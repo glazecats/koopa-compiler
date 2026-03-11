@@ -1,0 +1,13 @@
+{
+    "name": "Koopa Compiler Dev",
+    "image": "maxxing/compiler-dev",
+    "customizations": {
+        "vscode": {
+            "settings": {},
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.makefile-tools"
+            ]
+        }
+    }
+}
