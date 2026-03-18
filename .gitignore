@@ -1,0 +1,16 @@
+# Build artifacts
+*.o
+*.obj
+*.out
+
+# Local test binaries
+lexer_test
+hello
+
+# IDE settings
+.vscode/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
