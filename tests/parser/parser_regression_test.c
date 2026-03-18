@@ -217,6 +217,99 @@ static int test_deep_assignment_hits_recursion_limit(void) {
     return 1;
 }
 
+static char *build_deep_block_source(size_t depth) {
+    const char *prefix = "int main(){";
+    const char *middle = "return 0;";
+    const char *suffix = "}";
+    size_t prefix_len = strlen(prefix);
+    size_t middle_len = strlen(middle);
+    size_t suffix_len = strlen(suffix);
+    size_t total_len = prefix_len + depth + middle_len + depth + suffix_len + 1;
+    char *source = (char *)malloc(total_len);
+    size_t pos = 0;
+    size_t i;
+
+    if (!source) {
+        return NULL;
+    }
+
+    memcpy(source + pos, prefix, prefix_len);
+    pos += prefix_len;
+
+    for (i = 0; i < depth; ++i) {
+        source[pos++] = '{';
+    }
+
+    memcpy(source + pos, middle, middle_len);
+    pos += middle_len;
+
+    for (i = 0; i < depth; ++i) {
+        source[pos++] = '}';
+    }
+
+    memcpy(source + pos, suffix, suffix_len);
+    pos += suffix_len;
+    source[pos] = '\0';
+    return source;
+}
+
+static int test_deep_statement_nesting_hits_recursion_limit(void) {
+    TokenArray tokens;
+    ParserError err;
+    char *source = build_deep_block_source(3000);
+
+    if (!source) {
+        fprintf(stderr, "[parser-reg] FAIL: failed to allocate deep block source\n");
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for deep block input\n");
+        free(source);
+        return 0;
+    }
+
+    if (parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser unexpectedly accepted excessively deep statement nesting\n");
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    if (strstr(err.message, "recursion limit") == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected recursion-limit diagnostic for statements, got: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    if (strstr(err.message, "statement") == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected statement recursion diagnostic, got: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    if (strstr(err.message, "unary-expression") != NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: statement nesting should not be reported as unary-expression: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    free(source);
+    return 1;
+}
+
 int main(void) {
     if (!test_reject_stream_without_eof()) {
         return 1;
@@ -231,6 +324,9 @@ int main(void) {
         return 1;
     }
     if (!test_deep_assignment_hits_recursion_limit()) {
+        return 1;
+    }
+    if (!test_deep_statement_nesting_hits_recursion_limit()) {
         return 1;
     }
 

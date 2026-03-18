@@ -2,6 +2,50 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+typedef struct {
+    const char *source;
+    TokenArray *tokens;
+} TokenizeArgs;
+
+static int run_with_stderr_suppressed(int (*fn)(void *), void *ctx) {
+    int saved_stderr = dup(STDERR_FILENO);
+    int devnull_fd = open("/dev/null", O_WRONLY);
+    int result;
+
+    if (saved_stderr < 0 || devnull_fd < 0) {
+        if (saved_stderr >= 0) {
+            close(saved_stderr);
+        }
+        if (devnull_fd >= 0) {
+            close(devnull_fd);
+        }
+        return fn(ctx);
+    }
+
+    fflush(stderr);
+    if (dup2(devnull_fd, STDERR_FILENO) < 0) {
+        close(devnull_fd);
+        close(saved_stderr);
+        return fn(ctx);
+    }
+
+    result = fn(ctx);
+
+    fflush(stderr);
+    (void)dup2(saved_stderr, STDERR_FILENO);
+    close(devnull_fd);
+    close(saved_stderr);
+    return result;
+}
+
+static int run_lexer_tokenize_suppressed(void *ctx) {
+    TokenizeArgs *args = (TokenizeArgs *)ctx;
+
+    return lexer_tokenize(args->source, args->tokens);
+}
 
 static int test_block_comment_ending_at_eof(void) {
     TokenArray tokens;
@@ -48,12 +92,18 @@ static int test_reuse_token_array_without_manual_free(void) {
 
 static int test_invalid_token_array_state_rejected(void) {
     TokenArray tokens;
+    TokenizeArgs args;
+
+    memset(&tokens, 0, sizeof(tokens));
 
     tokens.data = NULL;
     tokens.size = 1;
     tokens.capacity = 0;
 
-    if (lexer_tokenize("int c = 3;", &tokens)) {
+    args.source = "int c = 3;";
+    args.tokens = &tokens;
+
+    if (run_with_stderr_suppressed(run_lexer_tokenize_suppressed, &args)) {
         fprintf(stderr, "[lexer-reg] FAIL: invalid TokenArray state should be rejected\n");
         return 0;
     }
@@ -63,9 +113,13 @@ static int test_invalid_token_array_state_rejected(void) {
 
 static int test_garbage_token_array_state_rejected(void) {
     TokenArray tokens;
+    TokenizeArgs args;
 
     memset(&tokens, 0xAB, sizeof(tokens));
-    if (lexer_tokenize("int d = 4;", &tokens)) {
+    args.source = "int d = 4;";
+    args.tokens = &tokens;
+
+    if (run_with_stderr_suppressed(run_lexer_tokenize_suppressed, &args)) {
         fprintf(stderr, "[lexer-reg] FAIL: garbage TokenArray state should be rejected\n");
         lexer_free_tokens(&tokens);
         return 0;

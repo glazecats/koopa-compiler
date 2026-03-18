@@ -10,15 +10,18 @@ typedef struct {
     ParserError *error;
     int has_error;
     size_t error_index;
-    size_t recursion_depth;
-    size_t recursion_limit;
+    size_t expression_recursion_depth;
+    size_t expression_recursion_limit;
+    size_t statement_recursion_depth;
+    size_t statement_recursion_limit;
 } Parser;
 
 /*
- * Protect recursive-descent hotspots (assignment/unary) from stack overflow.
+ * Protect recursive-descent hotspots from stack overflow.
  * If the nesting depth is unreasonable, fail gracefully with a parser error.
  */
-#define PARSER_RECURSION_LIMIT 2048U
+#define PARSER_EXPRESSION_RECURSION_LIMIT 2048U
+#define PARSER_STATEMENT_RECURSION_LIMIT 2048U
 
 static const Token *peek(const Parser *p) {
     if (p->current >= p->tokens->size) {
@@ -93,22 +96,41 @@ static void set_error(Parser *p, const Token *at, const char *fmt, ...) {
     va_end(args);
 }
 
-static int enter_recursion(Parser *p, const char *rule_name) {
-    if (p->recursion_depth >= p->recursion_limit) {
+static int enter_expression_recursion(Parser *p, const char *rule_name) {
+    if (p->expression_recursion_depth >= p->expression_recursion_limit) {
         set_error(p,
                   peek(p),
-                  "Parser recursion limit (%zu) exceeded while parsing %s",
-                  p->recursion_limit,
+                  "Parser expression recursion limit (%zu) exceeded while parsing %s",
+                  p->expression_recursion_limit,
                   rule_name);
         return 0;
     }
-    p->recursion_depth++;
+    p->expression_recursion_depth++;
     return 1;
 }
 
-static void leave_recursion(Parser *p) {
-    if (p->recursion_depth > 0) {
-        p->recursion_depth--;
+static void leave_expression_recursion(Parser *p) {
+    if (p->expression_recursion_depth > 0) {
+        p->expression_recursion_depth--;
+    }
+}
+
+static int enter_statement_recursion(Parser *p, const char *rule_name) {
+    if (p->statement_recursion_depth >= p->statement_recursion_limit) {
+        set_error(p,
+                  peek(p),
+                  "Parser statement recursion limit (%zu) exceeded while parsing %s",
+                  p->statement_recursion_limit,
+                  rule_name);
+        return 0;
+    }
+    p->statement_recursion_depth++;
+    return 1;
+}
+
+static void leave_statement_recursion(Parser *p) {
+    if (p->statement_recursion_depth > 0) {
+        p->statement_recursion_depth--;
     }
 }
 
@@ -144,18 +166,18 @@ static int parse_primary(Parser *p) {
 static int parse_unary(Parser *p) {
     int ok;
 
-    if (!enter_recursion(p, "unary-expression")) {
+    if (!enter_expression_recursion(p, "unary-expression")) {
         return 0;
     }
 
     if (match(p, TOKEN_MINUS) || match(p, TOKEN_PLUS)) {
         ok = parse_unary(p);
-        leave_recursion(p);
+        leave_expression_recursion(p);
         return ok;
     }
 
     ok = parse_primary(p);
-    leave_recursion(p);
+    leave_expression_recursion(p);
     return ok;
 }
 
@@ -215,19 +237,19 @@ static int parse_assignment(Parser *p) {
     int ok;
     size_t start = p->current;
 
-    if (!enter_recursion(p, "assignment-expression")) {
+    if (!enter_expression_recursion(p, "assignment-expression")) {
         return 0;
     }
 
     if (match(p, TOKEN_IDENTIFIER) && match(p, TOKEN_ASSIGN)) {
         ok = parse_assignment(p);
-        leave_recursion(p);
+        leave_expression_recursion(p);
         return ok;
     }
 
     p->current = start;
     ok = parse_equality(p);
-    leave_recursion(p);
+    leave_expression_recursion(p);
     return ok;
 }
 
@@ -344,23 +366,42 @@ static int parse_return_statement(Parser *p) {
 }
 
 static int parse_statement(Parser *p) {
+    int ok;
+
+    if (!enter_statement_recursion(p, "statement")) {
+        return 0;
+    }
+
     if (match(p, TOKEN_LBRACE)) {
         p->current--;
-        return parse_compound_statement(p);
+        ok = parse_compound_statement(p);
+        leave_statement_recursion(p);
+        return ok;
     }
     if (match(p, TOKEN_KW_IF)) {
-        return parse_if_statement(p);
+        ok = parse_if_statement(p);
+        leave_statement_recursion(p);
+        return ok;
     }
     if (match(p, TOKEN_KW_WHILE)) {
-        return parse_while_statement(p);
+        ok = parse_while_statement(p);
+        leave_statement_recursion(p);
+        return ok;
     }
     if (match(p, TOKEN_KW_FOR)) {
-        return parse_for_statement(p);
+        ok = parse_for_statement(p);
+        leave_statement_recursion(p);
+        return ok;
     }
     if (match(p, TOKEN_KW_RETURN)) {
-        return parse_return_statement(p);
+        ok = parse_return_statement(p);
+        leave_statement_recursion(p);
+        return ok;
     }
-    return parse_expression_statement(p);
+
+    ok = parse_expression_statement(p);
+    leave_statement_recursion(p);
+    return ok;
 }
 
 static int parse_init_declarator(Parser *p) {
@@ -454,8 +495,10 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.error = error;
     p.has_error = 0;
     p.error_index = 0;
-    p.recursion_depth = 0;
-    p.recursion_limit = PARSER_RECURSION_LIMIT;
+    p.expression_recursion_depth = 0;
+    p.expression_recursion_limit = PARSER_EXPRESSION_RECURSION_LIMIT;
+    p.statement_recursion_depth = 0;
+    p.statement_recursion_limit = PARSER_STATEMENT_RECURSION_LIMIT;
 
     if (error) {
         error->line = 0;
