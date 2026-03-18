@@ -10,7 +10,15 @@ typedef struct {
     ParserError *error;
     int has_error;
     size_t error_index;
+    size_t recursion_depth;
+    size_t recursion_limit;
 } Parser;
+
+/*
+ * Protect recursive-descent hotspots (assignment/unary) from stack overflow.
+ * If the nesting depth is unreasonable, fail gracefully with a parser error.
+ */
+#define PARSER_RECURSION_LIMIT 2048U
 
 static const Token *peek(const Parser *p) {
     if (p->current >= p->tokens->size) {
@@ -85,6 +93,25 @@ static void set_error(Parser *p, const Token *at, const char *fmt, ...) {
     va_end(args);
 }
 
+static int enter_recursion(Parser *p, const char *rule_name) {
+    if (p->recursion_depth >= p->recursion_limit) {
+        set_error(p,
+                  peek(p),
+                  "Parser recursion limit (%zu) exceeded while parsing %s",
+                  p->recursion_limit,
+                  rule_name);
+        return 0;
+    }
+    p->recursion_depth++;
+    return 1;
+}
+
+static void leave_recursion(Parser *p) {
+    if (p->recursion_depth > 0) {
+        p->recursion_depth--;
+    }
+}
+
 static int consume(Parser *p, TokenType type, const char *what) {
     if (check(p, type)) {
         advance(p);
@@ -115,10 +142,21 @@ static int parse_primary(Parser *p) {
 }
 
 static int parse_unary(Parser *p) {
-    if (match(p, TOKEN_MINUS) || match(p, TOKEN_PLUS)) {
-        return parse_unary(p);
+    int ok;
+
+    if (!enter_recursion(p, "unary-expression")) {
+        return 0;
     }
-    return parse_primary(p);
+
+    if (match(p, TOKEN_MINUS) || match(p, TOKEN_PLUS)) {
+        ok = parse_unary(p);
+        leave_recursion(p);
+        return ok;
+    }
+
+    ok = parse_primary(p);
+    leave_recursion(p);
+    return ok;
 }
 
 static int parse_multiplicative(Parser *p) {
@@ -174,13 +212,23 @@ static int parse_equality(Parser *p) {
 }
 
 static int parse_assignment(Parser *p) {
+    int ok;
     size_t start = p->current;
+
+    if (!enter_recursion(p, "assignment-expression")) {
+        return 0;
+    }
+
     if (match(p, TOKEN_IDENTIFIER) && match(p, TOKEN_ASSIGN)) {
-        return parse_assignment(p);
+        ok = parse_assignment(p);
+        leave_recursion(p);
+        return ok;
     }
 
     p->current = start;
-    return parse_equality(p);
+    ok = parse_equality(p);
+    leave_recursion(p);
+    return ok;
 }
 
 static int parse_expression(Parser *p) {
@@ -406,6 +454,8 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.error = error;
     p.has_error = 0;
     p.error_index = 0;
+    p.recursion_depth = 0;
+    p.recursion_limit = PARSER_RECURSION_LIMIT;
 
     if (error) {
         error->line = 0;

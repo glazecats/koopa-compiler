@@ -150,6 +150,73 @@ static int test_success_clears_error_state(void) {
     return 1;
 }
 
+static char *build_deep_assignment_source(size_t chain_len) {
+    const char *prefix = "int main(){int a;a";
+    const char *suffix = "=1;return a;}";
+    size_t prefix_len = strlen(prefix);
+    size_t suffix_len = strlen(suffix);
+    size_t total_len = prefix_len + chain_len * 2 + suffix_len + 1;
+    char *source = (char *)malloc(total_len);
+    size_t pos = 0;
+    size_t i;
+
+    if (!source) {
+        return NULL;
+    }
+
+    memcpy(source + pos, prefix, prefix_len);
+    pos += prefix_len;
+
+    for (i = 0; i < chain_len; ++i) {
+        source[pos++] = '=';
+        source[pos++] = 'a';
+    }
+
+    memcpy(source + pos, suffix, suffix_len);
+    pos += suffix_len;
+    source[pos] = '\0';
+    return source;
+}
+
+static int test_deep_assignment_hits_recursion_limit(void) {
+    TokenArray tokens;
+    ParserError err;
+    char *source = build_deep_assignment_source(3000);
+
+    if (!source) {
+        fprintf(stderr, "[parser-reg] FAIL: failed to allocate deep assignment source\n");
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for deep assignment input\n");
+        free(source);
+        return 0;
+    }
+
+    if (parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser unexpectedly accepted excessively deep assignment chain\n");
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    if (strstr(err.message, "recursion limit") == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected recursion-limit diagnostic, got: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        free(source);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    free(source);
+    return 1;
+}
+
 int main(void) {
     if (!test_reject_stream_without_eof()) {
         return 1;
@@ -161,6 +228,9 @@ int main(void) {
         return 1;
     }
     if (!test_success_clears_error_state()) {
+        return 1;
+    }
+    if (!test_deep_assignment_hits_recursion_limit()) {
         return 1;
     }
 
