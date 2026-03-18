@@ -2,11 +2,13 @@
 *.o
 *.obj
 *.out
+build/
 
-# Local test binaries
-lexer_test
-hello
-test.cpp
+# Native binaries
+*.exe
+*.dll
+*.so
+*.dylib
 
 # IDE settings
 .vscode/
