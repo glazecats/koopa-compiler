@@ -6,6 +6,7 @@
 # Local test binaries
 lexer_test
 hello
+test.cpp
 
 # IDE settings
 .vscode/
