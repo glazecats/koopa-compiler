@@ -53,6 +53,7 @@ typedef struct {
     size_t capacity;
 } TokenArray;
 
+void lexer_init_tokens(TokenArray *tokens);
 int lexer_tokenize(const char *source, TokenArray *out_tokens);
 void lexer_free_tokens(TokenArray *tokens);
 const char *lexer_token_type_name(TokenType type);

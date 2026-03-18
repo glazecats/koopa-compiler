@@ -1,0 +1,408 @@
+#include "parser.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    const TokenArray *tokens;
+    size_t current;
+    ParserError *error;
+} Parser;
+
+static const Token *peek(const Parser *p) {
+    if (p->current >= p->tokens->size) {
+        return &p->tokens->data[p->tokens->size - 1];
+    }
+    return &p->tokens->data[p->current];
+}
+
+static const Token *previous(const Parser *p) {
+    if (p->current == 0) {
+        return &p->tokens->data[0];
+    }
+    return &p->tokens->data[p->current - 1];
+}
+
+static int is_at_end(const Parser *p) {
+    return peek(p)->type == TOKEN_EOF;
+}
+
+static const Token *advance(Parser *p) {
+    if (!is_at_end(p)) {
+        p->current++;
+    }
+    return previous(p);
+}
+
+static int check(const Parser *p, TokenType type) {
+    if (is_at_end(p)) {
+        return 0;
+    }
+    return peek(p)->type == type;
+}
+
+static int match(Parser *p, TokenType type) {
+    if (!check(p, type)) {
+        return 0;
+    }
+    advance(p);
+    return 1;
+}
+
+static void set_error(Parser *p, const Token *at, const char *fmt, ...) {
+    va_list args;
+
+    if (!p->error) {
+        return;
+    }
+    if (p->error->message[0] != '\0') {
+        return;
+    }
+
+    p->error->line = at->line;
+    p->error->column = at->column;
+
+    va_start(args, fmt);
+    vsnprintf(p->error->message, sizeof(p->error->message), fmt, args);
+    va_end(args);
+}
+
+static int consume(Parser *p, TokenType type, const char *what) {
+    if (check(p, type)) {
+        advance(p);
+        return 1;
+    }
+    set_error(p, peek(p), "Expected %s, got %s", what, lexer_token_type_name(peek(p)->type));
+    return 0;
+}
+
+static int parse_expression(Parser *p);
+static int parse_statement(Parser *p);
+static int parse_declaration(Parser *p);
+
+static int parse_primary(Parser *p) {
+    if (match(p, TOKEN_NUMBER) || match(p, TOKEN_IDENTIFIER)) {
+        return 1;
+    }
+
+    if (match(p, TOKEN_LPAREN)) {
+        if (!parse_expression(p)) {
+            return 0;
+        }
+        return consume(p, TOKEN_RPAREN, "')'");
+    }
+
+    set_error(p, peek(p), "Expected expression, got %s", lexer_token_type_name(peek(p)->type));
+    return 0;
+}
+
+static int parse_unary(Parser *p) {
+    if (match(p, TOKEN_MINUS) || match(p, TOKEN_PLUS)) {
+        return parse_unary(p);
+    }
+    return parse_primary(p);
+}
+
+static int parse_multiplicative(Parser *p) {
+    if (!parse_unary(p)) {
+        return 0;
+    }
+
+    while (match(p, TOKEN_STAR) || match(p, TOKEN_SLASH) || match(p, TOKEN_PERCENT)) {
+        if (!parse_unary(p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int parse_additive(Parser *p) {
+    if (!parse_multiplicative(p)) {
+        return 0;
+    }
+
+    while (match(p, TOKEN_PLUS) || match(p, TOKEN_MINUS)) {
+        if (!parse_multiplicative(p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int parse_relational(Parser *p) {
+    if (!parse_additive(p)) {
+        return 0;
+    }
+
+    while (match(p, TOKEN_LT) || match(p, TOKEN_LE) || match(p, TOKEN_GT) || match(p, TOKEN_GE)) {
+        if (!parse_additive(p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int parse_equality(Parser *p) {
+    if (!parse_relational(p)) {
+        return 0;
+    }
+
+    while (match(p, TOKEN_EQ) || match(p, TOKEN_NE)) {
+        if (!parse_relational(p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int parse_assignment(Parser *p) {
+    size_t start = p->current;
+    if (match(p, TOKEN_IDENTIFIER) && match(p, TOKEN_ASSIGN)) {
+        return parse_assignment(p);
+    }
+
+    p->current = start;
+    return parse_equality(p);
+}
+
+static int parse_expression(Parser *p) {
+    return parse_assignment(p);
+}
+
+static int parse_expression_statement(Parser *p) {
+    if (match(p, TOKEN_SEMICOLON)) {
+        return 1;
+    }
+    if (!parse_expression(p)) {
+        return 0;
+    }
+    return consume(p, TOKEN_SEMICOLON, "';'");
+}
+
+static int parse_compound_statement(Parser *p) {
+    if (!consume(p, TOKEN_LBRACE, "'{'") ) {
+        return 0;
+    }
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        if (check(p, TOKEN_KW_INT)) {
+            if (!parse_declaration(p)) {
+                return 0;
+            }
+        } else {
+            if (!parse_statement(p)) {
+                return 0;
+            }
+        }
+    }
+
+    return consume(p, TOKEN_RBRACE, "'}'");
+}
+
+static int parse_if_statement(Parser *p) {
+    if (!consume(p, TOKEN_LPAREN, "'('") ) {
+        return 0;
+    }
+    if (!parse_expression(p)) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+    if (!parse_statement(p)) {
+        return 0;
+    }
+    if (match(p, TOKEN_KW_ELSE)) {
+        return parse_statement(p);
+    }
+    return 1;
+}
+
+static int parse_while_statement(Parser *p) {
+    if (!consume(p, TOKEN_LPAREN, "'('") ) {
+        return 0;
+    }
+    if (!parse_expression(p)) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+    return parse_statement(p);
+}
+
+static int parse_for_statement(Parser *p) {
+    if (!consume(p, TOKEN_LPAREN, "'('") ) {
+        return 0;
+    }
+
+    if (match(p, TOKEN_KW_INT)) {
+        p->current--;
+        if (!parse_declaration(p)) {
+            return 0;
+        }
+    } else {
+        if (!parse_expression_statement(p)) {
+            return 0;
+        }
+    }
+
+    if (!check(p, TOKEN_SEMICOLON)) {
+        if (!parse_expression(p)) {
+            return 0;
+        }
+    }
+    if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        return 0;
+    }
+
+    if (!check(p, TOKEN_RPAREN)) {
+        if (!parse_expression(p)) {
+            return 0;
+        }
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+
+    return parse_statement(p);
+}
+
+static int parse_return_statement(Parser *p) {
+    if (!check(p, TOKEN_SEMICOLON)) {
+        if (!parse_expression(p)) {
+            return 0;
+        }
+    }
+    return consume(p, TOKEN_SEMICOLON, "';'");
+}
+
+static int parse_statement(Parser *p) {
+    if (match(p, TOKEN_LBRACE)) {
+        p->current--;
+        return parse_compound_statement(p);
+    }
+    if (match(p, TOKEN_KW_IF)) {
+        return parse_if_statement(p);
+    }
+    if (match(p, TOKEN_KW_WHILE)) {
+        return parse_while_statement(p);
+    }
+    if (match(p, TOKEN_KW_FOR)) {
+        return parse_for_statement(p);
+    }
+    if (match(p, TOKEN_KW_RETURN)) {
+        return parse_return_statement(p);
+    }
+    return parse_expression_statement(p);
+}
+
+static int parse_init_declarator(Parser *p) {
+    if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
+        return 0;
+    }
+    if (match(p, TOKEN_ASSIGN)) {
+        if (!parse_expression(p)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int parse_declaration(Parser *p) {
+    if (!consume(p, TOKEN_KW_INT, "'int'")) {
+        return 0;
+    }
+    if (!parse_init_declarator(p)) {
+        return 0;
+    }
+    while (match(p, TOKEN_COMMA)) {
+        if (!parse_init_declarator(p)) {
+            return 0;
+        }
+    }
+    return consume(p, TOKEN_SEMICOLON, "';'");
+}
+
+static int parse_parameter_list(Parser *p) {
+    if (check(p, TOKEN_RPAREN)) {
+        return 1;
+    }
+
+    do {
+        if (!consume(p, TOKEN_KW_INT, "'int'")) {
+            return 0;
+        }
+        if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
+            return 0;
+        }
+    } while (match(p, TOKEN_COMMA));
+
+    return 1;
+}
+
+static int parse_function_definition(Parser *p) {
+    if (!consume(p, TOKEN_KW_INT, "'int'")) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_LPAREN, "'('") ) {
+        return 0;
+    }
+    if (!parse_parameter_list(p)) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+    return parse_compound_statement(p);
+}
+
+int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) {
+    Parser p;
+    size_t start;
+
+    if (!tokens || !tokens->data || tokens->size == 0) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "Empty token stream");
+        }
+        return 0;
+    }
+
+    if (tokens->data[tokens->size - 1].type != TOKEN_EOF) {
+        if (error) {
+            const Token *last = &tokens->data[tokens->size - 1];
+            error->line = last->line;
+            error->column = last->column;
+            snprintf(error->message, sizeof(error->message), "Token stream missing EOF terminator");
+        }
+        return 0;
+    }
+
+    p.tokens = tokens;
+    p.current = 0;
+    p.error = error;
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
+    }
+
+    while (!is_at_end(&p)) {
+        start = p.current;
+        if (!parse_function_definition(&p)) {
+            p.current = start;
+            if (!parse_declaration(&p)) {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}

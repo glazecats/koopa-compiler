@@ -35,6 +35,15 @@ static bool token_array_push(TokenArray *arr, Token token) {
     return true;
 }
 
+void lexer_init_tokens(TokenArray *tokens) {
+    if (!tokens) {
+        return;
+    }
+    tokens->data = NULL;
+    tokens->size = 0;
+    tokens->capacity = 0;
+}
+
 void lexer_free_tokens(TokenArray *tokens) {
     if (!tokens) {
         return;
@@ -82,15 +91,8 @@ static bool match(Lexer *lx, char expected) {
     return true;
 }
 
-static bool add_token(
-    Lexer *lx,
-    TokenType type,
-    const char *lexeme,
-    size_t length,
-    long long number_value,
-    int line,
-    int column)
-{
+static bool add_token(Lexer *lx, TokenType type, const char *lexeme, size_t length,
+                      long long number_value, int line, int column) {
     Token t;
     t.type = type;
     t.lexeme = lexeme;
@@ -161,9 +163,10 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
         return 0;
     }
 
-    out_tokens->data = NULL;
-    out_tokens->size = 0;
-    out_tokens->capacity = 0;
+    if (out_tokens->data) {
+        free(out_tokens->data);
+    }
+    lexer_init_tokens(out_tokens);
 
     Lexer lx;
     lx.current = source;
@@ -222,16 +225,18 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
                 break;
             }
             if (peek(&lx) == '*') {
+                bool closed = false;
                 advance(&lx);
                 while (!is_at_end(&lx)) {
                     if (peek(&lx) == '*' && peek_next(&lx) == '/') {
                         advance(&lx);
                         advance(&lx);
+                        closed = true;
                         break;
                     }
                     advance(&lx);
                 }
-                if (is_at_end(&lx)) {
+                if (!closed) {
                     fprintf(stderr, "Unterminated block comment at %d:%d\n", tok_line, tok_col);
                     lexer_free_tokens(out_tokens);
                     return 0;

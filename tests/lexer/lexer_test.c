@@ -75,6 +75,7 @@ int main(int argc, char **argv) {
     }
 
     TokenArray tokens;
+    lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source_text, &tokens)) {
         free(source_text);
         return 1;

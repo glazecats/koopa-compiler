@@ -6,8 +6,19 @@
             "settings": {},
             "extensions": [
                 "ms-vscode.cpptools",
-                "ms-vscode.makefile-tools"
+                "ms-vscode.makefile-tools",
+                "openai.chatgpt"
             ]
         }
+    },
+    "mounts": [
+        // 挂载本机用户目录下的 .codex 到容器
+        "source=${localEnv:USERPROFILE}/.codex,target=/root/.codex,type=bind"
+    ],
+
+    "containerEnv": {
+        // 告诉插件去哪里找配置文件（如果它默认不看 /root 的话）
+        "CODEX_CONFIG_PATH": "/root/.codex/config.toml",
+        "OPENAI_API_BASE": "http://codex.relaxychat.com/v1"
     }
 }
