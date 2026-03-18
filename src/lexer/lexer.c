@@ -14,6 +14,8 @@ typedef struct {
     TokenArray *tokens;
 } Lexer;
 
+#define TOKEN_ARRAY_MAGIC 0x544f4b4eU
+
 static bool token_array_reserve(TokenArray *arr, size_t new_cap) {
     Token *new_data = (Token *)realloc(arr->data, new_cap * sizeof(Token));
     if (!new_data) {
@@ -39,6 +41,7 @@ void lexer_init_tokens(TokenArray *tokens) {
     if (!tokens) {
         return;
     }
+    tokens->magic = TOKEN_ARRAY_MAGIC;
     tokens->data = NULL;
     tokens->size = 0;
     tokens->capacity = 0;
@@ -48,10 +51,34 @@ void lexer_free_tokens(TokenArray *tokens) {
     if (!tokens) {
         return;
     }
+
+    if (tokens->magic != TOKEN_ARRAY_MAGIC) {
+        lexer_init_tokens(tokens);
+        return;
+    }
+
     free(tokens->data);
-    tokens->data = NULL;
-    tokens->size = 0;
-    tokens->capacity = 0;
+    lexer_init_tokens(tokens);
+}
+
+static bool token_array_state_is_valid(const TokenArray *tokens) {
+    if (!tokens) {
+        return false;
+    }
+
+    if (tokens->magic != TOKEN_ARRAY_MAGIC) {
+        return false;
+    }
+
+    if (tokens->data == NULL) {
+        return tokens->size == 0 && tokens->capacity == 0;
+    }
+
+    if (tokens->capacity == 0) {
+        return false;
+    }
+
+    return tokens->size <= tokens->capacity;
 }
 
 static bool is_at_end(const Lexer *lx) {
@@ -160,6 +187,16 @@ static bool scan_identifier(Lexer *lx, const char *start, int line, int column) 
 
 int lexer_tokenize(const char *source, TokenArray *out_tokens) {
     if (!source || !out_tokens) {
+        return 0;
+    }
+
+    if (out_tokens->magic == 0 && out_tokens->data == NULL && out_tokens->size == 0 &&
+        out_tokens->capacity == 0) {
+        lexer_init_tokens(out_tokens);
+    }
+
+    if (!token_array_state_is_valid(out_tokens)) {
+        fprintf(stderr, "TokenArray is not initialized; call lexer_init_tokens first\n");
         return 0;
     }
 

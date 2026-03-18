@@ -1,5 +1,6 @@
 #include "lexer.h"
 
+#include <string.h>
 #include <stdio.h>
 
 static int test_block_comment_ending_at_eof(void) {
@@ -45,11 +46,45 @@ static int test_reuse_token_array_without_manual_free(void) {
     return 1;
 }
 
+static int test_invalid_token_array_state_rejected(void) {
+    TokenArray tokens;
+
+    tokens.data = NULL;
+    tokens.size = 1;
+    tokens.capacity = 0;
+
+    if (lexer_tokenize("int c = 3;", &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: invalid TokenArray state should be rejected\n");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_garbage_token_array_state_rejected(void) {
+    TokenArray tokens;
+
+    memset(&tokens, 0xAB, sizeof(tokens));
+    if (lexer_tokenize("int d = 4;", &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: garbage TokenArray state should be rejected\n");
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    return 1;
+}
+
 int main(void) {
     if (!test_block_comment_ending_at_eof()) {
         return 1;
     }
     if (!test_reuse_token_array_without_manual_free()) {
+        return 1;
+    }
+    if (!test_invalid_token_array_state_rejected()) {
+        return 1;
+    }
+    if (!test_garbage_token_array_state_rejected()) {
         return 1;
     }
 

@@ -48,13 +48,28 @@ typedef struct {
 } Token;
 
 typedef struct {
+    unsigned int magic;
     Token *data;
     size_t size;
     size_t capacity;
 } TokenArray;
 
+/*
+ * Initializes TokenArray to a safe empty state.
+ * Must be called before first use unless the struct is zero-initialized.
+ */
 void lexer_init_tokens(TokenArray *tokens);
+
+/*
+ * Tokenizes source into out_tokens.
+ * out_tokens must be in a valid initialized state (via lexer_init_tokens or {0}).
+ * Returns 1 on success, 0 on lexical/contract error.
+ */
 int lexer_tokenize(const char *source, TokenArray *out_tokens);
+
+/*
+ * Frees token storage and resets TokenArray to empty state.
+ */
 void lexer_free_tokens(TokenArray *tokens);
 const char *lexer_token_type_name(TokenType type);
 

@@ -8,6 +8,8 @@ typedef struct {
     const TokenArray *tokens;
     size_t current;
     ParserError *error;
+    int has_error;
+    size_t error_index;
 } Parser;
 
 static const Token *peek(const Parser *p) {
@@ -51,13 +53,28 @@ static int match(Parser *p, TokenType type) {
 }
 
 static void set_error(Parser *p, const Token *at, const char *fmt, ...) {
+    size_t idx;
     va_list args;
 
     if (!p->error) {
         return;
     }
-    if (p->error->message[0] != '\0') {
+
+    if (at < p->tokens->data) {
+        idx = 0;
+    } else if (at >= p->tokens->data + p->tokens->size) {
+        idx = p->tokens->size - 1;
+    } else {
+        idx = (size_t)(at - p->tokens->data);
+    }
+
+    if (p->has_error && idx < p->error_index) {
         return;
+    }
+
+    if (!p->has_error || idx > p->error_index) {
+        p->has_error = 1;
+        p->error_index = idx;
     }
 
     p->error->line = at->line;
@@ -387,6 +404,8 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.tokens = tokens;
     p.current = 0;
     p.error = error;
+    p.has_error = 0;
+    p.error_index = 0;
 
     if (error) {
         error->line = 0;
@@ -396,12 +415,19 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
+
         if (!parse_function_definition(&p)) {
             p.current = start;
             if (!parse_declaration(&p)) {
                 return 0;
             }
         }
+    }
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
     }
 
     return 1;
