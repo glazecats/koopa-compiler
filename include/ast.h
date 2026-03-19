@@ -19,6 +19,8 @@ typedef struct {
     int is_function_definition;
     size_t return_statement_count;
     int returns_on_all_paths;
+    size_t loop_statement_count;
+    size_t if_statement_count;
     int line;
     int column;
 } AstExternal;

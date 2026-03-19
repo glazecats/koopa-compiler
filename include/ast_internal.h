@@ -54,6 +54,8 @@ static inline int ast_program_append_external(AstProgram *program,
     external.is_function_definition = 0;
     external.return_statement_count = 0;
     external.returns_on_all_paths = 0;
+    external.loop_statement_count = 0;
+    external.if_statement_count = 0;
     external.line = 0;
     external.column = 0;
 

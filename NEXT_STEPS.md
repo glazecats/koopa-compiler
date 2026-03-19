@@ -32,6 +32,12 @@
 - Address confirmed warnings and document any accepted false positives.
 - Verify with ASan/regression suite.
 
+### Milestone D: Strict Path Semantics (deferred)
+
+- Define strict return-path policy for non-termination paths.
+- Replace current structured approximation with stricter path reasoning.
+- Add dedicated regressions for loop non-termination/break/continue edge paths.
+
 ## Guardrails
 
 - Do not prioritize low-risk hygiene over semantic feature progress.
@@ -48,6 +54,8 @@
 - 2026-03-19: Milestone A continued: strengthened return semantic from "at least one return" to "all control-flow paths return", with parser metadata (`returns_on_all_paths`) and regressions.
 - 2026-03-19: Milestone A continued: refined all-path return approximation with fallthrough tracking and conservative handling of syntactic infinite loops (`while(1)`, `for(;;)`) so unreachable trailing `return` does not satisfy the rule.
 - 2026-03-19: Milestone A continued: added `break`/`continue` keyword and parser support, including loop-context validation and flow propagation so `while(1){break;} return ...` is treated as reachable while break/continue outside loops are rejected.
+- 2026-03-19: Milestone A continued: AST now records per-function loop statement count (`loop_statement_count`) with parser regression coverage and dump support.
+- 2026-03-19: Milestone A continued: AST now records per-function if statement count (`if_statement_count`) with parser regression coverage and dump support.
 
 ## Current Milestone A Focus
 
@@ -61,3 +69,5 @@
 - Example currently accepted by design: `int f(int a){while(1){if(a){break;}}return 1;}`.
 - Rationale: parser flow marks loop body as potentially breaking, so a fallthrough path to trailing `return` is considered reachable.
 - If we later adopt stricter semantics that treat non-termination paths as non-returning failures, this loop/break interaction is a priority tightening point.
+- `loop_statement_count` / `if_statement_count` are syntactic occurrence counters, not reachability-aware path counters.
+- Unreachable loop/if statements are still counted by current metadata collection.
