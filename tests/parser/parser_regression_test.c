@@ -150,6 +150,197 @@ static int test_success_clears_error_state(void) {
     return 1;
 }
 
+static int test_ast_collects_top_level_externals(void) {
+    const char *source = "int x;\nint main(){return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for AST top-level test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse unexpectedly failed at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 2) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected 2 top-level externals, got %zu\n",
+                program.count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].kind != AST_EXTERNAL_DECLARATION ||
+        strcmp(program.externals[0].name, "x") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected first external to be declaration x, got kind=%s name=%s\n",
+                ast_external_kind_name(program.externals[0].kind),
+                program.externals[0].name ? program.externals[0].name : "<null>");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[1].kind != AST_EXTERNAL_FUNCTION ||
+        strcmp(program.externals[1].name, "main") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected second external to be function main, got kind=%s name=%s\n",
+                ast_external_kind_name(program.externals[1].kind),
+                program.externals[1].name ? program.externals[1].name : "<null>");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_collects_all_top_level_declarators(void) {
+    const char *source = "int a,b;\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for multi-declarator AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse failed for multi-declarator input at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 2) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected 2 declarations for int a,b;, got %zu\n",
+                program.count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].kind != AST_EXTERNAL_DECLARATION ||
+        !program.externals[0].name || strcmp(program.externals[0].name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected first declarator name a, got kind=%s name=%s\n",
+                ast_external_kind_name(program.externals[0].kind),
+                program.externals[0].name ? program.externals[0].name : "<null>");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[1].kind != AST_EXTERNAL_DECLARATION ||
+        !program.externals[1].name || strcmp(program.externals[1].name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected second declarator name b, got kind=%s name=%s\n",
+                ast_external_kind_name(program.externals[1].kind),
+                program.externals[1].name ? program.externals[1].name : "<null>");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_failure_clears_previous_program(void) {
+    const char *valid_source = "int x;\n";
+    TokenArray ok_tokens;
+    Token bad_tokens[1];
+    TokenArray bad_stream;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&ok_tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(valid_source, &ok_tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for AST stale-state setup input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&ok_tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST setup parse failed at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected setup AST count=1, got %zu\n",
+                program.count);
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    bad_tokens[0].type = TOKEN_KW_INT;
+    bad_tokens[0].lexeme = "int";
+    bad_tokens[0].length = 3;
+    bad_tokens[0].number_value = 0;
+    bad_tokens[0].line = 1;
+    bad_tokens[0].column = 1;
+
+    bad_stream.data = bad_tokens;
+    bad_stream.magic = 0;
+    bad_stream.size = 1;
+    bad_stream.capacity = 1;
+
+    if (parser_parse_translation_unit_ast(&bad_stream, &program, &err)) {
+        fprintf(stderr, "[parser-reg] FAIL: AST parser accepted stream without EOF\n");
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: failed parse should clear AST, got count=%zu\n",
+                program.count);
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&ok_tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static char *build_deep_assignment_source(size_t chain_len) {
     const char *prefix = "int main(){int a;a";
     const char *suffix = "=1;return a;}";
@@ -321,6 +512,15 @@ int main(void) {
         return 1;
     }
     if (!test_success_clears_error_state()) {
+        return 1;
+    }
+    if (!test_ast_collects_top_level_externals()) {
+        return 1;
+    }
+    if (!test_ast_collects_all_top_level_declarators()) {
+        return 1;
+    }
+    if (!test_ast_failure_clears_previous_program()) {
         return 1;
     }
     if (!test_deep_assignment_hits_recursion_limit()) {

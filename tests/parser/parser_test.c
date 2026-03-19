@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include "parser.h"
+#include "semantic.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -53,25 +54,33 @@ static char *read_file_text(const char *path) {
 int main(int argc, char **argv) {
     const char *input_path;
     int dump_tokens = 0;
+    int dump_ast = 0;
     char *source_text;
     TokenArray tokens;
     lexer_init_tokens(&tokens);
+    AstProgram program;
     ParserError error;
+    SemanticError semantic_error;
     size_t i;
 
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Usage: %s <source-file> [--dump-tokens]\n", argv[0]);
+    ast_program_init(&program);
+
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "Usage: %s <source-file> [--dump-tokens] [--dump-ast]\n", argv[0]);
         return 1;
     }
 
     input_path = argv[1];
-    if (argc == 3) {
-        if (strcmp(argv[2], "--dump-tokens") != 0) {
-            fprintf(stderr, "Unknown option: %s\n", argv[2]);
-            fprintf(stderr, "Usage: %s <source-file> [--dump-tokens]\n", argv[0]);
+    for (i = 2; i < (size_t)argc; ++i) {
+        if (strcmp(argv[i], "--dump-tokens") == 0) {
+            dump_tokens = 1;
+        } else if (strcmp(argv[i], "--dump-ast") == 0) {
+            dump_ast = 1;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            fprintf(stderr, "Usage: %s <source-file> [--dump-tokens] [--dump-ast]\n", argv[0]);
             return 1;
         }
-        dump_tokens = 1;
     }
 
     source_text = read_file_text(input_path);
@@ -102,15 +111,45 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!parser_parse_translation_unit(&tokens, &error)) {
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &error)) {
         fprintf(stderr, "[parser] Parse failed at %d:%d: %s\n", error.line, error.column, error.message);
+        ast_program_free(&program);
         lexer_free_tokens(&tokens);
         free(source_text);
         return 1;
     }
 
-    printf("[parser] Parse succeeded.\n");
+    if (!semantic_analyze_program(&program, &semantic_error)) {
+        fprintf(stderr,
+                "[semantic] Analyze failed at %d:%d: %s\n",
+                semantic_error.line,
+                semantic_error.column,
+                semantic_error.message);
+        ast_program_free(&program);
+        lexer_free_tokens(&tokens);
+        free(source_text);
+        return 1;
+    }
 
+    if (dump_ast) {
+        printf("[ast] top-level externals: %zu\n", program.count);
+        for (i = 0; i < program.count; ++i) {
+            const AstExternal *ext = &program.externals[i];
+            printf("[ast] %zu: %s", i, ast_external_kind_name(ext->kind));
+            if (ext->name && ext->name_length > 0) {
+                printf(" name=%s", ext->name);
+            }
+            if (ext->line > 0) {
+                printf(" at %d:%d", ext->line, ext->column);
+            }
+            putchar('\n');
+        }
+    }
+
+    printf("[parser] Parse succeeded.\n");
+    printf("[semantic] Analyze succeeded.\n");
+
+    ast_program_free(&program);
     lexer_free_tokens(&tokens);
     free(source_text);
     return 0;

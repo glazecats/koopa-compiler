@@ -1,6 +1,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#include "ast.h"
 #include "lexer.h"
 
 typedef struct {
@@ -14,5 +15,14 @@ typedef struct {
  * Returns 1 on success, 0 on syntax/contract error.
  */
 int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error);
+
+/*
+ * Parses tokens and builds a top-level AST program.
+ * out_program must be initialized (via ast_program_init or {0}).
+ * Returns 1 on success, 0 on syntax/contract/allocation error.
+ */
+int parser_parse_translation_unit_ast(const TokenArray *tokens,
+                                      AstProgram *out_program,
+                                      ParserError *error);
 
 #endif

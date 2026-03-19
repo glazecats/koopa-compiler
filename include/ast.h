@@ -1,0 +1,39 @@
+#ifndef AST_H
+#define AST_H
+
+#include <stddef.h>
+
+#include "lexer.h"
+
+typedef enum {
+    AST_EXTERNAL_FUNCTION = 0,
+    AST_EXTERNAL_DECLARATION,
+} AstExternalKind;
+
+typedef struct {
+    AstExternalKind kind;
+    char *name;
+    size_t name_length;
+    int line;
+    int column;
+} AstExternal;
+
+typedef struct {
+    AstExternal *externals;
+    size_t count;
+    size_t capacity;
+} AstProgram;
+
+void ast_program_init(AstProgram *program);
+void ast_program_free(AstProgram *program);
+
+/*
+ * Adds a top-level external declaration/function to program.
+ * If name_token is NULL, the external is recorded without a name.
+ * Returns 1 on success, 0 on allocation failure.
+ */
+int ast_program_add_external(AstProgram *program, AstExternalKind kind, const Token *name_token);
+
+const char *ast_external_kind_name(AstExternalKind kind);
+
+#endif

@@ -1,8 +1,8 @@
 #include "parser.h"
+#include "ast_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
 
 typedef struct {
     const TokenArray *tokens;
@@ -134,10 +134,25 @@ static void leave_statement_recursion(Parser *p) {
     }
 }
 
+static int consume_token(Parser *p, TokenType type, const char *what, const Token **out_token);
+
 static int consume(Parser *p, TokenType type, const char *what) {
+    return consume_token(p, type, what, NULL);
+}
+
+static int consume_token(Parser *p, TokenType type, const char *what, const Token **out_token) {
+    const Token *at;
+
     if (check(p, type)) {
+        at = peek(p);
+        if (out_token) {
+            *out_token = at;
+        }
         advance(p);
         return 1;
+    }
+    if (out_token) {
+        *out_token = NULL;
     }
     set_error(p, peek(p), "Expected %s, got %s", what, lexer_token_type_name(peek(p)->type));
     return 0;
@@ -145,7 +160,7 @@ static int consume(Parser *p, TokenType type, const char *what) {
 
 static int parse_expression(Parser *p);
 static int parse_statement(Parser *p);
-static int parse_declaration(Parser *p);
+static int parse_declaration(Parser *p, AstProgram *top_level_program);
 
 static int parse_primary(Parser *p) {
     if (match(p, TOKEN_NUMBER) || match(p, TOKEN_IDENTIFIER)) {
@@ -274,7 +289,7 @@ static int parse_compound_statement(Parser *p) {
 
     while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
         if (check(p, TOKEN_KW_INT)) {
-            if (!parse_declaration(p)) {
+            if (!parse_declaration(p, NULL)) {
                 return 0;
             }
         } else {
@@ -326,7 +341,7 @@ static int parse_for_statement(Parser *p) {
 
     if (match(p, TOKEN_KW_INT)) {
         p->current--;
-        if (!parse_declaration(p)) {
+        if (!parse_declaration(p, NULL)) {
             return 0;
         }
     } else {
@@ -404,8 +419,8 @@ static int parse_statement(Parser *p) {
     return ok;
 }
 
-static int parse_init_declarator(Parser *p) {
-    if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
+static int parse_init_declarator(Parser *p, const Token **out_ident) {
+    if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", out_ident)) {
         return 0;
     }
     if (match(p, TOKEN_ASSIGN)) {
@@ -416,15 +431,27 @@ static int parse_init_declarator(Parser *p) {
     return 1;
 }
 
-static int parse_declaration(Parser *p) {
+static int parse_declaration(Parser *p, AstProgram *top_level_program) {
+    const Token *ident = NULL;
+
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
     }
-    if (!parse_init_declarator(p)) {
+    if (!parse_init_declarator(p, &ident)) {
         return 0;
     }
+    if (top_level_program && !ast_program_append_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
+        set_error(p, peek(p), "Out of memory while building AST");
+        return 0;
+    }
+
     while (match(p, TOKEN_COMMA)) {
-        if (!parse_init_declarator(p)) {
+        if (!parse_init_declarator(p, &ident)) {
+            return 0;
+        }
+        if (top_level_program &&
+            !ast_program_append_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
+            set_error(p, peek(p), "Out of memory while building AST");
             return 0;
         }
     }
@@ -448,12 +475,21 @@ static int parse_parameter_list(Parser *p) {
     return 1;
 }
 
-static int parse_function_definition(Parser *p) {
+static int parse_function_definition(Parser *p, const Token **out_name_token) {
+    const Token *name_tok = NULL;
+
+    if (out_name_token) {
+        *out_name_token = NULL;
+    }
+
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
     }
-    if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
+    if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", &name_tok)) {
         return 0;
+    }
+    if (out_name_token) {
+        *out_name_token = name_tok;
     }
     if (!consume(p, TOKEN_LPAREN, "'('") ) {
         return 0;
@@ -465,6 +501,88 @@ static int parse_function_definition(Parser *p) {
         return 0;
     }
     return parse_compound_statement(p);
+}
+
+int parser_parse_translation_unit_ast(const TokenArray *tokens,
+                                      AstProgram *out_program,
+                                      ParserError *error) {
+    Parser p;
+    size_t start;
+    const Token *external_name = NULL;
+
+    if (!out_program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "Output AST is NULL");
+        }
+        return 0;
+    }
+
+    /* Keep state deterministic: on every call we first clear previous AST. */
+    ast_program_clear_storage(out_program);
+
+    if (!tokens || !tokens->data || tokens->size == 0) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "Empty token stream");
+        }
+        return 0;
+    }
+
+    if (tokens->data[tokens->size - 1].type != TOKEN_EOF) {
+        if (error) {
+            const Token *last = &tokens->data[tokens->size - 1];
+            error->line = last->line;
+            error->column = last->column;
+            snprintf(error->message, sizeof(error->message), "Token stream missing EOF terminator");
+        }
+        return 0;
+    }
+
+    p.tokens = tokens;
+    p.current = 0;
+    p.error = error;
+    p.has_error = 0;
+    p.error_index = 0;
+    p.expression_recursion_depth = 0;
+    p.expression_recursion_limit = PARSER_EXPRESSION_RECURSION_LIMIT;
+    p.statement_recursion_depth = 0;
+    p.statement_recursion_limit = PARSER_STATEMENT_RECURSION_LIMIT;
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
+    }
+
+    while (!is_at_end(&p)) {
+        start = p.current;
+        external_name = NULL;
+
+        if (!parse_function_definition(&p, &external_name)) {
+            p.current = start;
+            if (!parse_declaration(&p, out_program)) {
+                ast_program_clear_storage(out_program);
+                return 0;
+            }
+        } else {
+            if (!ast_program_append_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
+                set_error(&p, peek(&p), "Out of memory while building AST");
+                ast_program_clear_storage(out_program);
+                return 0;
+            }
+        }
+    }
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
+    }
+
+    return 1;
 }
 
 int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) {
@@ -508,10 +626,9 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
-
-        if (!parse_function_definition(&p)) {
+        if (!parse_function_definition(&p, NULL)) {
             p.current = start;
-            if (!parse_declaration(&p)) {
+            if (!parse_declaration(&p, NULL)) {
                 return 0;
             }
         }
