@@ -419,11 +419,18 @@ static int parse_statement(Parser *p) {
     return ok;
 }
 
-static int parse_init_declarator(Parser *p, const Token **out_ident) {
+static int parse_init_declarator(Parser *p, const Token **out_ident, int *out_has_initializer) {
+    if (out_has_initializer) {
+        *out_has_initializer = 0;
+    }
+
     if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", out_ident)) {
         return 0;
     }
     if (match(p, TOKEN_ASSIGN)) {
+        if (out_has_initializer) {
+            *out_has_initializer = 1;
+        }
         if (!parse_expression(p)) {
             return 0;
         }
@@ -433,20 +440,24 @@ static int parse_init_declarator(Parser *p, const Token **out_ident) {
 
 static int parse_declaration(Parser *p, AstProgram *top_level_program) {
     const Token *ident = NULL;
+    int has_initializer = 0;
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
     }
-    if (!parse_init_declarator(p, &ident)) {
+    if (!parse_init_declarator(p, &ident, &has_initializer)) {
         return 0;
     }
     if (top_level_program && !ast_program_append_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
         set_error(p, peek(p), "Out of memory while building AST");
         return 0;
     }
+    if (top_level_program) {
+        top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
+    }
 
     while (match(p, TOKEN_COMMA)) {
-        if (!parse_init_declarator(p, &ident)) {
+        if (!parse_init_declarator(p, &ident, &has_initializer)) {
             return 0;
         }
         if (top_level_program &&
@@ -454,11 +465,25 @@ static int parse_declaration(Parser *p, AstProgram *top_level_program) {
             set_error(p, peek(p), "Out of memory while building AST");
             return 0;
         }
+        if (top_level_program) {
+            top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
+        }
     }
     return consume(p, TOKEN_SEMICOLON, "';'");
 }
 
-static int parse_parameter_list(Parser *p) {
+static int parse_parameter_list(Parser *p,
+                                size_t *out_param_count,
+                                int *out_has_unnamed_parameter) {
+    size_t count = 0;
+
+    if (out_param_count) {
+        *out_param_count = 0;
+    }
+    if (out_has_unnamed_parameter) {
+        *out_has_unnamed_parameter = 0;
+    }
+
     if (check(p, TOKEN_RPAREN)) {
         return 1;
     }
@@ -467,19 +492,40 @@ static int parse_parameter_list(Parser *p) {
         if (!consume(p, TOKEN_KW_INT, "'int'")) {
             return 0;
         }
-        if (!consume(p, TOKEN_IDENTIFIER, "identifier")) {
-            return 0;
+        /* C-style prototypes may omit parameter names: int f(int); */
+        if (check(p, TOKEN_IDENTIFIER)) {
+            advance(p);
+        } else {
+            if (out_has_unnamed_parameter) {
+                *out_has_unnamed_parameter = 1;
+            }
         }
+        count++;
     } while (match(p, TOKEN_COMMA));
+
+    if (out_param_count) {
+        *out_param_count = count;
+    }
 
     return 1;
 }
 
-static int parse_function_definition(Parser *p, const Token **out_name_token) {
+static int parse_function_external(Parser *p,
+                                   const Token **out_name_token,
+                                   size_t *out_parameter_count,
+                                   int *out_is_definition) {
     const Token *name_tok = NULL;
+    size_t parameter_count = 0;
+    int has_unnamed_parameter = 0;
 
     if (out_name_token) {
         *out_name_token = NULL;
+    }
+    if (out_parameter_count) {
+        *out_parameter_count = 0;
+    }
+    if (out_is_definition) {
+        *out_is_definition = 0;
     }
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
@@ -494,13 +540,45 @@ static int parse_function_definition(Parser *p, const Token **out_name_token) {
     if (!consume(p, TOKEN_LPAREN, "'('") ) {
         return 0;
     }
-    if (!parse_parameter_list(p)) {
+    if (!parse_parameter_list(p, &parameter_count, &has_unnamed_parameter)) {
         return 0;
+    }
+    if (out_parameter_count) {
+        *out_parameter_count = parameter_count;
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
         return 0;
     }
-    return parse_compound_statement(p);
+
+    if (match(p, TOKEN_SEMICOLON)) {
+        if (out_is_definition) {
+            *out_is_definition = 0;
+        }
+        return 1;
+    }
+
+    if (check(p, TOKEN_LBRACE)) {
+        /*
+         * Function definitions require named parameters so names are available
+         * in function scope; unnamed parameters are only accepted in prototypes.
+         */
+        if (has_unnamed_parameter) {
+            set_error(p,
+                      peek(p),
+                      "Function definition parameters must have names");
+            return 0;
+        }
+        if (out_is_definition) {
+            *out_is_definition = 1;
+        }
+        return parse_compound_statement(p);
+    }
+
+    set_error(p,
+              peek(p),
+              "Expected function body '{' or declaration terminator ';', got %s",
+              lexer_token_type_name(peek(p)->type));
+    return 0;
 }
 
 int parser_parse_translation_unit_ast(const TokenArray *tokens,
@@ -509,6 +587,8 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     Parser p;
     size_t start;
     const Token *external_name = NULL;
+    size_t external_parameter_count = 0;
+    int external_is_definition = 0;
 
     if (!out_program) {
         if (error) {
@@ -560,8 +640,13 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     while (!is_at_end(&p)) {
         start = p.current;
         external_name = NULL;
+        external_parameter_count = 0;
+        external_is_definition = 0;
 
-        if (!parse_function_definition(&p, &external_name)) {
+        if (!parse_function_external(&p,
+                                     &external_name,
+                                     &external_parameter_count,
+                                     &external_is_definition)) {
             p.current = start;
             if (!parse_declaration(&p, out_program)) {
                 ast_program_clear_storage(out_program);
@@ -573,6 +658,9 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                 ast_program_clear_storage(out_program);
                 return 0;
             }
+            out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
+            out_program->externals[out_program->count - 1].is_function_definition =
+                external_is_definition;
         }
     }
 
@@ -626,7 +714,7 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
-        if (!parse_function_definition(&p, NULL)) {
+        if (!parse_function_external(&p, NULL, NULL, NULL)) {
             p.current = start;
             if (!parse_declaration(&p, NULL)) {
                 return 0;

@@ -91,6 +91,122 @@ static int test_semantic_rejects_duplicate_function(void) {
     return 1;
 }
 
+static int test_semantic_allows_function_declaration_then_definition(void) {
+    const char *source = "int main(int a);\nint main(int a){return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: declaration+definition should be accepted, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_duplicate_function_declarations(void) {
+    const char *source = "int main(int a);\nint main(int a);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: duplicate function declarations should be accepted, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_function_declaration_count_mismatch(void) {
+    const char *source = "int f(int a);\nint f(int a,int b);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: mismatched declaration parameter counts should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_declaration_definition_count_mismatch(void) {
+    const char *source = "int f(int a);\nint f(){return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: declaration/definition count mismatch should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_semantic_rejects_function_variable_conflict(void) {
     const char *source = "int main;\nint main(){return 0;}\n";
     TokenArray tokens;
@@ -178,6 +294,18 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_rejects_duplicate_function()) {
+        return 1;
+    }
+    if (!test_semantic_allows_function_declaration_then_definition()) {
+        return 1;
+    }
+    if (!test_semantic_allows_duplicate_function_declarations()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_function_declaration_count_mismatch()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_declaration_definition_count_mismatch()) {
         return 1;
     }
     if (!test_semantic_rejects_function_variable_conflict()) {

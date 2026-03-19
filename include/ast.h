@@ -14,6 +14,9 @@ typedef struct {
     AstExternalKind kind;
     char *name;
     size_t name_length;
+    int has_initializer;
+    size_t parameter_count;
+    int is_function_definition;
     int line;
     int column;
 } AstExternal;

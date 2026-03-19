@@ -37,3 +37,15 @@
 - Do not prioritize low-risk hygiene over semantic feature progress.
 - Every functional change should come with a regression test.
 - Keep `make test` green at each step.
+
+## Execution Log
+
+- 2026-03-19: Milestone checkpoint committed (`b73b248`) with AST foundation, parser AST API, semantic pipeline, legacy-link test, and semantic regressions.
+- 2026-03-19: Milestone A continued: expanding AST detail by recording function parameter counts in top-level AST externals.
+- 2026-03-19: Milestone A continued: recording declaration initializer metadata (`has_initializer`) for top-level AST declaration externals.
+- 2026-03-19: Milestone A continued: parser now accepts function declarations (`int f(int);`) and AST records function declaration/definition metadata (`is_function_definition`).
+
+## Current Milestone A Focus
+
+- Keep extending AST metadata in small verified steps.
+- Pair each AST extension with parser regression coverage and `make test` verification.

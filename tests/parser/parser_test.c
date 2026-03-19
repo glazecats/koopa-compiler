@@ -139,6 +139,12 @@ int main(int argc, char **argv) {
             if (ext->name && ext->name_length > 0) {
                 printf(" name=%s", ext->name);
             }
+            if (ext->kind == AST_EXTERNAL_FUNCTION) {
+                printf(" params=%zu", ext->parameter_count);
+                printf(" def=%d", ext->is_function_definition);
+            } else if (ext->kind == AST_EXTERNAL_DECLARATION) {
+                printf(" init=%d", ext->has_initializer);
+            }
             if (ext->line > 0) {
                 printf(" at %d:%d", ext->line, ext->column);
             }

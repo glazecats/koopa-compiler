@@ -61,13 +61,28 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             }
 
             if (lhs->kind == AST_EXTERNAL_FUNCTION && rhs->kind == AST_EXTERNAL_FUNCTION) {
-                if (error) {
-                    semantic_set_error(error,
-                                       rhs->line,
-                                       rhs->column,
-                                       "Duplicate function definition");
+                if (lhs->parameter_count != rhs->parameter_count) {
+                    if (error) {
+                        semantic_set_error(error,
+                                           rhs->line,
+                                           rhs->column,
+                                           "Conflicting function declarations: parameter count mismatch");
+                    }
+                    return 0;
                 }
-                return 0;
+
+                if (lhs->is_function_definition && rhs->is_function_definition) {
+                    if (error) {
+                        semantic_set_error(error,
+                                           rhs->line,
+                                           rhs->column,
+                                           "Duplicate function definition");
+                    }
+                    return 0;
+                }
+
+                /* Multiple compatible declarations are currently accepted. */
+                continue;
             }
 
             if (lhs->kind != rhs->kind) {
