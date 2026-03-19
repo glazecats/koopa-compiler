@@ -52,6 +52,8 @@ static inline int ast_program_append_external(AstProgram *program,
     external.has_initializer = 0;
     external.parameter_count = 0;
     external.is_function_definition = 0;
+    external.return_statement_count = 0;
+    external.returns_on_all_paths = 0;
     external.line = 0;
     external.column = 0;
 

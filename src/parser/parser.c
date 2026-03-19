@@ -14,6 +14,9 @@ typedef struct {
     size_t expression_recursion_limit;
     size_t statement_recursion_depth;
     size_t statement_recursion_limit;
+    size_t loop_depth;
+    int track_function_return_count;
+    size_t function_return_count;
 } Parser;
 
 /*
@@ -159,7 +162,10 @@ static int consume_token(Parser *p, TokenType type, const char *what, const Toke
 }
 
 static int parse_expression(Parser *p);
-static int parse_statement(Parser *p);
+static int parse_statement_with_flow(Parser *p,
+                                     int *out_guaranteed_return,
+                                     int *out_may_fallthrough,
+                                     int *out_may_break);
 static int parse_declaration(Parser *p, AstProgram *top_level_program);
 
 static int parse_primary(Parser *p) {
@@ -282,7 +288,41 @@ static int parse_expression_statement(Parser *p) {
     return consume(p, TOKEN_SEMICOLON, "';'");
 }
 
-static int parse_compound_statement(Parser *p) {
+static int expression_slice_is_constant_true(const TokenArray *tokens,
+                                             size_t start,
+                                             size_t end) {
+    const Token *tok;
+
+    if (!tokens || !tokens->data || end <= start) {
+        return 0;
+    }
+
+    if (end - start != 1) {
+        return 0;
+    }
+
+    tok = &tokens->data[start];
+    return tok->type == TOKEN_NUMBER && tok->number_value != 0;
+}
+
+static int parse_compound_statement_with_flow(Parser *p,
+                                              int *out_guaranteed_return,
+                                              int *out_may_fallthrough,
+                                              int *out_may_break) {
+    int block_guaranteed_return = 0;
+    int block_may_fallthrough = 1;
+    int block_may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
     if (!consume(p, TOKEN_LBRACE, "'{'") ) {
         return 0;
     }
@@ -292,36 +332,77 @@ static int parse_compound_statement(Parser *p) {
             if (!parse_declaration(p, NULL)) {
                 return 0;
             }
+            if (block_may_fallthrough) {
+                block_guaranteed_return = 0;
+            }
         } else {
-            if (!parse_statement(p)) {
+            int stmt_guaranteed_return = 0;
+            int stmt_may_fallthrough = 1;
+            int stmt_may_break = 0;
+
+            if (!parse_statement_with_flow(p,
+                                           &stmt_guaranteed_return,
+                                           &stmt_may_fallthrough,
+                                           &stmt_may_break)) {
                 return 0;
+            }
+
+            if (block_may_fallthrough && stmt_may_break) {
+                block_may_break = 1;
+            }
+
+            if (block_may_fallthrough) {
+                if (stmt_guaranteed_return) {
+                    block_guaranteed_return = 1;
+                    block_may_fallthrough = 0;
+                } else if (!stmt_may_fallthrough) {
+                    block_guaranteed_return = 0;
+                    block_may_fallthrough = 0;
+                } else {
+                    block_guaranteed_return = 0;
+                }
             }
         }
     }
 
-    return consume(p, TOKEN_RBRACE, "'}'");
-}
+    if (!consume(p, TOKEN_RBRACE, "'}'")) {
+        return 0;
+    }
 
-static int parse_if_statement(Parser *p) {
-    if (!consume(p, TOKEN_LPAREN, "'('") ) {
-        return 0;
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = block_guaranteed_return;
     }
-    if (!parse_expression(p)) {
-        return 0;
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = block_may_fallthrough;
     }
-    if (!consume(p, TOKEN_RPAREN, "')'")) {
-        return 0;
-    }
-    if (!parse_statement(p)) {
-        return 0;
-    }
-    if (match(p, TOKEN_KW_ELSE)) {
-        return parse_statement(p);
+    if (out_may_break) {
+        *out_may_break = block_may_break;
     }
     return 1;
 }
 
-static int parse_while_statement(Parser *p) {
+static int parse_if_statement_with_flow(Parser *p,
+                                        int *out_guaranteed_return,
+                                        int *out_may_fallthrough,
+                                        int *out_may_break) {
+    int then_guaranteed_return = 0;
+    int then_may_fallthrough = 1;
+    int then_may_break = 0;
+    int else_guaranteed_return = 0;
+    int else_may_fallthrough = 1;
+    int else_may_break = 0;
+    int has_else = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
     if (!consume(p, TOKEN_LPAREN, "'('") ) {
         return 0;
     }
@@ -331,10 +412,127 @@ static int parse_while_statement(Parser *p) {
     if (!consume(p, TOKEN_RPAREN, "')'")) {
         return 0;
     }
-    return parse_statement(p);
+    if (!parse_statement_with_flow(p,
+                                   &then_guaranteed_return,
+                                   &then_may_fallthrough,
+                                   &then_may_break)) {
+        return 0;
+    }
+    if (match(p, TOKEN_KW_ELSE)) {
+        has_else = 1;
+        if (!parse_statement_with_flow(p,
+                                       &else_guaranteed_return,
+                                       &else_may_fallthrough,
+                                       &else_may_break)) {
+            return 0;
+        }
+    }
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = has_else && then_guaranteed_return && else_guaranteed_return;
+    }
+    if (out_may_fallthrough) {
+        if (!has_else) {
+            *out_may_fallthrough = 1;
+        } else {
+            *out_may_fallthrough = then_may_fallthrough || else_may_fallthrough;
+        }
+    }
+    if (out_may_break) {
+        if (!has_else) {
+            *out_may_break = then_may_break;
+        } else {
+            *out_may_break = then_may_break || else_may_break;
+        }
+    }
+    return 1;
 }
 
-static int parse_for_statement(Parser *p) {
+static int parse_while_statement_with_flow(Parser *p,
+                                           int *out_guaranteed_return,
+                                           int *out_may_fallthrough,
+                                           int *out_may_break) {
+    size_t cond_start;
+    int cond_always_true;
+    int body_guaranteed_return = 0;
+    int body_may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
+    if (!consume(p, TOKEN_LPAREN, "'('") ) {
+        return 0;
+    }
+    cond_start = p->current;
+    if (!parse_expression(p)) {
+        return 0;
+    }
+    cond_always_true = expression_slice_is_constant_true(p->tokens, cond_start, p->current);
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        return 0;
+    }
+
+    p->loop_depth++;
+    if (!parse_statement_with_flow(p, &body_guaranteed_return, NULL, &body_may_break)) {
+        p->loop_depth--;
+        return 0;
+    }
+    p->loop_depth--;
+
+    if (cond_always_true) {
+        if (body_may_break) {
+            if (out_guaranteed_return) {
+                *out_guaranteed_return = 0;
+            }
+            if (out_may_fallthrough) {
+                *out_may_fallthrough = 1;
+            }
+        } else {
+            if (out_guaranteed_return) {
+                *out_guaranteed_return = body_guaranteed_return;
+            }
+            if (out_may_fallthrough) {
+                *out_may_fallthrough = 0;
+            }
+        }
+    } else {
+        if (out_guaranteed_return) {
+            *out_guaranteed_return = 0;
+        }
+        if (out_may_fallthrough) {
+            *out_may_fallthrough = 1;
+        }
+    }
+
+    return 1;
+}
+
+static int parse_for_statement_with_flow(Parser *p,
+                                         int *out_guaranteed_return,
+                                         int *out_may_fallthrough,
+                                         int *out_may_break) {
+    int cond_always_true = 0;
+    size_t cond_start = 0;
+    int body_guaranteed_return = 0;
+    int body_may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
     if (!consume(p, TOKEN_LPAREN, "'('") ) {
         return 0;
     }
@@ -351,9 +549,13 @@ static int parse_for_statement(Parser *p) {
     }
 
     if (!check(p, TOKEN_SEMICOLON)) {
+        cond_start = p->current;
         if (!parse_expression(p)) {
             return 0;
         }
+        cond_always_true = expression_slice_is_constant_true(p->tokens, cond_start, p->current);
+    } else {
+        cond_always_true = 1;
     }
     if (!consume(p, TOKEN_SEMICOLON, "';'")) {
         return 0;
@@ -368,7 +570,39 @@ static int parse_for_statement(Parser *p) {
         return 0;
     }
 
-    return parse_statement(p);
+    p->loop_depth++;
+    if (!parse_statement_with_flow(p, &body_guaranteed_return, NULL, &body_may_break)) {
+        p->loop_depth--;
+        return 0;
+    }
+    p->loop_depth--;
+
+    if (cond_always_true) {
+        if (body_may_break) {
+            if (out_guaranteed_return) {
+                *out_guaranteed_return = 0;
+            }
+            if (out_may_fallthrough) {
+                *out_may_fallthrough = 1;
+            }
+        } else {
+            if (out_guaranteed_return) {
+                *out_guaranteed_return = body_guaranteed_return;
+            }
+            if (out_may_fallthrough) {
+                *out_may_fallthrough = 0;
+            }
+        }
+    } else {
+        if (out_guaranteed_return) {
+            *out_guaranteed_return = 0;
+        }
+        if (out_may_fallthrough) {
+            *out_may_fallthrough = 1;
+        }
+    }
+
+    return 1;
 }
 
 static int parse_return_statement(Parser *p) {
@@ -377,11 +611,49 @@ static int parse_return_statement(Parser *p) {
             return 0;
         }
     }
+    if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        return 0;
+    }
+    if (p->track_function_return_count) {
+        p->function_return_count++;
+    }
+    return 1;
+}
+
+static int parse_break_statement(Parser *p) {
+    if (p->loop_depth == 0) {
+        set_error(p, previous(p), "'break' is only allowed inside loops");
+        return 0;
+    }
     return consume(p, TOKEN_SEMICOLON, "';'");
 }
 
-static int parse_statement(Parser *p) {
+static int parse_continue_statement(Parser *p) {
+    if (p->loop_depth == 0) {
+        set_error(p, previous(p), "'continue' is only allowed inside loops");
+        return 0;
+    }
+    return consume(p, TOKEN_SEMICOLON, "';'");
+}
+
+static int parse_statement_with_flow(Parser *p,
+                                     int *out_guaranteed_return,
+                                     int *out_may_fallthrough,
+                                     int *out_may_break) {
     int ok;
+    int guaranteed_return = 0;
+    int may_fallthrough = 1;
+    int may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
 
     if (!enter_statement_recursion(p, "statement")) {
         return 0;
@@ -389,33 +661,127 @@ static int parse_statement(Parser *p) {
 
     if (match(p, TOKEN_LBRACE)) {
         p->current--;
-        ok = parse_compound_statement(p);
+        ok = parse_compound_statement_with_flow(p,
+                                                &guaranteed_return,
+                                                &may_fallthrough,
+                                                &may_break);
         leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = guaranteed_return;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = may_fallthrough;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = may_break;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_IF)) {
-        ok = parse_if_statement(p);
+        ok = parse_if_statement_with_flow(p,
+                                          &guaranteed_return,
+                                          &may_fallthrough,
+                                          &may_break);
         leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = guaranteed_return;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = may_fallthrough;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = may_break;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_WHILE)) {
-        ok = parse_while_statement(p);
+        ok = parse_while_statement_with_flow(p,
+                                             &guaranteed_return,
+                                             &may_fallthrough,
+                                             &may_break);
         leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = guaranteed_return;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = may_fallthrough;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = may_break;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_FOR)) {
-        ok = parse_for_statement(p);
+        ok = parse_for_statement_with_flow(p,
+                                           &guaranteed_return,
+                                           &may_fallthrough,
+                                           &may_break);
         leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = guaranteed_return;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = may_fallthrough;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = may_break;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_RETURN)) {
         ok = parse_return_statement(p);
         leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = 1;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = 0;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = 0;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_BREAK)) {
+        ok = parse_break_statement(p);
+        leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = 0;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = 0;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = 1;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_CONTINUE)) {
+        ok = parse_continue_statement(p);
+        leave_statement_recursion(p);
+        if (ok && out_guaranteed_return) {
+            *out_guaranteed_return = 0;
+        }
+        if (ok && out_may_fallthrough) {
+            *out_may_fallthrough = 0;
+        }
+        if (ok && out_may_break) {
+            *out_may_break = 0;
+        }
         return ok;
     }
 
     ok = parse_expression_statement(p);
     leave_statement_recursion(p);
+    if (ok && out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (ok && out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (ok && out_may_break) {
+        *out_may_break = 0;
+    }
     return ok;
 }
 
@@ -513,10 +879,14 @@ static int parse_parameter_list(Parser *p,
 static int parse_function_external(Parser *p,
                                    const Token **out_name_token,
                                    size_t *out_parameter_count,
-                                   int *out_is_definition) {
+                                   int *out_is_definition,
+                                   size_t *out_return_statement_count,
+                                   int *out_returns_on_all_paths) {
     const Token *name_tok = NULL;
     size_t parameter_count = 0;
     int has_unnamed_parameter = 0;
+    int body_ok;
+    int function_returns_on_all_paths = 0;
 
     if (out_name_token) {
         *out_name_token = NULL;
@@ -526,6 +896,12 @@ static int parse_function_external(Parser *p,
     }
     if (out_is_definition) {
         *out_is_definition = 0;
+    }
+    if (out_return_statement_count) {
+        *out_return_statement_count = 0;
+    }
+    if (out_returns_on_all_paths) {
+        *out_returns_on_all_paths = 0;
     }
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
@@ -571,7 +947,20 @@ static int parse_function_external(Parser *p,
         if (out_is_definition) {
             *out_is_definition = 1;
         }
-        return parse_compound_statement(p);
+        p->track_function_return_count = 1;
+        p->function_return_count = 0;
+        body_ok = parse_compound_statement_with_flow(p,
+                                                     &function_returns_on_all_paths,
+                                                     NULL,
+                                                     NULL);
+        if (out_return_statement_count) {
+            *out_return_statement_count = p->function_return_count;
+        }
+        if (out_returns_on_all_paths) {
+            *out_returns_on_all_paths = function_returns_on_all_paths;
+        }
+        p->track_function_return_count = 0;
+        return body_ok;
     }
 
     set_error(p,
@@ -589,6 +978,8 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     const Token *external_name = NULL;
     size_t external_parameter_count = 0;
     int external_is_definition = 0;
+    size_t external_return_statement_count = 0;
+    int external_returns_on_all_paths = 0;
 
     if (!out_program) {
         if (error) {
@@ -630,6 +1021,9 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     p.expression_recursion_limit = PARSER_EXPRESSION_RECURSION_LIMIT;
     p.statement_recursion_depth = 0;
     p.statement_recursion_limit = PARSER_STATEMENT_RECURSION_LIMIT;
+    p.loop_depth = 0;
+    p.track_function_return_count = 0;
+    p.function_return_count = 0;
 
     if (error) {
         error->line = 0;
@@ -642,11 +1036,15 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
         external_name = NULL;
         external_parameter_count = 0;
         external_is_definition = 0;
+        external_return_statement_count = 0;
+        external_returns_on_all_paths = 0;
 
         if (!parse_function_external(&p,
                                      &external_name,
                                      &external_parameter_count,
-                                     &external_is_definition)) {
+                                     &external_is_definition,
+                                     &external_return_statement_count,
+                                     &external_returns_on_all_paths)) {
             p.current = start;
             if (!parse_declaration(&p, out_program)) {
                 ast_program_clear_storage(out_program);
@@ -661,6 +1059,10 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
             out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
             out_program->externals[out_program->count - 1].is_function_definition =
                 external_is_definition;
+            out_program->externals[out_program->count - 1].return_statement_count =
+                external_return_statement_count;
+            out_program->externals[out_program->count - 1].returns_on_all_paths =
+                external_returns_on_all_paths;
         }
     }
 
@@ -705,6 +1107,9 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.expression_recursion_limit = PARSER_EXPRESSION_RECURSION_LIMIT;
     p.statement_recursion_depth = 0;
     p.statement_recursion_limit = PARSER_STATEMENT_RECURSION_LIMIT;
+    p.loop_depth = 0;
+    p.track_function_return_count = 0;
+    p.function_return_count = 0;
 
     if (error) {
         error->line = 0;
@@ -714,7 +1119,7 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
-        if (!parse_function_external(&p, NULL, NULL, NULL)) {
+        if (!parse_function_external(&p, NULL, NULL, NULL, NULL, NULL)) {
             p.current = start;
             if (!parse_declaration(&p, NULL)) {
                 return 0;

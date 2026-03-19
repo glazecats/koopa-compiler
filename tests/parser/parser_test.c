@@ -142,6 +142,8 @@ int main(int argc, char **argv) {
             if (ext->kind == AST_EXTERNAL_FUNCTION) {
                 printf(" params=%zu", ext->parameter_count);
                 printf(" def=%d", ext->is_function_definition);
+                printf(" returns=%zu", ext->return_statement_count);
+                printf(" allpaths=%d", ext->returns_on_all_paths);
             } else if (ext->kind == AST_EXTERNAL_DECLARATION) {
                 printf(" init=%d", ext->has_initializer);
             }

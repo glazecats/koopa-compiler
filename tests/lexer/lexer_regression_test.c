@@ -128,6 +128,41 @@ static int test_garbage_token_array_state_rejected(void) {
     return 1;
 }
 
+static int test_break_continue_keywords(void) {
+    const char *source = "while(1){continue;break;}";
+    TokenArray tokens;
+    size_t i;
+    int saw_break = 0;
+    int saw_continue = 0;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on break/continue keyword input\n");
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type == TOKEN_KW_BREAK) {
+            saw_break = 1;
+        }
+        if (tokens.data[i].type == TOKEN_KW_CONTINUE) {
+            saw_continue = 1;
+        }
+    }
+
+    if (!saw_break || !saw_continue) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected KW_BREAK and KW_CONTINUE tokens (break=%d continue=%d)\n",
+                saw_break,
+                saw_continue);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
 int main(void) {
     if (!test_block_comment_ending_at_eof()) {
         return 1;
@@ -139,6 +174,9 @@ int main(void) {
         return 1;
     }
     if (!test_garbage_token_array_state_rejected()) {
+        return 1;
+    }
+    if (!test_break_continue_keywords()) {
         return 1;
     }
 

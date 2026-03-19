@@ -49,6 +49,17 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             continue;
         }
 
+        if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition &&
+            !lhs->returns_on_all_paths) {
+            if (error) {
+                semantic_set_error(error,
+                                   lhs->line,
+                                   lhs->column,
+                                   "Function definition must return on all control-flow paths");
+            }
+            return 0;
+        }
+
         for (j = i + 1; j < program->count; ++j) {
             const AstExternal *rhs = &program->externals[j];
 

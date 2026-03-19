@@ -149,6 +149,12 @@ static TokenType keyword_or_identifier(const char *start, size_t len) {
     if (len == 6 && strncmp(start, "return", 6) == 0) {
         return TOKEN_KW_RETURN;
     }
+    if (len == 5 && strncmp(start, "break", 5) == 0) {
+        return TOKEN_KW_BREAK;
+    }
+    if (len == 8 && strncmp(start, "continue", 8) == 0) {
+        return TOKEN_KW_CONTINUE;
+    }
     return TOKEN_IDENTIFIER;
 }
 
@@ -390,6 +396,10 @@ const char *lexer_token_type_name(TokenType type) {
         return "KW_WHILE";
     case TOKEN_KW_FOR:
         return "KW_FOR";
+    case TOKEN_KW_BREAK:
+        return "KW_BREAK";
+    case TOKEN_KW_CONTINUE:
+        return "KW_CONTINUE";
     case TOKEN_PLUS:
         return "PLUS";
     case TOKEN_MINUS:

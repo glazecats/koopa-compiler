@@ -17,6 +17,8 @@ typedef struct {
     int has_initializer;
     size_t parameter_count;
     int is_function_definition;
+    size_t return_statement_count;
+    int returns_on_all_paths;
     int line;
     int column;
 } AstExternal;
