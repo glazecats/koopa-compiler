@@ -438,6 +438,148 @@ static int test_semantic_accepts_reachable_return_after_break_in_while_true(void
     return 1;
 }
 
+static int run_cf_matrix_expect_accepts(const char *case_id, const char *source) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s should pass under current behavior, got: %s\n",
+                case_id,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+/*
+ * Important: these helpers encode CURRENT behavior only.
+ * They are intentionally strict: every case must match its current expectation.
+ * Do not relax these assertions to "accept either outcome".
+ */
+static int run_cf_matrix_expect_rejects(const char *case_id, const char *source) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s should fail under current behavior\n",
+                case_id);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s expected all-paths-return diagnostic, got: %s\n",
+                case_id,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+/*
+ * Control-flow comparison matrix groups:
+ * 1) must_pass_or_fail_now
+ *    - Current expectation is aligned with stricter all-path semantics.
+ * 2) known_limitation_lock
+ *    - Cases are intentionally accepted today.
+ *    - They are guardrails against accidental behavior drift until Milestone D.
+ *
+ * Strict-semantics migration note (Milestone D):
+ * - Move CF-02/CF-03/CF-06 from known_limitation_lock to reject expectations.
+ * - Keep CF-01/04/05/07/08/09/10 as-is unless semantics policy changes again.
+ */
+typedef enum {
+    CF_EXPECT_ACCEPT,
+    CF_EXPECT_REJECT
+} CfExpectation;
+
+typedef struct {
+    const char *id;
+    const char *source;
+    CfExpectation expect_now;
+} CfCase;
+
+static int run_cf_case(const CfCase *c) {
+    if (!c) {
+        return 0;
+    }
+    if (c->expect_now == CF_EXPECT_ACCEPT) {
+        return run_cf_matrix_expect_accepts(c->id, c->source);
+    }
+    return run_cf_matrix_expect_rejects(c->id, c->source);
+}
+
+static int run_cf_case_group(const char *group_name, const CfCase *cases, size_t count) {
+    size_t i;
+
+    for (i = 0; i < count; ++i) {
+        if (!run_cf_case(&cases[i])) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: %s group failed at %s\n",
+                    group_name,
+                    cases[i].id);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* must_pass_or_fail_now: current behavior matches strict all-path expectation. */
+static const CfCase kCfMustPassOrFailNow[] = {
+    {"CF-01", "int f(){while(1){break;}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-04", "int f(int a){while(1){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-05", "int f(){while(1){while(1){break;}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-07", "int f(int a){for(;;){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-09", "int f(){while(1){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-10", "int f(){for(;;){int x=1;}return 0;}\n", CF_EXPECT_REJECT},
+};
+
+/* known_limitation_lock: currently accepted; strict all-path semantics would reject. */
+static const CfCase kCfKnownLimitationLock[] = {
+    {"CF-02", "int f(int a){while(1){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-03", "int f(int a){while(1){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-06", "int f(int a){for(;;){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+};
+
+static int run_must_pass_or_fail_now_group(void) {
+    return run_cf_case_group("must_pass_or_fail_now",
+                             kCfMustPassOrFailNow,
+                             sizeof(kCfMustPassOrFailNow) / sizeof(kCfMustPassOrFailNow[0]));
+}
+
+static int run_known_limitation_lock_group(void) {
+    return run_cf_case_group("known_limitation_lock",
+                             kCfKnownLimitationLock,
+                             sizeof(kCfKnownLimitationLock) / sizeof(kCfKnownLimitationLock[0]));
+}
+
 int main(void) {
     if (!test_semantic_accepts_valid_program()) {
         return 1;
@@ -479,6 +621,17 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_accepts_reachable_return_after_break_in_while_true()) {
+        return 1;
+    }
+    if (!run_must_pass_or_fail_now_group()) {
+        return 1;
+    }
+
+    /*
+     * Run known-limitation locks as a dedicated group so they are not confused
+     * with strict-semantic baseline cases.
+     */
+    if (!run_known_limitation_lock_group()) {
         return 1;
     }
 

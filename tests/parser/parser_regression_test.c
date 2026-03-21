@@ -310,6 +310,17 @@ static int test_ast_records_function_parameter_count(void) {
         return 0;
     }
 
+    if (program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected add break/continue counts=0/0, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
@@ -365,15 +376,19 @@ static int test_ast_parses_function_declaration_external(void) {
         program.externals[0].return_statement_count != 0 ||
         program.externals[0].returns_on_all_paths != 0 ||
         program.externals[0].loop_statement_count != 0 ||
-        program.externals[0].if_statement_count != 0) {
+        program.externals[0].if_statement_count != 0 ||
+        program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
         fprintf(stderr,
-            "[parser-reg] FAIL: expected declaration metadata params=2 def=0 returns=0 allpaths=0 loops=0 ifs=0, got params=%zu def=%d returns=%zu allpaths=%d loops=%zu ifs=%zu\n",
+            "[parser-reg] FAIL: expected declaration metadata params=2 def=0 returns=0 allpaths=0 loops=0 ifs=0 breaks=0 continues=0, got params=%zu def=%d returns=%zu allpaths=%d loops=%zu ifs=%zu breaks=%zu continues=%zu\n",
                 program.externals[0].parameter_count,
                 program.externals[0].is_function_definition,
             program.externals[0].return_statement_count,
             program.externals[0].returns_on_all_paths,
             program.externals[0].loop_statement_count,
-            program.externals[0].if_statement_count);
+            program.externals[0].if_statement_count,
+            program.externals[0].break_statement_count,
+            program.externals[0].continue_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -418,7 +433,9 @@ static int test_ast_parses_unnamed_parameter_prototype(void) {
         program.externals[0].return_statement_count != 0 ||
         program.externals[0].returns_on_all_paths != 0 ||
         program.externals[0].loop_statement_count != 0 ||
-        program.externals[0].if_statement_count != 0) {
+        program.externals[0].if_statement_count != 0 ||
+        program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
         fprintf(stderr,
                 "[parser-reg] FAIL: unnamed-parameter prototype metadata mismatch\n");
         lexer_free_tokens(&tokens);
@@ -537,6 +554,17 @@ static int test_ast_records_multiple_function_returns(void) {
         return 0;
     }
 
+    if (program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected break/continue counts=0/0 for return-count test, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
@@ -604,6 +632,17 @@ static int test_ast_partial_return_not_all_paths(void) {
         return 0;
     }
 
+    if (program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected partial-return break/continue counts=0/0, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
@@ -658,6 +697,17 @@ static int test_ast_accepts_break_continue_inside_loops(void) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expected if_statement_count=1 for break/continue loop case, got %zu\n",
                 program.externals[0].if_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].break_statement_count != 1 ||
+        program.externals[0].continue_statement_count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected break/continue counts=1/1 for break/continue loop case, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -789,6 +839,17 @@ static int test_ast_records_function_loop_statement_count(void) {
         return 0;
     }
 
+    if (program.externals[0].break_statement_count != 2 ||
+        program.externals[0].continue_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected break/continue counts=2/0 for loop-count test, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
@@ -832,6 +893,67 @@ static int test_ast_records_function_if_statement_count(void) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expected if_statement_count=2, got %zu\n",
                 program.externals[0].if_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].break_statement_count != 0 ||
+        program.externals[0].continue_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected if-count test break/continue counts=0/0, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_function_break_continue_statement_count(void) {
+    const char *source =
+        "int f(int a){for(;;){if(a){break;}continue;}return 1;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for break/continue-count AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse failed for break/continue-count input at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected one function external for break/continue-count test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].break_statement_count != 1 ||
+        program.externals[0].continue_statement_count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected break/continue counts=1/1, got %zu/%zu\n",
+                program.externals[0].break_statement_count,
+                program.externals[0].continue_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1231,6 +1353,9 @@ int main(void) {
         return 1;
     }
     if (!test_ast_records_function_if_statement_count()) {
+        return 1;
+    }
+    if (!test_ast_records_function_break_continue_statement_count()) {
         return 1;
     }
     if (!test_ast_records_declaration_initializer_metadata()) {

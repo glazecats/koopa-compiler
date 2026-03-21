@@ -56,6 +56,7 @@
 - 2026-03-19: Milestone A continued: added `break`/`continue` keyword and parser support, including loop-context validation and flow propagation so `while(1){break;} return ...` is treated as reachable while break/continue outside loops are rejected.
 - 2026-03-19: Milestone A continued: AST now records per-function loop statement count (`loop_statement_count`) with parser regression coverage and dump support.
 - 2026-03-19: Milestone A continued: AST now records per-function if statement count (`if_statement_count`) with parser regression coverage and dump support.
+- 2026-03-21: Milestone A continued: AST now records per-function break/continue statement counts (`break_statement_count`, `continue_statement_count`) with parser regression coverage and dump support.
 
 ## Current Milestone A Focus
 
@@ -68,6 +69,9 @@
 - Return all-path analysis is still a structured approximation, not a full path solver.
 - Example currently accepted by design: `int f(int a){while(1){if(a){break;}}return 1;}`.
 - Rationale: parser flow marks loop body as potentially breaking, so a fallthrough path to trailing `return` is considered reachable.
+- Semantic regression matrix lock: CF-02 / CF-03 / CF-06 are currently expected to pass and are tagged as known-limitation guardrails.
+- Future strict-path migration rule: CF-02 / CF-03 / CF-06 should be flipped to expected-fail together when Milestone D is implemented.
 - If we later adopt stricter semantics that treat non-termination paths as non-returning failures, this loop/break interaction is a priority tightening point.
 - `loop_statement_count` / `if_statement_count` are syntactic occurrence counters, not reachability-aware path counters.
-- Unreachable loop/if statements are still counted by current metadata collection.
+- `break_statement_count` / `continue_statement_count` follow the same syntactic counting model.
+- Unreachable loop/if/break/continue statements are still counted by current metadata collection.
