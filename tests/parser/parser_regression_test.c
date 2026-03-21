@@ -164,7 +164,7 @@ static int parse_expression_source_to_ast(const char *source,
         return 0;
     }
 
-    if (!parser_parse_expression_ast_additive(tokens, out_expression, err)) {
+    if (!parser_parse_expression_ast_equality(tokens, out_expression, err)) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expression AST parse failed at %d:%d: %s\n",
                 err->line,
@@ -263,7 +263,7 @@ static int test_expression_ast_rejects_trailing_tokens(void) {
         return 0;
     }
 
-    if (parser_parse_expression_ast_additive(&tokens, &expr, &err)) {
+    if (parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expression parser unexpectedly accepted trailing tokens\n");
         lexer_free_tokens(&tokens);
@@ -318,7 +318,7 @@ static int test_expression_ast_rejects_deep_parentheses_with_recursion_limit(voi
         return 0;
     }
 
-    if (parser_parse_expression_ast_additive(&tokens, &expr, &err)) {
+    if (parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
         fprintf(stderr,
                 "[parser-reg] FAIL: deep-parentheses expression should fail recursion limit\n");
         lexer_free_tokens(&tokens);
@@ -427,6 +427,246 @@ static int test_expression_ast_subtraction_left_associative(void) {
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expected (a-b)-c left-associative tree for a-b-c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_relational_lower_precedence_than_additive(void) {
+    const char *source = "a+b<c*d\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_LT ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.binary.op != TOKEN_PLUS ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_STAR) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a+b)<(c*d) tree for a+b<c*d\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_relational_left_associative(void) {
+    const char *source = "a<b<c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_LT ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.binary.op != TOKEN_LT ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a<b)<c left-associative tree for a<b<c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_relational_with_parenthesized_right_additive(void) {
+    const char *source = "a<=(b+c)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_LE ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_PAREN ||
+        !expr->as.binary.right->as.inner || expr->as.binary.right->as.inner->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.inner->as.binary.op != TOKEN_PLUS) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected a<=(b+c) relational tree with paren additive right side\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_relational_gt_operator(void) {
+    const char *source = "a>b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_GT) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected binary '>' root for a>b\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_relational_ge_operator(void) {
+    const char *source = "a>=b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_GE) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected binary '>=' root for a>=b\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_equality_lower_precedence_than_relational(void) {
+    const char *source = "a<b==c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_EQ ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.binary.op != TOKEN_LT ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a<b)==c tree for a<b==c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_equality_left_associative(void) {
+    const char *source = "a==b!=c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_NE ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.binary.op != TOKEN_EQ ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a==b)!=c left-associative tree for a==b!=c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_assignment_parses_simple(void) {
+    const char *source = "a=b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected assignment tree a=b for assignment expression\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_assignment_is_right_associative(void) {
+    const char *source = "a=b=c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_ASSIGN ||
+        !expr->as.binary.right->as.binary.left ||
+        expr->as.binary.right->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.left->as.identifier.name, "b") != 0 ||
+        !expr->as.binary.right->as.binary.right ||
+        expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected right-associative assignment tree a=(b=c)\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -1741,6 +1981,33 @@ int main(void) {
         return 1;
     }
     if (!test_expression_ast_subtraction_left_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_relational_lower_precedence_than_additive()) {
+        return 1;
+    }
+    if (!test_expression_ast_relational_left_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_relational_with_parenthesized_right_additive()) {
+        return 1;
+    }
+    if (!test_expression_ast_relational_gt_operator()) {
+        return 1;
+    }
+    if (!test_expression_ast_relational_ge_operator()) {
+        return 1;
+    }
+    if (!test_expression_ast_equality_lower_precedence_than_relational()) {
+        return 1;
+    }
+    if (!test_expression_ast_equality_left_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_assignment_parses_simple()) {
+        return 1;
+    }
+    if (!test_expression_ast_assignment_is_right_associative()) {
         return 1;
     }
     if (!test_ast_collects_top_level_externals()) {

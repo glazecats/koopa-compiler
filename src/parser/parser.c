@@ -183,6 +183,9 @@ static int parse_declaration(Parser *p, AstProgram *top_level_program);
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
 static AstExpression *parse_expression_ast_multiplicative(Parser *p);
 static AstExpression *parse_expression_ast_additive(Parser *p);
+static AstExpression *parse_expression_ast_relational(Parser *p);
+static AstExpression *parse_expression_ast_equality(Parser *p);
+static AstExpression *parse_expression_ast_assignment(Parser *p);
 
 static AstExpression *alloc_ast_expression(AstExpressionKind kind,
                                            int line,
@@ -222,7 +225,7 @@ static AstExpression *parse_parenthesized_expression_ast_primary_only(Parser *p,
     AstExpression *inner;
     AstExpression *paren_expr;
 
-    inner = parse_expression_ast_additive(p);
+    inner = parse_expression_ast_assignment(p);
     if (!inner) {
         return NULL;
     }
@@ -345,6 +348,92 @@ static AstExpression *parse_expression_ast_additive(Parser *p) {
         }
     }
 
+    return left;
+}
+
+static AstExpression *parse_expression_ast_relational(Parser *p) {
+    AstExpression *left;
+
+    left = parse_expression_ast_additive(p);
+    if (!left) {
+        return NULL;
+    }
+
+    while (match(p, TOKEN_LT) || match(p, TOKEN_LE) || match(p, TOKEN_GT) || match(p, TOKEN_GE)) {
+        const Token *op_tok = previous(p);
+        AstExpression *right = parse_expression_ast_additive(p);
+
+        if (!right) {
+            ast_expression_free_internal(left);
+            return NULL;
+        }
+
+        left = build_binary_expression_node(p, op_tok, left, right);
+        if (!left) {
+            return NULL;
+        }
+    }
+
+    return left;
+}
+
+static AstExpression *parse_expression_ast_equality(Parser *p) {
+    AstExpression *left;
+
+    left = parse_expression_ast_relational(p);
+    if (!left) {
+        return NULL;
+    }
+
+    while (match(p, TOKEN_EQ) || match(p, TOKEN_NE)) {
+        const Token *op_tok = previous(p);
+        AstExpression *right = parse_expression_ast_relational(p);
+
+        if (!right) {
+            ast_expression_free_internal(left);
+            return NULL;
+        }
+
+        left = build_binary_expression_node(p, op_tok, left, right);
+        if (!left) {
+            return NULL;
+        }
+    }
+
+    return left;
+}
+
+static AstExpression *parse_expression_ast_assignment(Parser *p) {
+    AstExpression *left;
+    AstExpression *right;
+    const Token *op_tok;
+    int entered = enter_expression_recursion(p, "assignment-expression-ast");
+
+    if (!entered) {
+        return NULL;
+    }
+
+    left = parse_expression_ast_equality(p);
+    if (!left) {
+        leave_expression_recursion(p);
+        return NULL;
+    }
+
+    if (!(left->kind == AST_EXPR_IDENTIFIER && match(p, TOKEN_ASSIGN))) {
+        leave_expression_recursion(p);
+        return left;
+    }
+
+    op_tok = previous(p);
+    right = parse_expression_ast_assignment(p);
+    if (!right) {
+        ast_expression_free_internal(left);
+        leave_expression_recursion(p);
+        return NULL;
+    }
+
+    left = build_binary_expression_node(p, op_tok, left, right);
+    leave_expression_recursion(p);
     return left;
 }
 
@@ -1432,9 +1521,9 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     return 1;
 }
 
-int parser_parse_expression_ast_additive(const TokenArray *tokens,
-                                         AstExpression **out_expression,
-                                         ParserError *error) {
+int parser_parse_expression_ast_assignment(const TokenArray *tokens,
+                                           AstExpression **out_expression,
+                                           ParserError *error) {
     Parser p;
     AstExpression *expr;
 
@@ -1490,7 +1579,7 @@ int parser_parse_expression_ast_additive(const TokenArray *tokens,
         error->message[0] = '\0';
     }
 
-    expr = parse_expression_ast_additive(&p);
+    expr = parse_expression_ast_assignment(&p);
     if (!expr) {
         return 0;
     }
@@ -1518,5 +1607,27 @@ int parser_parse_expression_ast_additive(const TokenArray *tokens,
 int parser_parse_expression_ast_primary(const TokenArray *tokens,
                                         AstExpression **out_expression,
                                         ParserError *error) {
-    return parser_parse_expression_ast_additive(tokens, out_expression, error);
+    /* Compatibility alias: forwards to assignment-level parser by design. */
+    return parser_parse_expression_ast_assignment(tokens, out_expression, error);
+}
+
+int parser_parse_expression_ast_additive(const TokenArray *tokens,
+                                         AstExpression **out_expression,
+                                         ParserError *error) {
+    /* Compatibility alias: forwards to assignment-level parser by design. */
+    return parser_parse_expression_ast_assignment(tokens, out_expression, error);
+}
+
+int parser_parse_expression_ast_relational(const TokenArray *tokens,
+                                           AstExpression **out_expression,
+                                           ParserError *error) {
+    /* Compatibility alias: forwards to assignment-level parser by design. */
+    return parser_parse_expression_ast_assignment(tokens, out_expression, error);
+}
+
+int parser_parse_expression_ast_equality(const TokenArray *tokens,
+                                         AstExpression **out_expression,
+                                         ParserError *error) {
+    /* Compatibility alias: forwards to assignment-level parser by design. */
+    return parser_parse_expression_ast_assignment(tokens, out_expression, error);
 }
