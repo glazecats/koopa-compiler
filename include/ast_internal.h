@@ -91,6 +91,9 @@ static inline void ast_expression_free_internal(AstExpression *expr) {
     case AST_EXPR_PAREN:
         ast_expression_free_internal(expr->as.inner);
         break;
+    case AST_EXPR_UNARY:
+        ast_expression_free_internal(expr->as.unary.operand);
+        break;
     case AST_EXPR_BINARY:
         ast_expression_free_internal(expr->as.binary.left);
         ast_expression_free_internal(expr->as.binary.right);

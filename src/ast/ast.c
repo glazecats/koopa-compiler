@@ -41,6 +41,8 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "number";
     case AST_EXPR_PAREN:
         return "paren";
+    case AST_EXPR_UNARY:
+        return "unary";
     case AST_EXPR_BINARY:
         return "binary";
     default:

@@ -181,6 +181,7 @@ static int parse_statement_with_flow(Parser *p,
 static int parse_declaration(Parser *p, AstProgram *top_level_program);
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
+static AstExpression *parse_expression_ast_unary(Parser *p);
 static AstExpression *parse_expression_ast_multiplicative(Parser *p);
 static AstExpression *parse_expression_ast_additive(Parser *p);
 static AstExpression *parse_expression_ast_relational(Parser *p);
@@ -217,6 +218,21 @@ static AstExpression *build_binary_expression_node(Parser *p,
     expr->as.binary.op = op_tok->type;
     expr->as.binary.left = left;
     expr->as.binary.right = right;
+    return expr;
+}
+
+static AstExpression *build_unary_expression_node(Parser *p,
+                                                  const Token *op_tok,
+                                                  AstExpression *operand) {
+    AstExpression *expr = alloc_ast_expression(AST_EXPR_UNARY, op_tok->line, op_tok->column);
+    if (!expr) {
+        set_error(p, op_tok, "Out of memory while building expression AST");
+        ast_expression_free_internal(operand);
+        return NULL;
+    }
+
+    expr->as.unary.op = op_tok->type;
+    expr->as.unary.operand = operand;
     return expr;
 }
 
@@ -299,17 +315,42 @@ static AstExpression *parse_expression_ast_primary_only(Parser *p) {
     return NULL;
 }
 
+static AstExpression *parse_expression_ast_unary(Parser *p) {
+    AstExpression *expr;
+    const Token *op_tok;
+
+    if (!enter_expression_recursion(p, "unary-expression-ast")) {
+        return NULL;
+    }
+
+    if (match(p, TOKEN_PLUS) || match(p, TOKEN_MINUS)) {
+        op_tok = previous(p);
+        expr = parse_expression_ast_unary(p);
+        if (!expr) {
+            leave_expression_recursion(p);
+            return NULL;
+        }
+        expr = build_unary_expression_node(p, op_tok, expr);
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    expr = parse_expression_ast_primary_only(p);
+    leave_expression_recursion(p);
+    return expr;
+}
+
 static AstExpression *parse_expression_ast_multiplicative(Parser *p) {
     AstExpression *left;
 
-    left = parse_expression_ast_primary_only(p);
+    left = parse_expression_ast_unary(p);
     if (!left) {
         return NULL;
     }
 
     while (match(p, TOKEN_STAR) || match(p, TOKEN_SLASH) || match(p, TOKEN_PERCENT)) {
         const Token *op_tok = previous(p);
-        AstExpression *right = parse_expression_ast_primary_only(p);
+        AstExpression *right = parse_expression_ast_unary(p);
 
         if (!right) {
             ast_expression_free_internal(left);

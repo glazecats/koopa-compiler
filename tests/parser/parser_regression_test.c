@@ -164,7 +164,7 @@ static int parse_expression_source_to_ast(const char *source,
         return 0;
     }
 
-    if (!parser_parse_expression_ast_equality(tokens, out_expression, err)) {
+    if (!parser_parse_expression_ast_assignment(tokens, out_expression, err)) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expression AST parse failed at %d:%d: %s\n",
                 err->line,
@@ -174,6 +174,58 @@ static int parse_expression_source_to_ast(const char *source,
         return 0;
     }
 
+    return 1;
+}
+
+static int expect_expression_assignment_parse_failure(const char *source,
+                                                     const char *case_name,
+                                                     const char *required_msg_a,
+                                                     const char *required_msg_b) {
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for %s\n",
+                case_name);
+        return 0;
+    }
+
+    if (parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
+                source);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    if (required_msg_a && strstr(err.message, required_msg_a) == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                required_msg_a,
+                source,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    if (required_msg_b && strstr(err.message, required_msg_b) == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                required_msg_b,
+                source,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
     return 1;
 }
 
@@ -252,47 +304,18 @@ static int test_expression_ast_parses_nested_parentheses(void) {
 }
 
 static int test_expression_ast_rejects_trailing_tokens(void) {
-    const char *source = "a b\n";
-    TokenArray tokens;
-    AstExpression *expr = NULL;
-    ParserError err;
-
-    lexer_init_tokens(&tokens);
-    if (!lexer_tokenize(source, &tokens)) {
-        fprintf(stderr, "[parser-reg] FAIL: lexer failed for trailing-token expression input\n");
-        return 0;
-    }
-
-    if (parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
-        fprintf(stderr,
-                "[parser-reg] FAIL: expression parser unexpectedly accepted trailing tokens\n");
-        lexer_free_tokens(&tokens);
-        ast_expression_free(expr);
-        return 0;
-    }
-
-    if (strstr(err.message, "EOF") == NULL) {
-        fprintf(stderr,
-                "[parser-reg] FAIL: expected EOF diagnostic for trailing tokens, got: %s\n",
-                err.message);
-        lexer_free_tokens(&tokens);
-        ast_expression_free(expr);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_expression_free(expr);
-    return 1;
+    return expect_expression_assignment_parse_failure("a b\n",
+                                                     "trailing-token expression input",
+                                                     "EOF",
+                                                     NULL);
 }
 
 static int test_expression_ast_rejects_deep_parentheses_with_recursion_limit(void) {
     size_t depth = 3000;
     size_t len = depth * 2 + 2;
     char *source = (char *)malloc(len + 1);
-    TokenArray tokens;
-    AstExpression *expr = NULL;
-    ParserError err;
     size_t i;
+    int ok;
 
     if (!source) {
         fprintf(stderr,
@@ -310,37 +333,12 @@ static int test_expression_ast_rejects_deep_parentheses_with_recursion_limit(voi
     source[len - 1] = '\n';
     source[len] = '\0';
 
-    lexer_init_tokens(&tokens);
-    if (!lexer_tokenize(source, &tokens)) {
-        fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for deep-parentheses expression input\n");
-        free(source);
-        return 0;
-    }
-
-    if (parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
-        fprintf(stderr,
-                "[parser-reg] FAIL: deep-parentheses expression should fail recursion limit\n");
-        lexer_free_tokens(&tokens);
-        ast_expression_free(expr);
-        free(source);
-        return 0;
-    }
-
-    if (strstr(err.message, "recursion limit") == NULL) {
-        fprintf(stderr,
-                "[parser-reg] FAIL: expected recursion-limit diagnostic, got: %s\n",
-                err.message);
-        lexer_free_tokens(&tokens);
-        ast_expression_free(expr);
-        free(source);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_expression_free(expr);
+    ok = expect_expression_assignment_parse_failure(source,
+                                                   "deep-parentheses expression input",
+                                                   "recursion limit",
+                                                   NULL);
     free(source);
-    return 1;
+    return ok;
 }
 
 static int test_expression_ast_precedence_add_then_mul(void) {
@@ -435,6 +433,268 @@ static int test_expression_ast_subtraction_left_associative(void) {
     lexer_free_tokens(&tokens);
     ast_expression_free(expr);
     return 1;
+}
+
+static int test_expression_ast_unary_minus_primary(void) {
+    const char *source = "-a\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_UNARY || expr->as.unary.op != TOKEN_MINUS ||
+        !expr->as.unary.operand || expr->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.unary.operand->as.identifier.name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected unary minus tree -(a) for -a\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_unary_chain_right_associative(void) {
+    const char *source = "-+a\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_UNARY || expr->as.unary.op != TOKEN_MINUS ||
+        !expr->as.unary.operand || expr->as.unary.operand->kind != AST_EXPR_UNARY ||
+        expr->as.unary.operand->as.unary.op != TOKEN_PLUS ||
+        !expr->as.unary.operand->as.unary.operand ||
+        expr->as.unary.operand->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.unary.operand->as.unary.operand->as.identifier.name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected unary chain tree -(+a) for -+a\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_unary_binds_tighter_than_multiplicative(void) {
+    const char *source = "-a*b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_STAR ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_UNARY ||
+        expr->as.binary.left->as.unary.op != TOKEN_MINUS ||
+        !expr->as.binary.left->as.unary.operand ||
+        expr->as.binary.left->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.unary.operand->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (-a)*b tree for unary/multiplicative precedence\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_assignment_rhs_unary(void) {
+    const char *source = "a=-b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_UNARY ||
+        expr->as.binary.right->as.unary.op != TOKEN_MINUS ||
+        !expr->as.binary.right->as.unary.operand ||
+        expr->as.binary.right->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.unary.operand->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected assignment tree a=(-b) for a=-b\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_unary_parenthesized_additive(void) {
+    const char *source = "-(a+b)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_UNARY || expr->as.unary.op != TOKEN_MINUS ||
+        !expr->as.unary.operand || expr->as.unary.operand->kind != AST_EXPR_PAREN ||
+        !expr->as.unary.operand->as.inner ||
+        expr->as.unary.operand->as.inner->kind != AST_EXPR_BINARY ||
+        expr->as.unary.operand->as.inner->as.binary.op != TOKEN_PLUS) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected unary paren tree -((a+b)) for -(a+b)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_multiplicative_right_unary(void) {
+    const char *source = "a*-b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_STAR ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_UNARY ||
+        expr->as.binary.right->as.unary.op != TOKEN_MINUS ||
+        !expr->as.binary.right->as.unary.operand ||
+        expr->as.binary.right->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.unary.operand->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected multiplicative tree a*(-b) for a*-b\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+/* Compatibility lock: legacy alias should keep forwarding to assignment entrypoint. */
+static int test_expression_ast_equality_alias_still_forwards_assignment(void) {
+    const char *source = "a=b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for equality-alias compatibility input\n");
+        return 0;
+    }
+
+    if (!parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: equality alias should forward assignment-level parser: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+/* Negative boundaries: malformed unary tails and non-lvalue assignment forms. */
+static int test_expression_ast_rejects_assignment_rhs_incomplete_unary(void) {
+    return expect_expression_assignment_parse_failure("a=+\n",
+                                                     "incomplete unary assignment RHS input",
+                                                     "primary expression",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_multiplicative_rhs_incomplete_unary(void) {
+    return expect_expression_assignment_parse_failure("a*-\n",
+                                                     "incomplete unary multiplicative RHS input",
+                                                     "primary expression",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_parenthesized_incomplete_additive_operand(void) {
+    return expect_expression_assignment_parse_failure("-(a+)\n",
+                                                     "incomplete parenthesized additive input",
+                                                     "primary expression",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_parenthesized_lhs_assignment(void) {
+    return expect_expression_assignment_parse_failure("(a)=b\n",
+                                                     "parenthesized lhs assignment input",
+                                                     "EOF",
+                                                     "ASSIGN");
+}
+
+static int test_expression_ast_rejects_number_lhs_assignment(void) {
+    return expect_expression_assignment_parse_failure("1=b\n",
+                                                     "number lhs assignment input",
+                                                     "EOF",
+                                                     "ASSIGN");
+}
+
+static int test_expression_ast_rejects_binary_lhs_assignment(void) {
+    return expect_expression_assignment_parse_failure("a+b=c\n",
+                                                     "binary lhs assignment input",
+                                                     "EOF",
+                                                     "ASSIGN");
+}
+
+static int test_expression_ast_rejects_parenthesized_assignment_lhs(void) {
+    return expect_expression_assignment_parse_failure("(a=b)=c\n",
+                                                     "parenthesized assignment lhs input",
+                                                     "EOF",
+                                                     "ASSIGN");
+}
+
+static int test_expression_ast_rejects_double_parenthesized_identifier_lhs_assignment(void) {
+    return expect_expression_assignment_parse_failure("((a))=b\n",
+                                                     "double-parenthesized lhs assignment input",
+                                                     "EOF",
+                                                     "ASSIGN");
+}
+
+static int test_expression_ast_rejects_assignment_to_parenthesized_equality(void) {
+    return expect_expression_assignment_parse_failure("a=(b==c)=d\n",
+                                                     "assignment-to-parenthesized-equality input",
+                                                     "EOF",
+                                                     "ASSIGN");
 }
 
 static int test_expression_ast_relational_lower_precedence_than_additive(void) {
@@ -675,6 +935,67 @@ static int test_expression_ast_assignment_is_right_associative(void) {
     lexer_free_tokens(&tokens);
     ast_expression_free(expr);
     return 1;
+}
+
+static int test_expression_ast_assignment_lower_precedence_than_equality(void) {
+    const char *source = "a=b==c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_EQ) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected assignment tree a=(b==c) for a=b==c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_equality_with_parenthesized_assignment_rhs(void) {
+    const char *source = "a==(b=c)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_EQ ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_PAREN ||
+        !expr->as.binary.right->as.inner ||
+        expr->as.binary.right->as.inner->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.inner->as.binary.op != TOKEN_ASSIGN) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected equality tree with parenthesized assignment rhs for a==(b=c)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_rejects_assignment_after_equality_chain(void) {
+    return expect_expression_assignment_parse_failure("a==b=c\n",
+                                                     "assignment-after-equality input",
+                                                     "EOF",
+                                                     "ASSIGN");
 }
 
 static int test_ast_collects_top_level_externals(void) {
@@ -1959,6 +2280,8 @@ int main(void) {
     if (!test_success_clears_error_state()) {
         return 1;
     }
+
+    /* Expression AST positive-shape coverage. */
     if (!test_expression_ast_parses_identifier_primary()) {
         return 1;
     }
@@ -1981,6 +2304,58 @@ int main(void) {
         return 1;
     }
     if (!test_expression_ast_subtraction_left_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_unary_minus_primary()) {
+        return 1;
+    }
+    if (!test_expression_ast_unary_chain_right_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_unary_binds_tighter_than_multiplicative()) {
+        return 1;
+    }
+    if (!test_expression_ast_assignment_rhs_unary()) {
+        return 1;
+    }
+    if (!test_expression_ast_unary_parenthesized_additive()) {
+        return 1;
+    }
+    if (!test_expression_ast_multiplicative_right_unary()) {
+        return 1;
+    }
+
+    /* Expression AST compatibility alias lock. */
+    if (!test_expression_ast_equality_alias_still_forwards_assignment()) {
+        return 1;
+    }
+
+    /* Expression AST negative-boundary coverage. */
+    if (!test_expression_ast_rejects_assignment_rhs_incomplete_unary()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_multiplicative_rhs_incomplete_unary()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_parenthesized_incomplete_additive_operand()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_parenthesized_lhs_assignment()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_number_lhs_assignment()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_binary_lhs_assignment()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_parenthesized_assignment_lhs()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_double_parenthesized_identifier_lhs_assignment()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_assignment_to_parenthesized_equality()) {
         return 1;
     }
     if (!test_expression_ast_relational_lower_precedence_than_additive()) {
@@ -2008,6 +2383,15 @@ int main(void) {
         return 1;
     }
     if (!test_expression_ast_assignment_is_right_associative()) {
+        return 1;
+    }
+    if (!test_expression_ast_assignment_lower_precedence_than_equality()) {
+        return 1;
+    }
+    if (!test_expression_ast_equality_with_parenthesized_assignment_rhs()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_assignment_after_equality_chain()) {
         return 1;
     }
     if (!test_ast_collects_top_level_externals()) {

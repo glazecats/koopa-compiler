@@ -14,6 +14,7 @@ typedef enum {
     AST_EXPR_IDENTIFIER = 0,
     AST_EXPR_NUMBER,
     AST_EXPR_PAREN,
+    AST_EXPR_UNARY,
     AST_EXPR_BINARY,
 } AstExpressionKind;
 
@@ -30,6 +31,10 @@ struct AstExpression {
         } identifier;
         long long number_value;
         AstExpression *inner;
+        struct {
+            TokenType op;
+            AstExpression *operand;
+        } unary;
         struct {
             TokenType op;
             AstExpression *left;
