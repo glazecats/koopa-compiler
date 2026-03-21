@@ -58,6 +58,7 @@ static inline int ast_program_append_external(AstProgram *program,
     external.if_statement_count = 0;
     external.break_statement_count = 0;
     external.continue_statement_count = 0;
+    external.declaration_statement_count = 0;
     external.line = 0;
     external.column = 0;
 

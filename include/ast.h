@@ -23,6 +23,7 @@ typedef struct {
     size_t if_statement_count;
     size_t break_statement_count;
     size_t continue_statement_count;
+    size_t declaration_statement_count;
     int line;
     int column;
 } AstExternal;

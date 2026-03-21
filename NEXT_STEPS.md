@@ -57,6 +57,7 @@
 - 2026-03-19: Milestone A continued: AST now records per-function loop statement count (`loop_statement_count`) with parser regression coverage and dump support.
 - 2026-03-19: Milestone A continued: AST now records per-function if statement count (`if_statement_count`) with parser regression coverage and dump support.
 - 2026-03-21: Milestone A continued: AST now records per-function break/continue statement counts (`break_statement_count`, `continue_statement_count`) with parser regression coverage and dump support.
+- 2026-03-21: Milestone A continued: AST now records per-function declaration statement count (`declaration_statement_count`) with parser regression coverage and dump support.
 
 ## Current Milestone A Focus
 
@@ -74,4 +75,6 @@
 - If we later adopt stricter semantics that treat non-termination paths as non-returning failures, this loop/break interaction is a priority tightening point.
 - `loop_statement_count` / `if_statement_count` are syntactic occurrence counters, not reachability-aware path counters.
 - `break_statement_count` / `continue_statement_count` follow the same syntactic counting model.
-- Unreachable loop/if/break/continue statements are still counted by current metadata collection.
+- `declaration_statement_count` follows the same syntactic counting model.
+- `declaration_statement_count` currently counts only declarations parsed as compound-block statements; `for(int i=...)` init declarations are excluded.
+- Unreachable loop/if/break/continue/declaration statements are still counted by current metadata collection.

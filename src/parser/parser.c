@@ -25,6 +25,8 @@ typedef struct {
     size_t function_break_count;
     int track_function_continue_count;
     size_t function_continue_count;
+    int track_function_declaration_count;
+    size_t function_declaration_count;
 } Parser;
 
 /*
@@ -337,6 +339,9 @@ static int parse_compound_statement_with_flow(Parser *p,
 
     while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
         if (check(p, TOKEN_KW_INT)) {
+            if (p->track_function_declaration_count) {
+                p->function_declaration_count++;
+            }
             if (!parse_declaration(p, NULL)) {
                 return 0;
             }
@@ -911,7 +916,8 @@ static int parse_function_external(Parser *p,
                                    size_t *out_loop_statement_count,
                                    size_t *out_if_statement_count,
                                    size_t *out_break_statement_count,
-                                   size_t *out_continue_statement_count) {
+                                   size_t *out_continue_statement_count,
+                                   size_t *out_declaration_statement_count) {
     const Token *name_tok = NULL;
     size_t parameter_count = 0;
     int has_unnamed_parameter = 0;
@@ -944,6 +950,9 @@ static int parse_function_external(Parser *p,
     }
     if (out_continue_statement_count) {
         *out_continue_statement_count = 0;
+    }
+    if (out_declaration_statement_count) {
+        *out_declaration_statement_count = 0;
     }
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
@@ -999,6 +1008,8 @@ static int parse_function_external(Parser *p,
         p->function_break_count = 0;
         p->track_function_continue_count = 1;
         p->function_continue_count = 0;
+        p->track_function_declaration_count = 1;
+        p->function_declaration_count = 0;
         body_ok = parse_compound_statement_with_flow(p,
                                                      &function_returns_on_all_paths,
                                                      NULL,
@@ -1021,11 +1032,15 @@ static int parse_function_external(Parser *p,
         if (out_continue_statement_count) {
             *out_continue_statement_count = p->function_continue_count;
         }
+        if (out_declaration_statement_count) {
+            *out_declaration_statement_count = p->function_declaration_count;
+        }
         p->track_function_return_count = 0;
         p->track_function_loop_count = 0;
         p->track_function_if_count = 0;
         p->track_function_break_count = 0;
         p->track_function_continue_count = 0;
+        p->track_function_declaration_count = 0;
         return body_ok;
     }
 
@@ -1050,6 +1065,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     size_t external_if_statement_count = 0;
     size_t external_break_statement_count = 0;
     size_t external_continue_statement_count = 0;
+    size_t external_declaration_statement_count = 0;
 
     if (!out_program) {
         if (error) {
@@ -1102,6 +1118,8 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     p.function_break_count = 0;
     p.track_function_continue_count = 0;
     p.function_continue_count = 0;
+    p.track_function_declaration_count = 0;
+    p.function_declaration_count = 0;
 
     if (error) {
         error->line = 0;
@@ -1120,6 +1138,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
         external_if_statement_count = 0;
         external_break_statement_count = 0;
         external_continue_statement_count = 0;
+        external_declaration_statement_count = 0;
 
         if (!parse_function_external(&p,
                                      &external_name,
@@ -1130,7 +1149,8 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                                      &external_loop_statement_count,
                                      &external_if_statement_count,
                                      &external_break_statement_count,
-                                     &external_continue_statement_count)) {
+                                     &external_continue_statement_count,
+                                     &external_declaration_statement_count)) {
             p.current = start;
             if (!parse_declaration(&p, out_program)) {
                 ast_program_clear_storage(out_program);
@@ -1157,6 +1177,8 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                 external_break_statement_count;
             out_program->externals[out_program->count - 1].continue_statement_count =
                 external_continue_statement_count;
+            out_program->externals[out_program->count - 1].declaration_statement_count =
+                external_declaration_statement_count;
         }
     }
 
@@ -1212,6 +1234,8 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.function_break_count = 0;
     p.track_function_continue_count = 0;
     p.function_continue_count = 0;
+    p.track_function_declaration_count = 0;
+    p.function_declaration_count = 0;
 
     if (error) {
         error->line = 0;
@@ -1221,7 +1245,7 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
-        if (!parse_function_external(&p, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+        if (!parse_function_external(&p, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
             p.current = start;
             if (!parse_declaration(&p, NULL)) {
                 return 0;
