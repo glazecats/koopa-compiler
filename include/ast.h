@@ -10,6 +10,34 @@ typedef enum {
     AST_EXTERNAL_DECLARATION,
 } AstExternalKind;
 
+typedef enum {
+    AST_EXPR_IDENTIFIER = 0,
+    AST_EXPR_NUMBER,
+    AST_EXPR_PAREN,
+    AST_EXPR_BINARY,
+} AstExpressionKind;
+
+typedef struct AstExpression AstExpression;
+
+struct AstExpression {
+    AstExpressionKind kind;
+    int line;
+    int column;
+    union {
+        struct {
+            char *name;
+            size_t name_length;
+        } identifier;
+        long long number_value;
+        AstExpression *inner;
+        struct {
+            TokenType op;
+            AstExpression *left;
+            AstExpression *right;
+        } binary;
+    } as;
+};
+
 typedef struct {
     AstExternalKind kind;
     char *name;
@@ -45,5 +73,9 @@ void ast_program_free(AstProgram *program);
 int ast_program_add_external(AstProgram *program, AstExternalKind kind, const Token *name_token);
 
 const char *ast_external_kind_name(AstExternalKind kind);
+
+void ast_expression_free(AstExpression *expr);
+
+const char *ast_expression_kind_name(AstExpressionKind kind);
 
 #endif

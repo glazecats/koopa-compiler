@@ -78,4 +78,29 @@ static inline int ast_program_append_external(AstProgram *program,
     return 1;
 }
 
+/* Internal helper: recursively free an expression subtree. */
+static inline void ast_expression_free_internal(AstExpression *expr) {
+    if (!expr) {
+        return;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER:
+        free(expr->as.identifier.name);
+        break;
+    case AST_EXPR_PAREN:
+        ast_expression_free_internal(expr->as.inner);
+        break;
+    case AST_EXPR_BINARY:
+        ast_expression_free_internal(expr->as.binary.left);
+        ast_expression_free_internal(expr->as.binary.right);
+        break;
+    case AST_EXPR_NUMBER:
+    default:
+        break;
+    }
+
+    free(expr);
+}
+
 #endif

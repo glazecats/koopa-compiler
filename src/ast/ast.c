@@ -28,3 +28,22 @@ const char *ast_external_kind_name(AstExternalKind kind) {
         return "unknown";
     }
 }
+
+void ast_expression_free(AstExpression *expr) {
+    ast_expression_free_internal(expr);
+}
+
+const char *ast_expression_kind_name(AstExpressionKind kind) {
+    switch (kind) {
+    case AST_EXPR_IDENTIFIER:
+        return "identifier";
+    case AST_EXPR_NUMBER:
+        return "number";
+    case AST_EXPR_PAREN:
+        return "paren";
+    case AST_EXPR_BINARY:
+        return "binary";
+    default:
+        return "unknown";
+    }
+}

@@ -3,6 +3,8 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     const TokenArray *tokens;
@@ -177,6 +179,174 @@ static int parse_statement_with_flow(Parser *p,
                                      int *out_may_fallthrough,
                                      int *out_may_break);
 static int parse_declaration(Parser *p, AstProgram *top_level_program);
+
+static AstExpression *parse_expression_ast_primary_only(Parser *p);
+static AstExpression *parse_expression_ast_multiplicative(Parser *p);
+static AstExpression *parse_expression_ast_additive(Parser *p);
+
+static AstExpression *alloc_ast_expression(AstExpressionKind kind,
+                                           int line,
+                                           int column) {
+    AstExpression *expr = (AstExpression *)malloc(sizeof(AstExpression));
+    if (!expr) {
+        return NULL;
+    }
+    expr->kind = kind;
+    expr->line = line;
+    expr->column = column;
+    expr->as.identifier.name = NULL;
+    expr->as.identifier.name_length = 0;
+    return expr;
+}
+
+static AstExpression *build_binary_expression_node(Parser *p,
+                                                   const Token *op_tok,
+                                                   AstExpression *left,
+                                                   AstExpression *right) {
+    AstExpression *expr = alloc_ast_expression(AST_EXPR_BINARY, op_tok->line, op_tok->column);
+    if (!expr) {
+        set_error(p, op_tok, "Out of memory while building expression AST");
+        ast_expression_free_internal(left);
+        ast_expression_free_internal(right);
+        return NULL;
+    }
+
+    expr->as.binary.op = op_tok->type;
+    expr->as.binary.left = left;
+    expr->as.binary.right = right;
+    return expr;
+}
+
+static AstExpression *parse_parenthesized_expression_ast_primary_only(Parser *p,
+                                                                      const Token *lparen) {
+    AstExpression *inner;
+    AstExpression *paren_expr;
+
+    inner = parse_expression_ast_additive(p);
+    if (!inner) {
+        return NULL;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        ast_expression_free_internal(inner);
+        return NULL;
+    }
+
+    paren_expr = alloc_ast_expression(AST_EXPR_PAREN, lparen->line, lparen->column);
+    if (!paren_expr) {
+        set_error(p, lparen, "Out of memory while building expression AST");
+        ast_expression_free_internal(inner);
+        return NULL;
+    }
+    paren_expr->as.inner = inner;
+    return paren_expr;
+}
+
+static AstExpression *parse_expression_ast_primary_only(Parser *p) {
+    const Token *tok;
+    AstExpression *expr;
+
+    if (!enter_expression_recursion(p, "primary-expression-ast")) {
+        return NULL;
+    }
+
+    if (match(p, TOKEN_IDENTIFIER)) {
+        tok = previous(p);
+        expr = alloc_ast_expression(AST_EXPR_IDENTIFIER, tok->line, tok->column);
+        if (!expr) {
+            set_error(p, tok, "Out of memory while building expression AST");
+            leave_expression_recursion(p);
+            return NULL;
+        }
+        expr->as.identifier.name = (char *)malloc(tok->length + 1);
+        if (!expr->as.identifier.name) {
+            set_error(p, tok, "Out of memory while building expression AST");
+            ast_expression_free_internal(expr);
+            leave_expression_recursion(p);
+            return NULL;
+        }
+        memcpy(expr->as.identifier.name, tok->lexeme, tok->length);
+        expr->as.identifier.name[tok->length] = '\0';
+        expr->as.identifier.name_length = tok->length;
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    if (match(p, TOKEN_NUMBER)) {
+        tok = previous(p);
+        expr = alloc_ast_expression(AST_EXPR_NUMBER, tok->line, tok->column);
+        if (!expr) {
+            set_error(p, tok, "Out of memory while building expression AST");
+            leave_expression_recursion(p);
+            return NULL;
+        }
+        expr->as.number_value = tok->number_value;
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    if (match(p, TOKEN_LPAREN)) {
+        tok = previous(p);
+        expr = parse_parenthesized_expression_ast_primary_only(p, tok);
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    set_error(p, peek(p), "Expected primary expression, got %s", lexer_token_type_name(peek(p)->type));
+    leave_expression_recursion(p);
+    return NULL;
+}
+
+static AstExpression *parse_expression_ast_multiplicative(Parser *p) {
+    AstExpression *left;
+
+    left = parse_expression_ast_primary_only(p);
+    if (!left) {
+        return NULL;
+    }
+
+    while (match(p, TOKEN_STAR) || match(p, TOKEN_SLASH) || match(p, TOKEN_PERCENT)) {
+        const Token *op_tok = previous(p);
+        AstExpression *right = parse_expression_ast_primary_only(p);
+
+        if (!right) {
+            ast_expression_free_internal(left);
+            return NULL;
+        }
+
+        left = build_binary_expression_node(p, op_tok, left, right);
+        if (!left) {
+            return NULL;
+        }
+    }
+
+    return left;
+}
+
+static AstExpression *parse_expression_ast_additive(Parser *p) {
+    AstExpression *left;
+
+    left = parse_expression_ast_multiplicative(p);
+    if (!left) {
+        return NULL;
+    }
+
+    while (match(p, TOKEN_PLUS) || match(p, TOKEN_MINUS)) {
+        const Token *op_tok = previous(p);
+        AstExpression *right = parse_expression_ast_multiplicative(p);
+
+        if (!right) {
+            ast_expression_free_internal(left);
+            return NULL;
+        }
+
+        left = build_binary_expression_node(p, op_tok, left, right);
+        if (!left) {
+            return NULL;
+        }
+    }
+
+    return left;
+}
 
 static int parse_primary(Parser *p) {
     if (match(p, TOKEN_NUMBER) || match(p, TOKEN_IDENTIFIER)) {
@@ -1260,4 +1430,93 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     }
 
     return 1;
+}
+
+int parser_parse_expression_ast_additive(const TokenArray *tokens,
+                                         AstExpression **out_expression,
+                                         ParserError *error) {
+    Parser p;
+    AstExpression *expr;
+
+    if (out_expression) {
+        *out_expression = NULL;
+    }
+
+    if (!tokens || !tokens->data || tokens->size == 0) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "Empty token stream");
+        }
+        return 0;
+    }
+
+    if (tokens->data[tokens->size - 1].type != TOKEN_EOF) {
+        if (error) {
+            const Token *last = &tokens->data[tokens->size - 1];
+            error->line = last->line;
+            error->column = last->column;
+            snprintf(error->message, sizeof(error->message), "Token stream missing EOF terminator");
+        }
+        return 0;
+    }
+
+    p.tokens = tokens;
+    p.current = 0;
+    p.error = error;
+    p.has_error = 0;
+    p.error_index = 0;
+    p.expression_recursion_depth = 0;
+    p.expression_recursion_limit = PARSER_EXPRESSION_RECURSION_LIMIT;
+    p.statement_recursion_depth = 0;
+    p.statement_recursion_limit = PARSER_STATEMENT_RECURSION_LIMIT;
+    p.loop_depth = 0;
+    p.track_function_return_count = 0;
+    p.function_return_count = 0;
+    p.track_function_loop_count = 0;
+    p.function_loop_count = 0;
+    p.track_function_if_count = 0;
+    p.function_if_count = 0;
+    p.track_function_break_count = 0;
+    p.function_break_count = 0;
+    p.track_function_continue_count = 0;
+    p.function_continue_count = 0;
+    p.track_function_declaration_count = 0;
+    p.function_declaration_count = 0;
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
+    }
+
+    expr = parse_expression_ast_additive(&p);
+    if (!expr) {
+        return 0;
+    }
+
+    if (!is_at_end(&p)) {
+        set_error(&p, peek(&p), "Expected EOF, got %s", lexer_token_type_name(peek(&p)->type));
+        ast_expression_free_internal(expr);
+        return 0;
+    }
+
+    if (out_expression) {
+        *out_expression = expr;
+    } else {
+        ast_expression_free_internal(expr);
+    }
+
+    if (error) {
+        error->line = 0;
+        error->column = 0;
+        error->message[0] = '\0';
+    }
+    return 1;
+}
+
+int parser_parse_expression_ast_primary(const TokenArray *tokens,
+                                        AstExpression **out_expression,
+                                        ParserError *error) {
+    return parser_parse_expression_ast_additive(tokens, out_expression, error);
 }

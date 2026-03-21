@@ -58,12 +58,25 @@
 - 2026-03-19: Milestone A continued: AST now records per-function if statement count (`if_statement_count`) with parser regression coverage and dump support.
 - 2026-03-21: Milestone A continued: AST now records per-function break/continue statement counts (`break_statement_count`, `continue_statement_count`) with parser regression coverage and dump support.
 - 2026-03-21: Milestone A continued: AST now records per-function declaration statement count (`declaration_statement_count`) with parser regression coverage and dump support.
+- 2026-03-21: Milestone A (Expression Tree A1) started: added minimal standalone expression AST parsing for primary + parenthesized expressions with dedicated parser regressions and no semantic rule changes.
+- 2026-03-21: Milestone A (Expression Tree A2) continued: standalone expression AST now covers multiplicative/additive binary expressions with precedence + left-associativity regressions.
 
 ## Current Milestone A Focus
 
 - Keep extending AST metadata in small verified steps.
 - Pair each AST extension with parser regression coverage and `make test` verification.
 - Expand from top-level metadata toward minimal function-body semantic signals.
+
+## Expression Tree Increment Plan (next)
+
+1. Step A1: add minimal expression AST nodes for primary + parenthesized expressions only.
+2. Step A1 tests: add parser regressions that lock grouping behavior for `(a)` and nested parentheses like `((a))`.
+3. Step A2: extend expression AST to multiplicative/additive layers while preserving current parser control flow and semantics.
+4. Step A2 tests: add precedence/associativity regressions (`a+b*c`, `(a+b)*c`, `a-b-c`) and keep AST dump readable.
+5. Step A3: extend to relational/equality/assignment expression nodes with the same one-layer-per-commit discipline.
+6. Step A3 tests: add focused regressions for each newly enabled operator family before moving to the next layer.
+7. Rule: expression-tree milestones must not change current semantic pass/fail rules unless explicitly planned in Milestone D.
+8. Validation gate per step: `make test` must stay green before starting the next expression layer.
 
 ## Known Limitations (Current Behavior)
 

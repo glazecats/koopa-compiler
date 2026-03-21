@@ -150,6 +150,293 @@ static int test_success_clears_error_state(void) {
     return 1;
 }
 
+static int parse_expression_source_to_ast(const char *source,
+                                         TokenArray *tokens,
+                                         AstExpression **out_expression,
+                                         ParserError *err) {
+    lexer_init_tokens(tokens);
+    if (out_expression) {
+        *out_expression = NULL;
+    }
+
+    if (!lexer_tokenize(source, tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for expression AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_expression_ast_additive(tokens, out_expression, err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expression AST parse failed at %d:%d: %s\n",
+                err->line,
+                err->column,
+                err->message);
+        lexer_free_tokens(tokens);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_expression_ast_parses_identifier_primary(void) {
+    const char *source = "abc\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_IDENTIFIER ||
+        !expr->as.identifier.name || strcmp(expr->as.identifier.name, "abc") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected identifier expression 'abc'\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_number_primary(void) {
+    const char *source = "42\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_NUMBER || expr->as.number_value != 42) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected number expression 42\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_nested_parentheses(void) {
+    const char *source = "((a))\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_PAREN || !expr->as.inner ||
+        expr->as.inner->kind != AST_EXPR_PAREN || !expr->as.inner->as.inner ||
+        expr->as.inner->as.inner->kind != AST_EXPR_IDENTIFIER ||
+        !expr->as.inner->as.inner->as.identifier.name ||
+        strcmp(expr->as.inner->as.inner->as.identifier.name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected nested paren expression ((a)) structure\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_rejects_trailing_tokens(void) {
+    const char *source = "a b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for trailing-token expression input\n");
+        return 0;
+    }
+
+    if (parser_parse_expression_ast_additive(&tokens, &expr, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expression parser unexpectedly accepted trailing tokens\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    if (strstr(err.message, "EOF") == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected EOF diagnostic for trailing tokens, got: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_rejects_deep_parentheses_with_recursion_limit(void) {
+    size_t depth = 3000;
+    size_t len = depth * 2 + 2;
+    char *source = (char *)malloc(len + 1);
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+    size_t i;
+
+    if (!source) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: out of memory preparing deep-parentheses input\n");
+        return 0;
+    }
+
+    for (i = 0; i < depth; ++i) {
+        source[i] = '(';
+    }
+    source[depth] = 'a';
+    for (i = 0; i < depth; ++i) {
+        source[depth + 1 + i] = ')';
+    }
+    source[len - 1] = '\n';
+    source[len] = '\0';
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for deep-parentheses expression input\n");
+        free(source);
+        return 0;
+    }
+
+    if (parser_parse_expression_ast_additive(&tokens, &expr, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: deep-parentheses expression should fail recursion limit\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        free(source);
+        return 0;
+    }
+
+    if (strstr(err.message, "recursion limit") == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected recursion-limit diagnostic, got: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        free(source);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    free(source);
+    return 1;
+}
+
+static int test_expression_ast_precedence_add_then_mul(void) {
+    const char *source = "a+b*c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_PLUS ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_STAR ||
+        !expr->as.binary.right->as.binary.left ||
+        expr->as.binary.right->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.left->as.identifier.name, "b") != 0 ||
+        !expr->as.binary.right->as.binary.right ||
+        expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected a+(b*c) precedence tree for a+b*c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parentheses_override_precedence(void) {
+    const char *source = "(a+b)*c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_STAR ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_PAREN ||
+        !expr->as.binary.left->as.inner || expr->as.binary.left->as.inner->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.inner->as.binary.op != TOKEN_PLUS ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a+b)*c tree with paren wrapping additive subexpression\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_subtraction_left_associative(void) {
+    const char *source = "a-b-c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_MINUS ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_BINARY ||
+        expr->as.binary.left->as.binary.op != TOKEN_MINUS ||
+        !expr->as.binary.left->as.binary.left ||
+        expr->as.binary.left->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.left->as.binary.right ||
+        expr->as.binary.left->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.binary.right->as.identifier.name, "b") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected (a-b)-c left-associative tree for a-b-c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
 static int test_ast_collects_top_level_externals(void) {
     const char *source = "int x;\nint main(){return 0;}\n";
     TokenArray tokens;
@@ -1430,6 +1717,30 @@ int main(void) {
         return 1;
     }
     if (!test_success_clears_error_state()) {
+        return 1;
+    }
+    if (!test_expression_ast_parses_identifier_primary()) {
+        return 1;
+    }
+    if (!test_expression_ast_parses_number_primary()) {
+        return 1;
+    }
+    if (!test_expression_ast_parses_nested_parentheses()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_trailing_tokens()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_deep_parentheses_with_recursion_limit()) {
+        return 1;
+    }
+    if (!test_expression_ast_precedence_add_then_mul()) {
+        return 1;
+    }
+    if (!test_expression_ast_parentheses_override_precedence()) {
+        return 1;
+    }
+    if (!test_expression_ast_subtraction_left_associative()) {
         return 1;
     }
     if (!test_ast_collects_top_level_externals()) {

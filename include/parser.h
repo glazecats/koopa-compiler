@@ -25,4 +25,19 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                                       AstProgram *out_program,
                                       ParserError *error);
 
+/*
+ * Parses a standalone expression token stream into an expression AST supporting
+ * primary, parenthesized, multiplicative, and additive expressions.
+ * tokens must be non-empty and end with TOKEN_EOF.
+ * On success, out_expression receives ownership of the allocated AST root.
+ */
+int parser_parse_expression_ast_additive(const TokenArray *tokens,
+                                         AstExpression **out_expression,
+                                         ParserError *error);
+
+/* Backward-compatible alias for previous API name. */
+int parser_parse_expression_ast_primary(const TokenArray *tokens,
+                                        AstExpression **out_expression,
+                                        ParserError *error);
+
 #endif
