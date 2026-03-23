@@ -84,6 +84,8 @@
 - 2026-03-21: Milestone A (Expression Tree A10) continued: added unary prefix increment/decrement support (`++`, `--`) in lexer/parser expression paths with regression coverage and synchronized smoke fixtures.
 - 2026-03-21: Milestone A (Expression Tree A11) continued: added postfix increment/decrement support (`a++`, `a--`) in parser expression paths with AST/precedence/negative regressions and synchronized smoke fixtures.
 - 2026-03-23: Milestone A hardening: tightened `++/--` operand acceptance to identifier-lvalue in both AST and translation-unit parser paths, added non-lvalue rejection regressions, and added lexer boundary-sequence locks for `<<=`, `>>=`, `&=`, `|=`, `^=` prior to compound-assignment support.
+- 2026-03-23: Milestone A (Expression Tree A12) continued: added postfix function-call expression support in AST and translation-unit parser paths (including argument-list parsing), added positive/negative parser regressions, and synchronized lexer/parser smoke fixtures.
+- 2026-03-23: Milestone A (Expression Tree A13) continued: added compound assignment operator support (`+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`, `&=`, `^=`, `|=`) in lexer and assignment parser layers, added translation-unit/expression-AST regressions, and synchronized smoke fixtures.
 
 ## Current Milestone A Focus
 
@@ -115,4 +117,6 @@
 - `declaration_statement_count` follows the same syntactic counting model.
 - `declaration_statement_count` currently counts only declarations parsed as compound-block statements; `for(int i=...)` init declarations are excluded.
 - Unreachable loop/if/break/continue/declaration statements are still counted by current metadata collection.
-- Current lvalue policy is intentionally identifier-only in parser expression checks (`=` and `++/--`); parenthesized identifiers and other lvalue forms (e.g., `++(a)`, `(a)++`) are rejected in this subset.
+- Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
+- Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
+- Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.

@@ -28,6 +28,9 @@ int main() {
         z = --y;
         z = x++;
         z = y--;
+        z = main(x, y);
+        z += x;
+        z <<= 1;
         if (z == 9) {
             z = z + 2;
         }

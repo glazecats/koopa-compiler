@@ -200,6 +200,140 @@ static AstExpression *parse_expression_ast_comma(Parser *p);
 static int parse_assignment(Parser *p);
 static int parse_comma(Parser *p);
 
+static int match_assignment_operator(Parser *p, const Token **out_op_tok) {
+    if (match(p, TOKEN_ASSIGN) || match(p, TOKEN_PLUS_ASSIGN) || match(p, TOKEN_MINUS_ASSIGN) ||
+        match(p, TOKEN_STAR_ASSIGN) || match(p, TOKEN_SLASH_ASSIGN) ||
+        match(p, TOKEN_PERCENT_ASSIGN) || match(p, TOKEN_AMP_ASSIGN) ||
+        match(p, TOKEN_CARET_ASSIGN) || match(p, TOKEN_PIPE_ASSIGN) ||
+        match(p, TOKEN_SHIFT_LEFT_ASSIGN) || match(p, TOKEN_SHIFT_RIGHT_ASSIGN)) {
+        if (out_op_tok) {
+            *out_op_tok = previous(p);
+        }
+        return 1;
+    }
+    if (out_op_tok) {
+        *out_op_tok = NULL;
+    }
+    return 0;
+}
+
+static int token_slice_has_balanced_parens(const TokenArray *tokens,
+                                           size_t start,
+                                           size_t end,
+                                           int *out_zero_depth_inside) {
+    size_t i;
+    int depth = 0;
+    int zero_depth_inside = 0;
+
+    if (!tokens || !tokens->data || start >= end) {
+        if (out_zero_depth_inside) {
+            *out_zero_depth_inside = 1;
+        }
+        return 0;
+    }
+
+    for (i = start; i < end; ++i) {
+        if (tokens->data[i].type == TOKEN_LPAREN) {
+            depth++;
+        } else if (tokens->data[i].type == TOKEN_RPAREN) {
+            if (depth == 0) {
+                return 0;
+            }
+            depth--;
+            if (depth == 0 && i + 1 < end) {
+                zero_depth_inside = 1;
+            }
+        }
+    }
+
+    if (depth != 0) {
+        return 0;
+    }
+
+    if (out_zero_depth_inside) {
+        *out_zero_depth_inside = zero_depth_inside;
+    }
+    return 1;
+}
+
+static void trim_wrapping_parentheses(const TokenArray *tokens, size_t *io_start, size_t *io_end) {
+    size_t start;
+    size_t end;
+    int zero_depth_inside;
+
+    if (!tokens || !tokens->data || !io_start || !io_end) {
+        return;
+    }
+
+    start = *io_start;
+    end = *io_end;
+
+    while (end > start + 1 && tokens->data[start].type == TOKEN_LPAREN &&
+           tokens->data[end - 1].type == TOKEN_RPAREN &&
+           token_slice_has_balanced_parens(tokens, start, end, &zero_depth_inside) &&
+           !zero_depth_inside) {
+        start++;
+        end--;
+    }
+
+    *io_start = start;
+    *io_end = end;
+}
+
+static int token_slice_is_parenthesized_identifier_form(const TokenArray *tokens,
+                                                        size_t start,
+                                                        size_t end) {
+    trim_wrapping_parentheses(tokens, &start, &end);
+    return end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER;
+}
+
+static int token_slice_is_callable_form(const TokenArray *tokens,
+                                        size_t start,
+                                        size_t end) {
+    size_t i;
+
+    if (!tokens || !tokens->data || start >= end) {
+        return 0;
+    }
+
+    trim_wrapping_parentheses(tokens, &start, &end);
+
+    if (end <= start || tokens->data[start].type != TOKEN_IDENTIFIER) {
+        return 0;
+    }
+
+    i = start + 1;
+    while (i < end) {
+        size_t j;
+        int depth = 0;
+
+        if (tokens->data[i].type != TOKEN_LPAREN) {
+            return 0;
+        }
+
+        for (j = i; j < end; ++j) {
+            if (tokens->data[j].type == TOKEN_LPAREN) {
+                depth++;
+            } else if (tokens->data[j].type == TOKEN_RPAREN) {
+                if (depth == 0) {
+                    return 0;
+                }
+                depth--;
+                if (depth == 0) {
+                    i = j + 1;
+                    break;
+                }
+            }
+        }
+
+        if (depth != 0) {
+            return 0;
+        }
+    }
+
+    return i == end;
+}
+
 static int parse_initializer_expression(Parser *p) {
     /* C declarator initializers use assignment-expression, not comma-expression. */
     return parse_assignment(p);
@@ -268,8 +402,98 @@ static AstExpression *build_postfix_expression_node(Parser *p,
     return expr;
 }
 
+static void free_ast_expression_array(AstExpression **items, size_t count) {
+    size_t i;
+
+    if (!items) {
+        return;
+    }
+
+    for (i = 0; i < count; ++i) {
+        ast_expression_free_internal(items[i]);
+    }
+
+    free(items);
+}
+
+static int append_ast_expression_arg(Parser *p,
+                                     AstExpression ***items,
+                                     size_t *count,
+                                     size_t *capacity,
+                                     AstExpression *arg) {
+    AstExpression **new_items;
+    size_t next_capacity;
+
+    if (!items || !count || !capacity || !arg) {
+        return 0;
+    }
+
+    if (*count == *capacity) {
+        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        new_items = (AstExpression **)realloc(*items, next_capacity * sizeof(AstExpression *));
+        if (!new_items) {
+            set_error(p, peek(p), "Out of memory while building expression AST");
+            ast_expression_free_internal(arg);
+            return 0;
+        }
+        *items = new_items;
+        *capacity = next_capacity;
+    }
+
+    (*items)[*count] = arg;
+    (*count)++;
+    return 1;
+}
+
+static AstExpression *build_call_expression_node(Parser *p,
+                                                 const Token *lparen_tok,
+                                                 AstExpression *callee,
+                                                 AstExpression **args,
+                                                 size_t arg_count) {
+    AstExpression *expr = alloc_ast_expression(AST_EXPR_CALL, lparen_tok->line, lparen_tok->column);
+    if (!expr) {
+        set_error(p, lparen_tok, "Out of memory while building expression AST");
+        ast_expression_free_internal(callee);
+        free_ast_expression_array(args, arg_count);
+        return NULL;
+    }
+
+    expr->as.call.callee = callee;
+    expr->as.call.args = args;
+    expr->as.call.arg_count = arg_count;
+    return expr;
+}
+
 static int ast_expression_is_identifier_lvalue(const AstExpression *expr) {
-    return expr && expr->kind == AST_EXPR_IDENTIFIER;
+    if (!expr) {
+        return 0;
+    }
+
+    if (expr->kind == AST_EXPR_IDENTIFIER) {
+        return 1;
+    }
+
+    if (expr->kind == AST_EXPR_PAREN) {
+        return ast_expression_is_identifier_lvalue(expr->as.inner);
+    }
+
+    return 0;
+}
+
+static int ast_expression_is_callable_callee(const AstExpression *expr) {
+    if (!expr) {
+        return 0;
+    }
+
+    if (expr->kind == AST_EXPR_IDENTIFIER || expr->kind == AST_EXPR_CALL) {
+        return 1;
+    }
+
+    if (expr->kind == AST_EXPR_PAREN) {
+        return ast_expression_is_callable_callee(expr->as.inner);
+    }
+
+    return 0;
 }
 
 static AstExpression *build_ternary_expression_node(Parser *p,
@@ -428,22 +652,71 @@ static AstExpression *parse_expression_ast_postfix(Parser *p) {
         return NULL;
     }
 
-    while (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
-        const Token *op_tok = previous(p);
+    while (1) {
+        if (match(p, TOKEN_LPAREN)) {
+            const Token *lparen_tok = previous(p);
+            AstExpression **args = NULL;
+            size_t arg_count = 0;
+            size_t arg_capacity = 0;
 
-        if (!ast_expression_is_identifier_lvalue(expr)) {
-            set_error(p,
-                      op_tok,
-                      "Expected identifier lvalue before %s",
-                      lexer_token_type_name(op_tok->type));
-            ast_expression_free_internal(expr);
-            return NULL;
+            if (!ast_expression_is_callable_callee(expr)) {
+                set_error(p,
+                          lparen_tok,
+                          "Expected callable expression before '('");
+                ast_expression_free_internal(expr);
+                free_ast_expression_array(args, arg_count);
+                return NULL;
+            }
+
+            if (!check(p, TOKEN_RPAREN)) {
+                do {
+                    AstExpression *arg = parse_expression_ast_assignment(p);
+                    if (!arg) {
+                        ast_expression_free_internal(expr);
+                        free_ast_expression_array(args, arg_count);
+                        return NULL;
+                    }
+                    if (!append_ast_expression_arg(p, &args, &arg_count, &arg_capacity, arg)) {
+                        ast_expression_free_internal(expr);
+                        free_ast_expression_array(args, arg_count);
+                        return NULL;
+                    }
+                } while (match(p, TOKEN_COMMA));
+            }
+
+            if (!consume(p, TOKEN_RPAREN, "')'")) {
+                ast_expression_free_internal(expr);
+                free_ast_expression_array(args, arg_count);
+                return NULL;
+            }
+
+            expr = build_call_expression_node(p, lparen_tok, expr, args, arg_count);
+            if (!expr) {
+                return NULL;
+            }
+            continue;
         }
 
-        expr = build_postfix_expression_node(p, op_tok, expr);
-        if (!expr) {
-            return NULL;
+        if (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
+            const Token *op_tok = previous(p);
+
+            if (!ast_expression_is_identifier_lvalue(expr)) {
+                set_error(p,
+                          op_tok,
+                          "Expected identifier lvalue before %s",
+                          lexer_token_type_name(op_tok->type));
+                ast_expression_free_internal(expr);
+                return NULL;
+            }
+
+            expr = build_postfix_expression_node(p, op_tok, expr);
+            if (!expr) {
+                return NULL;
+            }
+            continue;
         }
+
+        break;
     }
 
     return expr;
@@ -779,12 +1052,11 @@ static AstExpression *parse_expression_ast_assignment(Parser *p) {
         return NULL;
     }
 
-    if (!(left->kind == AST_EXPR_IDENTIFIER && match(p, TOKEN_ASSIGN))) {
+    if (!(left->kind == AST_EXPR_IDENTIFIER && match_assignment_operator(p, &op_tok))) {
         leave_expression_recursion(p);
         return left;
     }
 
-    op_tok = previous(p);
     right = parse_expression_ast_assignment(p);
     if (!right) {
         ast_expression_free_internal(left);
@@ -823,14 +1095,24 @@ static AstExpression *parse_expression_ast_comma(Parser *p) {
     return left;
 }
 
-static int parse_primary_with_lvalue_flag(Parser *p, int *out_is_identifier_lvalue) {
+static int parse_primary_with_flags(Parser *p,
+                                    int *out_is_identifier_lvalue,
+                                    int *out_is_callable_target) {
+    size_t expr_start_index;
+
     if (out_is_identifier_lvalue) {
         *out_is_identifier_lvalue = 0;
+    }
+    if (out_is_callable_target) {
+        *out_is_callable_target = 0;
     }
 
     if (match(p, TOKEN_IDENTIFIER)) {
         if (out_is_identifier_lvalue) {
             *out_is_identifier_lvalue = 1;
+        }
+        if (out_is_callable_target) {
+            *out_is_callable_target = 1;
         }
         return 1;
     }
@@ -840,10 +1122,25 @@ static int parse_primary_with_lvalue_flag(Parser *p, int *out_is_identifier_lval
     }
 
     if (match(p, TOKEN_LPAREN)) {
+        expr_start_index = p->current;
         if (!parse_expression(p)) {
             return 0;
         }
-        return consume(p, TOKEN_RPAREN, "')'");
+        if (!consume(p, TOKEN_RPAREN, "')'")) {
+            return 0;
+        }
+
+        if (out_is_identifier_lvalue) {
+            *out_is_identifier_lvalue = token_slice_is_parenthesized_identifier_form(p->tokens,
+                                                                                      expr_start_index,
+                                                                                      p->current - 1);
+        }
+        if (out_is_callable_target) {
+            *out_is_callable_target = token_slice_is_callable_form(p->tokens,
+                                                                   expr_start_index,
+                                                                   p->current - 1);
+        }
+        return 1;
     }
 
     set_error(p, peek(p), "Expected expression, got %s", lexer_token_type_name(peek(p)->type));
@@ -852,23 +1149,50 @@ static int parse_primary_with_lvalue_flag(Parser *p, int *out_is_identifier_lval
 
 static int parse_postfix(Parser *p) {
     int is_identifier_lvalue = 0;
+    int is_callable_target = 0;
 
-    if (!parse_primary_with_lvalue_flag(p, &is_identifier_lvalue)) {
+    if (!parse_primary_with_flags(p, &is_identifier_lvalue, &is_callable_target)) {
         return 0;
     }
 
-    while (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
-        const Token *op_tok = previous(p);
-
-        if (!is_identifier_lvalue) {
-            set_error(p,
-                      op_tok,
-                      "Expected identifier lvalue before %s",
-                      lexer_token_type_name(op_tok->type));
-            return 0;
+    while (1) {
+        if (match(p, TOKEN_LPAREN)) {
+            if (!is_callable_target) {
+                set_error(p, previous(p), "Expected callable expression before '('");
+                return 0;
+            }
+            if (!check(p, TOKEN_RPAREN)) {
+                do {
+                    if (!parse_assignment(p)) {
+                        return 0;
+                    }
+                } while (match(p, TOKEN_COMMA));
+            }
+            if (!consume(p, TOKEN_RPAREN, "')'")) {
+                return 0;
+            }
+            is_identifier_lvalue = 0;
+            is_callable_target = 1;
+            continue;
         }
 
-        is_identifier_lvalue = 0;
+        if (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
+            const Token *op_tok = previous(p);
+
+            if (!is_identifier_lvalue) {
+                set_error(p,
+                          op_tok,
+                          "Expected identifier lvalue before %s",
+                          lexer_token_type_name(op_tok->type));
+                return 0;
+            }
+
+            is_identifier_lvalue = 0;
+            is_callable_target = 0;
+            continue;
+        }
+
+        break;
     }
 
     return 1;
@@ -876,13 +1200,23 @@ static int parse_postfix(Parser *p) {
 
 static int parse_unary(Parser *p) {
     int ok;
+    size_t operand_start;
 
     if (!enter_expression_recursion(p, "unary-expression")) {
         return 0;
     }
 
     if (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
-        ok = consume(p, TOKEN_IDENTIFIER, "identifier lvalue");
+        const Token *op_tok = previous(p);
+        operand_start = p->current;
+        ok = parse_unary(p);
+        if (ok && !token_slice_is_parenthesized_identifier_form(p->tokens, operand_start, p->current)) {
+            set_error(p,
+                      op_tok,
+                      "Expected identifier lvalue for %s operand",
+                      lexer_token_type_name(op_tok->type));
+            ok = 0;
+        }
         leave_expression_recursion(p);
         return ok;
     }
@@ -1069,7 +1403,7 @@ static int parse_assignment(Parser *p) {
         return 0;
     }
 
-    if (match(p, TOKEN_IDENTIFIER) && match(p, TOKEN_ASSIGN)) {
+    if (match(p, TOKEN_IDENTIFIER) && match_assignment_operator(p, NULL)) {
         ok = parse_assignment(p);
         leave_expression_recursion(p);
         return ok;

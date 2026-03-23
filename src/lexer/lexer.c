@@ -252,6 +252,9 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (match(&lx, '+')) {
                 if (!add_token(&lx, TOKEN_PLUS_PLUS, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
+            } else if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_PLUS_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
             } else {
                 if (!add_token(&lx, TOKEN_PLUS, tok_start, 1, 0, tok_line, tok_col))
                     goto oom;
@@ -261,14 +264,22 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (match(&lx, '-')) {
                 if (!add_token(&lx, TOKEN_MINUS_MINUS, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
+            } else if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_MINUS_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
             } else {
                 if (!add_token(&lx, TOKEN_MINUS, tok_start, 1, 0, tok_line, tok_col))
                     goto oom;
             }
             break;
         case '*':
-            if (!add_token(&lx, TOKEN_STAR, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_STAR_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_STAR, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '/':
             if (peek(&lx) == '/') {
@@ -296,12 +307,22 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
                 }
                 break;
             }
-            if (!add_token(&lx, TOKEN_SLASH, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_SLASH_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_SLASH, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '%':
-            if (!add_token(&lx, TOKEN_PERCENT, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_PERCENT_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_PERCENT, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '(':
             if (!add_token(&lx, TOKEN_LPAREN, tok_start, 1, 0, tok_line, tok_col))
@@ -361,18 +382,29 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (match(&lx, '&')) {
                 if (!add_token(&lx, TOKEN_AND_AND, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
+            } else if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_AMP_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
             } else {
                 if (!add_token(&lx, TOKEN_AMP, tok_start, 1, 0, tok_line, tok_col))
                     goto oom;
             }
             break;
         case '^':
-            if (!add_token(&lx, TOKEN_CARET, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_CARET_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_CARET, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '|':
             if (match(&lx, '|')) {
                 if (!add_token(&lx, TOKEN_OR_OR, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else if (match(&lx, '=')) {
+                if (!add_token(&lx, TOKEN_PIPE_ASSIGN, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
             } else {
                 if (!add_token(&lx, TOKEN_PIPE, tok_start, 1, 0, tok_line, tok_col))
@@ -381,8 +413,13 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             break;
         case '<':
             if (match(&lx, '<')) {
-                if (!add_token(&lx, TOKEN_SHIFT_LEFT, tok_start, 2, 0, tok_line, tok_col))
-                    goto oom;
+                if (match(&lx, '=')) {
+                    if (!add_token(&lx, TOKEN_SHIFT_LEFT_ASSIGN, tok_start, 3, 0, tok_line, tok_col))
+                        goto oom;
+                } else {
+                    if (!add_token(&lx, TOKEN_SHIFT_LEFT, tok_start, 2, 0, tok_line, tok_col))
+                        goto oom;
+                }
             } else if (match(&lx, '=')) {
                 if (!add_token(&lx, TOKEN_LE, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
@@ -393,8 +430,13 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             break;
         case '>':
             if (match(&lx, '>')) {
-                if (!add_token(&lx, TOKEN_SHIFT_RIGHT, tok_start, 2, 0, tok_line, tok_col))
-                    goto oom;
+                if (match(&lx, '=')) {
+                    if (!add_token(&lx, TOKEN_SHIFT_RIGHT_ASSIGN, tok_start, 3, 0, tok_line, tok_col))
+                        goto oom;
+                } else {
+                    if (!add_token(&lx, TOKEN_SHIFT_RIGHT, tok_start, 2, 0, tok_line, tok_col))
+                        goto oom;
+                }
             } else if (match(&lx, '=')) {
                 if (!add_token(&lx, TOKEN_GE, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
@@ -479,6 +521,26 @@ const char *lexer_token_type_name(TokenType type) {
         return "OR_OR";
     case TOKEN_ASSIGN:
         return "ASSIGN";
+    case TOKEN_PLUS_ASSIGN:
+        return "PLUS_ASSIGN";
+    case TOKEN_MINUS_ASSIGN:
+        return "MINUS_ASSIGN";
+    case TOKEN_STAR_ASSIGN:
+        return "STAR_ASSIGN";
+    case TOKEN_SLASH_ASSIGN:
+        return "SLASH_ASSIGN";
+    case TOKEN_PERCENT_ASSIGN:
+        return "PERCENT_ASSIGN";
+    case TOKEN_AMP_ASSIGN:
+        return "AMP_ASSIGN";
+    case TOKEN_CARET_ASSIGN:
+        return "CARET_ASSIGN";
+    case TOKEN_PIPE_ASSIGN:
+        return "PIPE_ASSIGN";
+    case TOKEN_SHIFT_LEFT_ASSIGN:
+        return "SHIFT_LEFT_ASSIGN";
+    case TOKEN_SHIFT_RIGHT_ASSIGN:
+        return "SHIFT_RIGHT_ASSIGN";
     case TOKEN_EQ:
         return "EQ";
     case TOKEN_NE:

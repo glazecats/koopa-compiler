@@ -45,6 +45,9 @@ int main() {
     z = --y;
     z = x++;
     z = y--;
+    z = helper(x, y);
+    z += x;
+    z <<= 1;
 
     return x + z;
 }

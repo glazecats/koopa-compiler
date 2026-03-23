@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int expect_translation_unit_parse_failure(const char *source,
+                                                 const char *case_name,
+                                                 const char *required_msg_a,
+                                                 const char *required_msg_b);
+
 static int test_reject_stream_without_eof(void) {
     Token bad_tokens[1];
     TokenArray stream;
@@ -287,6 +292,250 @@ static int test_translation_unit_rejects_postfix_increment_non_lvalue(void) {
     return 1;
 }
 
+static int test_translation_unit_accepts_function_call_expressions(void) {
+    const char *source =
+        "int id(int x){return x;}\n"
+        "int main(){int y=0; y=id(1); y=id(y, y+1); return y;}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for function-call translation-unit input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept function-call expressions: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_rejects_non_callable_number_callee(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){return 1(2);}\n",
+        "non-callable number callee",
+        "callable",
+        NULL);
+}
+
+static int test_translation_unit_accepts_parenthesized_callable_callee(void) {
+    const char *source =
+        "int f(int x){return x;}\n"
+        "int main(){return (f)(1);}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for parenthesized callable callee input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept parenthesized callable callee: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_accepts_parenthesized_identifier_increment(void) {
+    const char *source = "int main(){int a=1; ++(a); (a)++; return a;}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for parenthesized identifier increment input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept parenthesized identifier ++ forms: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_accepts_compound_assignments(void) {
+    const char *source =
+        "int main(){int a=1,b=2,c=3; a+=b; b*=c; c<<=1; a|=c; return a+b+c;}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for compound-assignment translation-unit input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept compound assignments: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_rejects_compound_assignment_missing_rhs_plus(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int a=1; a+=; return a;}\n",
+        "compound assignment missing RHS plus",
+        "Expected expression",
+        "SEMICOLON");
+}
+
+static int test_translation_unit_rejects_compound_assignment_missing_rhs_shift_left(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int a=1; a<<=; return a;}\n",
+        "compound assignment missing RHS shift-left",
+        "Expected expression",
+        "SEMICOLON");
+}
+
+static int test_translation_unit_rejects_compound_assignment_number_lhs(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){1+=2; return 0;}\n",
+        "compound assignment number lhs",
+        "';'",
+        "PLUS_ASSIGN");
+}
+
+static int test_translation_unit_rejects_compound_assignment_parenthesized_identifier_lhs(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int a=1; (a)+=2; return a;}\n",
+        "compound assignment parenthesized identifier lhs",
+        "';'",
+        "PLUS_ASSIGN");
+}
+
+static int expect_translation_unit_parse_failure(const char *source,
+                                                 const char *case_name,
+                                                 const char *required_msg_a,
+                                                 const char *required_msg_b) {
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for %s\n",
+                case_name);
+        return 0;
+    }
+
+    if (parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
+                case_name);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    if (required_msg_a && strstr(err.message, required_msg_a) == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                required_msg_a,
+                case_name,
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    if (required_msg_b && strstr(err.message, required_msg_b) == NULL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                required_msg_b,
+                case_name,
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_rejects_call_missing_first_argument(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(,1); return y;}\n",
+        "call missing first argument",
+        "Expected expression",
+        "COMMA");
+}
+
+static int test_translation_unit_rejects_call_missing_argument_after_comma(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1,); return y;}\n",
+        "call missing argument after comma",
+        "Expected expression",
+        "RPAREN");
+}
+
+static int test_translation_unit_rejects_call_missing_closing_paren(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1; return y;}\n",
+        "call missing closing paren",
+        "')'",
+        "SEMICOLON");
+}
+
+static int test_translation_unit_rejects_call_double_comma_in_arguments(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1,,2); return y;}\n",
+        "call double comma in arguments",
+        "Expected expression",
+        "COMMA");
+}
+
+static int test_translation_unit_rejects_call_missing_comma_between_arguments(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1 2); return y;}\n",
+        "call missing comma between arguments",
+        "')'",
+        "NUMBER");
+}
+
+static int test_translation_unit_rejects_call_semicolon_in_arguments(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1;2); return y;}\n",
+        "call semicolon in arguments",
+        "')'",
+        "SEMICOLON");
+}
+
+static int test_translation_unit_rejects_call_incomplete_argument_expression(void) {
+    return expect_translation_unit_parse_failure(
+        "int main(){int y=0; y=id(1,2+); return y;}\n",
+        "call incomplete argument expression",
+        "Expected expression",
+        "RPAREN");
+}
+
 static int parse_expression_source_to_ast(const char *source,
                                          TokenArray *tokens,
                                          AstExpression **out_expression,
@@ -310,6 +559,8 @@ static int parse_expression_source_to_ast(const char *source,
         lexer_free_tokens(tokens);
         return 0;
     }
+
+    /* Translation-unit call-argument negative boundaries. */
 
     return 1;
 }
@@ -865,6 +1116,171 @@ static int test_expression_ast_postfix_binds_tighter_than_multiplicative(void) {
     return 1;
 }
 
+static int test_expression_ast_call_no_args_primary(void) {
+    const char *source = "f()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.callee->as.identifier.name, "f") != 0 ||
+        expr->as.call.arg_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected call tree f() with zero args for f()\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_call_with_args_primary(void) {
+    const char *source = "f(a,b+1)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.callee->as.identifier.name, "f") != 0 ||
+        expr->as.call.arg_count != 2 || !expr->as.call.args || !expr->as.call.args[0] ||
+        !expr->as.call.args[1] || expr->as.call.args[0]->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.args[0]->as.identifier.name, "a") != 0 ||
+        expr->as.call.args[1]->kind != AST_EXPR_BINARY ||
+        expr->as.call.args[1]->as.binary.op != TOKEN_PLUS) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected call tree f(a, b+1) for f(a,b+1)\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_call_binds_tighter_than_additive(void) {
+    const char *source = "f(a)+b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_PLUS ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_CALL ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected additive tree (f(a))+b for f(a)+b\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_accepts_call_chaining(void) {
+    const char *source = "f()()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_CALL || expr->as.call.arg_count != 0 ||
+        !expr->as.call.callee->as.call.callee ||
+        expr->as.call.callee->as.call.callee->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.callee->as.call.callee->as.identifier.name, "f") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected nested call tree for f()()\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_accepts_parenthesized_callable_callee(void) {
+    const char *source = "(f)()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_PAREN || !expr->as.call.callee->as.inner ||
+        expr->as.call.callee->as.inner->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.callee->as.inner->as.identifier.name, "f") != 0 ||
+        expr->as.call.arg_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected parenthesized callable tree for (f)()\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_accepts_nested_parenthesized_call_chaining(void) {
+    const char *source = "(f())()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_PAREN || !expr->as.call.callee->as.inner ||
+        expr->as.call.callee->as.inner->kind != AST_EXPR_CALL ||
+        !expr->as.call.callee->as.inner->as.call.callee ||
+        expr->as.call.callee->as.inner->as.call.callee->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.call.callee->as.inner->as.call.callee->as.identifier.name, "f") != 0 ||
+        expr->as.call.arg_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected nested parenthesized call chain for (f())()\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
 static int test_expression_ast_assignment_rhs_bitwise_not(void) {
     const char *source = "a=~b\n";
     TokenArray tokens;
@@ -1074,24 +1490,85 @@ static int test_expression_ast_rejects_prefix_increment_postfix_operand(void) {
                                                      NULL);
 }
 
-static int test_expression_ast_rejects_prefix_increment_parenthesized_identifier(void) {
-    return expect_expression_assignment_parse_failure("++(a)\n",
-                                                     "prefix increment parenthesized identifier input",
-                                                     "lvalue",
-                                                     NULL);
+static int test_expression_ast_accepts_prefix_increment_parenthesized_identifier(void) {
+    const char *source = "++(a)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_UNARY || expr->as.unary.op != TOKEN_PLUS_PLUS ||
+        !expr->as.unary.operand || expr->as.unary.operand->kind != AST_EXPR_PAREN ||
+        !expr->as.unary.operand->as.inner ||
+        expr->as.unary.operand->as.inner->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.unary.operand->as.inner->as.identifier.name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected prefix increment tree ++(a) for ++(a)\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
 }
 
-static int test_expression_ast_rejects_postfix_increment_parenthesized_identifier(void) {
-    return expect_expression_assignment_parse_failure("(a)++\n",
-                                                     "postfix increment parenthesized identifier input",
-                                                     "lvalue",
-                                                     NULL);
+static int test_expression_ast_accepts_postfix_increment_parenthesized_identifier(void) {
+    const char *source = "(a)++\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_POSTFIX || expr->as.postfix.op != TOKEN_PLUS_PLUS ||
+        !expr->as.postfix.operand || expr->as.postfix.operand->kind != AST_EXPR_PAREN ||
+        !expr->as.postfix.operand->as.inner ||
+        expr->as.postfix.operand->as.inner->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.postfix.operand->as.inner->as.identifier.name, "a") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected postfix increment tree (a)++ for (a)++\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
 }
 
 static int test_expression_ast_rejects_incomplete_postfix_followed_by_plus(void) {
     return expect_expression_assignment_parse_failure("a+++\n",
                                                      "incomplete postfix followed by plus input",
                                                      "primary expression",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_call_missing_closing_paren(void) {
+    return expect_expression_assignment_parse_failure("f(a\n",
+                                                     "call missing closing paren input",
+                                                     "')'",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_call_missing_argument_after_comma(void) {
+    return expect_expression_assignment_parse_failure("f(a,)\n",
+                                                     "call missing argument after comma input",
+                                                     "primary expression",
+                                                     NULL);
+}
+
+static int test_expression_ast_rejects_non_callable_number_callee(void) {
+    return expect_expression_assignment_parse_failure("1(2)\n",
+                                                     "non-callable number callee input",
+                                                     "callable",
                                                      NULL);
 }
 
@@ -1727,6 +2204,91 @@ static int test_expression_ast_assignment_is_right_associative(void) {
     return 1;
 }
 
+static int test_expression_ast_compound_assignment_parses_simple(void) {
+    const char *source = "a+=b\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_PLUS_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected compound assignment tree a+=b for expression\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_compound_assignment_is_right_associative(void) {
+    const char *source = "a+=b*=c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_PLUS_ASSIGN ||
+        !expr->as.binary.left || expr->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.left->as.identifier.name, "a") != 0 ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_STAR_ASSIGN ||
+        !expr->as.binary.right->as.binary.left ||
+        expr->as.binary.right->as.binary.left->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.left->as.identifier.name, "b") != 0 ||
+        !expr->as.binary.right->as.binary.right ||
+        expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected right-associative compound assignment tree a+=(b*=c)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_compound_assignment_lower_precedence_than_logical_or(void) {
+    const char *source = "a+=b||c\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_PLUS_ASSIGN ||
+        !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
+        expr->as.binary.right->as.binary.op != TOKEN_OR_OR) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected compound assignment tree a+=(b||c) for a+=b||c\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
 static int test_expression_ast_assignment_lower_precedence_than_equality(void) {
     const char *source = "a=b==c\n";
     TokenArray tokens;
@@ -1758,6 +2320,13 @@ static int test_expression_ast_assignment_lower_precedence_than_equality(void) {
     lexer_free_tokens(&tokens);
     ast_expression_free(expr);
     return 1;
+}
+
+static int test_expression_ast_rejects_compound_assignment_rhs_incomplete(void) {
+    return expect_expression_assignment_parse_failure("a+=\n",
+                                                     "incomplete compound-assignment RHS input",
+                                                     "primary expression",
+                                                     NULL);
 }
 
 static int test_expression_ast_equality_with_parenthesized_assignment_rhs(void) {
@@ -3404,6 +3973,56 @@ int main(void) {
     if (!test_translation_unit_rejects_postfix_increment_non_lvalue()) {
         return 1;
     }
+    if (!test_translation_unit_accepts_function_call_expressions()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_non_callable_number_callee()) {
+        return 1;
+    }
+    if (!test_translation_unit_accepts_parenthesized_callable_callee()) {
+        return 1;
+    }
+    if (!test_translation_unit_accepts_parenthesized_identifier_increment()) {
+        return 1;
+    }
+    if (!test_translation_unit_accepts_compound_assignments()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_compound_assignment_missing_rhs_plus()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_compound_assignment_missing_rhs_shift_left()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_compound_assignment_number_lhs()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_compound_assignment_parenthesized_identifier_lhs()) {
+        return 1;
+    }
+
+    /* Translation-unit call-argument negative boundaries. */
+    if (!test_translation_unit_rejects_call_missing_first_argument()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_missing_argument_after_comma()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_missing_closing_paren()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_double_comma_in_arguments()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_missing_comma_between_arguments()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_semicolon_in_arguments()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_call_incomplete_argument_expression()) {
+        return 1;
+    }
 
     /* Expression AST positive-shape coverage. */
     if (!test_expression_ast_parses_identifier_primary()) {
@@ -3460,6 +4079,24 @@ int main(void) {
     if (!test_expression_ast_postfix_binds_tighter_than_multiplicative()) {
         return 1;
     }
+    if (!test_expression_ast_call_no_args_primary()) {
+        return 1;
+    }
+    if (!test_expression_ast_call_with_args_primary()) {
+        return 1;
+    }
+    if (!test_expression_ast_call_binds_tighter_than_additive()) {
+        return 1;
+    }
+    if (!test_expression_ast_accepts_call_chaining()) {
+        return 1;
+    }
+    if (!test_expression_ast_accepts_parenthesized_callable_callee()) {
+        return 1;
+    }
+    if (!test_expression_ast_accepts_nested_parenthesized_call_chaining()) {
+        return 1;
+    }
     if (!test_expression_ast_assignment_rhs_unary()) {
         return 1;
     }
@@ -3509,13 +4146,22 @@ int main(void) {
     if (!test_expression_ast_rejects_prefix_increment_postfix_operand()) {
         return 1;
     }
-    if (!test_expression_ast_rejects_prefix_increment_parenthesized_identifier()) {
+    if (!test_expression_ast_accepts_prefix_increment_parenthesized_identifier()) {
         return 1;
     }
-    if (!test_expression_ast_rejects_postfix_increment_parenthesized_identifier()) {
+    if (!test_expression_ast_accepts_postfix_increment_parenthesized_identifier()) {
         return 1;
     }
     if (!test_expression_ast_rejects_incomplete_postfix_followed_by_plus()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_call_missing_closing_paren()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_call_missing_argument_after_comma()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_non_callable_number_callee()) {
         return 1;
     }
     if (!test_expression_ast_rejects_multiplicative_rhs_incomplete_unary()) {
@@ -3605,6 +4251,12 @@ int main(void) {
     if (!test_expression_ast_assignment_is_right_associative()) {
         return 1;
     }
+    if (!test_expression_ast_compound_assignment_parses_simple()) {
+        return 1;
+    }
+    if (!test_expression_ast_compound_assignment_is_right_associative()) {
+        return 1;
+    }
     if (!test_expression_ast_assignment_lower_precedence_than_equality()) {
         return 1;
     }
@@ -3617,10 +4269,16 @@ int main(void) {
     if (!test_expression_ast_assignment_lower_precedence_than_logical_or()) {
         return 1;
     }
+    if (!test_expression_ast_compound_assignment_lower_precedence_than_logical_or()) {
+        return 1;
+    }
     if (!test_expression_ast_assignment_lower_precedence_than_conditional()) {
         return 1;
     }
     if (!test_expression_ast_conditional_then_branch_allows_comma_expression()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_compound_assignment_rhs_incomplete()) {
         return 1;
     }
     if (!test_expression_ast_comma_still_lowest_around_conditional()) {

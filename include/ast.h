@@ -16,6 +16,7 @@ typedef enum {
     AST_EXPR_PAREN,
     AST_EXPR_UNARY,
     AST_EXPR_POSTFIX,
+    AST_EXPR_CALL,
     AST_EXPR_BINARY,
     AST_EXPR_TERNARY,
 } AstExpressionKind;
@@ -41,6 +42,11 @@ struct AstExpression {
             TokenType op;
             AstExpression *operand;
         } postfix;
+        struct {
+            AstExpression *callee;
+            AstExpression **args;
+            size_t arg_count;
+        } call;
         struct {
             TokenType op;
             AstExpression *left;

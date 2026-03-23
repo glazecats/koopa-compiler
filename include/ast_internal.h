@@ -97,6 +97,15 @@ static inline void ast_expression_free_internal(AstExpression *expr) {
     case AST_EXPR_POSTFIX:
         ast_expression_free_internal(expr->as.postfix.operand);
         break;
+    case AST_EXPR_CALL: {
+        size_t i;
+        ast_expression_free_internal(expr->as.call.callee);
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            ast_expression_free_internal(expr->as.call.args[i]);
+        }
+        free(expr->as.call.args);
+        break;
+    }
     case AST_EXPR_BINARY:
         ast_expression_free_internal(expr->as.binary.left);
         ast_expression_free_internal(expr->as.binary.right);
