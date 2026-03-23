@@ -27,8 +27,9 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
 
 /*
  * Parses a standalone expression token stream into an expression AST supporting
- * primary, parenthesized, unary, multiplicative, additive, relational,
- * equality, and assignment expressions.
+ * primary, parenthesized, postfix, unary, multiplicative, additive, shift, relational,
+ * equality, bitwise-and, bitwise-xor, bitwise-or, logical-and,
+ * logical-or, conditional, assignment, and comma expressions.
  * tokens must be non-empty and end with TOKEN_EOF.
  * On success, out_expression receives ownership of the allocated AST root.
  */
@@ -38,7 +39,7 @@ int parser_parse_expression_ast_assignment(const TokenArray *tokens,
 
 /*
  * Backward-compatible aliases for previous API names.
- * Note: these aliases intentionally forward to the assignment-level parser,
+ * Note: these aliases intentionally forward to the comma-level parser,
  * so accepted grammar is a superset of each alias name's literal layer.
  */
 int parser_parse_expression_ast_equality(const TokenArray *tokens,

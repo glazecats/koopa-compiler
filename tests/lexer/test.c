@@ -17,6 +17,17 @@ int main() {
             int t = -20;
         }
         z = z - 1;
+        z = !z;
+        z = ~z;
+        z = z && x || y;
+        z = (z & x) ^ y | 1;
+        z = (z << 1) >> 1;
+        z = z ? x : y;
+        z = (z = x, z + y);
+        z = ++x;
+        z = --y;
+        z = x++;
+        z = y--;
         if (z == 9) {
             z = z + 2;
         }

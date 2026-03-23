@@ -34,5 +34,17 @@ int main() {
         x = x + y;
     }
 
+    z = !z;
+    z = ~z;
+    z = z && x || y;
+    z = (z & x) ^ y | 1;
+    z = (z << 1) >> 1;
+    z = z ? x : y;
+    z = (z = x, z + y);
+    z = ++x;
+    z = --y;
+    z = x++;
+    z = y--;
+
     return x + z;
 }

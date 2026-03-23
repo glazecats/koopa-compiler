@@ -43,8 +43,12 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "paren";
     case AST_EXPR_UNARY:
         return "unary";
+    case AST_EXPR_POSTFIX:
+        return "postfix";
     case AST_EXPR_BINARY:
         return "binary";
+    case AST_EXPR_TERNARY:
+        return "ternary";
     default:
         return "unknown";
     }

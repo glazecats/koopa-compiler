@@ -21,9 +21,18 @@ typedef enum {
 
     TOKEN_PLUS,
     TOKEN_MINUS,
+    TOKEN_PLUS_PLUS,
+    TOKEN_MINUS_MINUS,
     TOKEN_STAR,
     TOKEN_SLASH,
     TOKEN_PERCENT,
+    TOKEN_BANG,
+    TOKEN_TILDE,
+    TOKEN_AMP,
+    TOKEN_CARET,
+    TOKEN_PIPE,
+    TOKEN_AND_AND,
+    TOKEN_OR_OR,
     TOKEN_ASSIGN,
     TOKEN_EQ,
     TOKEN_NE,
@@ -31,6 +40,8 @@ typedef enum {
     TOKEN_LE,
     TOKEN_GT,
     TOKEN_GE,
+    TOKEN_SHIFT_LEFT,
+    TOKEN_SHIFT_RIGHT,
 
     TOKEN_LPAREN,
     TOKEN_RPAREN,
@@ -38,6 +49,8 @@ typedef enum {
     TOKEN_RBRACE,
     TOKEN_SEMICOLON,
     TOKEN_COMMA,
+    TOKEN_QUESTION,
+    TOKEN_COLON,
 } TokenType;
 
 typedef struct {

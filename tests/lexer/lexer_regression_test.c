@@ -11,33 +11,36 @@ typedef struct {
 } TokenizeArgs;
 
 static int run_with_stderr_suppressed(int (*fn)(void *), void *ctx) {
-    int saved_stderr = dup(STDERR_FILENO);
-    int devnull_fd = open("/dev/null", O_WRONLY);
+    int saved_stderr_fd;
+    int devnull_fd;
     int result;
 
-    if (saved_stderr < 0 || devnull_fd < 0) {
-        if (saved_stderr >= 0) {
-            close(saved_stderr);
-        }
-        if (devnull_fd >= 0) {
-            close(devnull_fd);
-        }
+    fflush(stderr);
+    saved_stderr_fd = dup(STDERR_FILENO);
+    if (saved_stderr_fd < 0) {
         return fn(ctx);
     }
 
-    fflush(stderr);
-    if (dup2(devnull_fd, STDERR_FILENO) < 0) {
-        close(devnull_fd);
-        close(saved_stderr);
+    devnull_fd = open("/dev/null", O_WRONLY);
+    if (devnull_fd < 0) {
+        close(saved_stderr_fd);
         return fn(ctx);
     }
+
+    if (dup2(devnull_fd, STDERR_FILENO) < 0) {
+        close(devnull_fd);
+        close(saved_stderr_fd);
+        return fn(ctx);
+    }
+
+    close(devnull_fd);
 
     result = fn(ctx);
 
     fflush(stderr);
-    (void)dup2(saved_stderr, STDERR_FILENO);
-    close(devnull_fd);
-    close(saved_stderr);
+    dup2(saved_stderr_fd, STDERR_FILENO);
+    close(saved_stderr_fd);
+
     return result;
 }
 
@@ -163,6 +166,387 @@ static int test_break_continue_keywords(void) {
     return 1;
 }
 
+static int test_bang_and_not_equal_tokens(void) {
+    const char *source = "!a!=b;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_BANG,
+        TOKEN_IDENTIFIER,
+        TOKEN_NE,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on bang/not-equal input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for !a!=b;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for !a!=b; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_tilde_bang_and_not_equal_tokens(void) {
+    const char *source = "~a!=!b;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_TILDE,
+        TOKEN_IDENTIFIER,
+        TOKEN_NE,
+        TOKEN_BANG,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on tilde/bang/not-equal input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for ~a!=!b;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for ~a!=!b; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_and_and_or_or_token_sequence(void) {
+    const char *source = "a&&b||c;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_IDENTIFIER,
+        TOKEN_AND_AND,
+        TOKEN_IDENTIFIER,
+        TOKEN_OR_OR,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on &&/|| input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for a&&b||c;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for a&&b||c; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_bitwise_operator_token_sequence(void) {
+    const char *source = "a&b^c|d;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_IDENTIFIER,
+        TOKEN_AMP,
+        TOKEN_IDENTIFIER,
+        TOKEN_CARET,
+        TOKEN_IDENTIFIER,
+        TOKEN_PIPE,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on bitwise operator input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for a&b^c|d;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for a&b^c|d; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+
+    return 1;
+}
+
+static int test_shift_operator_token_sequence(void) {
+    const char *source = "a<<b>>c;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_IDENTIFIER,
+        TOKEN_SHIFT_LEFT,
+        TOKEN_IDENTIFIER,
+        TOKEN_SHIFT_RIGHT,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on shift operator input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for a<<b>>c;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for a<<b>>c; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_ternary_operator_token_sequence(void) {
+    const char *source = "a?b:c;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_IDENTIFIER,
+        TOKEN_QUESTION,
+        TOKEN_IDENTIFIER,
+        TOKEN_COLON,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on ternary operator input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for a?b:c;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for a?b:c; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_prefix_increment_decrement_token_sequence(void) {
+    const char *source = "++a;--b;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_PLUS_PLUS,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_MINUS_MINUS,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on prefix ++/-- input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for ++a;--b;, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: token %zu mismatch for ++a;--b; expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_compound_assignment_boundary_token_sequence(void) {
+    const char *source = "a<<=b; a>>=c; d&=e; f|=g; h^=i;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_IDENTIFIER,
+        TOKEN_SHIFT_LEFT,
+        TOKEN_ASSIGN,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_IDENTIFIER,
+        TOKEN_SHIFT_RIGHT,
+        TOKEN_ASSIGN,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_IDENTIFIER,
+        TOKEN_AMP,
+        TOKEN_ASSIGN,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_IDENTIFIER,
+        TOKEN_PIPE,
+        TOKEN_ASSIGN,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_IDENTIFIER,
+        TOKEN_CARET,
+        TOKEN_ASSIGN,
+        TOKEN_IDENTIFIER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t i;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on compound-assignment boundary input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for compound-assignment boundary input, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (i = 0; i < tokens.size; ++i) {
+        if (tokens.data[i].type != expected[i]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: compound-boundary token %zu mismatch: expected %s got %s\n",
+                    i,
+                    lexer_token_type_name(expected[i]),
+                    lexer_token_type_name(tokens.data[i].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
 int main(void) {
     if (!test_block_comment_ending_at_eof()) {
         return 1;
@@ -177,6 +561,30 @@ int main(void) {
         return 1;
     }
     if (!test_break_continue_keywords()) {
+        return 1;
+    }
+    if (!test_bang_and_not_equal_tokens()) {
+        return 1;
+    }
+    if (!test_tilde_bang_and_not_equal_tokens()) {
+        return 1;
+    }
+    if (!test_and_and_or_or_token_sequence()) {
+        return 1;
+    }
+    if (!test_bitwise_operator_token_sequence()) {
+        return 1;
+    }
+    if (!test_shift_operator_token_sequence()) {
+        return 1;
+    }
+    if (!test_ternary_operator_token_sequence()) {
+        return 1;
+    }
+    if (!test_prefix_increment_decrement_token_sequence()) {
+        return 1;
+    }
+    if (!test_compound_assignment_boundary_token_sequence()) {
         return 1;
     }
 

@@ -15,7 +15,9 @@ typedef enum {
     AST_EXPR_NUMBER,
     AST_EXPR_PAREN,
     AST_EXPR_UNARY,
+    AST_EXPR_POSTFIX,
     AST_EXPR_BINARY,
+    AST_EXPR_TERNARY,
 } AstExpressionKind;
 
 typedef struct AstExpression AstExpression;
@@ -37,9 +39,18 @@ struct AstExpression {
         } unary;
         struct {
             TokenType op;
+            AstExpression *operand;
+        } postfix;
+        struct {
+            TokenType op;
             AstExpression *left;
             AstExpression *right;
         } binary;
+        struct {
+            AstExpression *condition;
+            AstExpression *then_expr;
+            AstExpression *else_expr;
+        } ternary;
     } as;
 };
 

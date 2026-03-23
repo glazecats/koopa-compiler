@@ -94,9 +94,17 @@ static inline void ast_expression_free_internal(AstExpression *expr) {
     case AST_EXPR_UNARY:
         ast_expression_free_internal(expr->as.unary.operand);
         break;
+    case AST_EXPR_POSTFIX:
+        ast_expression_free_internal(expr->as.postfix.operand);
+        break;
     case AST_EXPR_BINARY:
         ast_expression_free_internal(expr->as.binary.left);
         ast_expression_free_internal(expr->as.binary.right);
+        break;
+    case AST_EXPR_TERNARY:
+        ast_expression_free_internal(expr->as.ternary.condition);
+        ast_expression_free_internal(expr->as.ternary.then_expr);
+        ast_expression_free_internal(expr->as.ternary.else_expr);
         break;
     case AST_EXPR_NUMBER:
     default:

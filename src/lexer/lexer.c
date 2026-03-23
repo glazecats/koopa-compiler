@@ -249,12 +249,22 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
         switch (c)
         {
         case '+':
-            if (!add_token(&lx, TOKEN_PLUS, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '+')) {
+                if (!add_token(&lx, TOKEN_PLUS_PLUS, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_PLUS, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '-':
-            if (!add_token(&lx, TOKEN_MINUS, tok_start, 1, 0, tok_line, tok_col))
-                goto oom;
+            if (match(&lx, '-')) {
+                if (!add_token(&lx, TOKEN_MINUS_MINUS, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_MINUS, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
             break;
         case '*':
             if (!add_token(&lx, TOKEN_STAR, tok_start, 1, 0, tok_line, tok_col))
@@ -317,6 +327,14 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (!add_token(&lx, TOKEN_COMMA, tok_start, 1, 0, tok_line, tok_col))
                 goto oom;
             break;
+        case '?':
+            if (!add_token(&lx, TOKEN_QUESTION, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
+        case ':':
+            if (!add_token(&lx, TOKEN_COLON, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
         case '=':
             if (match(&lx, '=')) {
                 if (!add_token(&lx, TOKEN_EQ, tok_start, 2, 0, tok_line, tok_col))
@@ -331,13 +349,41 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
                 if (!add_token(&lx, TOKEN_NE, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
             } else {
-                fprintf(stderr, "Unexpected character '!' at %d:%d\n", tok_line, tok_col);
-                lexer_free_tokens(out_tokens);
-                return 0;
+                if (!add_token(&lx, TOKEN_BANG, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
+            break;
+        case '~':
+            if (!add_token(&lx, TOKEN_TILDE, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
+        case '&':
+            if (match(&lx, '&')) {
+                if (!add_token(&lx, TOKEN_AND_AND, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_AMP, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
+            }
+            break;
+        case '^':
+            if (!add_token(&lx, TOKEN_CARET, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
+        case '|':
+            if (match(&lx, '|')) {
+                if (!add_token(&lx, TOKEN_OR_OR, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else {
+                if (!add_token(&lx, TOKEN_PIPE, tok_start, 1, 0, tok_line, tok_col))
+                    goto oom;
             }
             break;
         case '<':
-            if (match(&lx, '=')) {
+            if (match(&lx, '<')) {
+                if (!add_token(&lx, TOKEN_SHIFT_LEFT, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else if (match(&lx, '=')) {
                 if (!add_token(&lx, TOKEN_LE, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
             } else {
@@ -346,7 +392,10 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             }
             break;
         case '>':
-            if (match(&lx, '=')) {
+            if (match(&lx, '>')) {
+                if (!add_token(&lx, TOKEN_SHIFT_RIGHT, tok_start, 2, 0, tok_line, tok_col))
+                    goto oom;
+            } else if (match(&lx, '=')) {
                 if (!add_token(&lx, TOKEN_GE, tok_start, 2, 0, tok_line, tok_col))
                     goto oom;
             } else {
@@ -404,12 +453,30 @@ const char *lexer_token_type_name(TokenType type) {
         return "PLUS";
     case TOKEN_MINUS:
         return "MINUS";
+    case TOKEN_PLUS_PLUS:
+        return "PLUS_PLUS";
+    case TOKEN_MINUS_MINUS:
+        return "MINUS_MINUS";
     case TOKEN_STAR:
         return "STAR";
     case TOKEN_SLASH:
         return "SLASH";
     case TOKEN_PERCENT:
         return "PERCENT";
+    case TOKEN_BANG:
+        return "BANG";
+    case TOKEN_TILDE:
+        return "TILDE";
+    case TOKEN_AMP:
+        return "AMP";
+    case TOKEN_CARET:
+        return "CARET";
+    case TOKEN_PIPE:
+        return "PIPE";
+    case TOKEN_AND_AND:
+        return "AND_AND";
+    case TOKEN_OR_OR:
+        return "OR_OR";
     case TOKEN_ASSIGN:
         return "ASSIGN";
     case TOKEN_EQ:
@@ -424,6 +491,10 @@ const char *lexer_token_type_name(TokenType type) {
         return "GT";
     case TOKEN_GE:
         return "GE";
+    case TOKEN_SHIFT_LEFT:
+        return "SHIFT_LEFT";
+    case TOKEN_SHIFT_RIGHT:
+        return "SHIFT_RIGHT";
     case TOKEN_LPAREN:
         return "LPAREN";
     case TOKEN_RPAREN:
@@ -436,6 +507,10 @@ const char *lexer_token_type_name(TokenType type) {
         return "SEMICOLON";
     case TOKEN_COMMA:
         return "COMMA";
+    case TOKEN_QUESTION:
+        return "QUESTION";
+    case TOKEN_COLON:
+        return "COLON";
     default:
         return "UNKNOWN";
     }
