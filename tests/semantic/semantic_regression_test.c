@@ -32,6 +32,207 @@ static int parse_source_to_ast(const char *source,
     return 1;
 }
 
+typedef struct {
+    const char *case_id;
+    const char *source;
+    const char *expected_code;
+    const char *expected_snippet;
+    int expected_line;
+    int expected_column;
+} CallableDiagCase;
+
+typedef struct {
+    const char *case_id;
+    const char *source;
+} CallablePassCase;
+
+static int run_callable_diag_case(const CallableDiagCase *c) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!c || !c->source || !c->expected_code) {
+        return 0;
+    }
+
+    if (!parse_source_to_ast(c->source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s should fail semantic analysis\n",
+                c->case_id);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, c->expected_code) == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s expected %s, got: %s\n",
+                c->case_id,
+                c->expected_code,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (c->expected_snippet && strstr(sema_err.message, c->expected_snippet) == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s expected diagnostic snippet '%s', got: %s\n",
+                c->case_id,
+                c->expected_snippet,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (c->expected_line > 0 && c->expected_column > 0 &&
+        (sema_err.line != c->expected_line || sema_err.column != c->expected_column)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s expected location %d:%d, got %d:%d\n",
+                c->case_id,
+                c->expected_line,
+                c->expected_column,
+                sema_err.line,
+                sema_err.column);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int run_callable_pass_case(const CallablePassCase *c) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!c || !c->source) {
+        return 0;
+    }
+
+    if (!parse_source_to_ast(c->source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s should pass semantic analysis, got: %s\n",
+                c->case_id,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_callable_diagnostic_matrix(void) {
+    static const CallableDiagCase cases[] = {
+        {"CALL-001",
+         "int main(){return foo(1);}\n",
+         "SEMA-CALL-001",
+         "undeclared function 'foo'",
+         1,
+         22},
+        {"CALL-002",
+         "int main(){return foo(1);}\nint foo(int a){return a;}\n",
+         "SEMA-CALL-002",
+         "first declaration at 2:5",
+         1,
+         22},
+        {"CALL-003",
+         "int foo;\nint main(){return foo(1);}\n",
+         "SEMA-CALL-003",
+         "non-function symbol 'foo'",
+         2,
+         22},
+        {"CALL-004",
+         "int foo(int a);\nint main(){return foo(1,2);}\n",
+         "SEMA-CALL-004",
+         "argument count mismatch for 'foo'",
+         2,
+         22},
+        {"CALL-005-A",
+         "int f(){return 1;}\nint main(){return f()(1);}\n",
+         "SEMA-CALL-005",
+         "call result is not callable",
+         2,
+         22},
+        {"CALL-005-B",
+         "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
+         "SEMA-CALL-005",
+         "call result is not callable",
+         2,
+         27},
+        {"CALL-006-A",
+         "int f(){return 1;}\nint main(){return (f+1)();}\n",
+         "SEMA-CALL-006",
+         "non-identifier callee",
+         2,
+         24},
+        {"CALL-006-B",
+         "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
+         "SEMA-CALL-006",
+         "non-identifier callee",
+         2,
+         26},
+        {"CALL-006-C",
+         "int f(){return 1;}\nint main(){return ((f+1))();}\n",
+         "SEMA-CALL-006",
+         "non-identifier callee",
+         2,
+         26},
+        {"CALL-006-D",
+         "int f(){return 1;}\nint main(){return (f&&f)();}\n",
+         "SEMA-CALL-006",
+         "non-identifier callee",
+         2,
+         25},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        if (!run_callable_diag_case(&cases[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int test_semantic_callable_accept_matrix(void) {
+    static const CallablePassCase cases[] = {
+        {"CALL-PASS-001", "int foo(int a){return a;}\nint main(){return foo(1);}\n"},
+        {"CALL-PASS-002", "int foo(int a);\nint main(){return foo(1);}\n"},
+        {"CALL-PASS-003", "int foo(int a);\nint main(){return (foo)(1);}\n"},
+        {"CALL-PASS-004", "int foo(int a);\nint main(){return ((foo))(1);}\n"},
+        {"CALL-PASS-005", "int foo();\nint main(){return foo();}\n"},
+        {"CALL-PASS-006", "int foo(int a);\nint main(){return foo(1);}\nint foo(int a){return a;}\n"},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        if (!run_callable_pass_case(&cases[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int test_semantic_accepts_valid_program(void) {
     const char *source = "int x;\nint y;\nint main(){return 0;}\n";
     TokenArray tokens;
@@ -438,6 +639,425 @@ static int test_semantic_accepts_reachable_return_after_break_in_while_true(void
     return 1;
 }
 
+static int test_semantic_rejects_call_to_undeclared_function(void) {
+    const char *source = "int main(){return foo(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call to undeclared function should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_call_to_non_function_symbol(void) {
+    const char *source = "int foo;\nint main(){return foo(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call to non-function symbol should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-003") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-003 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_reports_call_site_for_callable_diagnostic(void) {
+    const char *source = "int main(){\n"
+                         "  int x=0;\n"
+                         "  return foo(1);\n"
+                         "}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call-site diagnostic test should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (sema_err.line != 3 || sema_err.column != 13) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected call-site at 3:13, got %d:%d\n",
+                sema_err.line,
+                sema_err.column);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_call_argument_count_mismatch(void) {
+    const char *source = "int foo(int a);\nint main(){return foo(1,2);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call argument-count mismatch should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-004") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-004 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void) {
+    const char *source = "int f(){return 1;}\nint main(){return f()(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: chained call should be rejected as unsupported indirect call\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_parenthesized_call_result_forms(void) {
+    const char *cases[] = {
+        "int f(){return 1;}\nint main(){return (f())();}\n",
+        "int f(int a){return a;}\nint main(){return (f(1))(2);}\n",
+        "int f(int a){return a;}\nint main(){return ((f(1)))(2);}\n",
+        "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
+        "int f(){return 1;}\nint main(){return ((f)())();}\n"
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        TokenArray tokens;
+        AstProgram program;
+        ParserError parse_err;
+        SemanticError sema_err;
+
+        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+            return 0;
+        }
+
+        if (semantic_analyze_program(&program, &sema_err)) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: parenthesized call-result form should be rejected\n");
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
+            fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+    }
+
+    return 1;
+}
+
+static int test_semantic_rejects_parenthesized_non_identifier_callee_form(void) {
+    const char *cases[] = {
+        "int f(){return 1;}\nint main(){return (f+1)();}\n",
+        "int f(){return 1;}\nint main(){return (f?f:f)();}\n"
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        TokenArray tokens;
+        AstProgram program;
+        ParserError parse_err;
+        SemanticError sema_err;
+
+        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+            return 0;
+        }
+
+        if (semantic_analyze_program(&program, &sema_err)) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: parenthesized non-identifier callee form should fail semantic analysis\n");
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "SEMA-CALL-006") == NULL) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: expected SEMA-CALL-006 diagnostic, got: %s\n",
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+    }
+
+    return 1;
+}
+
+static int test_semantic_rejects_non_identifier_callee_metadata_contract(void) {
+    AstProgram program;
+    SemanticError sema_err;
+    Token main_tok;
+
+    ast_program_init(&program);
+
+    main_tok.type = TOKEN_IDENTIFIER;
+    main_tok.lexeme = "main";
+    main_tok.length = 4;
+    main_tok.number_value = 0;
+    main_tok.line = 1;
+    main_tok.column = 1;
+
+    if (!ast_program_add_external(&program, AST_EXTERNAL_FUNCTION, &main_tok)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: failed to build function external for metadata contract test\n");
+        ast_program_free(&program);
+        return 0;
+    }
+
+    program.externals[0].is_function_definition = 1;
+    program.externals[0].returns_on_all_paths = 1;
+    program.externals[0].called_function_count = 1;
+    program.externals[0].called_function_names = (char **)calloc(1, sizeof(char *));
+    program.externals[0].called_function_lines = (int *)calloc(1, sizeof(int));
+    program.externals[0].called_function_columns = (int *)calloc(1, sizeof(int));
+    program.externals[0].called_function_arg_counts = (size_t *)calloc(1, sizeof(size_t));
+    program.externals[0].called_function_kinds = (int *)calloc(1, sizeof(int));
+    if (!program.externals[0].called_function_names ||
+        !program.externals[0].called_function_lines ||
+        !program.externals[0].called_function_columns ||
+        !program.externals[0].called_function_arg_counts ||
+        !program.externals[0].called_function_kinds) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: out of memory while building metadata contract test\n");
+        ast_program_free(&program);
+        return 0;
+    }
+
+    program.externals[0].called_function_lines[0] = 1;
+    program.externals[0].called_function_columns[0] = 12;
+    program.externals[0].called_function_arg_counts[0] = 0;
+    program.externals[0].called_function_kinds[0] = AST_CALL_CALLEE_NON_IDENTIFIER;
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: non-identifier callee metadata should fail semantic analysis\n");
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-006") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-006 diagnostic, got: %s\n",
+                sema_err.message);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_accepts_call_to_declared_function(void) {
+    const char *source = "int foo(int a);\nint main(){return foo(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call to declared function should pass, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_call_before_visible_declaration(void) {
+    const char *source = "int main(){return foo(1);}\nint foo(int a){return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call before visible declaration should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-002 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "first declaration at 2:5") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected declaration location detail, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_accepts_call_with_prior_prototype_then_later_definition(void) {
+    const char *source = "int foo(int a);\nint main(){return foo(1);}\nint foo(int a){return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call with prior prototype should pass, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int run_cf_matrix_expect_accepts(const char *case_id, const char *source) {
     TokenArray tokens;
     AstProgram program;
@@ -621,6 +1241,45 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_accepts_reachable_return_after_break_in_while_true()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_call_to_undeclared_function()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_call_to_non_function_symbol()) {
+        return 1;
+    }
+    if (!test_semantic_reports_call_site_for_callable_diagnostic()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_call_argument_count_mismatch()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_chained_call_as_unsupported_indirect_call()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_parenthesized_call_result_forms()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_parenthesized_non_identifier_callee_form()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_non_identifier_callee_metadata_contract()) {
+        return 1;
+    }
+    if (!test_semantic_callable_diagnostic_matrix()) {
+        return 1;
+    }
+    if (!test_semantic_callable_accept_matrix()) {
+        return 1;
+    }
+    if (!test_semantic_accepts_call_to_declared_function()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_call_before_visible_declaration()) {
+        return 1;
+    }
+    if (!test_semantic_accepts_call_with_prior_prototype_then_later_definition()) {
         return 1;
     }
     if (!run_must_pass_or_fail_now_group()) {

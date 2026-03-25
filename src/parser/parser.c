@@ -29,6 +29,14 @@ typedef struct {
     size_t function_continue_count;
     int track_function_declaration_count;
     size_t function_declaration_count;
+    int track_function_calls;
+    char **function_called_names;
+    int *function_called_lines;
+    int *function_called_columns;
+    size_t *function_called_arg_counts;
+    int *function_called_kinds;
+    size_t function_called_count;
+    size_t function_called_capacity;
 } Parser;
 
 /*
@@ -180,6 +188,107 @@ static int parse_statement_with_flow(Parser *p,
                                      int *out_may_break);
 static int parse_declaration(Parser *p, AstProgram *top_level_program);
 
+static void parser_clear_function_called_names(Parser *p) {
+    size_t i;
+
+    if (!p) {
+        return;
+    }
+
+    for (i = 0; i < p->function_called_count; ++i) {
+        free(p->function_called_names[i]);
+    }
+    free(p->function_called_names);
+    free(p->function_called_lines);
+    free(p->function_called_columns);
+    free(p->function_called_arg_counts);
+    free(p->function_called_kinds);
+    p->function_called_names = NULL;
+    p->function_called_lines = NULL;
+    p->function_called_columns = NULL;
+    p->function_called_arg_counts = NULL;
+    p->function_called_kinds = NULL;
+    p->function_called_count = 0;
+    p->function_called_capacity = 0;
+}
+
+static int parser_record_function_call_name(Parser *p,
+                                            const Token *name_tok,
+                                            const Token *call_site_tok,
+                                            size_t arg_count,
+                                            int callee_kind) {
+    char **new_data;
+    int *new_lines;
+    int *new_columns;
+    size_t *new_arg_counts;
+    int *new_kinds;
+    size_t next_capacity;
+    char *name_copy;
+
+    if (!p || !p->track_function_calls || !call_site_tok) {
+        return 1;
+    }
+
+    if (p->function_called_count == p->function_called_capacity) {
+        next_capacity = (p->function_called_capacity == 0) ? 8 : (p->function_called_capacity * 2);
+        new_data = (char **)realloc(p->function_called_names, next_capacity * sizeof(char *));
+        if (!new_data) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        p->function_called_names = new_data;
+
+        new_lines = (int *)realloc(p->function_called_lines, next_capacity * sizeof(int));
+        if (!new_lines) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        p->function_called_lines = new_lines;
+
+        new_columns = (int *)realloc(p->function_called_columns, next_capacity * sizeof(int));
+        if (!new_columns) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        p->function_called_columns = new_columns;
+
+        new_arg_counts = (size_t *)realloc(p->function_called_arg_counts,
+                                           next_capacity * sizeof(size_t));
+        if (!new_arg_counts) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        p->function_called_arg_counts = new_arg_counts;
+
+        new_kinds = (int *)realloc(p->function_called_kinds, next_capacity * sizeof(int));
+        if (!new_kinds) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        p->function_called_kinds = new_kinds;
+        p->function_called_capacity = next_capacity;
+    }
+
+    name_copy = NULL;
+    if (name_tok && name_tok->lexeme && name_tok->length > 0) {
+        name_copy = (char *)malloc(name_tok->length + 1);
+        if (!name_copy) {
+            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
+            return 0;
+        }
+        memcpy(name_copy, name_tok->lexeme, name_tok->length);
+        name_copy[name_tok->length] = '\0';
+    }
+
+    p->function_called_names[p->function_called_count] = name_copy;
+    p->function_called_lines[p->function_called_count] = call_site_tok->line;
+    p->function_called_columns[p->function_called_count] = call_site_tok->column;
+    p->function_called_arg_counts[p->function_called_count] = arg_count;
+    p->function_called_kinds[p->function_called_count] = callee_kind;
+    p->function_called_count++;
+    return 1;
+}
+
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
 static AstExpression *parse_expression_ast_postfix(Parser *p);
 static AstExpression *parse_expression_ast_unary(Parser *p);
@@ -291,6 +400,8 @@ static int token_slice_is_callable_form(const TokenArray *tokens,
                                         size_t start,
                                         size_t end) {
     size_t i;
+    int depth;
+    size_t match_start;
 
     if (!tokens || !tokens->data || start >= end) {
         return 0;
@@ -298,40 +409,58 @@ static int token_slice_is_callable_form(const TokenArray *tokens,
 
     trim_wrapping_parentheses(tokens, &start, &end);
 
-    if (end <= start || tokens->data[start].type != TOKEN_IDENTIFIER) {
+    if (end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER) {
+        return 1;
+    }
+
+    if (end <= start + 1 || tokens->data[end - 1].type != TOKEN_RPAREN) {
         return 0;
     }
 
-    i = start + 1;
-    while (i < end) {
-        size_t j;
-        int depth = 0;
-
-        if (tokens->data[i].type != TOKEN_LPAREN) {
-            return 0;
-        }
-
-        for (j = i; j < end; ++j) {
-            if (tokens->data[j].type == TOKEN_LPAREN) {
-                depth++;
-            } else if (tokens->data[j].type == TOKEN_RPAREN) {
-                if (depth == 0) {
-                    return 0;
-                }
-                depth--;
-                if (depth == 0) {
-                    i = j + 1;
-                    break;
-                }
+    depth = 0;
+    match_start = end;
+    for (i = end; i > start; --i) {
+        TokenType type = tokens->data[i - 1].type;
+        if (type == TOKEN_RPAREN) {
+            depth++;
+        } else if (type == TOKEN_LPAREN) {
+            depth--;
+            if (depth == 0) {
+                match_start = i - 1;
+                break;
             }
-        }
-
-        if (depth != 0) {
-            return 0;
+            if (depth < 0) {
+                return 0;
+            }
         }
     }
 
-    return i == end;
+    if (depth != 0 || match_start <= start) {
+        return 0;
+    }
+
+    return token_slice_is_callable_form(tokens, start, match_start);
+}
+
+static const Token *token_slice_callable_name_token(const TokenArray *tokens,
+                                                    size_t start,
+                                                    size_t end) {
+    if (!tokens || !tokens->data || start >= end) {
+        return NULL;
+    }
+
+    trim_wrapping_parentheses(tokens, &start, &end);
+
+    /*
+     * Semantic callable metadata only supports direct identifier callees.
+     * Parenthesized call results like (f()) are callable syntactically, but
+     * should not be attributed to a direct function name token.
+     */
+    if (end != start + 1 || tokens->data[start].type != TOKEN_IDENTIFIER) {
+        return NULL;
+    }
+
+    return &tokens->data[start];
 }
 
 static int parse_initializer_expression(Parser *p) {
@@ -485,12 +614,9 @@ static int ast_expression_is_callable_callee(const AstExpression *expr) {
         return 0;
     }
 
-    if (expr->kind == AST_EXPR_IDENTIFIER || expr->kind == AST_EXPR_CALL) {
+    if (expr->kind == AST_EXPR_IDENTIFIER || expr->kind == AST_EXPR_CALL ||
+        expr->kind == AST_EXPR_PAREN) {
         return 1;
-    }
-
-    if (expr->kind == AST_EXPR_PAREN) {
-        return ast_expression_is_callable_callee(expr->as.inner);
     }
 
     return 0;
@@ -1097,7 +1223,9 @@ static AstExpression *parse_expression_ast_comma(Parser *p) {
 
 static int parse_primary_with_flags(Parser *p,
                                     int *out_is_identifier_lvalue,
-                                    int *out_is_callable_target) {
+                                    int *out_is_callable_target,
+                                    const Token **out_callable_name_token,
+                                    int *out_callable_callee_kind) {
     size_t expr_start_index;
 
     if (out_is_identifier_lvalue) {
@@ -1105,6 +1233,12 @@ static int parse_primary_with_flags(Parser *p,
     }
     if (out_is_callable_target) {
         *out_is_callable_target = 0;
+    }
+    if (out_callable_name_token) {
+        *out_callable_name_token = NULL;
+    }
+    if (out_callable_callee_kind) {
+        *out_callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
     }
 
     if (match(p, TOKEN_IDENTIFIER)) {
@@ -1114,6 +1248,12 @@ static int parse_primary_with_flags(Parser *p,
         if (out_is_callable_target) {
             *out_is_callable_target = 1;
         }
+        if (out_callable_name_token) {
+            *out_callable_name_token = previous(p);
+        }
+        if (out_callable_callee_kind) {
+            *out_callable_callee_kind = AST_CALL_CALLEE_DIRECT_IDENTIFIER;
+        }
         return 1;
     }
 
@@ -1122,6 +1262,9 @@ static int parse_primary_with_flags(Parser *p,
     }
 
     if (match(p, TOKEN_LPAREN)) {
+        int is_callable_form;
+        const Token *callable_name_tok;
+
         expr_start_index = p->current;
         if (!parse_expression(p)) {
             return 0;
@@ -1130,15 +1273,36 @@ static int parse_primary_with_flags(Parser *p,
             return 0;
         }
 
+        is_callable_form = token_slice_is_callable_form(p->tokens,
+                                                        expr_start_index,
+                                                        p->current - 1);
+        callable_name_tok = token_slice_callable_name_token(p->tokens,
+                                                            expr_start_index,
+                                                            p->current - 1);
+
         if (out_is_identifier_lvalue) {
             *out_is_identifier_lvalue = token_slice_is_parenthesized_identifier_form(p->tokens,
                                                                                       expr_start_index,
                                                                                       p->current - 1);
         }
         if (out_is_callable_target) {
-            *out_is_callable_target = token_slice_is_callable_form(p->tokens,
-                                                                   expr_start_index,
-                                                                   p->current - 1);
+            /*
+             * Any parenthesized expression can be a syntactic postfix call callee.
+             * Semantic callable checks classify non-direct forms afterward.
+             */
+            *out_is_callable_target = 1;
+        }
+        if (out_callable_name_token) {
+            *out_callable_name_token = callable_name_tok;
+        }
+        if (out_callable_callee_kind) {
+            if (callable_name_tok) {
+                *out_callable_callee_kind = AST_CALL_CALLEE_DIRECT_IDENTIFIER;
+            } else if (is_callable_form) {
+                *out_callable_callee_kind = AST_CALL_CALLEE_CALL_RESULT;
+            } else {
+                *out_callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
+            }
         }
         return 1;
     }
@@ -1150,13 +1314,23 @@ static int parse_primary_with_flags(Parser *p,
 static int parse_postfix(Parser *p) {
     int is_identifier_lvalue = 0;
     int is_callable_target = 0;
+    int callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
+    const Token *callable_name_token = NULL;
 
-    if (!parse_primary_with_flags(p, &is_identifier_lvalue, &is_callable_target)) {
+    if (!parse_primary_with_flags(p,
+                                  &is_identifier_lvalue,
+                                  &is_callable_target,
+                                  &callable_name_token,
+                                  &callable_callee_kind)) {
         return 0;
     }
 
     while (1) {
         if (match(p, TOKEN_LPAREN)) {
+            const Token *call_site_tok = previous(p);
+            size_t arg_count = 0;
+            int callee_kind = callable_callee_kind;
+
             if (!is_callable_target) {
                 set_error(p, previous(p), "Expected callable expression before '('");
                 return 0;
@@ -1166,13 +1340,24 @@ static int parse_postfix(Parser *p) {
                     if (!parse_assignment(p)) {
                         return 0;
                     }
+                    arg_count++;
                 } while (match(p, TOKEN_COMMA));
             }
             if (!consume(p, TOKEN_RPAREN, "')'")) {
                 return 0;
             }
+            if (!parser_record_function_call_name(p,
+                                                  callable_name_token,
+                                                  call_site_tok,
+                                                  arg_count,
+                                                  callee_kind)) {
+                return 0;
+            }
             is_identifier_lvalue = 0;
             is_callable_target = 1;
+            /* After a call, callee identity is no longer a direct identifier token. */
+            callable_name_token = NULL;
+            callable_callee_kind = AST_CALL_CALLEE_CALL_RESULT;
             continue;
         }
 
@@ -1189,6 +1374,8 @@ static int parse_postfix(Parser *p) {
 
             is_identifier_lvalue = 0;
             is_callable_target = 0;
+            callable_name_token = NULL;
+            callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
             continue;
         }
 
@@ -2062,7 +2249,13 @@ static int parse_function_external(Parser *p,
                                    size_t *out_if_statement_count,
                                    size_t *out_break_statement_count,
                                    size_t *out_continue_statement_count,
-                                   size_t *out_declaration_statement_count) {
+                                   size_t *out_declaration_statement_count,
+                                   char ***out_called_function_names,
+                                   int **out_called_function_lines,
+                                   int **out_called_function_columns,
+                                   size_t **out_called_function_arg_counts,
+                                   int **out_called_function_kinds,
+                                   size_t *out_called_function_count) {
     const Token *name_tok = NULL;
     size_t parameter_count = 0;
     int has_unnamed_parameter = 0;
@@ -2099,6 +2292,27 @@ static int parse_function_external(Parser *p,
     if (out_declaration_statement_count) {
         *out_declaration_statement_count = 0;
     }
+    if (out_called_function_names) {
+        *out_called_function_names = NULL;
+    }
+    if (out_called_function_lines) {
+        *out_called_function_lines = NULL;
+    }
+    if (out_called_function_columns) {
+        *out_called_function_columns = NULL;
+    }
+    if (out_called_function_arg_counts) {
+        *out_called_function_arg_counts = NULL;
+    }
+    if (out_called_function_kinds) {
+        *out_called_function_kinds = NULL;
+    }
+    if (out_called_function_count) {
+        *out_called_function_count = 0;
+    }
+
+    p->track_function_calls = 0;
+    parser_clear_function_called_names(p);
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
@@ -2155,6 +2369,7 @@ static int parse_function_external(Parser *p,
         p->function_continue_count = 0;
         p->track_function_declaration_count = 1;
         p->function_declaration_count = 0;
+        p->track_function_calls = 1;
         body_ok = parse_compound_statement_with_flow(p,
                                                      &function_returns_on_all_paths,
                                                      NULL,
@@ -2186,6 +2401,27 @@ static int parse_function_external(Parser *p,
         p->track_function_break_count = 0;
         p->track_function_continue_count = 0;
         p->track_function_declaration_count = 0;
+        p->track_function_calls = 0;
+        if (body_ok && out_called_function_names && out_called_function_lines &&
+            out_called_function_columns && out_called_function_arg_counts &&
+            out_called_function_kinds &&
+            out_called_function_count) {
+            *out_called_function_names = p->function_called_names;
+            *out_called_function_lines = p->function_called_lines;
+            *out_called_function_columns = p->function_called_columns;
+            *out_called_function_arg_counts = p->function_called_arg_counts;
+            *out_called_function_kinds = p->function_called_kinds;
+            *out_called_function_count = p->function_called_count;
+            p->function_called_names = NULL;
+            p->function_called_lines = NULL;
+            p->function_called_columns = NULL;
+            p->function_called_arg_counts = NULL;
+            p->function_called_kinds = NULL;
+            p->function_called_count = 0;
+            p->function_called_capacity = 0;
+        } else {
+            parser_clear_function_called_names(p);
+        }
         return body_ok;
     }
 
@@ -2211,6 +2447,12 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     size_t external_break_statement_count = 0;
     size_t external_continue_statement_count = 0;
     size_t external_declaration_statement_count = 0;
+    char **external_called_function_names = NULL;
+    int *external_called_function_lines = NULL;
+    int *external_called_function_columns = NULL;
+    size_t *external_called_function_arg_counts = NULL;
+    int *external_called_function_kinds = NULL;
+    size_t external_called_function_count = 0;
 
     if (!out_program) {
         if (error) {
@@ -2265,6 +2507,14 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     p.function_continue_count = 0;
     p.track_function_declaration_count = 0;
     p.function_declaration_count = 0;
+    p.track_function_calls = 0;
+    p.function_called_names = NULL;
+    p.function_called_lines = NULL;
+    p.function_called_columns = NULL;
+    p.function_called_arg_counts = NULL;
+    p.function_called_kinds = NULL;
+    p.function_called_count = 0;
+    p.function_called_capacity = 0;
 
     if (error) {
         error->line = 0;
@@ -2284,6 +2534,12 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
         external_break_statement_count = 0;
         external_continue_statement_count = 0;
         external_declaration_statement_count = 0;
+        external_called_function_names = NULL;
+        external_called_function_lines = NULL;
+        external_called_function_columns = NULL;
+        external_called_function_arg_counts = NULL;
+        external_called_function_kinds = NULL;
+        external_called_function_count = 0;
 
         if (!parse_function_external(&p,
                                      &external_name,
@@ -2295,14 +2551,31 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                                      &external_if_statement_count,
                                      &external_break_statement_count,
                                      &external_continue_statement_count,
-                                     &external_declaration_statement_count)) {
+                                     &external_declaration_statement_count,
+                                     &external_called_function_names,
+                                     &external_called_function_lines,
+                                     &external_called_function_columns,
+                                     &external_called_function_arg_counts,
+                                     &external_called_function_kinds,
+                                     &external_called_function_count)) {
             p.current = start;
             if (!parse_declaration(&p, out_program)) {
+                parser_clear_function_called_names(&p);
                 ast_program_clear_storage(out_program);
                 return 0;
             }
         } else {
             if (!ast_program_append_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
+                size_t i;
+
+                for (i = 0; i < external_called_function_count; ++i) {
+                    free(external_called_function_names[i]);
+                }
+                free(external_called_function_names);
+                free(external_called_function_lines);
+                free(external_called_function_columns);
+                free(external_called_function_arg_counts);
+                free(external_called_function_kinds);
                 set_error(&p, peek(&p), "Out of memory while building AST");
                 ast_program_clear_storage(out_program);
                 return 0;
@@ -2324,8 +2597,22 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                 external_continue_statement_count;
             out_program->externals[out_program->count - 1].declaration_statement_count =
                 external_declaration_statement_count;
+            out_program->externals[out_program->count - 1].called_function_names =
+                external_called_function_names;
+            out_program->externals[out_program->count - 1].called_function_lines =
+                external_called_function_lines;
+            out_program->externals[out_program->count - 1].called_function_columns =
+                external_called_function_columns;
+            out_program->externals[out_program->count - 1].called_function_arg_counts =
+                external_called_function_arg_counts;
+            out_program->externals[out_program->count - 1].called_function_kinds =
+                external_called_function_kinds;
+            out_program->externals[out_program->count - 1].called_function_count =
+                external_called_function_count;
         }
     }
+
+    parser_clear_function_called_names(&p);
 
     if (error) {
         error->line = 0;
@@ -2381,6 +2668,14 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     p.function_continue_count = 0;
     p.track_function_declaration_count = 0;
     p.function_declaration_count = 0;
+    p.track_function_calls = 0;
+    p.function_called_names = NULL;
+    p.function_called_lines = NULL;
+    p.function_called_columns = NULL;
+    p.function_called_arg_counts = NULL;
+    p.function_called_kinds = NULL;
+    p.function_called_count = 0;
+    p.function_called_capacity = 0;
 
     if (error) {
         error->line = 0;
@@ -2390,13 +2685,32 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 
     while (!is_at_end(&p)) {
         start = p.current;
-        if (!parse_function_external(&p, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+        if (!parse_function_external(&p,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL)) {
             p.current = start;
             if (!parse_declaration(&p, NULL)) {
+                parser_clear_function_called_names(&p);
                 return 0;
             }
         }
     }
+
+    parser_clear_function_called_names(&p);
 
     if (error) {
         error->line = 0;
@@ -2458,6 +2772,14 @@ int parser_parse_expression_ast_assignment(const TokenArray *tokens,
     p.function_continue_count = 0;
     p.track_function_declaration_count = 0;
     p.function_declaration_count = 0;
+    p.track_function_calls = 0;
+    p.function_called_names = NULL;
+    p.function_called_lines = NULL;
+    p.function_called_columns = NULL;
+    p.function_called_arg_counts = NULL;
+    p.function_called_kinds = NULL;
+    p.function_called_count = 0;
+    p.function_called_capacity = 0;
 
     if (error) {
         error->line = 0;

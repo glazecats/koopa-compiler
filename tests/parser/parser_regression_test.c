@@ -352,6 +352,93 @@ static int test_translation_unit_accepts_parenthesized_callable_callee(void) {
     return 1;
 }
 
+static int test_translation_unit_accepts_parenthesized_non_identifier_callee(void) {
+    const char *source =
+        "int f(){return 1;}\n"
+        "int main(){return (f+1)();}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for parenthesized non-identifier callee input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept parenthesized non-identifier callee: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_rejects_non_parenthesized_non_identifier_callee(void) {
+    return expect_translation_unit_parse_failure(
+        "int f(){return 1;}\n"
+        "int main(){return f+1();}\n",
+        "non-parenthesized non-identifier callee",
+        "callable",
+        NULL);
+}
+
+static int test_translation_unit_accepts_parenthesized_call_result_chaining(void) {
+    const char *source =
+        "int f(int x){return x;}\n"
+        "int main(){return ((f)(1))(2);}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for parenthesized call-result chaining input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept ((f)(1))(2) in TU path: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_accepts_parenthesized_zero_arg_call_result_chaining(void) {
+    const char *source =
+        "int f(){return 1;}\n"
+        "int main(){return ((f)())();}\n";
+    TokenArray tokens;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for parenthesized zero-arg call-result chaining input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit(&tokens, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should accept ((f)())() in TU path: %s\n",
+                err.message);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
 static int test_translation_unit_accepts_parenthesized_identifier_increment(void) {
     const char *source = "int main(){int a=1; ++(a); (a)++; return a;}\n";
     TokenArray tokens;
@@ -477,6 +564,137 @@ static int expect_translation_unit_parse_failure(const char *source,
     }
 
     lexer_free_tokens(&tokens);
+    return 1;
+}
+
+typedef struct {
+    const char *case_name;
+    const char *source;
+    int expect_success;
+    const char *required_msg_a;
+    const char *required_msg_b;
+} ParserTuCallableCase;
+
+static int run_translation_unit_callable_case(const ParserTuCallableCase *c) {
+    TokenArray tokens;
+    ParserError err;
+
+    if (!c || !c->source) {
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(c->source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for %s\n",
+                c->case_name);
+        return 0;
+    }
+
+    if (c->expect_success) {
+        if (!parser_parse_translation_unit(&tokens, &err)) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: parser should accept %s: %s\n",
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    } else {
+        if (parser_parse_translation_unit(&tokens, &err)) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
+                    c->case_name);
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+
+        if (c->required_msg_a && strstr(err.message, c->required_msg_a) == NULL) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                    c->required_msg_a,
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+
+        if (c->required_msg_b && strstr(err.message, c->required_msg_b) == NULL) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                    c->required_msg_b,
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_translation_unit_callable_entry_matrix(void) {
+    static const ParserTuCallableCase cases[] = {
+        {"TU-CALL-ACCEPT-001 direct identifier",
+         "int f(int a){return a;}\nint main(){return f(1);}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-002 parenthesized identifier",
+         "int f(int a){return a;}\nint main(){return (f)(1);}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-003 nested parenthesized identifier",
+         "int f(int a){return a;}\nint main(){return ((f))(1);}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-004 call-result chaining",
+         "int f(){return 1;}\nint main(){return f()(1);}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-005 parenthesized call-result chaining",
+         "int f(){return 1;}\nint main(){return (f())();}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-006 parenthesized non-identifier plus",
+         "int f(){return 1;}\nint main(){return (f+1)();}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-007 nested parenthesized non-identifier plus",
+         "int f(){return 1;}\nint main(){return ((f+1))();}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-ACCEPT-008 parenthesized non-identifier ternary",
+         "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
+         1,
+         NULL,
+         NULL},
+        {"TU-CALL-REJECT-001 non-parenthesized non-identifier plus",
+         "int f(){return 1;}\nint main(){return f+1();}\n",
+         0,
+         "callable",
+         NULL},
+        {"TU-CALL-REJECT-002 number callee",
+         "int main(){return 1(2);}\n",
+         0,
+         "callable",
+         NULL},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        if (!run_translation_unit_callable_case(&cases[i])) {
+            return 0;
+        }
+    }
+
     return 1;
 }
 
@@ -614,6 +832,103 @@ static int expect_expression_assignment_parse_failure(const char *source,
 
     lexer_free_tokens(&tokens);
     ast_expression_free(expr);
+    return 1;
+}
+
+typedef struct {
+    const char *case_name;
+    const char *source;
+    int expect_success;
+    const char *required_msg_a;
+    const char *required_msg_b;
+} ParserExprCallableCase;
+
+static int run_expression_callable_case(const ParserExprCallableCase *c) {
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!c || !c->source) {
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(c->source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for %s\n",
+                c->case_name);
+        return 0;
+    }
+
+    if (c->expect_success) {
+        if (!parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expression parser should accept %s: %s\n",
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            ast_expression_free(expr);
+            return 0;
+        }
+    } else {
+        if (parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
+                    c->case_name);
+            lexer_free_tokens(&tokens);
+            ast_expression_free(expr);
+            return 0;
+        }
+
+        if (c->required_msg_a && strstr(err.message, c->required_msg_a) == NULL) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                    c->required_msg_a,
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            ast_expression_free(expr);
+            return 0;
+        }
+
+        if (c->required_msg_b && strstr(err.message, c->required_msg_b) == NULL) {
+            fprintf(stderr,
+                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                    c->required_msg_b,
+                    c->case_name,
+                    err.message);
+            lexer_free_tokens(&tokens);
+            ast_expression_free(expr);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_callable_entry_matrix(void) {
+    static const ParserExprCallableCase cases[] = {
+        {"EXPR-CALL-ACCEPT-001 direct identifier", "f(1)\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-002 parenthesized identifier", "(f)(1)\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-003 nested parenthesized identifier", "((f))(1)\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-004 call-result chaining", "f()(1)\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-005 parenthesized call-result chaining", "(f())()\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-006 parenthesized non-identifier plus", "(f+1)()\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-007 nested parenthesized non-identifier plus", "((f+1))()\n", 1, NULL, NULL},
+        {"EXPR-CALL-ACCEPT-008 parenthesized non-identifier ternary", "(f?f:f)()\n", 1, NULL, NULL},
+        {"EXPR-CALL-REJECT-001 non-parenthesized non-identifier plus", "f+1()\n", 0, "callable", NULL},
+        {"EXPR-CALL-REJECT-002 number callee", "1(2)\n", 0, "callable", NULL},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        if (!run_expression_callable_case(&cases[i])) {
+            return 0;
+        }
+    }
+
     return 1;
 }
 
@@ -1252,6 +1567,39 @@ static int test_expression_ast_accepts_parenthesized_callable_callee(void) {
     return 1;
 }
 
+static int test_expression_ast_accepts_parenthesized_non_identifier_callee(void) {
+    const char *source = "(f+1)()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_PAREN || !expr->as.call.callee->as.inner ||
+        expr->as.call.callee->as.inner->kind != AST_EXPR_BINARY ||
+        expr->as.call.callee->as.inner->as.binary.op != TOKEN_PLUS) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected call tree for parenthesized non-identifier callee (f+1)()\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_rejects_non_parenthesized_non_identifier_callee(void) {
+    return expect_expression_assignment_parse_failure("f+1()\n",
+                                                     "non-parenthesized non-identifier callee input",
+                                                     "callable",
+                                                     NULL);
+}
+
 static int test_expression_ast_accepts_nested_parenthesized_call_chaining(void) {
     const char *source = "(f())()\n";
     TokenArray tokens;
@@ -1271,6 +1619,56 @@ static int test_expression_ast_accepts_nested_parenthesized_call_chaining(void) 
         expr->as.call.arg_count != 0) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expected nested parenthesized call chain for (f())()\\n\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_accepts_parenthesized_call_result_chaining(void) {
+    const char *source = "((f)(1))(2)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_PAREN || !expr->as.call.callee->as.inner ||
+        expr->as.call.callee->as.inner->kind != AST_EXPR_CALL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected call tree for ((f)(1))(2)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_accepts_parenthesized_zero_arg_call_result_chaining(void) {
+    const char *source = "((f)())()\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CALL || !expr->as.call.callee ||
+        expr->as.call.callee->kind != AST_EXPR_PAREN || !expr->as.call.callee->as.inner ||
+        expr->as.call.callee->as.inner->kind != AST_EXPR_CALL) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected call tree for ((f)())()\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -3982,6 +4380,18 @@ int main(void) {
     if (!test_translation_unit_accepts_parenthesized_callable_callee()) {
         return 1;
     }
+    if (!test_translation_unit_accepts_parenthesized_non_identifier_callee()) {
+        return 1;
+    }
+    if (!test_translation_unit_rejects_non_parenthesized_non_identifier_callee()) {
+        return 1;
+    }
+    if (!test_translation_unit_accepts_parenthesized_call_result_chaining()) {
+        return 1;
+    }
+    if (!test_translation_unit_accepts_parenthesized_zero_arg_call_result_chaining()) {
+        return 1;
+    }
     if (!test_translation_unit_accepts_parenthesized_identifier_increment()) {
         return 1;
     }
@@ -4021,6 +4431,9 @@ int main(void) {
         return 1;
     }
     if (!test_translation_unit_rejects_call_incomplete_argument_expression()) {
+        return 1;
+    }
+    if (!test_translation_unit_callable_entry_matrix()) {
         return 1;
     }
 
@@ -4094,7 +4507,19 @@ int main(void) {
     if (!test_expression_ast_accepts_parenthesized_callable_callee()) {
         return 1;
     }
+    if (!test_expression_ast_accepts_parenthesized_non_identifier_callee()) {
+        return 1;
+    }
+    if (!test_expression_ast_rejects_non_parenthesized_non_identifier_callee()) {
+        return 1;
+    }
     if (!test_expression_ast_accepts_nested_parenthesized_call_chaining()) {
+        return 1;
+    }
+    if (!test_expression_ast_accepts_parenthesized_call_result_chaining()) {
+        return 1;
+    }
+    if (!test_expression_ast_accepts_parenthesized_zero_arg_call_result_chaining()) {
         return 1;
     }
     if (!test_expression_ast_assignment_rhs_unary()) {
@@ -4162,6 +4587,9 @@ int main(void) {
         return 1;
     }
     if (!test_expression_ast_rejects_non_callable_number_callee()) {
+        return 1;
+    }
+    if (!test_expression_ast_callable_entry_matrix()) {
         return 1;
     }
     if (!test_expression_ast_rejects_multiplicative_rhs_incomplete_unary()) {

@@ -15,7 +15,16 @@ static inline void ast_program_clear_storage(AstProgram *program) {
     }
 
     for (i = 0; i < program->count; ++i) {
+        size_t j;
         free(program->externals[i].name);
+        for (j = 0; j < program->externals[i].called_function_count; ++j) {
+            free(program->externals[i].called_function_names[j]);
+        }
+        free(program->externals[i].called_function_names);
+        free(program->externals[i].called_function_lines);
+        free(program->externals[i].called_function_columns);
+        free(program->externals[i].called_function_arg_counts);
+        free(program->externals[i].called_function_kinds);
     }
 
     free(program->externals);
@@ -59,6 +68,12 @@ static inline int ast_program_append_external(AstProgram *program,
     external.break_statement_count = 0;
     external.continue_statement_count = 0;
     external.declaration_statement_count = 0;
+    external.called_function_names = NULL;
+    external.called_function_lines = NULL;
+    external.called_function_columns = NULL;
+    external.called_function_arg_counts = NULL;
+    external.called_function_kinds = NULL;
+    external.called_function_count = 0;
     external.line = 0;
     external.column = 0;
 
