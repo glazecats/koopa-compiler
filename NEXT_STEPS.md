@@ -107,23 +107,40 @@
 - 2026-03-25: Milestone A (Parser A19) continued: added table-driven parser callable entry matrices for both translation-unit and expression-AST entrypoints, locking accepted vs rejected callee-shape boundaries in a single consolidated suite.
 - 2026-03-25: Milestone A (Semantic A20) continued: upgraded callable failure matrix assertions from code-only checks to `error-code + key diagnostic snippet + call-site line/column` checks for stronger IDE/script stability guarantees.
 - 2026-03-25: Milestone A (Semantic A21) continued: enriched `SEMA-CALL-004` payload to include explicit expected vs actual argument counts (`expected N, got M`) and locked this wording in matrix regressions.
+- 2026-03-25: Milestone A (Semantic A22) continued: enriched `SEMA-CALL-002` with stable declaration-location key fields (`decl_line`, `decl_col`) while preserving existing human-readable `first declaration at L:C` wording.
+- 2026-03-25: Milestone A (Semantic A23) continued: unified `SEMA-CALL-001..006` diagnostics with stable key-value payload fragments (`callee`, `decl_line/decl_col`, `expected/got`, `callee_kind`) and updated matrix assertions accordingly.
+- 2026-03-25: Milestone A (Semantic A24) hardening: increased semantic diagnostic buffer capacity, removed redundant `SEMA-CALL-004` payload duplication, and added long-identifier regression lock to prevent message-tail truncation (`expected/got` fields must survive).
 
 ## Current Milestone A Focus
 
-- Keep extending AST metadata in small verified steps.
-- Pair each AST extension with parser regression coverage and `make test` verification.
-- Expand from top-level metadata toward minimal function-body semantic signals.
+- Shift from parser-side metadata accumulation to function-body statement AST construction.
+- Keep current semantic behavior stable while introducing AST structures in parallel.
+- Land each migration phase behind regression locks and keep `make test` green.
 
-## Expression Tree Increment Plan (next)
+## Statement AST Migration Plan (next)
 
-1. Step A1: add minimal expression AST nodes for primary + parenthesized expressions only.
-2. Step A1 tests: add parser regressions that lock grouping behavior for `(a)` and nested parentheses like `((a))`.
-3. Step A2: extend expression AST to multiplicative/additive layers while preserving current parser control flow and semantics.
-4. Step A2 tests: add precedence/associativity regressions (`a+b*c`, `(a+b)*c`, `a-b-c`) and keep AST dump readable.
-5. Step A3: extend to relational/equality/assignment expression nodes with the same one-layer-per-commit discipline.
-6. Step A3 tests: add focused regressions for each newly enabled operator family before moving to the next layer.
-7. Rule: expression-tree milestones must not change current semantic pass/fail rules unless explicitly planned in Milestone D.
-8. Validation gate per step: `make test` must stay green before starting the next expression layer.
+1. Step S1 (AST structure landing): add minimal statement AST nodes for function bodies: `block`, `return`, `expr-stmt`, `if`, `while`, `for`, `break`, `continue`, `declaration`.
+2. Step S1 compatibility rule: keep all existing parser-side metadata (`called_function_*`, `returns_on_all_paths`, statement counters) active in parallel; statement AST is build/free only in this step.
+3. Step S1 tests: add parser AST shape + lifecycle regressions (including free-path safety) without changing semantic pass/fail expectations.
+4. Step S2 (semantic dual-path): introduce semantic statement-AST traversal for callable checks and baseline control-flow extraction, while retaining current metadata logic as temporary fallback.
+5. Step S2 parity rule: callable and CF matrices must remain behavior-identical (no expectation changes during dual-path period).
+6. Step S3 (scope closure): add minimal scope semantics on statement AST traversal: duplicate local declaration conflict, undeclared variable use, and block shadowing allowed (with explicit behavior locks).
+7. Step S3 cleanup: after scope traversal is stable, remove/retire redundant parser metadata dependencies in semantic paths.
+8. Deferred tightening: flip CF-02/CF-03/CF-06 expectations only after S2/S3 are stable and dual-path drift risk is low.
+9. Validation gate per step: `make test` must stay green before starting the next migration step.
+
+## Metadata Migration Schedule (anti-coupling plan)
+
+1. S1 phase: no removals; keep all parser-side metadata fields as compatibility rails.
+2. S2 phase: semantic reads statement AST first and computes shadow results for callable/control-flow checks; metadata path remains active as fallback.
+3. S2 cutover gate: switch callable/control-flow checks to AST-primary only after parity is proven by existing callable + CF regression matrices across at least one full green cycle.
+4. S3 phase: implement scope semantics on statement AST traversal; metadata must not be used for new scope rules.
+5. S3 cleanup gate: once scope matrix and callable/CF matrices are all green with AST-primary semantics, begin metadata retirement in controlled order.
+6. Retirement order: retire `called_function_*` semantic dependency first.
+7. Retirement order: retire `returns_on_all_paths` semantic dependency next.
+8. Retirement order: retire statement counters (`loop/if/break/continue/declaration`) last, after no semantic path reads them.
+9. Removal safety rule: remove one metadata family at a time, run full `make test`, and only proceed if no behavioral drift is observed.
+10. Fallback rule: if drift appears during a removal step, restore the previous gate point and keep both paths until the mismatch root cause is fixed.
 
 ## Known Limitations (Current Behavior)
 
@@ -141,5 +158,5 @@
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
 - Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.
-- Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005: Call result is not callable`.
-- Scope note for `SEMA-CALL-006`: this code applies to the parser-accepted subset of non-identifier callees that reaches semantic callable checks (for example `(f+1)()`). Non-parenthesized non-identifier callees outside this subset can still be rejected earlier by parser syntax checks.
+- Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005` with `callee_kind=call_result`.
+- Scope note for `SEMA-CALL-006`: this code applies to the parser-accepted subset of non-identifier callees that reaches semantic callable checks (for example `(f+1)()`), reported with `callee_kind=non_identifier`. Non-parenthesized non-identifier callees outside this subset can still be rejected earlier by parser syntax checks.

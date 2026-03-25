@@ -144,61 +144,61 @@ static int test_semantic_callable_diagnostic_matrix(void) {
         {"CALL-001",
          "int main(){return foo(1);}\n",
          "SEMA-CALL-001",
-         "undeclared function 'foo'",
+         "callee=foo",
          1,
          22},
         {"CALL-002",
          "int main(){return foo(1);}\nint foo(int a){return a;}\n",
          "SEMA-CALL-002",
-         "first declaration at 2:5",
+         "callee=foo; decl_line=2; decl_col=5",
          1,
          22},
         {"CALL-003",
          "int foo;\nint main(){return foo(1);}\n",
          "SEMA-CALL-003",
-         "non-function symbol 'foo'",
+         "callee=foo; symbol_kind=non_function",
          2,
          22},
         {"CALL-004",
          "int foo(int a);\nint main(){return foo(1,2);}\n",
          "SEMA-CALL-004",
-         "expected 1, got 2",
+         "callee=foo; expected=1; got=2",
          2,
          22},
         {"CALL-005-A",
          "int f(){return 1;}\nint main(){return f()(1);}\n",
          "SEMA-CALL-005",
-         "call result is not callable",
+         "callee_kind=call_result",
          2,
          22},
         {"CALL-005-B",
          "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
          "SEMA-CALL-005",
-         "call result is not callable",
+         "callee_kind=call_result",
          2,
          27},
         {"CALL-006-A",
          "int f(){return 1;}\nint main(){return (f+1)();}\n",
          "SEMA-CALL-006",
-         "non-identifier callee",
+         "callee_kind=non_identifier",
          2,
          24},
         {"CALL-006-B",
          "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
          "SEMA-CALL-006",
-         "non-identifier callee",
+         "callee_kind=non_identifier",
          2,
          26},
         {"CALL-006-C",
          "int f(){return 1;}\nint main(){return ((f+1))();}\n",
          "SEMA-CALL-006",
-         "non-identifier callee",
+         "callee_kind=non_identifier",
          2,
          26},
         {"CALL-006-D",
          "int f(){return 1;}\nint main(){return (f&&f)();}\n",
          "SEMA-CALL-006",
-         "non-identifier callee",
+         "callee_kind=non_identifier",
          2,
          25},
     };
@@ -784,6 +784,53 @@ static int test_semantic_rejects_call_argument_count_mismatch(void) {
     return 1;
 }
 
+static int test_semantic_call_argument_mismatch_long_name_not_truncated(void) {
+    char long_name[241];
+    char source[768];
+    size_t i;
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    for (i = 0; i < sizeof(long_name) - 1; ++i) {
+        long_name[i] = (char)('a' + (i % 26));
+    }
+    long_name[sizeof(long_name) - 1] = '\0';
+
+    snprintf(source,
+             sizeof(source),
+             "int %s(int a);\nint main(){return %s(1,2);}\n",
+             long_name,
+             long_name);
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: long-name argument-count mismatch should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-004") == NULL ||
+        strstr(sema_err.message, "expected=1; got=2") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected non-truncated SEMA-CALL-004 payload, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void) {
     const char *source = "int f(){return 1;}\nint main(){return f()(1);}\n";
     TokenArray tokens;
@@ -1019,7 +1066,7 @@ static int test_semantic_rejects_call_before_visible_declaration(void) {
         return 0;
     }
 
-    if (strstr(sema_err.message, "first declaration at 2:5") == NULL) {
+    if (strstr(sema_err.message, "decl_line=2; decl_col=5") == NULL) {
         fprintf(stderr,
                 "[semantic-reg] FAIL: expected declaration location detail, got: %s\n",
                 sema_err.message);
@@ -1253,6 +1300,9 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_rejects_call_argument_count_mismatch()) {
+        return 1;
+    }
+    if (!test_semantic_call_argument_mismatch_long_name_not_truncated()) {
         return 1;
     }
     if (!test_semantic_rejects_chained_call_as_unsupported_indirect_call()) {

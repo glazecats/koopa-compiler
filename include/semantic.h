@@ -6,7 +6,7 @@
 typedef struct {
     int line;
     int column;
-    char message[128];
+    char message[512];
 } SemanticError;
 
 /*

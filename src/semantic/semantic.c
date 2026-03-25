@@ -3,6 +3,37 @@
 #include <stdio.h>
 #include <string.h>
 
+#define CALLEE_PREVIEW_HEAD 24
+#define CALLEE_PREVIEW_TAIL 16
+
+static void format_callee_preview(const char *name, char *out, size_t out_size) {
+    size_t len;
+
+    if (!out || out_size == 0) {
+        return;
+    }
+
+    if (!name) {
+        snprintf(out, out_size, "(null)");
+        return;
+    }
+
+    len = strlen(name);
+    if (len <= (CALLEE_PREVIEW_HEAD + CALLEE_PREVIEW_TAIL + 3)) {
+        snprintf(out, out_size, "%s", name);
+        return;
+    }
+
+    snprintf(out,
+             out_size,
+             "%.*s...%.*s(len=%zu)",
+             CALLEE_PREVIEW_HEAD,
+             name,
+             CALLEE_PREVIEW_TAIL,
+             name + (len - CALLEE_PREVIEW_TAIL),
+             len);
+}
+
 static void semantic_set_error(SemanticError *error,
                                int line,
                                int column,
@@ -75,6 +106,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 size_t expected_arg_count = 0;
                 size_t called_arg_count = 0;
                 const char *called_name = lhs->called_function_names[k];
+                char callee_preview[128];
+
+                format_callee_preview(called_name, callee_preview, sizeof(callee_preview));
 
                 if (lhs->called_function_lines && lhs->called_function_columns) {
                     call_line = lhs->called_function_lines[k];
@@ -93,12 +127,12 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                             semantic_set_error(error,
                                                call_line,
                                                call_column,
-                                               "SEMA-CALL-005: call result is not callable in this semantic subset");
+                                               "SEMA-CALL-005: call result is not callable in this semantic subset; callee_kind=call_result");
                         } else {
                             semantic_set_error(error,
                                                call_line,
                                                call_column,
-                                               "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset");
+                                               "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset; callee_kind=non_identifier");
                         }
                     }
                     return 0;
@@ -147,11 +181,11 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
                 if (!found_decl && found_non_function_symbol) {
                     if (error) {
-                        char msg[128];
+                        char msg[512];
                         snprintf(msg,
                                  sizeof(msg),
-                                 "SEMA-CALL-003: call to non-function symbol '%s'",
-                                 called_name);
+                                 "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
+                                 callee_preview);
                         semantic_set_error(error, call_line, call_column, msg);
                     }
                     return 0;
@@ -159,11 +193,11 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
                 if (found_decl && !found_matching_param_count) {
                     if (error) {
-                        char msg[160];
+                        char msg[512];
                         snprintf(msg,
                                  sizeof(msg),
-                                 "SEMA-CALL-004: call argument count mismatch for '%s' (expected %zu, got %zu)",
-                                 called_name,
+                                 "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
+                                 callee_preview,
                                  expected_arg_count,
                                  called_arg_count);
                         semantic_set_error(error, call_line, call_column, msg);
@@ -173,19 +207,19 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
                 if (!found_decl) {
                     if (error) {
-                        char msg[128];
+                        char msg[512];
                         if (has_later_function_decl) {
                             snprintf(msg,
                                      sizeof(msg),
-                                     "SEMA-CALL-002: call to function '%s' before declaration (first declaration at %d:%d)",
-                                     called_name,
+                                     "SEMA-CALL-002: callee=%s; decl_line=%d; decl_col=%d; call before declaration",
+                                     callee_preview,
                                      later_decl_line,
                                      later_decl_column);
                         } else {
                             snprintf(msg,
                                      sizeof(msg),
-                                     "SEMA-CALL-001: call to undeclared function '%s'",
-                                     called_name);
+                                     "SEMA-CALL-001: callee=%s; call to undeclared function",
+                                     callee_preview);
                         }
                         semantic_set_error(error, call_line, call_column, msg);
                     }
