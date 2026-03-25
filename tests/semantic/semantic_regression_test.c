@@ -162,7 +162,7 @@ static int test_semantic_callable_diagnostic_matrix(void) {
         {"CALL-004",
          "int foo(int a);\nint main(){return foo(1,2);}\n",
          "SEMA-CALL-004",
-         "argument count mismatch for 'foo'",
+         "expected 1, got 2",
          2,
          22},
         {"CALL-005-A",

@@ -72,6 +72,7 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 int call_line = lhs->line;
                 int call_column = lhs->column;
                 int callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
+                size_t expected_arg_count = 0;
                 size_t called_arg_count = 0;
                 const char *called_name = lhs->called_function_names[k];
 
@@ -116,6 +117,7 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
                     if (candidate->kind == AST_EXTERNAL_FUNCTION) {
                         found_decl = 1;
+                        expected_arg_count = candidate->parameter_count;
                         if (candidate->parameter_count == called_arg_count) {
                             found_matching_param_count = 1;
                             break;
@@ -160,8 +162,10 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                         char msg[160];
                         snprintf(msg,
                                  sizeof(msg),
-                                 "SEMA-CALL-004: call argument count mismatch for '%s'",
-                                 called_name);
+                                 "SEMA-CALL-004: call argument count mismatch for '%s' (expected %zu, got %zu)",
+                                 called_name,
+                                 expected_arg_count,
+                                 called_arg_count);
                         semantic_set_error(error, call_line, call_column, msg);
                     }
                     return 0;
