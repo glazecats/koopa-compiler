@@ -9,6 +9,7 @@ build/
 *.dll
 *.so
 *.dylib
+lesson/original_prompt.md
 
 # IDE settings
 .vscode/
