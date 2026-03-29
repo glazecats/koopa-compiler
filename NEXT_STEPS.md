@@ -2,12 +2,14 @@
 
 ## Current Guidance (agreed)
 
-1. Keep moving on semantic analysis and AST expansion first.
-2. Defer parser/AST internal decoupling to the next small milestone.
-3. Defer `-fanalyzer` leak-warning cleanup to a later static-analysis pass.
+1. Treat Semantic S2 migration as complete and move active implementation to S3 scope semantics.
+2. Keep callable/return behavior and diagnostics stable while introducing scope rules incrementally.
+3. Keep parser/AST internal decoupling and static-analysis hygiene as follow-up milestones after S3 baseline lands.
 
 ## Why this order
 
+- S1+S2 AST-primary cutover is now in place for active definition paths (callable + return-flow gates).
+- Next highest-value gap is missing scope semantics (duplicate locals / undeclared local use / block shadowing behavior locks).
 - `-fanalyzer` warning around `external.name` is currently treated as likely false positive.
 - Runtime tests and ASan runs did not reproduce a real leak.
 - Parser including internal AST helpers is a maintainability risk, not a functional blocker.
@@ -16,9 +18,12 @@
 
 ### Milestone A: Semantic + AST expansion (now)
 
-- Expand AST coverage beyond top-level externals.
-- Add semantic checks incrementally with regression tests.
-- Keep parser/legacy-link behavior stable while expanding features.
+- Status snapshot:
+- S1 statement AST landing is complete.
+- S2 callable/control-flow AST-primary cutover is complete.
+- Active subphase is S3 scope semantics and metadata retirement stabilization.
+- Current objective:
+- Land minimal block-scope semantic rules with strict regression locks and no callable/CF behavior drift.
 
 ### Milestone B: Internal decoupling (next small milestone)
 
@@ -110,37 +115,60 @@
 - 2026-03-25: Milestone A (Semantic A22) continued: enriched `SEMA-CALL-002` with stable declaration-location key fields (`decl_line`, `decl_col`) while preserving existing human-readable `first declaration at L:C` wording.
 - 2026-03-25: Milestone A (Semantic A23) continued: unified `SEMA-CALL-001..006` diagnostics with stable key-value payload fragments (`callee`, `decl_line/decl_col`, `expected/got`, `callee_kind`) and updated matrix assertions accordingly.
 - 2026-03-25: Milestone A (Semantic A24) hardening: increased semantic diagnostic buffer capacity, removed redundant `SEMA-CALL-004` payload duplication, and added long-identifier regression lock to prevent message-tail truncation (`expected/got` fields must survive).
+- 2026-03-25: Milestone A (Statement AST S1-1) continued: landed minimal function-body statement AST structure (`compound/declaration/expression/if/while/for/return/break/continue`) and attached `function_body` to function-definition externals while preserving existing parser metadata behavior.
+- 2026-03-25: Milestone A (Statement AST S1-2) continued: statement AST nodes now capture key expression subtrees (`expression`, `return`, `if` condition, `while` condition, `for` init/condition/step) via token-slice expression-AST reconstruction, with no semantic behavior changes.
+- 2026-03-25: Milestone A (Statement AST S1-3) continued: added explicit statement expression-slot metadata (`primary`, `condition`, `for_init`, `for_step`) and parser regression locks for slot/index stability; full `make test` remained green.
+- 2026-03-25: Milestone A (Semantic S2-boot) started: semantic now performs statement-AST callable shadow traversal and cross-checks parser callable metadata (`name/line/column/arg_count/callee_kind`) for internal consistency (`SEMA-INT-001..003`), while keeping existing callable diagnostics/behavior unchanged; full `make test` remained green.
+- 2026-03-25: Milestone A (Semantic S2-2) continued: callable semantic checks now consume an AST-primary call view (with parser-metadata fallback when statement AST body is unavailable), preserving existing `SEMA-CALL-001..006` behavior and diagnostics; full `make test` remained green.
+- 2026-03-25: Milestone A (Semantic S2-3) continued: tightened AST-primary migration gate so function definitions must provide statement AST body (`SEMA-INT-005` on contract breach), and updated semantic regressions accordingly; full `make test` remained green.
+- 2026-03-25: Milestone A (Semantic S2-4) continued: made callable-view source explicit in semantic internal data flow (`AST-primary` vs `metadata-fallback`) and added a definition-path guard (`SEMA-INT-006`) to ensure function-definition callable checks never run on fallback view; full `make test` remained green.
+- 2026-03-25: Milestone A (Semantic S2-5) continued: relaxed hard dependency on parser callable metadata for AST-primary function definitions by making metadata parity check a shadow toggle, and added semantic regression lock proving AST-primary callable results remain correct even when parser metadata is tampered; full `make test` remained green.
+- 2026-03-27: Milestone A (Semantic S2-6) continued: replaced single macro parity toggle with explicit migration-strategy constant (`STRICT_PARITY` / `AST_PRIMARY_ONLY`) so S2 policy switching is centralized and does not require scattered preprocessor edits; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S2-7) continued: introduced reusable semantic AST post-order walk helpers and moved AST-primary callable rule evaluation to visitor-driven checks (keeping metadata fallback path for non-body contexts), reducing intermediate call-list coupling while preserving existing `SEMA-CALL-001..006` behavior; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S2-7) hardening: added regression lock proving AST-primary visitor callable checks are authoritative for chained-call rejection (`SEMA-CALL-005`) even when parser callable metadata is intentionally tampered.
+- 2026-03-29: Milestone A (Semantic S2-8) continued: switched function all-path-return semantic gating to AST-primary statement-flow evaluation (metadata used only as optional strict-parity guard), and added tamper regression lock proving return rejection remains correct when `returns_on_all_paths` parser metadata is intentionally forced; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S2-9) cleanup: removed currently unreachable callable metadata-fallback/guard branches (`SEMA-INT-004`, `SEMA-INT-006`) from active callable-check path and made function-definition callable checks explicitly AST-primary, reducing maintenance ambiguity without behavior change; added explicit regression lock that direct chained form `a()()` remains rejected as `SEMA-CALL-005`; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S2-10) consistency: converged callable migration notes with current implementation by documenting function-definition callable checks as AST-primary-only and marking `SEMA-INT-004`/`SEMA-INT-006` as retired from active callable path (historical-only), reducing roadmap/code interpretation drift; full `make test` remained green.
+- 2026-03-29: Milestone planning refresh: marked S2 as closed for implementation tracking, shifted active plan to S3 scope semantics, and rewrote near-term plan blocks to separate completed work from remaining tasks.
 
 ## Current Milestone A Focus
 
-- Shift from parser-side metadata accumulation to function-body statement AST construction.
-- Keep current semantic behavior stable while introducing AST structures in parallel.
-- Land each migration phase behind regression locks and keep `make test` green.
+- Implement S3-1 scope baseline on statement AST traversal:
+- reject duplicate local declarations in same block scope,
+- reject undeclared local variable uses in expression paths,
+- allow block shadowing by default and lock behavior in tests.
+- Keep callable matrix and control-flow matrix behavior unchanged while scope rules are introduced.
+- Maintain AST-primary authority for definitions and keep parser metadata use non-authoritative.
 
-## Statement AST Migration Plan (next)
+## S2 Closure Snapshot
 
-1. Step S1 (AST structure landing): add minimal statement AST nodes for function bodies: `block`, `return`, `expr-stmt`, `if`, `while`, `for`, `break`, `continue`, `declaration`.
-2. Step S1 compatibility rule: keep all existing parser-side metadata (`called_function_*`, `returns_on_all_paths`, statement counters) active in parallel; statement AST is build/free only in this step.
-3. Step S1 tests: add parser AST shape + lifecycle regressions (including free-path safety) without changing semantic pass/fail expectations.
-4. Step S2 (semantic dual-path): introduce semantic statement-AST traversal for callable checks and baseline control-flow extraction, while retaining current metadata logic as temporary fallback.
-5. Step S2 parity rule: callable and CF matrices must remain behavior-identical (no expectation changes during dual-path period).
-6. Step S3 (scope closure): add minimal scope semantics on statement AST traversal: duplicate local declaration conflict, undeclared variable use, and block shadowing allowed (with explicit behavior locks).
-7. Step S3 cleanup: after scope traversal is stable, remove/retire redundant parser metadata dependencies in semantic paths.
-8. Deferred tightening: flip CF-02/CF-03/CF-06 expectations only after S2/S3 are stable and dual-path drift risk is low.
-9. Validation gate per step: `make test` must stay green before starting the next migration step.
+- Completed: AST-primary callable checks for definitions, AST-primary return-path gate, migration strategy constants, visitor-based callable traversal, chained-call behavior locks (`a()()` included).
+- Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
+- Remaining under S3+ scope: introduce scope rules, then continue controlled metadata dependency retirement.
+
+## Active Implementation Plan (S3 next)
+
+1. S3-1 (scope core): introduce block scope stack in semantic traversal and enforce duplicate-local rejection in same scope.
+2. S3-1 (scope core): enforce undeclared local variable rejection for identifier expression uses that are not covered by current top-level callable checks.
+3. S3-1 (behavior lock): explicitly allow inner-block shadowing and lock with targeted semantic regressions.
+4. S3-2 (integration): run scope checks over statement AST traversal while preserving current callable and CF diagnostic outputs.
+5. S3-3 (cleanup): retire first metadata family only after scope + callable + CF matrices are green (`called_function_*` semantic dependency remains parity-only).
+6. S3-4 (cleanup): retire `returns_on_all_paths` semantic dependency usage where still present in active paths.
+7. Validation gate: `make test` must remain green at each substep before proceeding.
+8. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only after S3 stabilization.
 
 ## Metadata Migration Schedule (anti-coupling plan)
 
-1. S1 phase: no removals; keep all parser-side metadata fields as compatibility rails.
-2. S2 phase: semantic reads statement AST first and computes shadow results for callable/control-flow checks; metadata path remains active as fallback.
-3. S2 cutover gate: switch callable/control-flow checks to AST-primary only after parity is proven by existing callable + CF regression matrices across at least one full green cycle.
-4. S3 phase: implement scope semantics on statement AST traversal; metadata must not be used for new scope rules.
-5. S3 cleanup gate: once scope matrix and callable/CF matrices are all green with AST-primary semantics, begin metadata retirement in controlled order.
-6. Retirement order: retire `called_function_*` semantic dependency first.
-7. Retirement order: retire `returns_on_all_paths` semantic dependency next.
-8. Retirement order: retire statement counters (`loop/if/break/continue/declaration`) last, after no semantic path reads them.
-9. Removal safety rule: remove one metadata family at a time, run full `make test`, and only proceed if no behavioral drift is observed.
-10. Fallback rule: if drift appears during a removal step, restore the previous gate point and keep both paths until the mismatch root cause is fixed.
+1. S1 status: complete (metadata kept as compatibility rails).
+2. S2 status: complete for active definition paths (AST-primary callable + return-flow).
+3. S3 rule: new scope semantics must be computed from statement AST traversal, not parser metadata.
+4. S3 cleanup gate: begin retirement only after scope/callable/CF matrices are simultaneously green.
+5. Retirement order (current):
+6. first retire `called_function_*` semantic authority (keep optional parity checks only if needed),
+7. then retire `returns_on_all_paths` semantic authority,
+8. then retire statement counters (`loop/if/break/continue/declaration`) from semantic dependencies.
+9. Safety rule: retire one metadata family per change slice and run full `make test` before next retirement.
+10. Rollback rule: if drift appears, restore previous gate and keep parity rails until root cause is fixed.
 
 ## Known Limitations (Current Behavior)
 
@@ -158,5 +186,5 @@
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
 - Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.
-- Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005` with `callee_kind=call_result`.
+- Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `a()()`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005` with `callee_kind=call_result`.
 - Scope note for `SEMA-CALL-006`: this code applies to the parser-accepted subset of non-identifier callees that reaches semantic callable checks (for example `(f+1)()`), reported with `callee_kind=non_identifier`. Non-parenthesized non-identifier callees outside this subset can still be rejected earlier by parser syntax checks.

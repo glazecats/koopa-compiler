@@ -1,10 +1,54 @@
 #include "semantic.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CALLEE_PREVIEW_HEAD 24
 #define CALLEE_PREVIEW_TAIL 16
+
+typedef enum {
+    SEMA_MIGRATION_STRICT_PARITY = 0,
+    SEMA_MIGRATION_AST_PRIMARY_ONLY,
+} SemanticMigrationStrategy;
+
+/*
+ * S2 strategy selector:
+ * - STRICT_PARITY: enforce AST-vs-metadata callable parity as hard gate.
+ * - AST_PRIMARY_ONLY: use AST as source of truth; parity check is optional/deferred.
+ */
+static const SemanticMigrationStrategy kSemanticMigrationStrategy =
+    SEMA_MIGRATION_AST_PRIMARY_ONLY;
+
+typedef struct {
+    char *name;
+    int line;
+    int column;
+    size_t arg_count;
+    int kind;
+} CollectedCall;
+
+typedef struct {
+    CollectedCall *items;
+    size_t count;
+    size_t capacity;
+} CollectedCallList;
+
+typedef int (*ExpressionPostVisitor)(const AstExpression *expr, void *ctx);
+
+typedef struct {
+    CollectedCallList *calls;
+} CallCollectCtx;
+
+typedef struct {
+    const AstProgram *program;
+    size_t func_index;
+    SemanticError *error;
+} CallableRuleVisitCtx;
+
+static int semantic_strategy_requires_callable_parity(void) {
+    return kSemanticMigrationStrategy == SEMA_MIGRATION_STRICT_PARITY;
+}
 
 static void format_callee_preview(const char *name, char *out, size_t out_size) {
     size_t len;
@@ -57,10 +101,727 @@ static int names_equal(const AstExternal *a, const AstExternal *b) {
     return strncmp(a->name, b->name, a->name_length) == 0;
 }
 
+static const AstExpression *unwrap_paren_expression(const AstExpression *expr) {
+    const AstExpression *cur = expr;
+
+    while (cur && cur->kind == AST_EXPR_PAREN) {
+        cur = cur->as.inner;
+    }
+    return cur;
+}
+
+static int classify_ast_call_callee(const AstExpression *callee, const char **out_name) {
+    const AstExpression *base = unwrap_paren_expression(callee);
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+
+    if (!base) {
+        return AST_CALL_CALLEE_NON_IDENTIFIER;
+    }
+
+    if (base->kind == AST_EXPR_IDENTIFIER) {
+        if (out_name) {
+            *out_name = base->as.identifier.name;
+        }
+        return AST_CALL_CALLEE_DIRECT_IDENTIFIER;
+    }
+
+    if (base->kind == AST_EXPR_CALL) {
+        return AST_CALL_CALLEE_CALL_RESULT;
+    }
+
+    return AST_CALL_CALLEE_NON_IDENTIFIER;
+}
+
+static void free_collected_call_list(CollectedCallList *list) {
+    size_t i;
+
+    if (!list) {
+        return;
+    }
+
+    for (i = 0; i < list->count; ++i) {
+        free(list->items[i].name);
+    }
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static int append_collected_call(CollectedCallList *list,
+                                 const char *name,
+                                 int line,
+                                 int column,
+                                 size_t arg_count,
+                                 int kind) {
+    CollectedCall *new_items;
+    size_t next_capacity;
+    char *name_copy = NULL;
+
+    if (!list) {
+        return 0;
+    }
+
+    if (list->count == list->capacity) {
+        next_capacity = (list->capacity == 0) ? 8 : (list->capacity * 2);
+        new_items = (CollectedCall *)realloc(list->items, next_capacity * sizeof(CollectedCall));
+        if (!new_items) {
+            return 0;
+        }
+        list->items = new_items;
+        list->capacity = next_capacity;
+    }
+
+    if (name && name[0] != '\0') {
+        size_t len = strlen(name);
+        name_copy = (char *)malloc(len + 1);
+        if (!name_copy) {
+            return 0;
+        }
+        memcpy(name_copy, name, len);
+        name_copy[len] = '\0';
+    }
+
+    list->items[list->count].name = name_copy;
+    list->items[list->count].line = line;
+    list->items[list->count].column = column;
+    list->items[list->count].arg_count = arg_count;
+    list->items[list->count].kind = kind;
+    list->count++;
+    return 1;
+}
+
+static int walk_expression_postorder(const AstExpression *expr,
+                                     ExpressionPostVisitor visitor,
+                                     void *ctx) {
+    size_t i;
+
+    if (!expr) {
+        return 1;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_PAREN:
+        if (!walk_expression_postorder(expr->as.inner, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_UNARY:
+        if (!walk_expression_postorder(expr->as.unary.operand, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_POSTFIX:
+        if (!walk_expression_postorder(expr->as.postfix.operand, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_BINARY:
+        if (!walk_expression_postorder(expr->as.binary.left, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.binary.right, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_TERNARY:
+        if (!walk_expression_postorder(expr->as.ternary.condition, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.ternary.then_expr, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.ternary.else_expr, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_CALL:
+        if (!walk_expression_postorder(expr->as.call.callee, visitor, ctx)) {
+            return 0;
+        }
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            if (!walk_expression_postorder(expr->as.call.args[i], visitor, ctx)) {
+                return 0;
+            }
+        }
+        break;
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+    default:
+        break;
+    }
+
+    if (visitor && !visitor(expr, ctx)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int walk_statement_postorder(const AstStatement *stmt,
+                                    ExpressionPostVisitor visitor,
+                                    void *ctx) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    for (i = 0; i < stmt->expression_count; ++i) {
+        if (!walk_expression_postorder(stmt->expressions[i], visitor, ctx)) {
+            return 0;
+        }
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (!walk_statement_postorder(stmt->children[i], visitor, ctx)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static const AstExpression *statement_get_condition_expression(const AstStatement *stmt) {
+    if (!stmt || !stmt->has_condition_expression) {
+        return NULL;
+    }
+
+    if (stmt->condition_expression_index >= stmt->expression_count) {
+        return NULL;
+    }
+
+    return stmt->expressions[stmt->condition_expression_index];
+}
+
+static int expression_is_constant_true_for_flow(const AstExpression *expr) {
+    return expr && expr->kind == AST_EXPR_NUMBER && expr->as.number_value != 0;
+}
+
+static int semantic_analyze_statement_flow(const AstStatement *stmt,
+                                           int *out_guaranteed_return,
+                                           int *out_may_fallthrough,
+                                           int *out_may_break) {
+    size_t i;
+    int guaranteed_return = 0;
+    int may_fallthrough = 1;
+    int may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
+    if (!stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_COMPOUND: {
+        int block_guaranteed_return = 0;
+        int block_may_fallthrough = 1;
+        int block_may_break = 0;
+
+        for (i = 0; i < stmt->child_count; ++i) {
+            int child_guaranteed_return = 0;
+            int child_may_fallthrough = 1;
+            int child_may_break = 0;
+
+            if (!semantic_analyze_statement_flow(stmt->children[i],
+                                                 &child_guaranteed_return,
+                                                 &child_may_fallthrough,
+                                                 &child_may_break)) {
+                return 0;
+            }
+
+            if (block_may_fallthrough && child_may_break) {
+                block_may_break = 1;
+            }
+
+            if (block_may_fallthrough) {
+                if (child_guaranteed_return) {
+                    block_guaranteed_return = 1;
+                    block_may_fallthrough = 0;
+                } else if (!child_may_fallthrough) {
+                    block_guaranteed_return = 0;
+                    block_may_fallthrough = 0;
+                } else {
+                    block_guaranteed_return = 0;
+                }
+            }
+        }
+
+        guaranteed_return = block_guaranteed_return;
+        may_fallthrough = block_may_fallthrough;
+        may_break = block_may_break;
+        break;
+    }
+    case AST_STMT_IF: {
+        int then_guaranteed_return = 0;
+        int then_may_fallthrough = 1;
+        int then_may_break = 0;
+        int else_guaranteed_return = 0;
+        int else_may_fallthrough = 1;
+        int else_may_break = 0;
+        int has_else = stmt->child_count >= 2;
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &then_guaranteed_return,
+                                             &then_may_fallthrough,
+                                             &then_may_break)) {
+            return 0;
+        }
+
+        if (has_else &&
+            !semantic_analyze_statement_flow(stmt->children[1],
+                                             &else_guaranteed_return,
+                                             &else_may_fallthrough,
+                                             &else_may_break)) {
+            return 0;
+        }
+
+        guaranteed_return = has_else && then_guaranteed_return && else_guaranteed_return;
+        may_fallthrough = has_else ? (then_may_fallthrough || else_may_fallthrough) : 1;
+        may_break = has_else ? (then_may_break || else_may_break) : then_may_break;
+        break;
+    }
+    case AST_STMT_WHILE: {
+        int cond_always_true = expression_is_constant_true_for_flow(
+            statement_get_condition_expression(stmt));
+        int body_guaranteed_return = 0;
+        int body_may_break = 0;
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &body_guaranteed_return,
+                                             NULL,
+                                             &body_may_break)) {
+            return 0;
+        }
+
+        if (cond_always_true) {
+            if (body_may_break) {
+                guaranteed_return = 0;
+                may_fallthrough = 1;
+            } else {
+                guaranteed_return = body_guaranteed_return;
+                may_fallthrough = 0;
+            }
+        } else {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
+        }
+
+        may_break = 0;
+        break;
+    }
+    case AST_STMT_FOR: {
+        const AstExpression *cond_expr = statement_get_condition_expression(stmt);
+        int cond_always_true = 1;
+        int body_guaranteed_return = 0;
+        int body_may_break = 0;
+
+        if (stmt->has_condition_expression) {
+            cond_always_true = expression_is_constant_true_for_flow(cond_expr);
+        }
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &body_guaranteed_return,
+                                             NULL,
+                                             &body_may_break)) {
+            return 0;
+        }
+
+        if (cond_always_true) {
+            if (body_may_break) {
+                guaranteed_return = 0;
+                may_fallthrough = 1;
+            } else {
+                guaranteed_return = body_guaranteed_return;
+                may_fallthrough = 0;
+            }
+        } else {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
+        }
+
+        may_break = 0;
+        break;
+    }
+    case AST_STMT_RETURN:
+        guaranteed_return = 1;
+        may_fallthrough = 0;
+        may_break = 0;
+        break;
+    case AST_STMT_BREAK:
+        guaranteed_return = 0;
+        may_fallthrough = 0;
+        may_break = 1;
+        break;
+    case AST_STMT_CONTINUE:
+        guaranteed_return = 0;
+        may_fallthrough = 0;
+        may_break = 0;
+        break;
+    case AST_STMT_DECLARATION:
+    case AST_STMT_EXPRESSION:
+    default:
+        guaranteed_return = 0;
+        may_fallthrough = 1;
+        may_break = 0;
+        break;
+    }
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = guaranteed_return;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = may_fallthrough;
+    }
+    if (out_may_break) {
+        *out_may_break = may_break;
+    }
+    return 1;
+}
+
+static int semantic_compute_function_returns_all_paths(const AstExternal *func,
+                                                       int *out_returns_all_paths,
+                                                       SemanticError *error) {
+    int guaranteed_return = 0;
+
+    if (out_returns_all_paths) {
+        *out_returns_all_paths = 0;
+    }
+
+    if (!func) {
+        return 1;
+    }
+
+    if (!func->function_body) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+        return 0;
+    }
+
+    if (!semantic_analyze_statement_flow(func->function_body, &guaranteed_return, NULL, NULL)) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-007: failed to analyze function return-path flow from statement AST");
+        return 0;
+    }
+
+    if (kSemanticMigrationStrategy == SEMA_MIGRATION_STRICT_PARITY &&
+        guaranteed_return != func->returns_on_all_paths) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-008: return-path metadata mismatch between parser metadata and statement AST");
+        return 0;
+    }
+
+    if (out_returns_all_paths) {
+        *out_returns_all_paths = guaranteed_return;
+    }
+
+    return 1;
+}
+
+static int collect_call_expression_postorder(const AstExpression *expr, void *ctx) {
+    CallCollectCtx *collector;
+    const char *callee_name;
+    int callee_kind;
+
+    if (!ctx || !expr || expr->kind != AST_EXPR_CALL) {
+        return 1;
+    }
+
+    collector = (CallCollectCtx *)ctx;
+    callee_kind = classify_ast_call_callee(expr->as.call.callee, &callee_name);
+    return append_collected_call(collector->calls,
+                                 callee_name,
+                                 expr->line,
+                                 expr->column,
+                                 expr->as.call.arg_count,
+                                 callee_kind);
+}
+
+static int collect_calls_from_statement(const AstStatement *stmt, CollectedCallList *out_calls) {
+    CallCollectCtx ctx;
+
+    if (!out_calls) {
+        return 1;
+    }
+
+    ctx.calls = out_calls;
+    return walk_statement_postorder(stmt, collect_call_expression_postorder, &ctx);
+}
+
+static int call_name_equal(const char *a, const char *b) {
+    if (a == NULL && b == NULL) {
+        return 1;
+    }
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    return strcmp(a, b) == 0;
+}
+
+static int semantic_validate_callable_metadata_consistency(const AstExternal *func,
+                                                           SemanticError *error) {
+    CollectedCallList ast_calls;
+    size_t k;
+
+    if (!func || !func->function_body) {
+        return 1;
+    }
+
+    ast_calls.items = NULL;
+    ast_calls.count = 0;
+    ast_calls.capacity = 0;
+
+    if (!collect_calls_from_statement(func->function_body, &ast_calls)) {
+        free_collected_call_list(&ast_calls);
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-001: failed to collect callable metadata from statement AST");
+        return 0;
+    }
+
+    if (ast_calls.count != func->called_function_count) {
+        free_collected_call_list(&ast_calls);
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-002: callable metadata count mismatch between parser metadata and statement AST");
+        return 0;
+    }
+
+    for (k = 0; k < ast_calls.count; ++k) {
+        const char *meta_name = func->called_function_names ? func->called_function_names[k] : NULL;
+        int meta_line = func->called_function_lines ? func->called_function_lines[k] : func->line;
+        int meta_col = func->called_function_columns ? func->called_function_columns[k] : func->column;
+        size_t meta_arg_count =
+            func->called_function_arg_counts ? func->called_function_arg_counts[k] : 0;
+        int meta_kind =
+            func->called_function_kinds ? func->called_function_kinds[k] : AST_CALL_CALLEE_NON_IDENTIFIER;
+
+        if (!call_name_equal(meta_name, ast_calls.items[k].name) ||
+            meta_line != ast_calls.items[k].line || meta_col != ast_calls.items[k].column ||
+            meta_arg_count != ast_calls.items[k].arg_count || meta_kind != ast_calls.items[k].kind) {
+            free_collected_call_list(&ast_calls);
+            semantic_set_error(error,
+                               func->line,
+                               func->column,
+                               "SEMA-INT-003: callable metadata detail mismatch between parser metadata and statement AST");
+            return 0;
+        }
+    }
+
+    free_collected_call_list(&ast_calls);
+    return 1;
+}
+
+static int semantic_check_single_callable_rule(const AstProgram *program,
+                                               size_t func_index,
+                                               const char *called_name,
+                                               int call_line,
+                                               int call_column,
+                                               size_t called_arg_count,
+                                               int callee_kind,
+                                               SemanticError *error) {
+    size_t j;
+    int found_decl = 0;
+    int found_matching_param_count = 0;
+    int found_non_function_symbol = 0;
+    int has_later_function_decl = 0;
+    int later_decl_line = 0;
+    int later_decl_column = 0;
+    size_t expected_arg_count = 0;
+    char callee_preview[128];
+
+    format_callee_preview(called_name, callee_preview, sizeof(callee_preview));
+
+    if (!called_name || called_name[0] == '\0') {
+        if (error) {
+            if (callee_kind == AST_CALL_CALLEE_CALL_RESULT) {
+                semantic_set_error(error,
+                                   call_line,
+                                   call_column,
+                                   "SEMA-CALL-005: call result is not callable in this semantic subset; callee_kind=call_result");
+            } else {
+                semantic_set_error(error,
+                                   call_line,
+                                   call_column,
+                                   "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset; callee_kind=non_identifier");
+            }
+        }
+        return 0;
+    }
+
+    for (j = 0; j <= func_index; ++j) {
+        const AstExternal *candidate = &program->externals[j];
+
+        if (!candidate->name) {
+            continue;
+        }
+
+        if (strcmp(candidate->name, called_name) != 0) {
+            continue;
+        }
+
+        if (candidate->kind == AST_EXTERNAL_FUNCTION) {
+            found_decl = 1;
+            expected_arg_count = candidate->parameter_count;
+            if (candidate->parameter_count == called_arg_count) {
+                found_matching_param_count = 1;
+                break;
+            }
+            continue;
+        }
+
+        found_non_function_symbol = 1;
+    }
+
+    if (!found_decl) {
+        for (j = func_index + 1; j < program->count; ++j) {
+            const AstExternal *candidate = &program->externals[j];
+
+            if (!candidate->name || candidate->kind != AST_EXTERNAL_FUNCTION) {
+                continue;
+            }
+
+            if (strcmp(candidate->name, called_name) == 0) {
+                has_later_function_decl = 1;
+                later_decl_line = candidate->line;
+                later_decl_column = candidate->column;
+                break;
+            }
+        }
+    }
+
+    if (!found_decl && found_non_function_symbol) {
+        if (error) {
+            char msg[512];
+            snprintf(msg,
+                     sizeof(msg),
+                     "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
+                     callee_preview);
+            semantic_set_error(error, call_line, call_column, msg);
+        }
+        return 0;
+    }
+
+    if (found_decl && !found_matching_param_count) {
+        if (error) {
+            char msg[512];
+            snprintf(msg,
+                     sizeof(msg),
+                     "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
+                     callee_preview,
+                     expected_arg_count,
+                     called_arg_count);
+            semantic_set_error(error, call_line, call_column, msg);
+        }
+        return 0;
+    }
+
+    if (!found_decl) {
+        if (error) {
+            char msg[512];
+            if (has_later_function_decl) {
+                snprintf(msg,
+                         sizeof(msg),
+                         "SEMA-CALL-002: callee=%s; decl_line=%d; decl_col=%d; call before declaration",
+                         callee_preview,
+                         later_decl_line,
+                         later_decl_column);
+            } else {
+                snprintf(msg,
+                         sizeof(msg),
+                         "SEMA-CALL-001: callee=%s; call to undeclared function",
+                         callee_preview);
+            }
+            semantic_set_error(error, call_line, call_column, msg);
+        }
+        return 0;
+    }
+
+    return 1;
+}
+
+static int semantic_check_call_expr_postorder(const AstExpression *expr, void *ctx) {
+    CallableRuleVisitCtx *visit_ctx;
+    const char *called_name = NULL;
+    int callee_kind;
+
+    if (!expr || expr->kind != AST_EXPR_CALL) {
+        return 1;
+    }
+
+    if (!ctx) {
+        return 0;
+    }
+
+    visit_ctx = (CallableRuleVisitCtx *)ctx;
+    callee_kind = classify_ast_call_callee(expr->as.call.callee, &called_name);
+
+    return semantic_check_single_callable_rule(visit_ctx->program,
+                                               visit_ctx->func_index,
+                                               called_name,
+                                               expr->line,
+                                               expr->column,
+                                               expr->as.call.arg_count,
+                                               callee_kind,
+                                               visit_ctx->error);
+}
+
+static int semantic_check_function_callable_rules(const AstProgram *program,
+                                                  size_t func_index,
+                                                  const AstExternal *func,
+                                                  SemanticError *error) {
+    CallableRuleVisitCtx visit_ctx;
+
+    if (!program || !func) {
+        return 1;
+    }
+
+    /* S2-9: function-definition callable checks are AST-primary only. */
+    if (!func->is_function_definition) {
+        return 1;
+    }
+
+    if (!func->function_body) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+        return 0;
+    }
+
+    if (semantic_strategy_requires_callable_parity() &&
+        !semantic_validate_callable_metadata_consistency(func, error)) {
+        return 0;
+    }
+
+    visit_ctx.program = program;
+    visit_ctx.func_index = func_index;
+    visit_ctx.error = error;
+    return walk_statement_postorder(func->function_body,
+                                    semantic_check_call_expr_postorder,
+                                    &visit_ctx);
+}
+
 int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
     size_t i;
     size_t j;
-    size_t k;
 
     if (!program) {
         semantic_set_error(error, 0, 0, "Semantic input program is NULL");
@@ -75,156 +836,30 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
     for (i = 0; i < program->count; ++i) {
         const AstExternal *lhs = &program->externals[i];
+        int returns_on_all_paths = 0;
 
         /* AST contract allows unnamed externals (name_token == NULL). */
         if (!lhs->name || lhs->name_length == 0) {
             continue;
         }
 
-        if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition &&
-            !lhs->returns_on_all_paths) {
-            if (error) {
-                semantic_set_error(error,
-                                   lhs->line,
-                                   lhs->column,
-                                   "Function definition must return on all control-flow paths");
-            }
-            return 0;
-        }
-
         if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition) {
-            for (k = 0; k < lhs->called_function_count; ++k) {
-                int found_decl = 0;
-                int found_matching_param_count = 0;
-                int found_non_function_symbol = 0;
-                int has_later_function_decl = 0;
-                int later_decl_line = 0;
-                int later_decl_column = 0;
-                int call_line = lhs->line;
-                int call_column = lhs->column;
-                int callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
-                size_t expected_arg_count = 0;
-                size_t called_arg_count = 0;
-                const char *called_name = lhs->called_function_names[k];
-                char callee_preview[128];
+            if (!semantic_compute_function_returns_all_paths(lhs, &returns_on_all_paths, error)) {
+                return 0;
+            }
 
-                format_callee_preview(called_name, callee_preview, sizeof(callee_preview));
-
-                if (lhs->called_function_lines && lhs->called_function_columns) {
-                    call_line = lhs->called_function_lines[k];
-                    call_column = lhs->called_function_columns[k];
+            if (!returns_on_all_paths) {
+                if (error) {
+                    semantic_set_error(error,
+                                       lhs->line,
+                                       lhs->column,
+                                       "Function definition must return on all control-flow paths");
                 }
-                if (lhs->called_function_arg_counts) {
-                    called_arg_count = lhs->called_function_arg_counts[k];
-                }
-                if (lhs->called_function_kinds) {
-                    callee_kind = lhs->called_function_kinds[k];
-                }
+                return 0;
+            }
 
-                if (!called_name || called_name[0] == '\0') {
-                    if (error) {
-                        if (callee_kind == AST_CALL_CALLEE_CALL_RESULT) {
-                            semantic_set_error(error,
-                                               call_line,
-                                               call_column,
-                                               "SEMA-CALL-005: call result is not callable in this semantic subset; callee_kind=call_result");
-                        } else {
-                            semantic_set_error(error,
-                                               call_line,
-                                               call_column,
-                                               "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset; callee_kind=non_identifier");
-                        }
-                    }
-                    return 0;
-                }
-
-                for (j = 0; j <= i; ++j) {
-                    const AstExternal *candidate = &program->externals[j];
-
-                    if (!candidate->name) {
-                        continue;
-                    }
-
-                    if (strcmp(candidate->name, called_name) != 0) {
-                        continue;
-                    }
-
-                    if (candidate->kind == AST_EXTERNAL_FUNCTION) {
-                        found_decl = 1;
-                        expected_arg_count = candidate->parameter_count;
-                        if (candidate->parameter_count == called_arg_count) {
-                            found_matching_param_count = 1;
-                            break;
-                        }
-                        continue;
-                    }
-
-                    found_non_function_symbol = 1;
-                }
-
-                if (!found_decl) {
-                    for (j = i + 1; j < program->count; ++j) {
-                        const AstExternal *candidate = &program->externals[j];
-
-                        if (!candidate->name || candidate->kind != AST_EXTERNAL_FUNCTION) {
-                            continue;
-                        }
-
-                        if (strcmp(candidate->name, called_name) == 0) {
-                            has_later_function_decl = 1;
-                            later_decl_line = candidate->line;
-                            later_decl_column = candidate->column;
-                            break;
-                        }
-                    }
-                }
-
-                if (!found_decl && found_non_function_symbol) {
-                    if (error) {
-                        char msg[512];
-                        snprintf(msg,
-                                 sizeof(msg),
-                                 "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
-                                 callee_preview);
-                        semantic_set_error(error, call_line, call_column, msg);
-                    }
-                    return 0;
-                }
-
-                if (found_decl && !found_matching_param_count) {
-                    if (error) {
-                        char msg[512];
-                        snprintf(msg,
-                                 sizeof(msg),
-                                 "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
-                                 callee_preview,
-                                 expected_arg_count,
-                                 called_arg_count);
-                        semantic_set_error(error, call_line, call_column, msg);
-                    }
-                    return 0;
-                }
-
-                if (!found_decl) {
-                    if (error) {
-                        char msg[512];
-                        if (has_later_function_decl) {
-                            snprintf(msg,
-                                     sizeof(msg),
-                                     "SEMA-CALL-002: callee=%s; decl_line=%d; decl_col=%d; call before declaration",
-                                     callee_preview,
-                                     later_decl_line,
-                                     later_decl_column);
-                        } else {
-                            snprintf(msg,
-                                     sizeof(msg),
-                                     "SEMA-CALL-001: callee=%s; call to undeclared function",
-                                     callee_preview);
-                        }
-                        semantic_set_error(error, call_line, call_column, msg);
-                    }
-                    return 0;
-                }
+            if (!semantic_check_function_callable_rules(program, i, lhs, error)) {
+                return 0;
             }
         }
 

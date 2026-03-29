@@ -185,7 +185,8 @@ static int parse_expression(Parser *p);
 static int parse_statement_with_flow(Parser *p,
                                      int *out_guaranteed_return,
                                      int *out_may_fallthrough,
-                                     int *out_may_break);
+                                     int *out_may_break,
+                                     AstStatement **out_statement);
 static int parse_declaration(Parser *p, AstProgram *top_level_program);
 
 static void parser_clear_function_called_names(Parser *p) {
@@ -466,6 +467,165 @@ static const Token *token_slice_callable_name_token(const TokenArray *tokens,
 static int parse_initializer_expression(Parser *p) {
     /* C declarator initializers use assignment-expression, not comma-expression. */
     return parse_assignment(p);
+}
+
+static AstStatement *alloc_ast_statement(Parser *p,
+                                         AstStatementKind kind,
+                                         const Token *anchor_tok) {
+    AstStatement *stmt = (AstStatement *)malloc(sizeof(AstStatement));
+
+    if (!stmt) {
+        set_error(p,
+                  anchor_tok ? anchor_tok : peek(p),
+                  "Out of memory while building statement AST");
+        return NULL;
+    }
+
+    stmt->kind = kind;
+    stmt->line = anchor_tok ? anchor_tok->line : 0;
+    stmt->column = anchor_tok ? anchor_tok->column : 0;
+    stmt->expressions = NULL;
+    stmt->expression_count = 0;
+    stmt->has_primary_expression = 0;
+    stmt->primary_expression_index = 0;
+    stmt->has_condition_expression = 0;
+    stmt->condition_expression_index = 0;
+    stmt->has_for_init_expression = 0;
+    stmt->for_init_expression_index = 0;
+    stmt->has_for_step_expression = 0;
+    stmt->for_step_expression_index = 0;
+    stmt->children = NULL;
+    stmt->child_count = 0;
+    return stmt;
+}
+
+static int build_expression_ast_from_slice(Parser *p,
+                                           size_t start,
+                                           size_t end,
+                                           AstExpression **out_expr,
+                                           const Token *anchor_tok) {
+    ParserError nested_error;
+    TokenArray slice;
+    Token *owned_tokens;
+    size_t len;
+    size_t i;
+    int ok;
+
+    if (out_expr) {
+        *out_expr = NULL;
+    }
+
+    if (!out_expr || end <= start) {
+        return 1;
+    }
+
+    len = end - start;
+    owned_tokens = (Token *)malloc((len + 1) * sizeof(Token));
+    if (!owned_tokens) {
+        set_error(p,
+                  anchor_tok ? anchor_tok : peek(p),
+                  "Out of memory while building expression AST");
+        return 0;
+    }
+
+    for (i = 0; i < len; ++i) {
+        owned_tokens[i] = p->tokens->data[start + i];
+    }
+    owned_tokens[len] = p->tokens->data[p->tokens->size - 1];
+
+    slice.data = owned_tokens;
+    slice.size = len + 1;
+    slice.capacity = len + 1;
+
+    nested_error.line = 0;
+    nested_error.column = 0;
+    nested_error.message[0] = '\0';
+    ok = parser_parse_expression_ast_assignment(&slice, out_expr, &nested_error);
+    free(owned_tokens);
+
+    if (!ok) {
+        set_error(p,
+                  anchor_tok ? anchor_tok : peek(p),
+                  "Failed to build expression AST slice at %d:%d: %s",
+                  nested_error.line,
+                  nested_error.column,
+                  nested_error.message[0] ? nested_error.message : "unknown");
+        return 0;
+    }
+
+    return 1;
+}
+
+static void free_ast_statement_array(AstStatement **items, size_t count) {
+    size_t i;
+
+    if (!items) {
+        return;
+    }
+
+    for (i = 0; i < count; ++i) {
+        ast_statement_free_internal(items[i]);
+    }
+    free(items);
+}
+
+static int append_ast_statement_child(Parser *p,
+                                      AstStatement ***items,
+                                      size_t *count,
+                                      size_t *capacity,
+                                      AstStatement *child,
+                                      const Token *anchor_tok) {
+    AstStatement **new_items;
+    size_t next_capacity;
+
+    if (!items || !count || !capacity || !child) {
+        return 0;
+    }
+
+    if (*count == *capacity) {
+        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        new_items = (AstStatement **)realloc(*items, next_capacity * sizeof(AstStatement *));
+        if (!new_items) {
+            set_error(p,
+                      anchor_tok ? anchor_tok : peek(p),
+                      "Out of memory while building statement AST");
+            ast_statement_free_internal(child);
+            return 0;
+        }
+        *items = new_items;
+        *capacity = next_capacity;
+    }
+
+    (*items)[*count] = child;
+    (*count)++;
+    return 1;
+}
+
+static int append_ast_statement_expression(Parser *p,
+                                           AstStatement *stmt,
+                                           AstExpression *expr,
+                                           const Token *anchor_tok) {
+    AstExpression **new_items;
+
+    if (!stmt || !expr) {
+        return 0;
+    }
+
+    new_items = (AstExpression **)realloc(stmt->expressions,
+                                          (stmt->expression_count + 1) *
+                                              sizeof(AstExpression *));
+    if (!new_items) {
+        set_error(p,
+                  anchor_tok ? anchor_tok : peek(p),
+                  "Out of memory while building statement AST");
+        ast_expression_free_internal(expr);
+        return 0;
+    }
+    stmt->expressions = new_items;
+
+    stmt->expressions[stmt->expression_count] = expr;
+    stmt->expression_count++;
+    return 1;
 }
 
 static AstExpression *alloc_ast_expression(AstExpressionKind kind,
@@ -1620,14 +1780,60 @@ static int parse_expression(Parser *p) {
     return parse_comma(p);
 }
 
-static int parse_expression_statement(Parser *p) {
+static int parse_expression_statement(Parser *p, AstStatement **out_statement) {
+    const Token *anchor_tok = peek(p);
+    AstStatement *stmt = NULL;
+    size_t expr_start = p->current;
+    size_t expr_end = p->current;
+    AstExpression *expr_ast = NULL;
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
     if (match(p, TOKEN_SEMICOLON)) {
+        if (out_statement) {
+            stmt = alloc_ast_statement(p, AST_STMT_EXPRESSION, previous(p));
+            if (!stmt) {
+                return 0;
+            }
+            *out_statement = stmt;
+        }
         return 1;
     }
     if (!parse_expression(p)) {
         return 0;
     }
-    return consume(p, TOKEN_SEMICOLON, "';'");
+    expr_end = p->current;
+    if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        return 0;
+    }
+
+    if (out_statement) {
+        stmt = alloc_ast_statement(p, AST_STMT_EXPRESSION, anchor_tok);
+        if (!stmt) {
+            return 0;
+        }
+        if (!build_expression_ast_from_slice(p,
+                                             expr_start,
+                                             expr_end,
+                                             &expr_ast,
+                                             anchor_tok)) {
+            ast_statement_free_internal(stmt);
+            return 0;
+        }
+        if (expr_ast && !append_ast_statement_expression(p, stmt, expr_ast, anchor_tok)) {
+            ast_statement_free_internal(stmt);
+            return 0;
+        }
+        if (expr_ast) {
+            stmt->has_primary_expression = 1;
+            stmt->primary_expression_index = stmt->expression_count - 1;
+        }
+        *out_statement = stmt;
+    }
+
+    return 1;
 }
 
 static int expression_slice_is_constant_true(const TokenArray *tokens,
@@ -1650,10 +1856,19 @@ static int expression_slice_is_constant_true(const TokenArray *tokens,
 static int parse_compound_statement_with_flow(Parser *p,
                                               int *out_guaranteed_return,
                                               int *out_may_fallthrough,
-                                              int *out_may_break) {
+                                              int *out_may_break,
+                                              AstStatement **out_statement) {
     int block_guaranteed_return = 0;
     int block_may_fallthrough = 1;
     int block_may_break = 0;
+    AstStatement **children = NULL;
+    size_t child_count = 0;
+    size_t child_capacity = 0;
+    const Token *lbrace_tok = NULL;
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
 
     if (out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -1665,17 +1880,37 @@ static int parse_compound_statement_with_flow(Parser *p,
         *out_may_break = 0;
     }
 
-    if (!consume(p, TOKEN_LBRACE, "'{'") ) {
+    if (!consume_token(p, TOKEN_LBRACE, "'{'", &lbrace_tok)) {
         return 0;
     }
 
     while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
         if (check(p, TOKEN_KW_INT)) {
+            const Token *decl_tok = peek(p);
+
             if (p->track_function_declaration_count) {
                 p->function_declaration_count++;
             }
             if (!parse_declaration(p, NULL)) {
+                free_ast_statement_array(children, child_count);
                 return 0;
+            }
+            if (out_statement) {
+                AstStatement *decl_stmt =
+                    alloc_ast_statement(p, AST_STMT_DECLARATION, decl_tok);
+                if (!decl_stmt) {
+                    free_ast_statement_array(children, child_count);
+                    return 0;
+                }
+                if (!append_ast_statement_child(p,
+                                                &children,
+                                                &child_count,
+                                                &child_capacity,
+                                                decl_stmt,
+                                                decl_tok)) {
+                    free_ast_statement_array(children, child_count);
+                    return 0;
+                }
             }
             if (block_may_fallthrough) {
                 block_guaranteed_return = 0;
@@ -1684,12 +1919,27 @@ static int parse_compound_statement_with_flow(Parser *p,
             int stmt_guaranteed_return = 0;
             int stmt_may_fallthrough = 1;
             int stmt_may_break = 0;
+            AstStatement *child_stmt = NULL;
 
             if (!parse_statement_with_flow(p,
                                            &stmt_guaranteed_return,
                                            &stmt_may_fallthrough,
-                                           &stmt_may_break)) {
+                                           &stmt_may_break,
+                                           out_statement ? &child_stmt : NULL)) {
+                free_ast_statement_array(children, child_count);
                 return 0;
+            }
+
+            if (out_statement && child_stmt) {
+                if (!append_ast_statement_child(p,
+                                                &children,
+                                                &child_count,
+                                                &child_capacity,
+                                                child_stmt,
+                                                lbrace_tok)) {
+                    free_ast_statement_array(children, child_count);
+                    return 0;
+                }
             }
 
             if (block_may_fallthrough && stmt_may_break) {
@@ -1711,7 +1961,21 @@ static int parse_compound_statement_with_flow(Parser *p,
     }
 
     if (!consume(p, TOKEN_RBRACE, "'}'")) {
+        free_ast_statement_array(children, child_count);
         return 0;
+    }
+
+    if (out_statement) {
+        AstStatement *compound_stmt = alloc_ast_statement(p, AST_STMT_COMPOUND, lbrace_tok);
+        if (!compound_stmt) {
+            free_ast_statement_array(children, child_count);
+            return 0;
+        }
+        compound_stmt->children = children;
+        compound_stmt->child_count = child_count;
+        *out_statement = compound_stmt;
+    } else {
+        free_ast_statement_array(children, child_count);
     }
 
     if (out_guaranteed_return) {
@@ -1729,7 +1993,8 @@ static int parse_compound_statement_with_flow(Parser *p,
 static int parse_if_statement_with_flow(Parser *p,
                                         int *out_guaranteed_return,
                                         int *out_may_fallthrough,
-                                        int *out_may_break) {
+                                        int *out_may_break,
+                                        AstStatement **out_statement) {
     int then_guaranteed_return = 0;
     int then_may_fallthrough = 1;
     int then_may_break = 0;
@@ -1737,6 +2002,17 @@ static int parse_if_statement_with_flow(Parser *p,
     int else_may_fallthrough = 1;
     int else_may_break = 0;
     int has_else = 0;
+    const Token *if_tok = previous(p);
+    AstStatement *then_stmt = NULL;
+    AstStatement *else_stmt = NULL;
+    AstExpression *cond_expr = NULL;
+    AstStatement **children = NULL;
+    size_t child_count = 0;
+    size_t child_capacity = 0;
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
 
     if (out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -1755,16 +2031,32 @@ static int parse_if_statement_with_flow(Parser *p,
     if (!consume(p, TOKEN_LPAREN, "'('") ) {
         return 0;
     }
-    if (!parse_expression(p)) {
-        return 0;
+    {
+        size_t cond_start = p->current;
+        size_t cond_end;
+
+        if (!parse_expression(p)) {
+            return 0;
+        }
+        cond_end = p->current;
+        if (!build_expression_ast_from_slice(p,
+                                             cond_start,
+                                             cond_end,
+                                             out_statement ? &cond_expr : NULL,
+                                             if_tok)) {
+            return 0;
+        }
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
+        ast_expression_free_internal(cond_expr);
         return 0;
     }
     if (!parse_statement_with_flow(p,
                                    &then_guaranteed_return,
                                    &then_may_fallthrough,
-                                   &then_may_break)) {
+                                   &then_may_break,
+                                   out_statement ? &then_stmt : NULL)) {
+        ast_expression_free_internal(cond_expr);
         return 0;
     }
     if (match(p, TOKEN_KW_ELSE)) {
@@ -1772,9 +2064,59 @@ static int parse_if_statement_with_flow(Parser *p,
         if (!parse_statement_with_flow(p,
                                        &else_guaranteed_return,
                                        &else_may_fallthrough,
-                                       &else_may_break)) {
+                                       &else_may_break,
+                                       out_statement ? &else_stmt : NULL)) {
+            ast_statement_free_internal(then_stmt);
+            ast_expression_free_internal(cond_expr);
             return 0;
         }
+    }
+
+    if (out_statement) {
+        AstStatement *if_stmt;
+
+        if (then_stmt &&
+            !append_ast_statement_child(p,
+                                        &children,
+                                        &child_count,
+                                        &child_capacity,
+                                        then_stmt,
+                                        if_tok)) {
+            free_ast_statement_array(children, child_count);
+            ast_statement_free_internal(else_stmt);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+        if (else_stmt &&
+            !append_ast_statement_child(p,
+                                        &children,
+                                        &child_count,
+                                        &child_capacity,
+                                        else_stmt,
+                                        if_tok)) {
+            free_ast_statement_array(children, child_count);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+
+        if_stmt = alloc_ast_statement(p, AST_STMT_IF, if_tok);
+        if (!if_stmt) {
+            free_ast_statement_array(children, child_count);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+        if (cond_expr && !append_ast_statement_expression(p, if_stmt, cond_expr, if_tok)) {
+            ast_statement_free_internal(if_stmt);
+            free_ast_statement_array(children, child_count);
+            return 0;
+        }
+        if (cond_expr) {
+            if_stmt->has_condition_expression = 1;
+            if_stmt->condition_expression_index = if_stmt->expression_count - 1;
+        }
+        if_stmt->children = children;
+        if_stmt->child_count = child_count;
+        *out_statement = if_stmt;
     }
 
     if (out_guaranteed_return) {
@@ -1800,11 +2142,19 @@ static int parse_if_statement_with_flow(Parser *p,
 static int parse_while_statement_with_flow(Parser *p,
                                            int *out_guaranteed_return,
                                            int *out_may_fallthrough,
-                                           int *out_may_break) {
+                                           int *out_may_break,
+                                           AstStatement **out_statement) {
     size_t cond_start;
     int cond_always_true;
     int body_guaranteed_return = 0;
     int body_may_break = 0;
+    AstStatement *body_stmt = NULL;
+    AstExpression *cond_expr = NULL;
+    const Token *while_tok = previous(p);
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
 
     if (out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -1827,17 +2177,59 @@ static int parse_while_statement_with_flow(Parser *p,
     if (!parse_expression(p)) {
         return 0;
     }
+    if (!build_expression_ast_from_slice(p,
+                                         cond_start,
+                                         p->current,
+                                         out_statement ? &cond_expr : NULL,
+                                         while_tok)) {
+        return 0;
+    }
     cond_always_true = expression_slice_is_constant_true(p->tokens, cond_start, p->current);
     if (!consume(p, TOKEN_RPAREN, "')'")) {
+        ast_expression_free_internal(cond_expr);
         return 0;
     }
 
     p->loop_depth++;
-    if (!parse_statement_with_flow(p, &body_guaranteed_return, NULL, &body_may_break)) {
+    if (!parse_statement_with_flow(p,
+                                   &body_guaranteed_return,
+                                   NULL,
+                                   &body_may_break,
+                                   out_statement ? &body_stmt : NULL)) {
         p->loop_depth--;
+        ast_expression_free_internal(cond_expr);
         return 0;
     }
     p->loop_depth--;
+
+    if (out_statement) {
+        AstStatement *while_stmt = alloc_ast_statement(p, AST_STMT_WHILE, while_tok);
+        if (!while_stmt) {
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+        while_stmt->children = (AstStatement **)malloc(sizeof(AstStatement *));
+        if (!while_stmt->children) {
+            set_error(p, while_tok, "Out of memory while building statement AST");
+            ast_statement_free_internal(while_stmt);
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+        if (cond_expr && !append_ast_statement_expression(p, while_stmt, cond_expr, while_tok)) {
+            ast_statement_free_internal(while_stmt);
+            ast_statement_free_internal(body_stmt);
+            return 0;
+        }
+        if (cond_expr) {
+            while_stmt->has_condition_expression = 1;
+            while_stmt->condition_expression_index = while_stmt->expression_count - 1;
+        }
+        while_stmt->children[0] = body_stmt;
+        while_stmt->child_count = 1;
+        *out_statement = while_stmt;
+    }
 
     if (cond_always_true) {
         if (body_may_break) {
@@ -1870,11 +2262,21 @@ static int parse_while_statement_with_flow(Parser *p,
 static int parse_for_statement_with_flow(Parser *p,
                                          int *out_guaranteed_return,
                                          int *out_may_fallthrough,
-                                         int *out_may_break) {
+                                         int *out_may_break,
+                                         AstStatement **out_statement) {
     int cond_always_true = 0;
     size_t cond_start = 0;
     int body_guaranteed_return = 0;
     int body_may_break = 0;
+    AstStatement *body_stmt = NULL;
+    AstExpression *init_expr = NULL;
+    AstExpression *cond_expr = NULL;
+    AstExpression *step_expr = NULL;
+    const Token *for_tok = previous(p);
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
 
     if (out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -1900,7 +2302,24 @@ static int parse_for_statement_with_flow(Parser *p,
             return 0;
         }
     } else {
-        if (!parse_expression_statement(p)) {
+        size_t init_start = p->current;
+        size_t init_end = p->current;
+
+        if (!check(p, TOKEN_SEMICOLON)) {
+            if (!parse_expression(p)) {
+                return 0;
+            }
+            init_end = p->current;
+            if (!build_expression_ast_from_slice(p,
+                                                 init_start,
+                                                 init_end,
+                                                 out_statement ? &init_expr : NULL,
+                                                 for_tok)) {
+                return 0;
+            }
+        }
+        if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+            ast_expression_free_internal(init_expr);
             return 0;
         }
     }
@@ -1908,6 +2327,15 @@ static int parse_for_statement_with_flow(Parser *p,
     if (!check(p, TOKEN_SEMICOLON)) {
         cond_start = p->current;
         if (!parse_expression(p)) {
+            ast_expression_free_internal(init_expr);
+            return 0;
+        }
+        if (!build_expression_ast_from_slice(p,
+                                             cond_start,
+                                             p->current,
+                                             out_statement ? &cond_expr : NULL,
+                                             for_tok)) {
+            ast_expression_free_internal(init_expr);
             return 0;
         }
         cond_always_true = expression_slice_is_constant_true(p->tokens, cond_start, p->current);
@@ -1915,24 +2343,105 @@ static int parse_for_statement_with_flow(Parser *p,
         cond_always_true = 1;
     }
     if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        ast_expression_free_internal(init_expr);
+        ast_expression_free_internal(cond_expr);
         return 0;
     }
 
     if (!check(p, TOKEN_RPAREN)) {
+        size_t step_start = p->current;
+        size_t step_end;
+
         if (!parse_expression(p)) {
+            ast_expression_free_internal(init_expr);
+            ast_expression_free_internal(cond_expr);
+            return 0;
+        }
+        step_end = p->current;
+        if (!build_expression_ast_from_slice(p,
+                                             step_start,
+                                             step_end,
+                                             out_statement ? &step_expr : NULL,
+                                             for_tok)) {
+            ast_expression_free_internal(init_expr);
+            ast_expression_free_internal(cond_expr);
             return 0;
         }
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
+        ast_expression_free_internal(init_expr);
+        ast_expression_free_internal(cond_expr);
+        ast_expression_free_internal(step_expr);
         return 0;
     }
 
     p->loop_depth++;
-    if (!parse_statement_with_flow(p, &body_guaranteed_return, NULL, &body_may_break)) {
+    if (!parse_statement_with_flow(p,
+                                   &body_guaranteed_return,
+                                   NULL,
+                                   &body_may_break,
+                                   out_statement ? &body_stmt : NULL)) {
         p->loop_depth--;
+        ast_expression_free_internal(init_expr);
+        ast_expression_free_internal(cond_expr);
+        ast_expression_free_internal(step_expr);
         return 0;
     }
     p->loop_depth--;
+
+    if (out_statement) {
+        AstStatement *for_stmt = alloc_ast_statement(p, AST_STMT_FOR, for_tok);
+        if (!for_stmt) {
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(init_expr);
+            ast_expression_free_internal(cond_expr);
+            ast_expression_free_internal(step_expr);
+            return 0;
+        }
+        for_stmt->children = (AstStatement **)malloc(sizeof(AstStatement *));
+        if (!for_stmt->children) {
+            set_error(p, for_tok, "Out of memory while building statement AST");
+            ast_statement_free_internal(for_stmt);
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(init_expr);
+            ast_expression_free_internal(cond_expr);
+            ast_expression_free_internal(step_expr);
+            return 0;
+        }
+        if (init_expr && !append_ast_statement_expression(p, for_stmt, init_expr, for_tok)) {
+            ast_statement_free_internal(for_stmt);
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(cond_expr);
+            ast_expression_free_internal(step_expr);
+            return 0;
+        }
+        if (init_expr) {
+            for_stmt->has_for_init_expression = 1;
+            for_stmt->for_init_expression_index = for_stmt->expression_count - 1;
+        }
+        if (cond_expr && !append_ast_statement_expression(p, for_stmt, cond_expr, for_tok)) {
+            ast_statement_free_internal(for_stmt);
+            ast_statement_free_internal(body_stmt);
+            ast_expression_free_internal(step_expr);
+            return 0;
+        }
+        if (cond_expr) {
+            for_stmt->has_condition_expression = 1;
+            for_stmt->condition_expression_index = for_stmt->expression_count - 1;
+        }
+        if (step_expr && !append_ast_statement_expression(p, for_stmt, step_expr, for_tok)) {
+            ast_statement_free_internal(for_stmt);
+            ast_statement_free_internal(body_stmt);
+            return 0;
+        }
+        if (step_expr) {
+            for_stmt->has_for_step_expression = 1;
+            for_stmt->for_step_expression_index = for_stmt->expression_count - 1;
+        }
+        for_stmt->children[0] = body_stmt;
+        for_stmt->child_count = 1;
+        *out_statement = for_stmt;
+    }
 
     if (cond_always_true) {
         if (body_may_break) {
@@ -1962,11 +2471,21 @@ static int parse_for_statement_with_flow(Parser *p,
     return 1;
 }
 
-static int parse_return_statement(Parser *p) {
+static int parse_return_statement(Parser *p, AstStatement **out_statement) {
+    const Token *return_tok = previous(p);
+    size_t expr_start = p->current;
+    size_t expr_end = p->current;
+    AstExpression *expr_ast = NULL;
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
     if (!check(p, TOKEN_SEMICOLON)) {
         if (!parse_expression(p)) {
             return 0;
         }
+        expr_end = p->current;
     }
     if (!consume(p, TOKEN_SEMICOLON, "';'")) {
         return 0;
@@ -1974,10 +2493,41 @@ static int parse_return_statement(Parser *p) {
     if (p->track_function_return_count) {
         p->function_return_count++;
     }
+
+    if (out_statement) {
+        AstStatement *stmt = alloc_ast_statement(p, AST_STMT_RETURN, return_tok);
+        if (!stmt) {
+            return 0;
+        }
+        if (!build_expression_ast_from_slice(p,
+                                             expr_start,
+                                             expr_end,
+                                             &expr_ast,
+                                             return_tok)) {
+            ast_statement_free_internal(stmt);
+            return 0;
+        }
+        if (expr_ast && !append_ast_statement_expression(p, stmt, expr_ast, return_tok)) {
+            ast_statement_free_internal(stmt);
+            return 0;
+        }
+        if (expr_ast) {
+            stmt->has_primary_expression = 1;
+            stmt->primary_expression_index = stmt->expression_count - 1;
+        }
+        *out_statement = stmt;
+    }
+
     return 1;
 }
 
-static int parse_break_statement(Parser *p) {
+static int parse_break_statement(Parser *p, AstStatement **out_statement) {
+    const Token *break_tok = previous(p);
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
     if (p->loop_depth == 0) {
         set_error(p, previous(p), "'break' is only allowed inside loops");
         return 0;
@@ -1985,10 +2535,28 @@ static int parse_break_statement(Parser *p) {
     if (p->track_function_break_count) {
         p->function_break_count++;
     }
-    return consume(p, TOKEN_SEMICOLON, "';'");
+    if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        return 0;
+    }
+
+    if (out_statement) {
+        AstStatement *stmt = alloc_ast_statement(p, AST_STMT_BREAK, break_tok);
+        if (!stmt) {
+            return 0;
+        }
+        *out_statement = stmt;
+    }
+
+    return 1;
 }
 
-static int parse_continue_statement(Parser *p) {
+static int parse_continue_statement(Parser *p, AstStatement **out_statement) {
+    const Token *continue_tok = previous(p);
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
     if (p->loop_depth == 0) {
         set_error(p, previous(p), "'continue' is only allowed inside loops");
         return 0;
@@ -1996,13 +2564,26 @@ static int parse_continue_statement(Parser *p) {
     if (p->track_function_continue_count) {
         p->function_continue_count++;
     }
-    return consume(p, TOKEN_SEMICOLON, "';'");
+    if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+        return 0;
+    }
+
+    if (out_statement) {
+        AstStatement *stmt = alloc_ast_statement(p, AST_STMT_CONTINUE, continue_tok);
+        if (!stmt) {
+            return 0;
+        }
+        *out_statement = stmt;
+    }
+
+    return 1;
 }
 
 static int parse_statement_with_flow(Parser *p,
                                      int *out_guaranteed_return,
                                      int *out_may_fallthrough,
-                                     int *out_may_break) {
+                                     int *out_may_break,
+                                     AstStatement **out_statement) {
     int ok;
     int guaranteed_return = 0;
     int may_fallthrough = 1;
@@ -2017,17 +2598,23 @@ static int parse_statement_with_flow(Parser *p,
     if (out_may_break) {
         *out_may_break = 0;
     }
+    if (out_statement) {
+        *out_statement = NULL;
+    }
 
     if (!enter_statement_recursion(p, "statement")) {
         return 0;
     }
 
     if (match(p, TOKEN_LBRACE)) {
+        AstStatement *stmt = NULL;
+
         p->current--;
         ok = parse_compound_statement_with_flow(p,
                                                 &guaranteed_return,
                                                 &may_fallthrough,
-                                                &may_break);
+                                                &may_break,
+                                                out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = guaranteed_return;
@@ -2037,14 +2624,20 @@ static int parse_statement_with_flow(Parser *p,
         }
         if (ok && out_may_break) {
             *out_may_break = may_break;
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
         }
         return ok;
     }
     if (match(p, TOKEN_KW_IF)) {
+        AstStatement *stmt = NULL;
+
         ok = parse_if_statement_with_flow(p,
                                           &guaranteed_return,
                                           &may_fallthrough,
-                                          &may_break);
+                                          &may_break,
+                                          out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = guaranteed_return;
@@ -2054,14 +2647,20 @@ static int parse_statement_with_flow(Parser *p,
         }
         if (ok && out_may_break) {
             *out_may_break = may_break;
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
         }
         return ok;
     }
     if (match(p, TOKEN_KW_WHILE)) {
+        AstStatement *stmt = NULL;
+
         ok = parse_while_statement_with_flow(p,
                                              &guaranteed_return,
                                              &may_fallthrough,
-                                             &may_break);
+                                             &may_break,
+                                             out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = guaranteed_return;
@@ -2071,14 +2670,20 @@ static int parse_statement_with_flow(Parser *p,
         }
         if (ok && out_may_break) {
             *out_may_break = may_break;
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
         }
         return ok;
     }
     if (match(p, TOKEN_KW_FOR)) {
+        AstStatement *stmt = NULL;
+
         ok = parse_for_statement_with_flow(p,
                                            &guaranteed_return,
                                            &may_fallthrough,
-                                           &may_break);
+                                           &may_break,
+                                           out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = guaranteed_return;
@@ -2089,10 +2694,15 @@ static int parse_statement_with_flow(Parser *p,
         if (ok && out_may_break) {
             *out_may_break = may_break;
         }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_RETURN)) {
-        ok = parse_return_statement(p);
+        AstStatement *stmt = NULL;
+
+        ok = parse_return_statement(p, out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = 1;
@@ -2103,10 +2713,15 @@ static int parse_statement_with_flow(Parser *p,
         if (ok && out_may_break) {
             *out_may_break = 0;
         }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_BREAK)) {
-        ok = parse_break_statement(p);
+        AstStatement *stmt = NULL;
+
+        ok = parse_break_statement(p, out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = 0;
@@ -2117,10 +2732,15 @@ static int parse_statement_with_flow(Parser *p,
         if (ok && out_may_break) {
             *out_may_break = 1;
         }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
         return ok;
     }
     if (match(p, TOKEN_KW_CONTINUE)) {
-        ok = parse_continue_statement(p);
+        AstStatement *stmt = NULL;
+
+        ok = parse_continue_statement(p, out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok && out_guaranteed_return) {
             *out_guaranteed_return = 0;
@@ -2131,10 +2751,13 @@ static int parse_statement_with_flow(Parser *p,
         if (ok && out_may_break) {
             *out_may_break = 0;
         }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
         return ok;
     }
 
-    ok = parse_expression_statement(p);
+    ok = parse_expression_statement(p, out_statement);
     leave_statement_recursion(p);
     if (ok && out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -2243,6 +2866,7 @@ static int parse_function_external(Parser *p,
                                    const Token **out_name_token,
                                    size_t *out_parameter_count,
                                    int *out_is_definition,
+                                   AstStatement **out_function_body,
                                    size_t *out_return_statement_count,
                                    int *out_returns_on_all_paths,
                                    size_t *out_loop_statement_count,
@@ -2261,6 +2885,7 @@ static int parse_function_external(Parser *p,
     int has_unnamed_parameter = 0;
     int body_ok;
     int function_returns_on_all_paths = 0;
+    AstStatement *function_body = NULL;
 
     if (out_name_token) {
         *out_name_token = NULL;
@@ -2270,6 +2895,9 @@ static int parse_function_external(Parser *p,
     }
     if (out_is_definition) {
         *out_is_definition = 0;
+    }
+    if (out_function_body) {
+        *out_function_body = NULL;
     }
     if (out_return_statement_count) {
         *out_return_statement_count = 0;
@@ -2373,7 +3001,8 @@ static int parse_function_external(Parser *p,
         body_ok = parse_compound_statement_with_flow(p,
                                                      &function_returns_on_all_paths,
                                                      NULL,
-                                                     NULL);
+                                                     NULL,
+                                                     out_function_body ? &function_body : NULL);
         if (out_return_statement_count) {
             *out_return_statement_count = p->function_return_count;
         }
@@ -2422,6 +3051,17 @@ static int parse_function_external(Parser *p,
         } else {
             parser_clear_function_called_names(p);
         }
+
+        if (body_ok) {
+            if (out_function_body) {
+                *out_function_body = function_body;
+            } else {
+                ast_statement_free_internal(function_body);
+            }
+        } else {
+            ast_statement_free_internal(function_body);
+        }
+
         return body_ok;
     }
 
@@ -2440,6 +3080,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
     const Token *external_name = NULL;
     size_t external_parameter_count = 0;
     int external_is_definition = 0;
+    AstStatement *external_function_body = NULL;
     size_t external_return_statement_count = 0;
     int external_returns_on_all_paths = 0;
     size_t external_loop_statement_count = 0;
@@ -2527,6 +3168,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
         external_name = NULL;
         external_parameter_count = 0;
         external_is_definition = 0;
+        external_function_body = NULL;
         external_return_statement_count = 0;
         external_returns_on_all_paths = 0;
         external_loop_statement_count = 0;
@@ -2545,6 +3187,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
                                      &external_name,
                                      &external_parameter_count,
                                      &external_is_definition,
+                                     &external_function_body,
                                      &external_return_statement_count,
                                      &external_returns_on_all_paths,
                                      &external_loop_statement_count,
@@ -2568,6 +3211,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
             if (!ast_program_append_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
                 size_t i;
 
+                ast_statement_free_internal(external_function_body);
                 for (i = 0; i < external_called_function_count; ++i) {
                     free(external_called_function_names[i]);
                 }
@@ -2583,6 +3227,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
             out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
             out_program->externals[out_program->count - 1].is_function_definition =
                 external_is_definition;
+            out_program->externals[out_program->count - 1].function_body = external_function_body;
             out_program->externals[out_program->count - 1].return_statement_count =
                 external_return_statement_count;
             out_program->externals[out_program->count - 1].returns_on_all_paths =
@@ -2686,6 +3331,7 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
     while (!is_at_end(&p)) {
         start = p.current;
         if (!parse_function_external(&p,
+                                     NULL,
                                      NULL,
                                      NULL,
                                      NULL,

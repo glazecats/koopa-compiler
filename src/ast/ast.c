@@ -55,3 +55,32 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "unknown";
     }
 }
+
+void ast_statement_free(AstStatement *stmt) {
+    ast_statement_free_internal(stmt);
+}
+
+const char *ast_statement_kind_name(AstStatementKind kind) {
+    switch (kind) {
+    case AST_STMT_COMPOUND:
+        return "compound";
+    case AST_STMT_DECLARATION:
+        return "declaration";
+    case AST_STMT_EXPRESSION:
+        return "expression";
+    case AST_STMT_IF:
+        return "if";
+    case AST_STMT_WHILE:
+        return "while";
+    case AST_STMT_FOR:
+        return "for";
+    case AST_STMT_RETURN:
+        return "return";
+    case AST_STMT_BREAK:
+        return "break";
+    case AST_STMT_CONTINUE:
+        return "continue";
+    default:
+        return "unknown";
+    }
+}

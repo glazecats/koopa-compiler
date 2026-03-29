@@ -3201,6 +3201,36 @@ static int test_ast_records_function_parameter_count(void) {
         return 0;
     }
 
+    if (!program.externals[0].function_body ||
+        program.externals[0].function_body->kind != AST_STMT_COMPOUND) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected add function_body compound statement AST\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].function_body->child_count != 1 ||
+        !program.externals[0].function_body->children[0] ||
+        program.externals[0].function_body->children[0]->kind != AST_STMT_RETURN ||
+        program.externals[0].function_body->children[0]->expression_count != 1 ||
+        !program.externals[0].function_body->children[0]->expressions[0]) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected add return statement with one expression subtree\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!program.externals[0].function_body->children[0]->has_primary_expression ||
+        program.externals[0].function_body->children[0]->primary_expression_index != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected return statement primary expression slot metadata\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     if (program.externals[0].return_statement_count != 1) {
         fprintf(stderr,
                 "[parser-reg] FAIL: expected add return_statement_count=1, got %zu\n",
@@ -3302,6 +3332,7 @@ static int test_ast_parses_function_declaration_external(void) {
 
     if (program.externals[0].parameter_count != 2 ||
         program.externals[0].is_function_definition != 0 ||
+        program.externals[0].function_body != NULL ||
         program.externals[0].return_statement_count != 0 ||
         program.externals[0].returns_on_all_paths != 0 ||
         program.externals[0].loop_statement_count != 0 ||
@@ -3310,9 +3341,10 @@ static int test_ast_parses_function_declaration_external(void) {
         program.externals[0].continue_statement_count != 0 ||
         program.externals[0].declaration_statement_count != 0) {
         fprintf(stderr,
-            "[parser-reg] FAIL: expected declaration metadata params=2 def=0 returns=0 allpaths=0 loops=0 ifs=0 breaks=0 continues=0 decls=0, got params=%zu def=%d returns=%zu allpaths=%d loops=%zu ifs=%zu breaks=%zu continues=%zu decls=%zu\n",
+            "[parser-reg] FAIL: expected declaration metadata params=2 def=0 body=NULL returns=0 allpaths=0 loops=0 ifs=0 breaks=0 continues=0 decls=0, got params=%zu def=%d body=%p returns=%zu allpaths=%d loops=%zu ifs=%zu breaks=%zu continues=%zu decls=%zu\n",
                 program.externals[0].parameter_count,
                 program.externals[0].is_function_definition,
+            (void *)program.externals[0].function_body,
             program.externals[0].return_statement_count,
             program.externals[0].returns_on_all_paths,
             program.externals[0].loop_statement_count,
@@ -3320,6 +3352,104 @@ static int test_ast_parses_function_declaration_external(void) {
             program.externals[0].break_statement_count,
             program.externals[0].continue_statement_count,
             program.externals[0].declaration_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_statement_expression_slots_for_control_flow(void) {
+    const char *source =
+        "int f(int n){while(n){n=n-1;}for(n=0;n;n=n-1){n=n-1;}if(n){return n;}return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *while_stmt;
+    AstStatement *for_stmt;
+    AstStatement *if_stmt;
+    AstStatement *ret_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for statement-slot AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse failed for statement-slot input at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected one function with body for statement-slot test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.externals[0].function_body;
+    if (body->kind != AST_STMT_COMPOUND || body->child_count != 4) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected compound body with 4 statements, got kind=%d count=%zu\n",
+                (int)body->kind,
+                body->child_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    while_stmt = body->children[0];
+    for_stmt = body->children[1];
+    if_stmt = body->children[2];
+    ret_stmt = body->children[3];
+
+    if (!while_stmt || while_stmt->kind != AST_STMT_WHILE || !while_stmt->has_condition_expression ||
+        while_stmt->condition_expression_index != 0 || while_stmt->expression_count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: while statement condition slot metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!for_stmt || for_stmt->kind != AST_STMT_FOR || !for_stmt->has_for_init_expression ||
+        !for_stmt->has_condition_expression || !for_stmt->has_for_step_expression ||
+        for_stmt->for_init_expression_index != 0 || for_stmt->condition_expression_index != 1 ||
+        for_stmt->for_step_expression_index != 2 || for_stmt->expression_count != 3) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: for statement slot metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!if_stmt || if_stmt->kind != AST_STMT_IF || !if_stmt->has_condition_expression ||
+        if_stmt->condition_expression_index != 0 || if_stmt->expression_count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: if statement condition slot metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!ret_stmt || ret_stmt->kind != AST_STMT_RETURN || !ret_stmt->has_primary_expression ||
+        ret_stmt->primary_expression_index != 0 || ret_stmt->expression_count != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: return statement primary slot metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -4767,6 +4897,9 @@ int main(void) {
         return 1;
     }
     if (!test_ast_parses_function_declaration_external()) {
+        return 1;
+    }
+    if (!test_ast_statement_expression_slots_for_control_flow()) {
         return 1;
     }
     if (!test_ast_parses_unnamed_parameter_prototype()) {

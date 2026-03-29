@@ -831,8 +831,8 @@ static int test_semantic_call_argument_mismatch_long_name_not_truncated(void) {
     return 1;
 }
 
-static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void) {
-    const char *source = "int f(){return 1;}\nint main(){return f()(1);}\n";
+static int test_semantic_rejects_missing_function_body_during_ast_primary_phase(void) {
+    const char *source = "int f(){return 1;}\n";
     TokenArray tokens;
     AstProgram program;
     ParserError parse_err;
@@ -842,17 +842,29 @@ static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void)
         return 0;
     }
 
-    if (semantic_analyze_program(&program, &sema_err)) {
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: chained call should be rejected as unsupported indirect call\n");
+                "[semantic-reg] FAIL: setup expected one function definition with function_body\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
     }
 
-    if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
+    ast_statement_free(program.externals[0].function_body);
+    program.externals[0].function_body = NULL;
+
+    if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
+                "[semantic-reg] FAIL: missing function_body should fail during AST-primary semantic phase\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-INT-005") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-INT-005 for missing function_body, got: %s\n",
                 sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
@@ -861,6 +873,47 @@ static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void)
 
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void) {
+    const char *cases[] = {
+        "int f(){return 1;}\nint main(){return f()(1);}\n",
+        "int a(){return 1;}\nint main(){return a()();}\n"
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        TokenArray tokens;
+        AstProgram program;
+        ParserError parse_err;
+        SemanticError sema_err;
+
+        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+            return 0;
+        }
+
+        if (semantic_analyze_program(&program, &sema_err)) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: chained call should be rejected as unsupported indirect call\n");
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+    }
+
     return 1;
 }
 
@@ -949,7 +1002,7 @@ static int test_semantic_rejects_parenthesized_non_identifier_callee_form(void) 
     return 1;
 }
 
-static int test_semantic_rejects_non_identifier_callee_metadata_contract(void) {
+static int test_semantic_rejects_metadata_only_definition_during_ast_primary_phase(void) {
     AstProgram program;
     SemanticError sema_err;
     Token main_tok;
@@ -996,14 +1049,14 @@ static int test_semantic_rejects_non_identifier_callee_metadata_contract(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: non-identifier callee metadata should fail semantic analysis\n");
+                "[semantic-reg] FAIL: metadata-only function definition should fail semantic analysis\n");
         ast_program_free(&program);
         return 0;
     }
 
-    if (strstr(sema_err.message, "SEMA-CALL-006") == NULL) {
+    if (strstr(sema_err.message, "SEMA-INT-005") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-006 diagnostic, got: %s\n",
+                "[semantic-reg] FAIL: expected SEMA-INT-005 diagnostic, got: %s\n",
                 sema_err.message);
         ast_program_free(&program);
         return 0;
@@ -1074,6 +1127,178 @@ static int test_semantic_rejects_call_before_visible_declaration(void) {
         ast_program_free(&program);
         return 0;
     }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_ast_primary_return_flow_ignores_tampered_metadata(void) {
+    const char *source = "int main(){while(1){continue;}return 1;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    int saved_returns_on_all_paths;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: setup expected one function definition with statement AST body\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    /* Tamper parser return metadata; AST-primary flow should still reject this function. */
+    saved_returns_on_all_paths = program.externals[0].returns_on_all_paths;
+    program.externals[0].returns_on_all_paths = 1;
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: non-returning function should fail even if parser return metadata is tampered\n");
+        program.externals[0].returns_on_all_paths = saved_returns_on_all_paths;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected all-paths-return diagnostic from AST-primary flow, got: %s\n",
+                sema_err.message);
+        program.externals[0].returns_on_all_paths = saved_returns_on_all_paths;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    program.externals[0].returns_on_all_paths = saved_returns_on_all_paths;
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_ast_primary_callable_ignores_tampered_metadata(void) {
+    const char *source = "int main(){return foo(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    size_t saved_count;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: setup expected one function definition with statement AST body\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    /* Tamper parser-side callable metadata; AST-primary path should still drive semantic result. */
+    saved_count = program.externals[0].called_function_count;
+    program.externals[0].called_function_count = 0;
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: undeclared call should fail even if parser callable metadata is tampered\n");
+        program.externals[0].called_function_count = saved_count;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-001 from AST-primary callable path, got: %s\n",
+                sema_err.message);
+        program.externals[0].called_function_count = saved_count;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    program.externals[0].called_function_count = saved_count;
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_ast_primary_chained_call_ignores_tampered_metadata(void) {
+    const char *source = "int f(){return 1;}\nint main(){return f()(1);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    size_t main_index = (size_t)-1;
+    size_t i;
+    size_t saved_count;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    for (i = 0; i < program.count; ++i) {
+        if (program.externals[i].kind == AST_EXTERNAL_FUNCTION && program.externals[i].name &&
+            strcmp(program.externals[i].name, "main") == 0) {
+            main_index = i;
+            break;
+        }
+    }
+
+    if (main_index == (size_t)-1 || !program.externals[main_index].is_function_definition ||
+        !program.externals[main_index].function_body) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: setup expected function definition main with statement AST body\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[main_index].called_function_count < 2) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: setup expected chained-call metadata count >= 2, got %zu\n",
+                program.externals[main_index].called_function_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    /* Hide outer call in parser metadata; AST-primary traversal should still reject chained call. */
+    saved_count = program.externals[main_index].called_function_count;
+    program.externals[main_index].called_function_count = 1;
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: chained call should fail even if parser callable metadata is tampered\n");
+        program.externals[main_index].called_function_count = saved_count;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-CALL-005 from AST-primary chained-call path, got: %s\n",
+                sema_err.message);
+        program.externals[main_index].called_function_count = saved_count;
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    program.externals[main_index].called_function_count = saved_count;
 
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
@@ -1305,6 +1530,9 @@ int main(void) {
     if (!test_semantic_call_argument_mismatch_long_name_not_truncated()) {
         return 1;
     }
+    if (!test_semantic_rejects_missing_function_body_during_ast_primary_phase()) {
+        return 1;
+    }
     if (!test_semantic_rejects_chained_call_as_unsupported_indirect_call()) {
         return 1;
     }
@@ -1314,7 +1542,7 @@ int main(void) {
     if (!test_semantic_rejects_parenthesized_non_identifier_callee_form()) {
         return 1;
     }
-    if (!test_semantic_rejects_non_identifier_callee_metadata_contract()) {
+    if (!test_semantic_rejects_metadata_only_definition_during_ast_primary_phase()) {
         return 1;
     }
     if (!test_semantic_callable_diagnostic_matrix()) {
@@ -1327,6 +1555,15 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_rejects_call_before_visible_declaration()) {
+        return 1;
+    }
+    if (!test_semantic_ast_primary_return_flow_ignores_tampered_metadata()) {
+        return 1;
+    }
+    if (!test_semantic_ast_primary_callable_ignores_tampered_metadata()) {
+        return 1;
+    }
+    if (!test_semantic_ast_primary_chained_call_ignores_tampered_metadata()) {
         return 1;
     }
     if (!test_semantic_accepts_call_with_prior_prototype_then_later_definition()) {

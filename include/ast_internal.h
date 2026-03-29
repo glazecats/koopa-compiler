@@ -6,6 +6,28 @@
 
 #include "ast.h"
 
+/* Internal helper: recursively free an expression subtree. */
+static inline void ast_expression_free_internal(AstExpression *expr);
+
+/* Internal helper: recursively free a statement subtree. */
+static inline void ast_statement_free_internal(AstStatement *stmt) {
+    size_t i;
+
+    if (!stmt) {
+        return;
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        ast_statement_free_internal(stmt->children[i]);
+    }
+    for (i = 0; i < stmt->expression_count; ++i) {
+        ast_expression_free_internal(stmt->expressions[i]);
+    }
+    free(stmt->expressions);
+    free(stmt->children);
+    free(stmt);
+}
+
 /* Internal helper: free all owned AstProgram storage and reset to empty. */
 static inline void ast_program_clear_storage(AstProgram *program) {
     size_t i;
@@ -17,6 +39,7 @@ static inline void ast_program_clear_storage(AstProgram *program) {
     for (i = 0; i < program->count; ++i) {
         size_t j;
         free(program->externals[i].name);
+        ast_statement_free_internal(program->externals[i].function_body);
         for (j = 0; j < program->externals[i].called_function_count; ++j) {
             free(program->externals[i].called_function_names[j]);
         }
@@ -61,6 +84,7 @@ static inline int ast_program_append_external(AstProgram *program,
     external.has_initializer = 0;
     external.parameter_count = 0;
     external.is_function_definition = 0;
+    external.function_body = NULL;
     external.return_statement_count = 0;
     external.returns_on_all_paths = 0;
     external.loop_statement_count = 0;

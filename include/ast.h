@@ -22,12 +22,25 @@ typedef enum {
 } AstExpressionKind;
 
 typedef enum {
+    AST_STMT_COMPOUND = 0,
+    AST_STMT_DECLARATION,
+    AST_STMT_EXPRESSION,
+    AST_STMT_IF,
+    AST_STMT_WHILE,
+    AST_STMT_FOR,
+    AST_STMT_RETURN,
+    AST_STMT_BREAK,
+    AST_STMT_CONTINUE,
+} AstStatementKind;
+
+typedef enum {
     AST_CALL_CALLEE_DIRECT_IDENTIFIER = 0,
     AST_CALL_CALLEE_CALL_RESULT,
     AST_CALL_CALLEE_NON_IDENTIFIER,
 } AstCallCalleeKind;
 
 typedef struct AstExpression AstExpression;
+typedef struct AstStatement AstStatement;
 
 struct AstExpression {
     AstExpressionKind kind;
@@ -66,6 +79,24 @@ struct AstExpression {
     } as;
 };
 
+struct AstStatement {
+    AstStatementKind kind;
+    int line;
+    int column;
+    AstExpression **expressions;
+    size_t expression_count;
+    int has_primary_expression;
+    size_t primary_expression_index;
+    int has_condition_expression;
+    size_t condition_expression_index;
+    int has_for_init_expression;
+    size_t for_init_expression_index;
+    int has_for_step_expression;
+    size_t for_step_expression_index;
+    AstStatement **children;
+    size_t child_count;
+};
+
 typedef struct {
     AstExternalKind kind;
     char *name;
@@ -73,6 +104,7 @@ typedef struct {
     int has_initializer;
     size_t parameter_count;
     int is_function_definition;
+    AstStatement *function_body;
     size_t return_statement_count;
     int returns_on_all_paths;
     size_t loop_statement_count;
@@ -111,5 +143,9 @@ const char *ast_external_kind_name(AstExternalKind kind);
 void ast_expression_free(AstExpression *expr);
 
 const char *ast_expression_kind_name(AstExpressionKind kind);
+
+void ast_statement_free(AstStatement *stmt);
+
+const char *ast_statement_kind_name(AstStatementKind kind);
 
 #endif
