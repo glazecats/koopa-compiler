@@ -3460,6 +3460,118 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     return 1;
 }
 
+static int test_ast_records_scope_declaration_and_parameter_names(void) {
+    const char *source =
+        "int f(int a,int b){int x=0,y=1;for(int i=0;i<2;i=i+1){x=x+i;}return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *decl_stmt;
+    AstStatement *for_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for scope-name AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse failed for scope-name input at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected one function definition with body for scope-name test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].parameter_count != 2 || !program.externals[0].parameter_names ||
+        !program.externals[0].parameter_names[0] || !program.externals[0].parameter_names[1] ||
+        strcmp(program.externals[0].parameter_names[0], "a") != 0 ||
+        strcmp(program.externals[0].parameter_names[1], "b") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected function parameter names [a,b] to be recorded\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.externals[0].function_body;
+    if (body->kind != AST_STMT_COMPOUND || body->child_count != 3) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected compound body with 3 statements in scope-name test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    decl_stmt = body->children[0];
+    for_stmt = body->children[1];
+
+    if (!decl_stmt || decl_stmt->kind != AST_STMT_DECLARATION ||
+        decl_stmt->declaration_name_count != 2 || !decl_stmt->declaration_names ||
+        !decl_stmt->declaration_names[0] || !decl_stmt->declaration_names[1] ||
+        strcmp(decl_stmt->declaration_names[0], "x") != 0 ||
+        strcmp(decl_stmt->declaration_names[1], "y") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected declaration statement names [x,y] to be recorded\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (decl_stmt->expression_count != 2 || !decl_stmt->expressions ||
+        !decl_stmt->expressions[0] || !decl_stmt->expressions[1] ||
+        decl_stmt->expressions[0]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->expressions[1]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->expressions[0]->as.number_value != 0 ||
+        decl_stmt->expressions[1]->as.number_value != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected declaration initializer expressions [0,1] in statement AST\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!for_stmt || for_stmt->kind != AST_STMT_FOR || for_stmt->declaration_name_count != 1 ||
+        !for_stmt->declaration_names || !for_stmt->declaration_names[0] ||
+        strcmp(for_stmt->declaration_names[0], "i") != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected for-init declaration name [i] to be recorded\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!for_stmt->has_for_init_expression || !for_stmt->has_condition_expression ||
+        !for_stmt->has_for_step_expression || for_stmt->for_init_expression_index != 0 ||
+        for_stmt->condition_expression_index != 1 || for_stmt->for_step_expression_index != 2 ||
+        for_stmt->expression_count != 3) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected for-init declaration expression slots to be recorded\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_ast_parses_unnamed_parameter_prototype(void) {
     /* Prototype accepts unnamed parameter: int f(int); */
     const char *source = "int f(int);\n";
@@ -4186,6 +4298,96 @@ static int test_ast_records_declaration_initializer_metadata(void) {
     return 1;
 }
 
+static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
+    const char *source =
+        "int f(){int x=y,y=1,z;for(int i=j,j=0,k;i<1;i=i+1){return i;}return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *decl_stmt;
+    AstStatement *for_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: lexer failed for initializer-slot alignment test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: AST parse failed for initializer-slot alignment input at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected one function definition for initializer-slot alignment test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.externals[0].function_body;
+    if (body->kind != AST_STMT_COMPOUND || body->child_count != 3) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected compound body with 3 statements for initializer-slot alignment test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    decl_stmt = body->children[0];
+    if (!decl_stmt || decl_stmt->kind != AST_STMT_DECLARATION ||
+        decl_stmt->declaration_name_count != 3 || decl_stmt->expression_count != 3 ||
+        !decl_stmt->expressions || decl_stmt->expressions[0] == NULL ||
+        decl_stmt->expressions[1] == NULL || decl_stmt->expressions[2] != NULL ||
+        decl_stmt->expressions[0]->kind != AST_EXPR_IDENTIFIER ||
+        !decl_stmt->expressions[0]->as.identifier.name ||
+        strcmp(decl_stmt->expressions[0]->as.identifier.name, "y") != 0 ||
+        decl_stmt->expressions[1]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->expressions[1]->as.number_value != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: declaration initializer slots did not align with declarator order [x,y,z]\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    for_stmt = body->children[1];
+    if (!for_stmt || for_stmt->kind != AST_STMT_FOR || for_stmt->declaration_name_count != 3 ||
+        for_stmt->expression_count != 5 || !for_stmt->expressions ||
+        !for_stmt->has_for_init_expression || !for_stmt->has_condition_expression ||
+        !for_stmt->has_for_step_expression || for_stmt->for_init_expression_index != 0 ||
+        for_stmt->condition_expression_index != 3 || for_stmt->for_step_expression_index != 4 ||
+        for_stmt->expressions[0] == NULL || for_stmt->expressions[1] == NULL ||
+        for_stmt->expressions[2] != NULL ||
+        for_stmt->expressions[0]->kind != AST_EXPR_IDENTIFIER ||
+        !for_stmt->expressions[0]->as.identifier.name ||
+        strcmp(for_stmt->expressions[0]->as.identifier.name, "j") != 0 ||
+        for_stmt->expressions[1]->kind != AST_EXPR_NUMBER ||
+        for_stmt->expressions[1]->as.number_value != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: for-init declaration initializer slots did not align with declarator order [i,j,k]\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_ast_collects_all_top_level_declarators(void) {
     const char *source = "int a,b;\n";
     TokenArray tokens;
@@ -4902,6 +5104,9 @@ int main(void) {
     if (!test_ast_statement_expression_slots_for_control_flow()) {
         return 1;
     }
+    if (!test_ast_records_scope_declaration_and_parameter_names()) {
+        return 1;
+    }
     if (!test_ast_parses_unnamed_parameter_prototype()) {
         return 1;
     }
@@ -4939,6 +5144,9 @@ int main(void) {
         return 1;
     }
     if (!test_ast_records_declaration_initializer_metadata()) {
+        return 1;
+    }
+    if (!test_ast_aligns_initializer_slots_with_declarator_order()) {
         return 1;
     }
     if (!test_ast_collects_all_top_level_declarators()) {

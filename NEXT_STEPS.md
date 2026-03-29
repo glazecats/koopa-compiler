@@ -130,15 +130,23 @@
 - 2026-03-29: Milestone A (Semantic S2-9) cleanup: removed currently unreachable callable metadata-fallback/guard branches (`SEMA-INT-004`, `SEMA-INT-006`) from active callable-check path and made function-definition callable checks explicitly AST-primary, reducing maintenance ambiguity without behavior change; added explicit regression lock that direct chained form `a()()` remains rejected as `SEMA-CALL-005`; full `make test` remained green.
 - 2026-03-29: Milestone A (Semantic S2-10) consistency: converged callable migration notes with current implementation by documenting function-definition callable checks as AST-primary-only and marking `SEMA-INT-004`/`SEMA-INT-006` as retired from active callable path (historical-only), reducing roadmap/code interpretation drift; full `make test` remained green.
 - 2026-03-29: Milestone planning refresh: marked S2 as closed for implementation tracking, shifted active plan to S3 scope semantics, and rewrote near-term plan blocks to separate completed work from remaining tasks.
+- 2026-03-29: Milestone A (Semantic S3-1) started: parser now records function parameter names plus local declaration names on statement AST nodes (including `for(int i=...)` init declarations), and semantic now enforces baseline scope rules (`SEMA-SCOPE-001` duplicate-local-in-scope reject, `SEMA-SCOPE-002` undeclared-identifier-use reject) while preserving block shadowing acceptance; added parser + semantic regression locks and kept full `make test` green.
+- 2026-03-29: Milestone A (Semantic S3-2) continued: aligned function-scope integration so parameters and function-body top-level declarations share the same scope frame (rejecting parameter redeclaration in the function body), and expanded scope regressions for `for` init lifetime and shadowing interactions; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) hardening: expanded scope regression locks for duplicate function-parameter names, block-local lifetime boundary (post-block use reject), for-body local lifetime boundary (post-loop use reject), and inner-block parameter shadowing acceptance; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) bugfix: declaration initializer expressions are now preserved in statement AST for both block declarations and `for(int ... )` init declarations, so scope traversal correctly rejects undeclared-identifier uses inside initializer expressions (`SEMA-SCOPE-002`); added parser + semantic regression locks for this path and kept full `make test` green.
+- 2026-03-29: Milestone A (Semantic S3-2) hardening: added callable/scope boundary enforcement so direct-identifier callees shadowed by local declarations (including parameters, local block declarations, and `for` init declarations) are rejected as `SEMA-CALL-003` (non-function symbol), and expanded callable diagnostic/pass matrices in one batch to lock these shadowing paths; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) hardening: added a callable shadow precheck pass so local non-function callee shadowing is diagnosed as `SEMA-CALL-003` before top-level callable lookup (closing `CALL-001/002` precedence drift in local-shadow cases), and batch-expanded callable matrix coverage for no-top-level/later-declaration shadow variants plus non-identifier stability (`SEMA-CALL-006` unchanged); full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) hardening: added diagnostic-ordering regression locks for mixed-error call sites (ensuring `SEMA-CALL-003/005/006` remain prioritized when applicable before scope undeclared-identifier checks, while declared-callee + undeclared-arg still reports `SEMA-SCOPE-002`), keeping callable/scope layering deterministic; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) hardening: batch-expanded callable/scope interaction matrix for declaration-initializer and loop-slot expressions (`for` condition/step), including ordering locks that keep `SEMA-CALL-003/004/005/006` precedence stable in those slots and fallback locks that keep declared-callee + undeclared-arg paths on `SEMA-SCOPE-002`; full `make test` remained green.
+- 2026-03-29: Milestone A (Semantic S3-2) bugfix/hardening: scope traversal now evaluates each declarator initializer before introducing that declarator name (including `for(int ... )` init declarations), closing same-declaration forward-reference leaks such as `int x=y,y=1` and `for(int i=j,j=0;...)`; parser initializer slots are now aligned 1:1 with declarator order (nullable for no-initializer declarators), and parser+semantic regressions were batch-expanded for reject/accept ordering variants; full `make test` remained green.
+- 2026-03-29: Milestone A (Parser ergonomics) low-priority hardening: clarified expression recursion-limit diagnostic wording to explicitly state it is call-depth-frame based (`%zu call-depth frames`) so deep-parentheses failures are interpreted correctly; behavior unchanged and parser regressions remained green.
+- 2026-03-29: Milestone A stage-gate: revalidated full suite (`make test`) with scope/callable/CF matrices green after latest S3-2 hardening slices, and marked S3-2 complete for milestone tracking; active work now transitions to S3-3 cleanup.
 
 ## Current Milestone A Focus
 
-- Implement S3-1 scope baseline on statement AST traversal:
-- reject duplicate local declarations in same block scope,
-- reject undeclared local variable uses in expression paths,
-- allow block shadowing by default and lock behavior in tests.
-- Keep callable matrix and control-flow matrix behavior unchanged while scope rules are introduced.
-- Maintain AST-primary authority for definitions and keep parser metadata use non-authoritative.
+- S3-1 baseline is complete; S3-2 integration/hardening is closed for milestone tracking.
+- Active work transitions to S3-3 cleanup: retire first metadata family authority in semantic paths (starting with callable metadata parity rails) under current green matrices.
+- Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
 ## S2 Closure Snapshot
 
@@ -148,12 +156,10 @@
 
 ## Active Implementation Plan (S3 next)
 
-1. S3-1 (scope core): introduce block scope stack in semantic traversal and enforce duplicate-local rejection in same scope.
-2. S3-1 (scope core): enforce undeclared local variable rejection for identifier expression uses that are not covered by current top-level callable checks.
-3. S3-1 (behavior lock): explicitly allow inner-block shadowing and lock with targeted semantic regressions.
-4. S3-2 (integration): run scope checks over statement AST traversal while preserving current callable and CF diagnostic outputs.
-5. S3-3 (cleanup): retire first metadata family only after scope + callable + CF matrices are green (`called_function_*` semantic dependency remains parity-only).
-6. S3-4 (cleanup): retire `returns_on_all_paths` semantic dependency usage where still present in active paths.
+1. S3-1 status: baseline scope core has landed (scope stack, duplicate-local rejection, undeclared-use rejection, and block shadowing lock).
+2. S3-2 status: complete; scope integration/hardening gate is satisfied with full-suite green.
+3. S3-3 (cleanup): in progress next; retire first metadata family only after scope + callable + CF matrices are green (`called_function_*` semantic dependency remains parity-only).
+4. S3-4 (cleanup): retire `returns_on_all_paths` semantic dependency usage where still present in active paths.
 7. Validation gate: `make test` must remain green at each substep before proceeding.
 8. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only after S3 stabilization.
 
@@ -186,5 +192,7 @@
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
 - Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.
+- Parser recursion-limit note: expression recursion protection is implemented on parser call-depth frames; in deeply parenthesized inputs, the guard can trigger before reaching the same numeric parenthesis depth.
 - Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `a()()`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005` with `callee_kind=call_result`.
+- Scope/callable layering note: undeclared checks intentionally skip call-callee identifier subtrees so callable diagnostics remain sourced from `SEMA-CALL-*` rules.
 - Scope note for `SEMA-CALL-006`: this code applies to the parser-accepted subset of non-identifier callees that reaches semantic callable checks (for example `(f+1)()`), reported with `callee_kind=non_identifier`. Non-parenthesized non-identifier callees outside this subset can still be rejected earlier by parser syntax checks.

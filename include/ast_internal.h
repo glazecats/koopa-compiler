@@ -23,6 +23,10 @@ static inline void ast_statement_free_internal(AstStatement *stmt) {
     for (i = 0; i < stmt->expression_count; ++i) {
         ast_expression_free_internal(stmt->expressions[i]);
     }
+    for (i = 0; i < stmt->declaration_name_count; ++i) {
+        free(stmt->declaration_names[i]);
+    }
+    free(stmt->declaration_names);
     free(stmt->expressions);
     free(stmt->children);
     free(stmt);
@@ -39,6 +43,12 @@ static inline void ast_program_clear_storage(AstProgram *program) {
     for (i = 0; i < program->count; ++i) {
         size_t j;
         free(program->externals[i].name);
+        if (program->externals[i].parameter_names) {
+            for (j = 0; j < program->externals[i].parameter_count; ++j) {
+                free(program->externals[i].parameter_names[j]);
+            }
+        }
+        free(program->externals[i].parameter_names);
         ast_statement_free_internal(program->externals[i].function_body);
         for (j = 0; j < program->externals[i].called_function_count; ++j) {
             free(program->externals[i].called_function_names[j]);
@@ -83,6 +93,7 @@ static inline int ast_program_append_external(AstProgram *program,
     external.name_length = 0;
     external.has_initializer = 0;
     external.parameter_count = 0;
+    external.parameter_names = NULL;
     external.is_function_definition = 0;
     external.function_body = NULL;
     external.return_statement_count = 0;

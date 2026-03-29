@@ -159,12 +159,96 @@ static int test_semantic_callable_diagnostic_matrix(void) {
          "callee=foo; symbol_kind=non_function",
          2,
          22},
+        {"CALL-003-SHADOW-LOCAL",
+         "int foo(int a){return a;}\nint main(){int foo=1; return foo(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-LOCAL-NO-TOPLEVEL",
+         "int main(){int foo=1; return foo(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-LOCAL-WITH-LATER-DECL",
+         "int main(){int foo=1; return foo(1);}\nint foo(int a){return a;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-PARAM",
+         "int foo(int a){return a;}\nint main(int foo){return foo(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-PARAM-NO-TOPLEVEL",
+         "int main(int foo){return foo(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-INNER-BLOCK",
+         "int foo(int a){return a;}\nint main(){{int foo=1; return foo(1);} return 0;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-FOR-INIT",
+         "int foo(int a){return a;}\nint main(){for(int foo=0;foo<1;foo=foo+1){return foo(1);}return 0;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-PAREN-CALLEE",
+         "int foo(int a){return a;}\nint main(){int foo=1; return (foo)(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-SHADOW-CALL-RESULT-CHAIN",
+         "int main(){int foo=1; return foo()(1);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-ORDER-BEFORE-ARG-UNDECL",
+         "int main(){int foo=1; return foo(bar);}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-DECL-INIT-SHADOW-ORDER",
+         "int foo(int a){return a;}\nint main(){int foo=1; int x=foo(bar); return x;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"CALL-003-FOR-COND-SHADOW-ORDER",
+         "int main(){for(int foo=1;foo(bar);foo=foo+1){return 0;} return 0;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
         {"CALL-004",
          "int foo(int a);\nint main(){return foo(1,2);}\n",
          "SEMA-CALL-004",
          "callee=foo; expected=1; got=2",
          2,
          22},
+        {"CALL-004-DECL-INIT-ORDER",
+         "int foo(int a);\nint main(){int x=foo(1,bar); return 0;}\n",
+         "SEMA-CALL-004",
+         "callee=foo; expected=1; got=2",
+         0,
+         0},
+        {"CALL-004-FOR-STEP-ORDER",
+         "int foo(int a);\nint main(){int i=0; for(;i<1;foo(1,bar)){i=i+1;} return 0;}\n",
+         "SEMA-CALL-004",
+         "callee=foo; expected=1; got=2",
+         0,
+         0},
         {"CALL-005-A",
          "int f(){return 1;}\nint main(){return f()(1);}\n",
          "SEMA-CALL-005",
@@ -177,6 +261,24 @@ static int test_semantic_callable_diagnostic_matrix(void) {
          "callee_kind=call_result",
          2,
          27},
+        {"CALL-005-ORDER-BEFORE-ARG-UNDECL",
+         "int f(){return 1;}\nint main(){return f()(bar);}\n",
+         "SEMA-CALL-005",
+         "callee_kind=call_result",
+         0,
+         0},
+        {"CALL-005-DECL-INIT-ORDER",
+         "int f(){return 1;}\nint main(){int x=f()(bar); return 0;}\n",
+         "SEMA-CALL-005",
+         "callee_kind=call_result",
+         0,
+         0},
+        {"CALL-005-FOR-COND-ORDER",
+         "int f(){return 1;}\nint main(){for(;f()(bar);){return 0;} return 0;}\n",
+         "SEMA-CALL-005",
+         "callee_kind=call_result",
+         0,
+         0},
         {"CALL-006-A",
          "int f(){return 1;}\nint main(){return (f+1)();}\n",
          "SEMA-CALL-006",
@@ -201,6 +303,30 @@ static int test_semantic_callable_diagnostic_matrix(void) {
          "callee_kind=non_identifier",
          2,
          25},
+        {"CALL-006-SHADOW-NONIDENTIFIER-STABLE",
+         "int main(){int foo=1; return (foo+1)();}\n",
+         "SEMA-CALL-006",
+         "callee_kind=non_identifier",
+         0,
+         0},
+        {"CALL-006-ORDER-BEFORE-ARG-UNDECL",
+         "int main(){return (1+1)(bar);}\n",
+         "SEMA-CALL-006",
+         "callee_kind=non_identifier",
+         0,
+         0},
+        {"CALL-006-DECL-INIT-ORDER",
+         "int main(){int x=(1+1)(bar); return 0;}\n",
+         "SEMA-CALL-006",
+         "callee_kind=non_identifier",
+         0,
+         0},
+        {"CALL-006-FOR-STEP-ORDER",
+         "int main(){int i=0; for(;i<1;(1+1)(bar)){i=i+1;} return 0;}\n",
+         "SEMA-CALL-006",
+         "callee_kind=non_identifier",
+         0,
+         0},
     };
     size_t i;
 
@@ -221,6 +347,12 @@ static int test_semantic_callable_accept_matrix(void) {
         {"CALL-PASS-004", "int foo(int a);\nint main(){return ((foo))(1);}\n"},
         {"CALL-PASS-005", "int foo();\nint main(){return foo();}\n"},
         {"CALL-PASS-006", "int foo(int a);\nint main(){return foo(1);}\nint foo(int a){return a;}\n"},
+        {"CALL-PASS-007",
+         "int foo(int a){return a;}\nint main(){{int foo=1;}return foo(1);}\n"},
+        {"CALL-PASS-008",
+         "int foo(int a){return a;}\nint main(){int x=foo(1); return x;}\n"},
+        {"CALL-PASS-009",
+         "int foo(int a){return a;}\nint main(){for(int i=foo(1);i<2;i=foo(i)){} return 0;}\n"},
     };
     size_t i;
 
@@ -1133,6 +1265,615 @@ static int test_semantic_rejects_call_before_visible_declaration(void) {
     return 1;
 }
 
+static int test_semantic_rejects_duplicate_local_declaration_same_scope(void) {
+    const char *source = "int f(){int x; int x; return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: duplicate local declaration in same scope should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-001 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_undeclared_local_identifier_use(void) {
+    const char *source = "int f(){int x; y=x; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: undeclared local identifier use should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_call_with_undeclared_argument_identifier(void) {
+    const char *source = "int foo(int a){return a;}\nint main(){return foo(bar);}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: call with undeclared argument identifier should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for undeclared call argument, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "identifier=bar") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected undeclared call argument identifier detail, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_undeclared_call_argument_across_statement_slots(void) {
+    static const char *cases[] = {
+        "int foo(int a){return a;}\nint main(){int x=foo(bar); return x;}\n",
+        "int foo(int a){return a;}\nint main(){for(;foo(bar);){return 0;} return 0;}\n",
+        "int foo(int a){return a;}\nint main(){int i=0; for(;i<1;foo(bar)){i=i+1;} return 0;}\n",
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        TokenArray tokens;
+        AstProgram program;
+        ParserError parse_err;
+        SemanticError sema_err;
+
+        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+            return 0;
+        }
+
+        if (semantic_analyze_program(&program, &sema_err)) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: undeclared call argument across statement slots should fail (case %zu)\n",
+                    i + 1);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for undeclared call argument slot case %zu, got: %s\n",
+                    i + 1,
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "identifier=bar") == NULL) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: expected identifier=bar detail for undeclared call argument slot case %zu, got: %s\n",
+                    i + 1,
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+    }
+
+    return 1;
+}
+
+static int test_semantic_allows_block_shadowing(void) {
+    const char *source = "int f(){int x; {int x; x=1;} x=2; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: block shadowing should be accepted, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_for_init_declaration_visibility(void) {
+    const char *source = "int f(){for(int i=0;i<3;i=i+1){int x=i;} return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-init declaration visibility should be accepted, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_parameter_redeclaration_in_function_body(void) {
+    const char *source = "int f(int a){int a; return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: parameter redeclaration in function body should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-001 for parameter redeclaration, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_for_init_identifier_use_outside_loop(void) {
+    const char *source = "int f(){for(int i=0;i<3;i=i+1){} return i;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-init identifier should be out of scope after loop\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for for-init lifetime, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_for_init_shadowing_outer_identifier(void) {
+    const char *source = "int f(){int i=7;for(int i=0;i<2;i=i+1){i=i+1;}return i;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-init declaration should be allowed to shadow outer identifier, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_duplicate_parameter_names(void) {
+    const char *source = "int f(int a,int a){return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: duplicate parameter names should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-001 for duplicate parameters, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_block_local_use_after_block_end(void) {
+    const char *source = "int f(){ {int x=1;} return x; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: block-local identifier should be out of scope after block\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for post-block use, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_for_body_local_use_after_loop(void) {
+    const char *source = "int f(){for(int i=0;i<1;i=i+1){int y=i;} return y;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-body local identifier should be out of scope after loop\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for post-loop body-local use, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_parameter_shadowing_in_inner_block(void) {
+    const char *source = "int f(int a){{int a=1;} return a;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: inner block should be allowed to shadow parameter, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_undeclared_identifier_in_declaration_initializer(void) {
+    const char *source = "int f(){int x=y; return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: undeclared identifier in declaration initializer should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for declaration initializer, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_undeclared_identifier_in_for_init_declaration_initializer(void) {
+    const char *source = "int f(){for(int i=j;i<3;i=i+1){return i;} return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: undeclared identifier in for-init declaration initializer should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for for-init declaration initializer, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_same_declaration_forward_reference(void) {
+    const char *source = "int f(){int x=y,y=1; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: same declaration forward reference should fail (x uses y before y is declared)\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for same declaration forward reference, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_same_declaration_reverse_reference(void) {
+    const char *source = "int f(){int y=1,x=y; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: reverse declaration reference should pass (x uses already-declared y), got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_for_init_same_declaration_forward_reference(void) {
+    const char *source = "int f(){for(int i=j,j=0;i<1;i=i+1){return i;} return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-init same declaration forward reference should fail (i uses j before j is declared)\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 for for-init same declaration forward reference, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_for_init_same_declaration_reverse_reference(void) {
+    const char *source = "int f(){for(int j=0,i=j;i<1;i=i+1){return i;} return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: for-init reverse declaration reference should pass (i uses already-declared j), got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_semantic_ast_primary_return_flow_ignores_tampered_metadata(void) {
     const char *source = "int main(){while(1){continue;}return 1;}\n";
     TokenArray tokens;
@@ -1555,6 +2296,63 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_rejects_call_before_visible_declaration()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_duplicate_local_declaration_same_scope()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_undeclared_local_identifier_use()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_call_with_undeclared_argument_identifier()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_undeclared_call_argument_across_statement_slots()) {
+        return 1;
+    }
+    if (!test_semantic_allows_block_shadowing()) {
+        return 1;
+    }
+    if (!test_semantic_allows_for_init_declaration_visibility()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_parameter_redeclaration_in_function_body()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_for_init_identifier_use_outside_loop()) {
+        return 1;
+    }
+    if (!test_semantic_allows_for_init_shadowing_outer_identifier()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_duplicate_parameter_names()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_block_local_use_after_block_end()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_for_body_local_use_after_loop()) {
+        return 1;
+    }
+    if (!test_semantic_allows_parameter_shadowing_in_inner_block()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_undeclared_identifier_in_declaration_initializer()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_undeclared_identifier_in_for_init_declaration_initializer()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_same_declaration_forward_reference()) {
+        return 1;
+    }
+    if (!test_semantic_allows_same_declaration_reverse_reference()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_for_init_same_declaration_forward_reference()) {
+        return 1;
+    }
+    if (!test_semantic_allows_for_init_same_declaration_reverse_reference()) {
         return 1;
     }
     if (!test_semantic_ast_primary_return_flow_ignores_tampered_metadata()) {
