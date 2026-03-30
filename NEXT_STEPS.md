@@ -151,12 +151,15 @@
 - 2026-03-30: Milestone A tracking clarification: S3 closure criterion follows semantic-authority retirement scope; parser-side metadata retention cleanup is classified as Milestone B decoupling work and does not block S3 completion.
 - 2026-03-30: Milestone transition checkpoint: Milestone A is closed for implementation tracking (semantic-authority retirement complete and validated), active implementation is switched to Milestone B, and a detailed B execution plan is recorded below as the next working contract.
 - 2026-03-30: Roadmap consistency sweep: normalized top-level guidance and near-term milestone states so document-wide wording reflects the same boundary (`A closed`, `B active`).
+- 2026-03-30: Milestone B (B0.5) completed: split oversized regression suites into aggregator + themed include fragments (`tests/parser/parser_regression_test.c` + `tests/parser/parser_regression_cases_*.inc`, `tests/semantic/semantic_regression_test.c` + `tests/semantic/semantic_regression_*.inc`) while preserving original case execution order; full `make test` remained green.
+- 2026-03-30: Milestone B (B0.5) refinement: further split parser expression-heavy fragment into smaller themed files (`parser_regression_cases_expr_ast_a.inc`, `parser_regression_cases_expr_ast_b.inc`, `parser_regression_cases_ast_meta.inc`) and updated aggregator includes; full `make test` remained green.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
 - Milestone B is now the active implementation phase.
 - Milestone B scope remains non-semantic: parser/AST internal decoupling and parser-side metadata-retention cleanup in controlled slices.
+- Large-file split is now scheduled as a B-support track: split oversized regression tests first, then split large implementation files after compatibility touchpoints shrink.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
 ## S2 Closure Snapshot
@@ -168,13 +171,14 @@
 ## Active Implementation Plan (Milestone B kickoff)
 
 1. B0 status: complete (A closure and B handoff context recorded in this document).
-2. B1 status: next slice; retire parser-side `called_function_*` retention plumbing with compatibility-test updates.
-3. B2 status: pending after B1; retire parser-side `returns_on_all_paths` retention field and write paths.
-4. B3 status: pending after B2; retire parser-side statement-counter retention fields and accounting/write paths.
-5. B4 status: pending after B3; reduce parser dependence on AST-internal helpers while preserving stable parser-facing contracts.
-6. B5 status: pending finalization; run retirement verification bundle and close Milestone B with evidence notes.
-7. Validation gate: `make test` must remain green after every B-slice change.
-8. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only in Milestone D strict-path work.
+2. B0.5 status: complete; oversized regression tests are split into suite aggregators plus themed include fragments (no behavior change).
+3. B1 status: next slice; retire parser-side `called_function_*` retention plumbing with compatibility-test updates.
+4. B2 status: pending after B1; retire parser-side `returns_on_all_paths` retention field and write paths.
+5. B3 status: pending after B2; retire parser-side statement-counter retention fields and accounting/write paths.
+6. B4 status: pending after B3; reduce parser dependence on AST-internal helpers while preserving stable parser-facing contracts.
+7. B5 status: pending finalization; run retirement verification bundle and close Milestone B with evidence notes.
+8. Validation gate: `make test` must remain green after every B-slice change.
+9. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only in Milestone D strict-path work.
 
 ## Milestone B Detailed Execution Plan (active)
 
@@ -183,39 +187,59 @@
 - Touchpoints: `NEXT_STEPS.md` only.
 - Validation: `make test` green baseline already captured before B edits; no functional behavior changes in this step.
 
-2. B1 callable metadata retention cleanup slice
+2. B0.5 regression-suite modularization slice (execute before metadata retirement)
+- Goal: reduce blast radius by splitting oversized regression sources into themed files before parser/semantic decoupling slices.
+- Primary touchpoints: `tests/parser/parser_regression_test.c`, `tests/semantic/semantic_regression_test.c`, `Makefile` (suite aggregation entrypoints).
+- Safety constraints: no diagnostic/rule/parse behavior changes; assertions and coverage must remain equivalent.
+- Validation gate: full `make test`, plus a suite-level count sanity check to ensure no regression groups were dropped.
+
+3. B1 callable metadata retention cleanup slice
 - Goal: remove parser-side `called_function_*` retention fields and collection plumbing that are no longer semantic-authoritative.
 - Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser dump/test adapters in `tests/parser`.
 - Safety constraints: keep parser parse/semantic behavior unchanged; only remove unused retention channels.
 - Validation gate: full `make test` plus direct grep check that `called_function_*` is retired from active parser/AST interfaces or limited to explicitly documented compatibility stubs.
 
-3. B2 return metadata retention cleanup slice
+4. B2 return metadata retention cleanup slice
 - Goal: remove parser-side `returns_on_all_paths` retention field from `AstExternal` and corresponding parser write paths.
 - Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regressions/dump expectations.
 - Safety constraints: semantic return enforcement must remain AST-primary with no behavior drift.
 - Validation gate: full `make test` plus targeted return-matrix checks in semantic regressions.
 
-4. B3 statement-counter retention cleanup slice
+5. B3 statement-counter retention cleanup slice
 - Goal: remove parser-side statement counters (`loop/if/break/continue/declaration`) from external metadata and related parser accounting paths.
 - Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regression assertions, parser dump output.
 - Safety constraints: do not alter statement AST construction or scope/callable traversal semantics.
 - Validation gate: full `make test` plus parser smoke/regression confirmation that diagnostics and parse success behavior are unchanged.
 
-5. B4 parser/AST internal decoupling slice
+6. B4 parser/AST internal decoupling slice
 - Goal: reduce parser dependence on AST-internal helper coupling and keep only stable parser-facing contracts.
 - Primary touchpoints: parser include boundaries and AST helper visibility points.
 - Safety constraints: preserve old parser API link behavior and existing external call sites.
 - Validation gate: full `make test`, including legacy-link parser smoke.
 
-6. B5 cleanup verification and handoff record
+7. B5 cleanup verification and handoff record
 - Goal: close Milestone B with explicit evidence bundle and handoff notes for Milestone C static-analysis pass.
 - Evidence checklist: updated roadmap notes, `make test` green run, grep-based retirement checks for all B metadata families.
 - Exit criterion: no functional regression introduced; B changes remain structural/compatibility-focused only.
 
-7. Cross-slice operating rules (apply to B1-B5)
+8. Cross-slice operating rules (apply to B0.5-B5)
 - Rule 1: retire one metadata family per code-change slice; do not batch callable/return/counter removals together.
 - Rule 2: after each slice, run full `make test` before proceeding.
 - Rule 3: if any semantic behavior drift appears, pause and restore prior compatibility surface for that slice before continuing.
+
+## Large-File Split Schedule (B support track)
+
+1. Phase T (immediate): split regression suites first.
+- Targets: `tests/parser/parser_regression_test.c` and `tests/semantic/semantic_regression_test.c`.
+- Reason: lowest semantic risk and highest payoff for reviewability/merge conflict reduction.
+
+2. Phase S (after B1-B3): split semantic/parser implementation files.
+- Targets: `src/semantic/semantic.c`, then `src/parser/parser.c`.
+- Reason: perform after metadata-retention cleanup to avoid moving code that is about to be deleted.
+
+3. Phase thresholds and guardrails.
+- Soft threshold: start split planning when a C file exceeds ~1500 lines or mixes more than one major concern.
+- Hard rule: each split commit must preserve behavior (`make test` green) and avoid API drift unless explicitly planned.
 
 ## Metadata Migration Schedule (anti-coupling plan)
 
