@@ -1,346 +1,284 @@
 # Semantic Lesson（compiler_lab）
 
-> 目标：解释“当前 semantic 阶段到底做了什么、怎么做、为什么这么做”，并对齐你现在看到的 S2 迁移日志。
+> 目标：解释当前 `semantic.c` 在做什么、怎么做，以及和 parser/测试的对应关系（按你现在这版代码，而不是旧迁移期描述）。
+
+## 导学
+
+这份讲义建议按“规则优先级”来读：
+
+1. 先建立主流程：return-flow、callable、scope、top-level consistency。
+2. 再理解报错顺序：为什么某些错误会优先出现。
+3. 最后看子集边界：哪些是规则，哪些是当前实现限制。
+
+学完你应该能：
+
+1. 能解释 `SEMA-CALL-001..006` 的判定分层。
+2. 能说明为什么“同声明顺序”会影响 initializer 可见性。
+3. 能区分“语义规则”与“当前子集限制”。
 
 ---
 
-## 1. 文件定位与职责
+## 1. 文件定位
 
-- 接口定义：`include/semantic.h`
-- 实现文件：`src/semantic/semantic.c`
-- 关键回归：`tests/semantic/semantic_regression_test.c`
+- 接口：`include/semantic.h`
+- 实现：`src/semantic/semantic.c`
+- 结构：`semantic.c` 是聚合入口，核心规则分片在 `semantic_core_flow.inc`、`semantic_callable_rules.inc`、`semantic_scope_rules.inc`、`semantic_entry.inc`
+- 回归：`tests/semantic/semantic_regression_test.c` + `semantic_regression_callable_flow.inc` + `semantic_regression_scope_cf.inc`
 
-semantic 输入是 `AstProgram`，输出是 `success/fail + SemanticError`：
-
-$$
-\mathrm{Analyze}: \mathrm{AstProgram} \rightarrow \{0,1\} \times \mathrm{SemanticError}
-$$
-
----
-
-## 2. `semantic.h` 接口契约
-
-`SemanticError`:
-
-- `line`
-- `column`
-- `message[512]`
-
-公开入口只有一个：
+语义入口：
 
 ```c
 int semantic_analyze_program(const AstProgram *program, SemanticError *error);
 ```
 
-语义：
+数学上可写成：
 
-- 返回 `1`：通过
-- 返回 `0`：失败，并在 `error` 里给诊断
-
-伪代码：
-
-```text
-if analyze_ok:
-    return 1
-else:
-    fill error
-    return 0
-```
+$$
+\mathrm{Analyze}: \mathrm{AstProgram} \to \{0,1\} \times \mathrm{SemanticError}
+$$
 
 ---
 
-## 3. `semantic.c` 总体结构
+## 2. 当前总体结构（AST-only）
 
-当前 semantic 可以分成 4 个层次：
+当前语义主路径已经是 AST-only，不再走 parser metadata parity/fallback，也不读取 parser 内部的 `function_called_*` 临时缓存。
 
-1. AST 访问与调用点收集（visitor 风格后序遍历）
-2. 调用视图构建（AST-primary / metadata-fallback）
-3. 函数调用规则检查（`SEMA-CALL-001..006`）
-4. 顶层符号一致性检查（重定义、冲突、参数数一致性等）
+主流程分 5 层：
+
+1. return-flow 分析（函数是否所有路径返回）
+2. callable shadow precheck（局部遮蔽优先）
+3. callable 规则检查（`SEMA-CALL-001..006`）
+4. scope 规则检查（`SEMA-SCOPE-*`）
+5. 顶层符号一致性检查（重复定义/冲突/参数数一致）
 
 数据流：
 
 $$
-\text{AST} \xrightarrow{\text{collect call view}} \text{Callable Checks}
-\xrightarrow{} \text{Top-level Checks} \xrightarrow{} \text{Result}
+\text{AST} \rightarrow \text{Flow} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Top-level Consistency}
 $$
 
 ---
 
-## 4. S2 迁移策略是怎么实现的
+## 3. Visitor 骨架怎么用
 
-文件开头有迁移策略枚举：
+语义复用了后序遍历骨架：
 
-- `SEMA_MIGRATION_STRICT_PARITY`
-- `SEMA_MIGRATION_AST_PRIMARY_ONLY`
+- `walk_expression_postorder(...)`
+- `walk_statement_postorder(...)`
 
-当前常量：
-
-```c
-static const SemanticMigrationStrategy kSemanticMigrationStrategy =
-    SEMA_MIGRATION_AST_PRIMARY_ONLY;
-```
-
-含义：
-
-- `STRICT_PARITY`：AST 收集结果必须和 parser metadata 对齐，否则直接 `SEMA-INT-00x`
-- `AST_PRIMARY_ONLY`：AST 作为语义真源，parity 只做可选影子校验
-
-对应函数：`semantic_strategy_requires_callable_parity()`
-
----
-
-## 5. 可复用 AST 遍历骨架（你前面问的 visitor）
-
-现在 semantic 里已经有一套可复用后序遍历骨架：
-
-- `walk_expression_postorder(const AstExpression*, ExpressionPostVisitor, void*)`
-- `walk_statement_postorder(const AstStatement*, ExpressionPostVisitor, void*)`
-
-访问策略是“先子节点，后当前节点”（postorder）：
+后序规则：
 
 $$
-\mathrm{visit}(n)=\mathrm{visit}(children(n));\ \mathrm{apply}(n)
+visit(n)=visit(children(n));\ apply(n)
 $$
 
 伪代码：
 
 ```text
 walk_expr(expr):
-    for each child in expr:
+    for child in expr.children:
         walk_expr(child)
     visitor(expr)
 ```
 
-这套骨架让语义逻辑和“递归遍历细节”解耦。
+这让“遍历逻辑”和“规则逻辑”解耦。
 
 ---
 
-## 6. 调用点收集怎么做
+## 4. return-flow 分析
 
-### 6.1 基础容器
+核心函数：
 
-`CollectedCall` 记录每个调用点：
+- `semantic_analyze_statement_flow`
+- `semantic_compute_function_returns_all_paths`
 
-- `name`（可能为空）
-- `line/column`
-- `arg_count`
-- `kind`（`DIRECT_IDENTIFIER` / `CALL_RESULT` / `NON_IDENTIFIER`）
-
-`CollectedCallList` 是动态数组，扩容规则：
+输出三元组：
 
 $$
-cap_{new}=\begin{cases}
-8, & cap=0 \\
-2\cdot cap, & cap>0
-\end{cases}
+\mathrm{Flow}(stmt)=(R,F,B)
 $$
 
-### 6.2 callee 分类
+- `R`: guaranteed return
+- `F`: may fallthrough
+- `B`: may break
 
-`classify_ast_call_callee`：
-
-1. 先去掉外层 `AST_EXPR_PAREN`
-2. 若底层是 `IDENTIFIER` => `DIRECT_IDENTIFIER`
-3. 若底层是 `CALL` => `CALL_RESULT`
-4. 否则 `NON_IDENTIFIER`
-
-这一步和 parser 里的 callee kind 语义对齐。
-
-### 6.3 实际收集函数
-
-- `collect_call_expression_postorder`：只在 `expr->kind == AST_EXPR_CALL` 时 append
-- `collect_calls_from_statement`：用 statement postorder + expression visitor 收集整函数调用
+函数定义必须满足“所有控制流路径都返回”（由 AST 流分析直接计算，不依赖 parser 外挂字段）。
 
 ---
 
-## 7. 两种调用视图（S2 核心）
+## 5. callable 规则（`SEMA-CALL-001..006`）
 
-semantic 内部把调用输入显式区分为：
+核心函数：
 
-- `CALL_VIEW_SOURCE_AST_PRIMARY`
-- `CALL_VIEW_SOURCE_METADATA_FALLBACK`
+- `semantic_check_call_expr_postorder`
+- `semantic_check_single_callable_rule`
 
-由 `semantic_build_function_call_view` 决定来源。
+callee 分类由 `classify_ast_call_callee` 给出：
 
-### 7.1 AST-primary 分支
+- `DIRECT_IDENTIFIER`
+- `CALL_RESULT`
+- `NON_IDENTIFIER`
 
-如果 `func->function_body` 存在：
+规则摘要：
 
-1. 从 statement AST 收集调用
-2. 若策略要求 parity，再和 metadata 对比
-3. 标记 `source = AST_PRIMARY`
-
-### 7.2 metadata fallback 分支
-
-如果 `function_body` 不存在：
-
-- 若是函数定义：直接报 `SEMA-INT-005`
-- 若是声明类路径：从 `called_function_*` 组装 fallback view
-
-并标记 `source = METADATA_FALLBACK`。
+- 非标识符 callee：
+  - `CALL_RESULT` -> `SEMA-CALL-005`
+  - 其他 -> `SEMA-CALL-006`
+- 标识符 callee：
+  - 同名非函数符号 -> `SEMA-CALL-003`
+  - 函数存在但参数不匹配 -> `SEMA-CALL-004`
+  - 仅后方声明存在 -> `SEMA-CALL-002`
+  - 无任何声明 -> `SEMA-CALL-001`
 
 ---
 
-## 8. `SEMA-INT-*` 内部一致性护栏
+## 6. S3-2: callable shadow precheck
 
-当前内部错误码对应关系：
-
-- `SEMA-INT-001`：AST 调用收集失败
-- `SEMA-INT-002`：AST 调用数与 metadata 数量不一致
-- `SEMA-INT-003`：AST 与 metadata 明细不一致（name/line/col/arg_count/kind）
-- `SEMA-INT-004`：构建 metadata fallback 失败
-- `SEMA-INT-005`：函数定义缺失 statement AST body（迁移阶段禁止）
-- `SEMA-INT-006`：函数定义 callable 检查未使用 AST-primary 视图
-
-`SEMA-INT-006` 是“定义路径必须 AST-primary”的硬门：
+新增 precheck 的目标是固定诊断优先级：
 
 $$
-is\_function\_definition \Rightarrow call\_view.source = AST\_PRIMARY
+callee=Id(x) \land x\in LocalScope \Rightarrow \text{先报 }SEMA\text{-}CALL\text{-}003
 $$
+
+避免局部遮蔽场景被 `CALL-001/002` 抢先。
+
+实现入口：
+
+- `semantic_check_function_callable_scope_shadow_rules`
+- `semantic_scope_check_call_shadow_statement`
+- `semantic_scope_check_call_shadow_expression`
+
+伪代码：
+
+```text
+walk_shadow(stmt, scope):
+    push/pop for compound/for
+    on declaration:按声明器顺序处理
+    on call:
+        if direct callee in local scope:
+            error CALL-003
+```
 
 ---
 
-## 9. `SEMA-CALL-001..006` 规则怎么判
+## 7. 诊断优先级（非常重要）
 
-主函数：`semantic_check_function_callable_rules`
+当前 semantic 明确锁定了“谁先报错”的顺序，避免同一输入在不同版本中飘移。
 
-对每个调用点做检查，核心状态：
+优先级要点：
 
-- `found_decl`
-- `found_matching_param_count`
-- `found_non_function_symbol`
-- `has_later_function_decl`
+1. 局部非函数遮蔽 callee 时，优先报 `SEMA-CALL-003`（shadow precheck 先行）。
+2. `call result` / `non-identifier callee` 先报 `SEMA-CALL-005/006`，不会被 `SEMA-SCOPE-002` 抢先。
+3. 若 callee 合法，但参数表达式里有未声明标识符，才报 `SEMA-SCOPE-002`。
 
-### 9.1 非标识符调用先拦截
-
-如果 `called_name` 为空：
-
-- `kind == CALL_RESULT` => `SEMA-CALL-005`
-- 其他（通常 `NON_IDENTIFIER`）=> `SEMA-CALL-006`
-
-### 9.2 可命名调用的符号检查
-
-扫描当前函数之前（含当前）的 external：
-
-1. 若同名函数声明存在：
-   - 参数个数匹配 => 通过
-   - 不匹配 => `SEMA-CALL-004`
-2. 若同名但不是函数 => `SEMA-CALL-003`
-3. 若之前没声明，再看后面有没有同名函数：
-   - 有 => `SEMA-CALL-002`（先调用后声明）
-   - 无 => `SEMA-CALL-001`（未声明函数）
-
-可写成判定树：
+可抽象为：
 
 $$
-\neg decl \land later\_decl \Rightarrow CALL\text{-}002
-$$
-
-$$
-\neg decl \land \neg later\_decl \Rightarrow CALL\text{-}001
-$$
-
-$$
-decl \land arg\_mismatch \Rightarrow CALL\text{-}004
-$$
-
-$$
-\neg decl \land non\_function\_symbol \Rightarrow CALL\text{-}003
+CALL\text{-}003/005/006 \succ SCOPE\text{-}002\ (callee\ path),\quad
+SCOPE\text{-}002\ applies\ to\ non\text{-}callee\ identifiers
 $$
 
 ---
 
-## 10. 顶层语义检查（不只 callable）
+## 8. scope 规则（含同声明顺序可见性）
 
-`semantic_analyze_program` 还做这些：
+核心函数：
 
-1. `program == NULL` 防御
-2. 函数定义必须 `returns_on_all_paths == 1`
-3. 顶层同名冲突检查：
-   - 函数-函数：参数数必须一致；不能双定义
-   - 函数-变量：报冲突
-4. unnamed external 允许（AST 合约保留）
+- `semantic_check_function_scope_rules`
+- `semantic_scope_check_statement`
+- `semantic_scope_check_expression`
 
-函数声明一致性约束：
+### 8.1 作用域栈
+
+显式 `ScopeStack`：`push/pop` 管理 `{}` 与 `for` 作用域。
+
+### 8.2 同声明顺序
+
+现在按声明器顺序检查：先看 initializer，再引入当前名字。
+
+$$
+\text{check}(init_i, S\cup\{d_1,...,d_{i-1}\});\ S:=S\cup\{d_i\}
+$$
+
+因此：
+
+- `int x=y,y=1;` 拒绝
+- `int y=1,x=y;` 通过
+- `for(int i=j,j=0;...)` 拒绝
+- `for(int j=0,i=j;...)` 通过
+
+---
+
+## 9. 当前活跃的 `SEMA-INT-*`
+
+当前实现里常见内部护栏：
+
+- `SEMA-INT-005`：函数定义缺失 `function_body`
+- `SEMA-INT-007`：return-flow AST 分析失败
+- `SEMA-INT-009`：scope 栈空时处理声明名
+- `SEMA-INT-010`：scope 栈扩容失败
+
+---
+
+## 10. 回归测试怎么对应
+
+`tests/semantic/semantic_regression_test.c` 现在是主 harness，case 体拆到：
+
+- `semantic_regression_callable_flow.inc`
+- `semantic_regression_scope_cf.inc`
+- `semantic_regression_intellisense_prelude.inc`（仅编辑器补全预置）
+
+建议固定覆盖三组：
+
+1. callable 诊断矩阵（`CALL-001..006` + shadow 变体）
+2. scope/cf 矩阵（局部可见性、for-init 生命周期）
+3. 同声明顺序矩阵（前向拒绝 / 反向通过）
+
+---
+
+## 11. 顶层一致性规则（函数/变量冲突）
+
+除了函数体内部规则，`semantic_analyze_program` 还会在顶层做名字一致性检查：
+
+1. 同名函数声明参数个数必须一致，否则报冲突。
+2. 同名函数不能重复定义。
+3. 函数名与变量名不能在顶层同名共存。
+
+可抽象为：
 
 $$
 same\_name \land both\_function \Rightarrow parameter\_count\_equal
 $$
 
----
-
-## 11. 诊断字符串实现细节
-
-### 11.1 `format_callee_preview`
-
-长标识符会中间截断，防止 message 太长：
-
-- 保留头 `24` + 尾 `16`
-- 中间用 `...`
-
-这对应你日志里“防 message-tail truncation”的持续加固方向。
-
-### 11.2 稳定 payload
-
-`SEMA-CALL-*` 文本中带稳定键值片段：
-
-- `callee=...`
-- `expected=...; got=...`
-- `decl_line=...; decl_col=...`
-- `callee_kind=...`
-
-便于回归测试和 IDE 脚本匹配。
-
----
-
-## 12. 测试代码怎么写（semantic）
-
-文件：`tests/semantic/semantic_regression_test.c`
-
-### 12.1 已有测试结构
-
-- `parse_source_to_ast(...)`：共享 fixture
-- `run_callable_diag_case(...)`：失败矩阵（期望 code + 片段 + 位置）
-- `run_callable_pass_case(...)`：通过矩阵
-
-### 12.2 推荐基础块模板
-
-```c
-static int test_semantic_rejects_xxx(void) {
-    const char *source = "int main(){return foo(1);}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError perr;
-    SemanticError serr;
-
-    if (!parse_source_to_ast(source, &tokens, &program, &perr)) return 0;
-    if (semantic_analyze_program(&program, &serr)) return 0;
-    if (strstr(serr.message, "SEMA-CALL-001") == NULL) return 0;
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
-}
-```
-
-### 12.3 迁移期专用测试建议
-
-1. tamper metadata 后 AST-primary 仍正确
-2. 函数定义缺 body 时必须 `SEMA-INT-005`
-3. `STRICT_PARITY` 下构造一例 mismatch，锁定 `SEMA-INT-002/003`
-
----
-
-## 13. 当前 semantic 的一句话总结
-
-当前实现已经从“单纯 metadata 驱动”升级为“AST-primary + 迁移护栏”：
-
 $$
-\text{Semantic Today}=
-\text{AST-primary callable analysis}
-+\text{migration parity gates}
-+\text{stable diagnostic contracts}
+same\_name \land kind\_mismatch(function\ vs\ declaration) \Rightarrow reject
 $$
 
-这就是你在 `NEXT_STEPS.md` 看到的 S2-boot 到 S2-6 的本质落地。
+---
+
+## 12. 当前已知限制（需在文档长期保留）
+
+1. return all-path 仍是结构化近似，不是完整路径求解器。
+2. callable 子集当前只支持 direct-identifier callee；call-result/chained 统一拒绝（`SEMA-CALL-005`）。
+3. 非标识符 callee 仅在 parser 可接受子集下进入 semantic，并按 `SEMA-CALL-006` 报错。
+
+这些限制是当前回归矩阵锁住的行为边界，不是临时偶发现象。
+
+---
+
+## 13. 一句话总结
+
+当前 semantic 已经是“AST 直接判定”架构：
+
+$$
+\text{AST callable checks} + \text{scope-order checks} + \text{return-flow checks}
+$$
+
+重点不再是 metadata parity，而是规则优先级稳定和声明顺序语义准确性。
+
+---
+
+## 可选思考题
+
+1. 为什么本项目把 callable shadow precheck 放在 callable 主规则之前？
+2. 如果未来要支持更完整的 callee 形态（例如函数指针调用），你会先改 parser 还是 semantic？为什么？

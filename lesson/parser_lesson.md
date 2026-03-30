@@ -1,12 +1,37 @@
 # Parser Lesson（compiler_lab）
 
-> 目标：按“文件 + 板块”解释 parser 怎么实现，并把“实现思路/伪代码”融合在每一节里，方便后续跟代码同步更新。
+> 目标：按“文件 + 板块”解释 parser 怎么实现，并把“实现思路/伪代码”融合在每一节里，形成可讲解、可跟读的讲义。
+
+## 导学
+
+这份讲义建议按“从外到内”的顺序学习：
+
+1. 先掌握接口契约与状态机原语（peek/match/consume）。
+2. 再理解表达式、语句、顶层 external 的递归下降主线。
+3. 最后结合回归测试，建立“实现-行为-断言”的对应关系。
+
+学完你应该能：
+
+1. 能口述 parser 的递归下降层次和结合律处理方式。
+2. 能解释为什么函数优先解析、失败再回退声明。
+3. 能把一个 parser 回归 case 对应到具体解析阶段。
 
 ---
 
-## 1. `include/parser.h`：对外契约
+## 1. 文件布局与对外契约
 
-### 1.1 `ParserError` 怎么实现
+当前 parser 已拆分为“聚合入口 + 功能分片”：
+
+- 聚合入口：`src/parser/parser.c`
+- AST 兼容层：`src/parser/parser_ast_compat.inc`
+- 表达式核心：`src/parser/parser_core_expr.inc`
+- 语句/声明/TU：`src/parser/parser_stmt_decl_tu.inc`
+
+`parser.c` 负责定义 `Parser` 与聚合 include，主要实现位于 3 个 `.inc` 分片中。
+
+## 2. `include/parser.h`：对外契约
+
+### 2.1 `ParserError` 怎么实现
 
 `ParserError` 结构体是 parser 的统一错误出口：
 
@@ -38,7 +63,7 @@ else:
     err = best_error
 ```
 
-### 1.2 API 族的实现定位
+### 2.2 API 族的实现定位
 
 `parser.h` 暴露 3 类接口：
 
@@ -59,7 +84,7 @@ $$
 \text{ExprAlias}(T) \equiv \text{ExprAssignment}(T)
 $$
 
-### 1.3 输入契约
+### 2.3 输入契约
 
 所有入口都依赖 token 流契约：
 
@@ -71,9 +96,9 @@ $$
 
 ---
 
-## 2. `src/parser/parser.c`：核心状态与基础设施
+## 3. `src/parser/parser.c` + `*.inc`：核心状态与基础设施
 
-### 2.1 `Parser` 状态机
+### 3.1 `Parser` 状态机
 
 `Parser` 结构体核心字段可以抽象为：
 
@@ -99,7 +124,7 @@ while not EOF:
     S <- step(S)
 ```
 
-### 2.2 游标原语：`peek/advance/check/match/consume`
+### 3.2 游标原语：`peek/advance/check/match/consume`
 
 这是递归下降 parser 的基础组合：
 
@@ -128,7 +153,7 @@ set_error("Expected ...")
 return fail
 ```
 
-### 2.3 错误选择：最远失败优先
+### 3.3 错误选择：最远失败优先
 
 `set_error` 用 `error_index` 记录“最远走到哪里才失败”。
 
@@ -144,7 +169,7 @@ $$
 
 这个策略是为了解决“回溯分支污染错误”的问题（`parser_regression_test.c` 有专门 case）。
 
-### 2.4 递归保护（防爆栈）
+### 3.4 递归保护（防爆栈）
 
 表达式和语句分别限制深度（默认 2048）：
 
@@ -168,7 +193,7 @@ depth++
 depth--
 ```
 
-### 2.5 函数调用元数据缓存（给 semantic 用）
+### 3.5 函数调用元数据缓存（parser 内部临时状态）
 
 函数体解析时，parser 会记录 call-site 信息：
 
@@ -191,9 +216,11 @@ $$
 
 - 每个数组单独 `realloc`。
 - 任一步失败都报 OOM 并终止该解析路径。
-- 成功后所有权转交到 `AstExternal`。
+- 这组数据属于 `Parser` 内部瞬态状态。
+- 本次解析结束后会被释放，不属于当前 `AstExternal` 对外契约字段。
+- 当前 semantic 主路径不会读取这组 parser 内部缓存；semantic 规则以 AST 遍历结果为准。
 
-### 2.6 token slice 工具函数（可调用形态判定）
+### 3.6 token slice 工具函数（可调用形态判定）
 
 `token_slice_is_callable_form`、`token_slice_callable_name_token`、`trim_wrapping_parentheses` 用于把 `(...)` 外壳剥掉并判断：
 
@@ -207,11 +234,31 @@ $$
 - `AST_CALL_CALLEE_CALL_RESULT`
 - `AST_CALL_CALLEE_NON_IDENTIFIER`
 
+### 3.7 `parser_ast_compat.inc`（重要兼容边界）
+
+parser 现在通过本地兼容层管理 AST 生命周期与 external append：
+
+- `parser_ast_program_add_external`
+- `parser_ast_program_free`
+- `parser_ast_statement_free`
+- `parser_ast_expression_free`
+
+这层的意义：
+
+1. parser 旧链路（legacy-link）不强依赖 `src/ast/ast.c` 也能正确链接运行。
+2. parser 自己对“解析中临时 AST”的释放路径可控，失败回滚更稳定。
+3. parser 与 AST 内部实现解耦，公开契约仍以 `include/ast.h` 为准。
+
+维护规则建议：
+
+- 新增 parser AST 节点字段时，必须同步更新这层 free/初始化逻辑。
+- 若只更新 `ast.c` 释放逻辑而忘记兼容层，`parser_legacy_link_test` 可能会第一时间暴露问题。
+
 ---
 
-## 3. 表达式解析：验证路径 + AST 路径
+## 4. 表达式解析：验证路径 + AST 路径
 
-### 3.1 两条路径如何保持一致
+### 4.1 两条路径如何保持一致
 
 `parser.c` 同时维护：
 
@@ -224,7 +271,7 @@ $$
 \mathcal{G}_{check} \cong \mathcal{G}_{ast}
 $$
 
-### 3.2 优先级分层（低到高）
+### 4.2 优先级分层（低到高）
 
 $$
 E_{comma}
@@ -261,7 +308,7 @@ $$
 a-b-c = (a-b)-c
 $$
 
-### 3.3 条件与赋值：右结合
+### 4.3 条件与赋值：右结合
 
 条件表达式（`?:`）和赋值表达式采用右递归：
 
@@ -282,7 +329,7 @@ if (!(left->kind == AST_EXPR_IDENTIFIER && match_assignment_operator(...)))
 
 这属于当前项目子集策略，和完整 C lvalue 语义不同。
 
-### 3.4 前后缀 `++/--` 的 lvalue 检查
+### 4.4 前后缀 `++/--` 的 lvalue 检查
 
 非 AST 路径通过 token slice 判定“是否是（可带括号的）标识符形式”；AST 路径通过 `ast_expression_is_identifier_lvalue` 检查。
 
@@ -294,7 +341,7 @@ $$
 
 否则报错：`Expected identifier lvalue ...`。
 
-### 3.5 函数调用的语法与元数据
+### 4.5 函数调用的语法与元数据
 
 后缀解析里遇到 `(` 时：
 
@@ -310,7 +357,7 @@ expr = parse_primary()
 while next is '(' or postfix-op:
     if '(':
         args = parse_arg_list_as_assignment_expr()
-        record_call_metadata()
+        record_call_site_state()
         expr = Call(expr, args)
     elif ++/--:
         require identifier-lvalue
@@ -319,7 +366,7 @@ while next is '(' or postfix-op:
 
 ---
 
-## 4. 语句解析与控制流方程
+## 5. 语句解析与控制流方程
 
 `parse_statement_with_flow` 同时产出语法结果与 3 个流属性：
 
@@ -331,7 +378,7 @@ $$
 - $F$: `may_fallthrough`
 - $B$: `may_break`
 
-### 4.1 复合语句 `{...}`
+### 5.1 复合语句 `{...}`
 
 `parse_compound_statement_with_flow` 顺序扫描子语句，做流传播。核心思想是“前面路径已不再 fallthrough 时，后续语句不再影响 return 保证”。
 
@@ -347,7 +394,7 @@ for child in block:
         elif not flow.F: block_R=0; block_F=0
 ```
 
-### 4.2 `if` 合成规则
+### 5.2 `if` 合成规则
 
 有 `else`：
 
@@ -371,7 +418,7 @@ $$
 
 因为条件为假时会直接落到 if 后面。
 
-### 4.3 `while` 与 `for`（近似分析）
+### 5.3 `while` 与 `for`（近似分析）
 
 通过 `expression_slice_is_constant_true` 识别“条件是单个非零字面量”这一类常真条件。
 
@@ -393,7 +440,7 @@ $$
 
 `R` 在常真且不可 break 时继承 body 的 `R`；其他情况置 0。
 
-### 4.4 `break/continue` 的合法性
+### 5.4 `break/continue` 的合法性
 
 利用 `loop_depth` 约束：
 
@@ -403,7 +450,7 @@ $$
 
 这在 `parse_break_statement` 与 `parse_continue_statement` 中直接检查。
 
-### 4.5 语句 AST 的实现方案
+### 5.5 语句 AST 的实现方案
 
 控制流语句会把表达式片段切成 token slice，再调用 `parser_parse_expression_ast_assignment` 生成表达式 AST，挂到 `AstStatement` 的 `expressions[]`。
 
@@ -411,9 +458,9 @@ $$
 
 ---
 
-## 5. 顶层 external：函数优先，失败回退声明
+## 6. 顶层 external：函数优先，失败回退声明
 
-### 5.1 `parse_function_external` 的策略
+### 6.1 `parse_function_external` 的策略
 
 流程：
 
@@ -433,7 +480,7 @@ $$
 \text{is\_definition} \Rightarrow \neg \text{has\_unnamed\_parameter}
 $$
 
-### 5.2 顶层主循环（`parser_parse_translation_unit_ast`）
+### 6.2 顶层主循环（`parser_parse_translation_unit_ast`）
 
 外层策略是“先函数再声明”：
 
@@ -450,7 +497,7 @@ while not EOF:
 
 这是处理 C 顶层二义入口的常见 deterministic 回退法。
 
-### 5.3 `parse_declaration` 实现点
+### 6.3 `parse_declaration` 实现点
 
 支持：
 
@@ -458,24 +505,61 @@ while not EOF:
 - `int a=1;`
 - `int a=1, b, c=2;`
 
-并把每个 declarator 展开为一个 `AST_EXTERNAL_DECLARATION` external，`has_initializer` 单独记录。
+实现上有两个关键动作（现在这版非常重要）：
+
+1. 顶层 external 仍然“每个 declarator 展开一个 `AST_EXTERNAL_DECLARATION`”，并记录 `has_initializer`。  
+2. 语句 AST 路径中，声明器名字与初始化器表达式槽位做一一对齐。
+
+对齐规则：
+
+$$
+\text{slot}_i =
+\begin{cases}
+E_i, & d_i\ \text{有 initializer} \\
+\varnothing, & d_i\ \text{无 initializer}
+\end{cases}
+$$
+
+也就是：
+
+$$
+|declaration\_names| = |expressions|
+$$
+
+这解决了旧实现里“只存有 initializer 的表达式”带来的映射歧义，使 semantic 可以稳定按声明器顺序检查可见性。
+
+伪代码：
+
+```text
+for each declarator d_i:
+    parse identifier
+    if has initializer:
+        init_expr = build_ast_from_slice(...)
+    else:
+        init_expr = NULL
+
+    names.push(d_i)
+    expr_slots.push(init_expr)   // 始终 push，保持索引对齐
+```
+
+同样规则也用于 `for(int ...; ...; ...)` 的 for-init 声明部分。
 
 ---
 
-## 6. 公共入口函数的关系
+## 7. 公共入口函数的关系
 
-### 6.1 `parser_parse_translation_unit`
+### 7.1 `parser_parse_translation_unit`
 
 - 仅语法检查
 - 不构建 `AstProgram`
 - 更轻量，适合快速路径或旧链路
 
-### 6.2 `parser_parse_translation_unit_ast`
+### 7.2 `parser_parse_translation_unit_ast`
 
 - 语法 + AST + 函数元数据
 - 失败时会清理 `out_program`，避免半成品 AST 残留
 
-### 6.3 `parser_parse_expression_ast_assignment`
+### 7.3 `parser_parse_expression_ast_assignment`
 
 - 入口是 comma-level 解析
 - 结尾强制 `is_at_end`
@@ -488,9 +572,9 @@ $$
 
 ---
 
-## 7. `tests/parser/*`：测试代码怎么写（含模板）
+## 8. `tests/parser/*`：测试代码怎么写（含模板）
 
-### 7.1 `tests/parser/test.c`
+### 8.1 `tests/parser/test.c`
 
 这是手工样例输入文件，用于 `parser_test` 读取并展示 token/AST。
 
@@ -499,7 +583,7 @@ $$
 - 覆盖 if/for/while
 - 覆盖表达式优先级与一元/后缀/调用/复合赋值
 
-### 7.2 `tests/parser/parser_test.c`
+### 8.2 `tests/parser/parser_test.c`
 
 CLI 冒烟测试程序：
 
@@ -511,11 +595,11 @@ CLI 冒烟测试程序：
 
 这是“端到端链路”验证，不是精细断言回归。
 
-### 7.3 `tests/parser/parser_legacy_link_test.c`
+### 8.3 `tests/parser/parser_legacy_link_test.c`
 
 最小旧 API 链接冒烟：只测 `parser_parse_translation_unit` 能正常链接并跑通。
 
-### 7.4 `tests/parser/parser_regression_test.c`（重点）
+### 8.4 `tests/parser/parser_regression_test.c`（重点）
 
 这个文件是 parser 行为契约主集合。组织方式：
 
@@ -524,7 +608,7 @@ CLI 冒烟测试程序：
 - 表驱动矩阵（callable entry cases）
 - `main()` 逐条串联，任何失败立即 `return 1`
 
-### 7.5 基础测试块（C 模板）
+### 8.5 基础测试块（C 模板）
 
 模板 A：预期失败 + 诊断子串断言
 
@@ -596,7 +680,7 @@ for (i = 0; i < n; ++i) {
 }
 ```
 
-### 7.6 注册新测试到 `main`
+### 8.6 注册新测试到 `main`
 
 当前风格是显式串联：
 
@@ -606,7 +690,7 @@ if (!test_xxx()) return 1;
 
 新增测试时保持这个顺序式结构，便于第一时间定位失败点。
 
-### 7.7 Parser 改动时的测试策略
+### 8.7 Parser 改动时的测试策略
 
 当你修改 parser，建议按这个顺序补/跑：
 
@@ -617,7 +701,7 @@ if (!test_xxx()) return 1;
 
 ---
 
-## 8. 快速维护指南（代码还在变化时）
+## 9. 快速维护指南（代码还在变化时）
 
 如果 parser 后续继续扩展，推荐固定这个落地顺序：
 
@@ -633,3 +717,226 @@ $$
 $$
 
 满足这三项，parser 演进会很稳。
+
+---
+
+## 10. 逐函数深挖（按 `src/parser/parser.c` 执行路径）
+
+下面这一节按“实际运行顺序”讲 parser：从 token 游标，到表达式，再到语句和函数体。
+
+### 10.1 游标与状态转移
+
+核心状态可看成：
+
+$$
+S=(current, has\_error, error\_index, loop\_depth, recursion\_depths, metrics)
+$$
+
+每次 `match/consume/advance` 都是对 `current` 的状态转移：
+
+$$
+current_{t+1}=current_t+1\quad(\text{仅在成功消费 token 时})
+$$
+
+伪代码：
+
+```text
+step(type):
+    if peek == type:
+        advance
+        return ok
+    else:
+        return fail
+```
+
+### 10.2 错误策略（最远失败优先）
+
+`set_error` 不是“最后一次错误覆盖”，而是“最远位置优先”：
+
+$$
+idx_{new}<idx_{best}\Rightarrow ignore,
+\quad idx_{new}\ge idx_{best}\Rightarrow replace
+$$
+
+这让回退场景（函数解析失败后尝试声明解析）仍能给出更有意义的错误点。
+
+### 10.3 表达式解析链（优先级 + 结合性）
+
+表达式链是典型递归下降分层：
+
+$$
+E_{comma}\to E_{assign}\to \cdots \to E_{postfix}\to E_{primary}
+$$
+
+- 左结合层（`+ - * / ...`）用 `while` 循环叠树
+- 赋值层保持右结合（递归进右侧）
+
+伪代码（左结合层）：
+
+```text
+left = parse_lower()
+while next in ops:
+    op = consume()
+    right = parse_lower()
+    left = Node(op,left,right)
+return left
+```
+
+### 10.4 `parse_postfix`：为什么能识别调用链
+
+`parse_postfix` 的 while 循环每吃到一个 `(`...`)`，就产生一次调用语义（并在非 AST 路径记录元数据）。
+
+链式形式：
+
+$$
+a()()() = Call(Call(Call(a,[]),[]),[])
+$$
+
+所以 `a()()()` 会记录 3 条 call site。
+
+### 10.5 `parse_statement_with_flow`：语句解析 + 控制流合成
+
+它做两件事：
+
+1. 解析语句结构（`if/while/for/return/...`）
+2. 同步计算流属性：
+
+$$
+(g\_ret, may\_fall, may\_break)
+$$
+
+例如 block（compound）是折叠合成：
+
+```text
+for stmt in block:
+    merge(flow, flow(stmt))
+```
+
+### 10.6 `parse_compound_statement_with_flow`：声明与语句并行处理
+
+在 `{...}` 中：
+
+- 若遇到 `int`，走 `parse_declaration`
+- 否则走一般语句解析
+
+现在（S3 后）声明节点会同时挂：
+
+- `declaration_names[]`
+- 与其一一对齐的 `expressions[]`（initializer AST，可能为 `NULL`）
+
+### 10.7 `parse_declaration`：声明器序与 initializer 槽位
+
+声明器序列：
+
+$$
+int\ d_1(=e_1)?, d_2(=e_2)?,\dots,d_n(=e_n)?;
+$$
+
+当前实现的关键不变量：
+
+$$
+|names|=|expr\_slots|=n
+$$
+
+且：
+
+$$
+expr\_slots[i]=
+\begin{cases}
+AST(e_i), & d_i\ \text{有初始化}\\
+NULL, & d_i\ \text{无初始化}
+\end{cases}
+$$
+
+这正是 semantic 能按声明器顺序做可见性检查的前提。
+
+### 10.8 `parse_for_statement_with_flow`：for-init 的两条路
+
+`for(init; cond; step)` 的 init 有两种：
+
+1. 表达式 init（`i=0`）
+2. 声明 init（`int i=0,j=1`）
+
+声明 init 情况下，for 语句也会保存对齐后的声明器槽位，然后再追加 cond/step。
+
+可抽象为：
+
+$$
+ExprList_{for} = [InitDeclSlots...] \oplus [cond?] \oplus [step?]
+$$
+
+并用索引字段标注 `for_init/condition/for_step`。
+
+### 10.9 顶层回退（函数优先，失败回退声明）
+
+翻译单元循环：
+
+```text
+try parse_function_external
+if fail:
+    rewind
+    parse_declaration
+```
+
+这是 C 顶层常见模式，目的是在共享前缀（`int ident ...`）下优先识别函数，再安全回退。
+
+### 10.10 对外产出（当前精简契约）
+
+函数定义成功后，parser 对外主要写入：
+
+1. `function_body`（statement AST）
+2. `return_statement_count`
+3. 形参信息（`parameter_count/parameter_names`）
+
+换句话说，当前 external 契约更偏“结构主导、统计精简”。
+
+$$
+Output_{external} = \{AST\ body,\ params,\ return\_count\}
+$$
+
+### 10.11 为什么 parser 仍保留非 AST 路径
+
+当前是“镜像双轨”：
+
+- 旧接口需要 `int parse_*` 语法验证路径
+- 新链路需要 `AstExpression*` 构树路径
+
+这是迁移期设计，不是最终形态。后续可逐步收敛为 AST 主路径 + 兼容壳。
+
+---
+
+## 11. Parser 级测试怎么对应到实现
+
+### 11.1 声明器槽位对齐（S3 关键回归）
+
+最小应覆盖：
+
+- `int x, y=1, z;` -> 槽位 `[NULL, 1, NULL]`
+- `for(int i, j=0, k; ... )` -> for-init 槽位同样对齐
+
+### 11.2 同声明顺序可见性的 parser 前提
+
+parser 不直接做“前向/反向引用合法性”判定，但必须保证 semantic 可判：
+
+$$
+name_i \leftrightarrow init_i\ \text{映射稳定}
+$$
+
+也就是上一节的对齐不变量。
+
+### 11.3 callable 链相关基准
+
+建议固定 3 类输入：
+
+1. `f(1)`（direct identifier）
+2. `(f())()`（call result）
+3. `(f+1)()`（non-identifier）
+
+保证 parser 侧分类/记录稳定，再由 semantic 决定最终诊断。
+
+---
+
+## 可选思考题
+
+1. 为什么 assignment 层当前采用“identifier-only lvalue”策略？它带来了哪些简化与限制？
+2. `parse_function_external` 失败后为什么必须回退 token 游标再尝试 declaration？

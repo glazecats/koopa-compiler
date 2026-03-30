@@ -38,7 +38,7 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                     semantic_set_error(error,
                                        lhs->line,
                                        lhs->column,
-                                       "Function definition must return on all control-flow paths");
+                                       "SEMA-CF-001: Function definition must return on all control-flow paths");
                 }
                 return 0;
             }

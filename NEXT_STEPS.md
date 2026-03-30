@@ -4,16 +4,15 @@
 
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
 2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
-3. Active implementation is Milestone C (`-fanalyzer`/ASan cleanup and warning triage).
-4. Keep Milestone D (strict path semantics) as the follow-up phase after Milestone C.
+3. Milestone C baseline validation is complete (`-fanalyzer`/ASan/strict-warning reruns are green).
+4. Active implementation is Milestone D (strict path semantics tightening).
 
 ## Why this order
 
 - S1+S2 AST-primary cutover is in place, and S3 semantic-authority retirement has been completed and validated.
-- The remaining high-value risk is structural coupling and parser-side legacy retention, not missing semantic baseline rules.
-- `-fanalyzer` warning around `external.name` is currently treated as likely false positive.
-- Runtime tests and ASan runs did not reproduce a real leak.
-- Parser dependence on AST internals and legacy metadata retention is now the primary maintainability target.
+- Structural coupling cleanup and static-analysis baselines are now complete.
+- The next high-value semantic risk is return-path strictness for non-termination/break/continue interactions.
+- Milestone D first strict-path slice is landed: CF matrix cases `CF-02`/`CF-03`/`CF-06` now enforce reject expectations.
 
 ## Near-Term Milestone Plan
 
@@ -35,11 +34,10 @@
 
 ### Milestone C: Static-analysis cleanup
 
-- Re-run strict static analysis (`-fanalyzer` and strict warning sets).
-- Address confirmed warnings and document any accepted false positives.
-- Verify with ASan/regression suite.
+- Status: completed baseline and rerun verification.
+- `test-fanalyzer`, `test-asan`, and `test-strict-warnings` are green with zero warnings in current runs.
 
-### Milestone D: Strict Path Semantics (deferred)
+### Milestone D: Strict Path Semantics (active)
 
 - Define strict return-path policy for non-termination paths.
 - Replace current structured approximation with stricter path reasoning.
@@ -163,34 +161,42 @@
 - 2026-03-30: Milestone C baseline started: re-ran full suite with GCC `-fanalyzer` and ASan instrumentation; all suites stayed green. Scoped suppression was added for one GCC `-Wanalyzer-fd-leak` false positive in `tests/lexer/lexer_regression_test.c` (`run_with_stderr_suppressed` stderr redirection helper), while preserving normal warning coverage for the rest of the codebase.
 - 2026-03-30: Milestone C strict-warning sweep: re-ran full suite under stricter warning flags (`-Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wformat=2`) and confirmed zero additional warnings with all regression suites green.
 - 2026-03-30: Milestone C ergonomics: added reusable Makefile targets `test-fanalyzer`, `test-asan`, and `test-strict-warnings` and validated all three targets end-to-end to keep static/runtime analysis checks one-command reproducible.
+- 2026-03-30: Large-file split follow-up (Phase S semantic slice) completed: split `src/semantic/semantic.c` into function-oriented fragments (`semantic_core_flow.inc`, `semantic_callable_rules.inc`, `semantic_scope_rules.inc`, `semantic_entry.inc`) with `semantic.c` as aggregator entry; behavior preserved and full `make test` remained green (commit `116af1b`).
+- 2026-03-30: Milestone C closure checkpoint: re-ran `test-fanalyzer`, `test-asan`, and `test-strict-warnings`; all three targets passed with zero warnings and semantic/parser/lexer regression suites green.
+- 2026-03-30: Milestone transition checkpoint: switched active implementation focus from Milestone C to Milestone D strict-path semantics.
+- 2026-03-30: Milestone D (D1) tests-first slice landed: flipped semantic CF matrix expectations for `CF-02`/`CF-03`/`CF-06` from accept to reject in strict-path target group.
+- 2026-03-30: Milestone D (D2) semantic slice landed: tightened loop return-path analysis for `while(1)`/`for(;;)` when loop bodies can both break and reiterate (`fallthrough` or `continue`), preventing trailing returns from masking non-termination paths; full `make test` and all analysis targets remained green.
+- 2026-03-30: Milestone D (D3) coverage slice landed: expanded strict-path CF matrix with nested-loop and mixed break/continue edge locks (`CF-11..CF-18`) and kept full `make clean && make test` plus analysis targets green.
+- 2026-03-30: Milestone D (findings hardening) landed: closed equivalent-true condition bypasses by extending constant-true flow recognition to parenthesized/unary/comma constant expressions (for example `(1)`, `+1`, `(0,1)`), added dedicated regressions (`CF-19..CF-25`), and stabilized reject assertions with error code `SEMA-CF-001`; full `make clean && make test` and analysis targets remained green.
+- 2026-03-30: Milestone D (D4 build reliability) landed: added explicit parser/semantic `.inc` dependency tracking in `Makefile` so include-fragment edits trigger rebuilds without manual clean.
+- 2026-03-30: Milestone D (parser boundary hardening) landed: soft-retired parser callable metadata collection in active path (`PARSER_ENABLE_CALL_METADATA_TRACKING=0` default), clarified parser-flow ownership comments (parser flow is syntax-local; semantic flow is authority), and added parser regression lock proving parser does not enforce semantic all-path return policy.
+- 2026-03-30: Milestone D (low-risk guardrail) landed: added explicit maintenance checklist note in parser AST compatibility layer to keep lifecycle helpers synchronized with `include/ast_internal.h` when AST ownership fields evolve.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
 - Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
-- Milestone C is now the active implementation phase (`-fanalyzer`/ASan cleanup and warning triage).
-- Large-file split is now scheduled as a B-support track: split oversized regression tests first, then split large implementation files after compatibility touchpoints shrink.
+- Milestone C baseline is complete and validated (`test-fanalyzer`/`test-asan`/`test-strict-warnings` are green with zero warnings).
+- Milestone D is now the active implementation phase (strict return-path semantics for non-termination/break/continue interactions).
+- Large-file split follow-up for parser + semantic implementation files is completed.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
 ## S2 Closure Snapshot
 
 - Completed: AST-primary callable checks for definitions, AST-primary return-path gate, visitor-based callable traversal, and chained-call behavior locks (`a()()` included).
 - Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
-- S3 semantic-authority retirement has completed; active remaining work is Milestone C static-analysis cleanup.
+- S3 semantic-authority retirement has completed; active remaining work is Milestone D strict-path tightening.
 
-## Active Implementation Plan (Milestone B kickoff)
+## Active Implementation Plan (Milestone D kickoff)
 
-1. B0 status: complete (A closure and B handoff context recorded in this document).
-2. B0.5 status: complete; oversized regression tests are split into suite aggregators plus themed include fragments (no behavior change).
-3. B1 status: complete; parser-side `called_function_*` retention interfaces are retired from AST/parser output paths and tests are aligned.
-4. B2 status: complete; parser-side `returns_on_all_paths` retention field and parser write paths are retired.
-5. B3 status: complete; parser-side statement-counter retention fields and parser accounting/write paths are retired.
-6. B4 status: complete; parser no longer depends on `ast_internal.h`, and parser-only legacy link compatibility is preserved.
-7. B5 status: complete; retirement verification bundle is recorded and Milestone B is closed.
-8. Validation gate: `make test` must remain green after every B-slice change.
-9. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only in Milestone D strict-path work.
+1. D0 status: complete; roadmap status is synchronized to `C complete -> D active` and current baselines are recorded.
+2. D1 status: complete; CF-02/CF-03/CF-06 are now reject expectations in the semantic control-flow matrix.
+3. D2 status: complete; loop return-path logic is tightened for cond-true loops that may both break and reiterate.
+4. D3 status: complete; strict-path edge coverage is expanded with nested-loop and mixed break/continue locks.
+5. D4 status: complete; validation bundle is green and include-fragment dependency tracking is hardened in Makefile.
+6. D5 status: complete; strict-path behavior changes and accepted limitations are recorded in this document.
 
-## Milestone B Detailed Execution Plan (active)
+## Milestone B Detailed Execution Plan (historical reference)
 
 1. B0 checkpoint freeze (documentation + baseline)
 - Goal: lock Milestone A closure context before B-side structural edits.
@@ -237,7 +243,7 @@
 - Rule 2: after each slice, run full `make test` before proceeding.
 - Rule 3: if any semantic behavior drift appears, pause and restore prior compatibility surface for that slice before continuing.
 
-## Large-File Split Schedule (B support track)
+## Large-File Split Schedule (historical reference)
 
 1. Phase T (immediate): split regression suites first.
 - Targets: `tests/parser/parser_regression_test.c` and `tests/semantic/semantic_regression_test.c`.
@@ -245,7 +251,7 @@
 
 2. Phase S (after B1-B3): split semantic/parser implementation files.
 - Targets: `src/semantic/semantic.c`, then `src/parser/parser.c`.
-- Reason: perform after metadata-retention cleanup to avoid moving code that is about to be deleted.
+- Status: completed for both targets.
 
 3. Phase thresholds and guardrails.
 - Soft threshold: start split planning when a C file exceeds ~1500 lines or mixes more than one major concern.
@@ -268,11 +274,11 @@
 ## Known Limitations (Current Behavior)
 
 - Return all-path analysis is still a structured approximation, not a full path solver.
-- Example currently accepted by design: `int f(int a){while(1){if(a){break;}}return 1;}`.
-- Rationale: parser flow marks loop body as potentially breaking, so a fallthrough path to trailing `return` is considered reachable.
-- Semantic regression matrix lock: CF-02 / CF-03 / CF-06 are currently expected to pass and are tagged as known-limitation guardrails.
-- Future strict-path migration rule: CF-02 / CF-03 / CF-06 should be flipped to expected-fail together when Milestone D is implemented.
-- If we later adopt stricter semantics that treat non-termination paths as non-returning failures, this loop/break interaction is a priority tightening point.
+- Strict-path CF matrix has been tightened and expanded through `CF-25`; previously accepted non-termination/break mixes (`CF-02`/`CF-03`/`CF-06`) are now reject expectations.
+- Equivalent-true condition rewrites (for example `(1)`, `+1`, `(0,1)`, `for(;(1);...)`) are now treated as strict-path true in flow analysis and covered by regressions.
+- Parser `parse_*_with_flow` equations are explicitly syntax-local for parser constraints/AST shaping and are not semantic return-path authority (owned by semantic flow analysis).
+- Current strict-path analysis remains intra-function and statement-structured (it is not a full symbolic path solver for arbitrary value-dependent loops).
+- Include-fragment rebuild reliability is hardened: parser/semantic `.inc` and regression fragment edits now trigger rebuilds via explicit Makefile prerequisites.
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
 - Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.

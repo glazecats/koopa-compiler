@@ -19,6 +19,29 @@ SEMANTIC_REGRESSION_BIN := $(SEMANTIC_BUILD_DIR)/semantic_regression_test
 LEXER_TEST_INPUT := tests/lexer/test.c
 PARSER_TEST_INPUT := tests/parser/test.c
 
+PARSER_SPLIT_INCLUDES := \
+	src/parser/parser_ast_compat.inc \
+	src/parser/parser_core_expr.inc \
+	src/parser/parser_stmt_decl_tu.inc
+
+SEMANTIC_SPLIT_INCLUDES := \
+	src/semantic/semantic_core_flow.inc \
+	src/semantic/semantic_callable_rules.inc \
+	src/semantic/semantic_scope_rules.inc \
+	src/semantic/semantic_entry.inc
+
+PARSER_REGRESSION_INCLUDES := \
+	tests/parser/parser_regression_intellisense_prelude.inc \
+	tests/parser/parser_regression_cases_core.inc \
+	tests/parser/parser_regression_cases_expr_ast_a.inc \
+	tests/parser/parser_regression_cases_expr_ast_b.inc \
+	tests/parser/parser_regression_cases_ast_meta.inc
+
+SEMANTIC_REGRESSION_INCLUDES := \
+	tests/semantic/semantic_regression_intellisense_prelude.inc \
+	tests/semantic/semantic_regression_callable_flow.inc \
+	tests/semantic/semantic_regression_scope_cf.inc
+
 .PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-fanalyzer test-asan test-strict-warnings clean
 
 all: test
@@ -36,16 +59,16 @@ $(LEXER_TEST_BIN): src/lexer/lexer.c tests/lexer/lexer_test.c include/lexer.h | 
 $(LEXER_REGRESSION_BIN): src/lexer/lexer.c tests/lexer/lexer_regression_test.c include/lexer.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c tests/lexer/lexer_regression_test.c -o $@
 
-$(PARSER_TEST_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/parser/parser_test.c include/lexer.h include/ast.h include/ast_internal.h include/parser.h include/semantic.h | dirs
+$(PARSER_TEST_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/parser/parser_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/parser.h include/semantic.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/parser/parser_test.c -o $@
 
-$(PARSER_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c tests/parser/parser_regression_test.c include/lexer.h include/ast.h include/ast_internal.h include/parser.h | dirs
+$(PARSER_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c tests/parser/parser_regression_test.c $(PARSER_SPLIT_INCLUDES) $(PARSER_REGRESSION_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/parser.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c tests/parser/parser_regression_test.c -o $@
 
-$(PARSER_LEGACY_LINK_BIN): src/lexer/lexer.c src/parser/parser.c tests/parser/parser_legacy_link_test.c include/lexer.h include/ast.h include/ast_internal.h include/parser.h | dirs
+$(PARSER_LEGACY_LINK_BIN): src/lexer/lexer.c src/parser/parser.c tests/parser/parser_legacy_link_test.c $(PARSER_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/parser.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/parser/parser.c tests/parser/parser_legacy_link_test.c -o $@
 
-$(SEMANTIC_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/semantic/semantic_regression_test.c include/lexer.h include/ast.h include/ast_internal.h include/parser.h include/semantic.h | dirs
+$(SEMANTIC_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/semantic/semantic_regression_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(SEMANTIC_REGRESSION_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/parser.h include/semantic.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/semantic/semantic_regression_test.c -o $@
 
 test-lexer: $(LEXER_TEST_BIN)

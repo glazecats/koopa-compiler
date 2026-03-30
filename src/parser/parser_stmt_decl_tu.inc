@@ -77,6 +77,12 @@ static int expression_slice_is_constant_true(const TokenArray *tokens,
     return tok->type == TOKEN_NUMBER && tok->number_value != 0;
 }
 
+/*
+ * Parser-side flow values are used only for local parsing constraints and
+ * statement-shape bookkeeping. Semantic return-path authority is implemented
+ * in semantic flow analysis, not in parser flow outputs.
+ */
+
 static int parse_compound_statement_with_flow(Parser *p,
                                               int *out_guaranteed_return,
                                               int *out_may_fallthrough,
@@ -1415,7 +1421,8 @@ static int parse_function_external(Parser *p,
         }
         p->track_function_return_count = 1;
         p->function_return_count = 0;
-        p->track_function_calls = 1;
+        p->track_function_calls = PARSER_ENABLE_CALL_METADATA_TRACKING;
+        /* Semantic owns all-path return/call correctness; parser keeps syntax-only flow. */
         body_ok = parse_compound_statement_with_flow(p,
                                                      NULL,
                                                      NULL,

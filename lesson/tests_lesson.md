@@ -1,8 +1,24 @@
 # Tests Lesson (compiler_lab)
 
+> 目标：把“怎么写测试”讲清楚，让你能从用例设计角度理解 lexer/parser/semantic 的行为边界。
+
+## 导学
+
+这份讲义建议按“模板 -> 策略 -> 设计能力”的顺序读：
+
+1. 先掌握通用模板：Arrange/Act/Assert/Cleanup。
+2. 再按模块学习：lexer、parser、semantic 各自如何设断言。
+3. 最后回到设计层：如何从需求反推测试矩阵。
+
+学完你应该能：
+
+1. 能为新语法点设计一组正向/反向/边界测试。
+2. 能写出可维护的表驱动回归测试。
+3. 能判断某个断言是否足够“稳”（返回值、结构、诊断、位置）。
+
 ## 1. 总览：`tests/` 目录怎么组织
 
-当前测试文件（共 8 个）：
+当前测试入口 C 文件（8 个）：
 
 - `tests/lexer/test.c`
 - `tests/lexer/lexer_test.c`
@@ -12,6 +28,17 @@
 - `tests/parser/parser_legacy_link_test.c`
 - `tests/parser/parser_regression_test.c`
 - `tests/semantic/semantic_regression_test.c`
+
+当前拆分片段（8 个 `.inc`）：
+
+- `tests/parser/parser_regression_cases_core.inc`
+- `tests/parser/parser_regression_cases_expr_ast_a.inc`
+- `tests/parser/parser_regression_cases_expr_ast_b.inc`
+- `tests/parser/parser_regression_cases_ast_meta.inc`
+- `tests/parser/parser_regression_intellisense_prelude.inc`
+- `tests/semantic/semantic_regression_callable_flow.inc`
+- `tests/semantic/semantic_regression_scope_cf.inc`
+- `tests/semantic/semantic_regression_intellisense_prelude.inc`
 
 建议理解为三层：
 
@@ -165,6 +192,8 @@ const TokenType expected[] = {
 
 用途：parser 主要行为锁（成功、失败、诊断、优先级、结合性、边界）。
 
+当前已按 `*.inc` 拆分（`core`/`expr_ast_a`/`expr_ast_b`/`ast_meta`），主文件只保留 harness 和执行顺序。
+
 写法策略：
 
 1. 单测函数命名要表达行为：
@@ -173,6 +202,13 @@ const TokenType expected[] = {
 2. 失败用例要校验诊断关键词（`required_msg_a/b`）
 3. 大量同类 case 用表驱动（例如 callable matrix）
 4. `main()` 按功能分组顺序执行，便于定位回归块
+
+S3 之后 parser 回归新增一个重点：声明器 initializer 槽位对齐。
+
+建议固定补这两组：
+
+1. 普通声明对齐：`int x, y=1, z;` 要验证 `declaration_names` 与 `expressions` 等长，且槽位为 `[NULL, 1, NULL]`  
+2. for-init 声明对齐：`for(int i, j=0, k; ... )` 要验证 for-init 槽位也保持同样对齐规则
 
 推荐新增测试时使用的“先验公式”：
 
@@ -192,6 +228,8 @@ $$
 
 用途：语义诊断码、行列定位、矩阵策略、控制流当前行为锁。
 
+当前也拆分为 `semantic_regression_callable_flow.inc` 与 `semantic_regression_scope_cf.inc`；另外 `semantic_regression_intellisense_prelude.inc` 专门承载编辑器补全前置声明。
+
 已有高价值模式（建议保持）：
 
 1. `parse_source_to_ast` 统一准备流程
@@ -204,11 +242,32 @@ $$
    - `must_pass_or_fail_now`
    - `known_limitation_lock`
 
+S3 之后建议把两类矩阵当成必选：
+
+1. callable shadow 诊断优先级矩阵：local/param/inner-block/for-init/parenthesized callee 都应稳定报 `SEMA-CALL-003`  
+2. 同声明顺序可见性矩阵：前向引用拒绝、反向引用通过（普通声明与 for-init 各一组）
+
 新增语义规则时建议：
 
 - 至少补 1 个 pass + 1 个 fail。
 - fail 至少校验两个维度：`error_code` 与 `message_snippet`。
 - 若涉及位置，额外校验 `line/column`。
+
+前向/反向引用模板（推荐直接复用）：
+
+```c
+/* fail: forward reference in same declaration */
+const char *s1 = "int f(){int x=y,y=1;return x;}\n";
+
+/* pass: reverse reference in same declaration */
+const char *s2 = "int f(){int y=1,x=y;return x;}\n";
+
+/* fail: forward reference in for-init declaration */
+const char *s3 = "int f(){for(int i=j,j=0;i<1;i=i+1){return i;}return 0;}\n";
+
+/* pass: reverse reference in for-init declaration */
+const char *s4 = "int f(){for(int j=0,i=j;i<1;i=i+1){return i;}return 0;}\n";
+```
 
 语义断言强度可写成：
 
@@ -254,6 +313,26 @@ $$
 2. 改 parser 后先跑 `make test-parser-regression`
 3. 改 semantic 后先跑 `make test-semantic-regression`
 4. 合并前跑一次 `make test`
+
+Milestone C（静态分析清理）建议加跑下面两条：
+
+1. `-fanalyzer` 严格检查（不改 Makefile，直接覆盖 `CFLAGS`）
+
+```bash
+make clean && make CFLAGS="-std=c11 -Wall -Wextra -Werror -fanalyzer -Iinclude" test
+```
+
+2. AddressSanitizer 路径（内存错误与越界）
+
+```bash
+make clean && make CFLAGS="-std=c11 -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer -g -Iinclude" test
+```
+
+可选：若环境支持 LeakSanitizer，可附加：
+
+```bash
+ASAN_OPTIONS=detect_leaks=1 make test
+```
 
 ---
 
@@ -407,3 +486,10 @@ $$
 - 建议：返回值 + 关键结构（token 序列 / AST shape）
 - 强建议（语义）：再加错误码与 `line:column`
 
+---
+
+## 9. 课堂讨论题（可选）
+
+1. 对同一个新特性，为什么“只写通过用例”通常不够？
+2. 在 parser 回归里，诊断子串断言和 AST 结构断言应该如何搭配？
+3. 你会如何设计一组用例来验证“诊断优先级稳定”而不是“偶然通过”？

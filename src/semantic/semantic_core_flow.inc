@@ -194,18 +194,77 @@ static const AstExpression *statement_get_condition_expression(const AstStatemen
     return stmt->expressions[stmt->condition_expression_index];
 }
 
+static int flow_try_eval_constant_int(const AstExpression *expr, long long *out_value) {
+    long long operand_value;
+    long long lhs_value;
+    long long rhs_value;
+
+    if (!expr || !out_value) {
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_NUMBER:
+        *out_value = expr->as.number_value;
+        return 1;
+    case AST_EXPR_PAREN:
+        return flow_try_eval_constant_int(expr->as.inner, out_value);
+    case AST_EXPR_UNARY:
+        if (!flow_try_eval_constant_int(expr->as.unary.operand, &operand_value)) {
+            return 0;
+        }
+        switch (expr->as.unary.op) {
+        case TOKEN_PLUS:
+            *out_value = operand_value;
+            return 1;
+        case TOKEN_MINUS:
+            *out_value = -operand_value;
+            return 1;
+        case TOKEN_BANG:
+            *out_value = !operand_value;
+            return 1;
+        case TOKEN_TILDE:
+            *out_value = ~operand_value;
+            return 1;
+        default:
+            return 0;
+        }
+    case AST_EXPR_BINARY:
+        if (expr->as.binary.op != TOKEN_COMMA) {
+            return 0;
+        }
+        if (!flow_try_eval_constant_int(expr->as.binary.left, &lhs_value)) {
+            return 0;
+        }
+        if (!flow_try_eval_constant_int(expr->as.binary.right, &rhs_value)) {
+            return 0;
+        }
+        (void)lhs_value;
+        *out_value = rhs_value;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int expression_is_constant_true_for_flow(const AstExpression *expr) {
-    return expr && expr->kind == AST_EXPR_NUMBER && expr->as.number_value != 0;
+    long long value;
+
+    return flow_try_eval_constant_int(expr, &value) && value != 0;
 }
 
 static int semantic_analyze_statement_flow(const AstStatement *stmt,
                                            int *out_guaranteed_return,
                                            int *out_may_fallthrough,
-                                           int *out_may_break) {
+                                           int *out_may_break,
+                                           int *out_may_continue_loop,
+                                           int *out_may_non_terminating) {
     size_t i;
     int guaranteed_return = 0;
     int may_fallthrough = 1;
     int may_break = 0;
+    int may_continue_loop = 0;
+    int may_non_terminating = 0;
 
     if (out_guaranteed_return) {
         *out_guaranteed_return = 0;
@@ -215,6 +274,12 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
     }
     if (out_may_break) {
         *out_may_break = 0;
+    }
+    if (out_may_continue_loop) {
+        *out_may_continue_loop = 0;
+    }
+    if (out_may_non_terminating) {
+        *out_may_non_terminating = 0;
     }
 
     if (!stmt) {
@@ -226,21 +291,33 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         int block_guaranteed_return = 0;
         int block_may_fallthrough = 1;
         int block_may_break = 0;
+        int block_may_continue_loop = 0;
+        int block_may_non_terminating = 0;
 
         for (i = 0; i < stmt->child_count; ++i) {
             int child_guaranteed_return = 0;
             int child_may_fallthrough = 1;
             int child_may_break = 0;
+            int child_may_continue_loop = 0;
+            int child_may_non_terminating = 0;
 
             if (!semantic_analyze_statement_flow(stmt->children[i],
                                                  &child_guaranteed_return,
                                                  &child_may_fallthrough,
-                                                 &child_may_break)) {
+                                                 &child_may_break,
+                                                 &child_may_continue_loop,
+                                                 &child_may_non_terminating)) {
                 return 0;
             }
 
             if (block_may_fallthrough && child_may_break) {
                 block_may_break = 1;
+            }
+            if (block_may_fallthrough && child_may_continue_loop) {
+                block_may_continue_loop = 1;
+            }
+            if (block_may_fallthrough && child_may_non_terminating) {
+                block_may_non_terminating = 1;
             }
 
             if (block_may_fallthrough) {
@@ -259,22 +336,30 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         guaranteed_return = block_guaranteed_return;
         may_fallthrough = block_may_fallthrough;
         may_break = block_may_break;
+        may_continue_loop = block_may_continue_loop;
+        may_non_terminating = block_may_non_terminating;
         break;
     }
     case AST_STMT_IF: {
         int then_guaranteed_return = 0;
         int then_may_fallthrough = 1;
         int then_may_break = 0;
+        int then_may_continue_loop = 0;
+        int then_may_non_terminating = 0;
         int else_guaranteed_return = 0;
         int else_may_fallthrough = 1;
         int else_may_break = 0;
+        int else_may_continue_loop = 0;
+        int else_may_non_terminating = 0;
         int has_else = stmt->child_count >= 2;
 
         if (stmt->child_count >= 1 &&
             !semantic_analyze_statement_flow(stmt->children[0],
                                              &then_guaranteed_return,
                                              &then_may_fallthrough,
-                                             &then_may_break)) {
+                                             &then_may_break,
+                                             &then_may_continue_loop,
+                                             &then_may_non_terminating)) {
             return 0;
         }
 
@@ -282,50 +367,72 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             !semantic_analyze_statement_flow(stmt->children[1],
                                              &else_guaranteed_return,
                                              &else_may_fallthrough,
-                                             &else_may_break)) {
+                                             &else_may_break,
+                                             &else_may_continue_loop,
+                                             &else_may_non_terminating)) {
             return 0;
         }
 
         guaranteed_return = has_else && then_guaranteed_return && else_guaranteed_return;
         may_fallthrough = has_else ? (then_may_fallthrough || else_may_fallthrough) : 1;
         may_break = has_else ? (then_may_break || else_may_break) : then_may_break;
+        may_continue_loop =
+            has_else ? (then_may_continue_loop || else_may_continue_loop) : then_may_continue_loop;
+        may_non_terminating =
+            has_else ? (then_may_non_terminating || else_may_non_terminating)
+                     : then_may_non_terminating;
         break;
     }
     case AST_STMT_WHILE: {
         int cond_always_true = expression_is_constant_true_for_flow(
             statement_get_condition_expression(stmt));
         int body_guaranteed_return = 0;
+        int body_may_fallthrough = 1;
         int body_may_break = 0;
+        int body_may_continue_loop = 0;
+        int body_may_non_terminating = 0;
 
         if (stmt->child_count >= 1 &&
             !semantic_analyze_statement_flow(stmt->children[0],
                                              &body_guaranteed_return,
-                                             NULL,
-                                             &body_may_break)) {
+                                             &body_may_fallthrough,
+                                             &body_may_break,
+                                             &body_may_continue_loop,
+                                             &body_may_non_terminating)) {
             return 0;
         }
 
         if (cond_always_true) {
             if (body_may_break) {
+                int body_can_reiterate = body_may_fallthrough || body_may_continue_loop;
+                int body_can_nonterminate_without_break =
+                    body_can_reiterate || body_may_non_terminating;
                 guaranteed_return = 0;
-                may_fallthrough = 1;
+                may_fallthrough = body_can_nonterminate_without_break ? 0 : 1;
+                may_non_terminating = body_can_nonterminate_without_break ? 1 : 0;
             } else {
                 guaranteed_return = body_guaranteed_return;
                 may_fallthrough = 0;
+                may_non_terminating = body_guaranteed_return ? 0 : 1;
             }
         } else {
             guaranteed_return = 0;
             may_fallthrough = 1;
+            may_non_terminating = 0;
         }
 
         may_break = 0;
+        may_continue_loop = 0;
         break;
     }
     case AST_STMT_FOR: {
         const AstExpression *cond_expr = statement_get_condition_expression(stmt);
         int cond_always_true = 1;
         int body_guaranteed_return = 0;
+        int body_may_fallthrough = 1;
         int body_may_break = 0;
+        int body_may_continue_loop = 0;
+        int body_may_non_terminating = 0;
 
         if (stmt->has_condition_expression) {
             cond_always_true = expression_is_constant_true_for_flow(cond_expr);
@@ -334,41 +441,56 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         if (stmt->child_count >= 1 &&
             !semantic_analyze_statement_flow(stmt->children[0],
                                              &body_guaranteed_return,
-                                             NULL,
-                                             &body_may_break)) {
+                                             &body_may_fallthrough,
+                                             &body_may_break,
+                                             &body_may_continue_loop,
+                                             &body_may_non_terminating)) {
             return 0;
         }
 
         if (cond_always_true) {
             if (body_may_break) {
+                int body_can_reiterate = body_may_fallthrough || body_may_continue_loop;
+                int body_can_nonterminate_without_break =
+                    body_can_reiterate || body_may_non_terminating;
                 guaranteed_return = 0;
-                may_fallthrough = 1;
+                may_fallthrough = body_can_nonterminate_without_break ? 0 : 1;
+                may_non_terminating = body_can_nonterminate_without_break ? 1 : 0;
             } else {
                 guaranteed_return = body_guaranteed_return;
                 may_fallthrough = 0;
+                may_non_terminating = body_guaranteed_return ? 0 : 1;
             }
         } else {
             guaranteed_return = 0;
             may_fallthrough = 1;
+            may_non_terminating = 0;
         }
 
         may_break = 0;
+        may_continue_loop = 0;
         break;
     }
     case AST_STMT_RETURN:
         guaranteed_return = 1;
         may_fallthrough = 0;
         may_break = 0;
+        may_continue_loop = 0;
+        may_non_terminating = 0;
         break;
     case AST_STMT_BREAK:
         guaranteed_return = 0;
         may_fallthrough = 0;
         may_break = 1;
+        may_continue_loop = 0;
+        may_non_terminating = 0;
         break;
     case AST_STMT_CONTINUE:
         guaranteed_return = 0;
         may_fallthrough = 0;
         may_break = 0;
+        may_continue_loop = 1;
+        may_non_terminating = 0;
         break;
     case AST_STMT_DECLARATION:
     case AST_STMT_EXPRESSION:
@@ -376,6 +498,8 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         guaranteed_return = 0;
         may_fallthrough = 1;
         may_break = 0;
+        may_continue_loop = 0;
+        may_non_terminating = 0;
         break;
     }
 
@@ -387,6 +511,12 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
     }
     if (out_may_break) {
         *out_may_break = may_break;
+    }
+    if (out_may_continue_loop) {
+        *out_may_continue_loop = may_continue_loop;
+    }
+    if (out_may_non_terminating) {
+        *out_may_non_terminating = may_non_terminating;
     }
     return 1;
 }
@@ -412,7 +542,12 @@ static int semantic_compute_function_returns_all_paths(const AstExternal *func,
         return 0;
     }
 
-    if (!semantic_analyze_statement_flow(func->function_body, &guaranteed_return, NULL, NULL)) {
+    if (!semantic_analyze_statement_flow(func->function_body,
+                                         &guaranteed_return,
+                                         NULL,
+                                         NULL,
+                                         NULL,
+                                         NULL)) {
         semantic_set_error(error,
                            func->line,
                            func->column,

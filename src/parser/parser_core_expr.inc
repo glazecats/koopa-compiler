@@ -181,6 +181,14 @@ static int parser_record_function_call_name(Parser *p,
                                             const Token *call_site_tok,
                                             size_t arg_count,
                                             int callee_kind) {
+#if !PARSER_ENABLE_CALL_METADATA_TRACKING
+    (void)p;
+    (void)name_tok;
+    (void)call_site_tok;
+    (void)arg_count;
+    (void)callee_kind;
+    return 1;
+#else
     char **new_data;
     int *new_lines;
     int *new_columns;
@@ -251,6 +259,7 @@ static int parser_record_function_call_name(Parser *p,
     p->function_called_kinds[p->function_called_count] = callee_kind;
     p->function_called_count++;
     return 1;
+#endif
 }
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);

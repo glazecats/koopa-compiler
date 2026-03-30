@@ -35,6 +35,14 @@ typedef struct {
 #define PARSER_EXPRESSION_RECURSION_LIMIT 2048U
 #define PARSER_STATEMENT_RECURSION_LIMIT 2048U
 
+/*
+ * Soft-retired by default: semantic callable checks are AST-primary.
+ * Keep this gate for temporary legacy compatibility windows.
+ */
+#ifndef PARSER_ENABLE_CALL_METADATA_TRACKING
+#define PARSER_ENABLE_CALL_METADATA_TRACKING 0
+#endif
+
 #define PARSER_SPLIT_AGGREGATOR 1
 #include "parser_ast_compat.inc"
 #include "parser_core_expr.inc"

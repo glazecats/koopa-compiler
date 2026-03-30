@@ -886,6 +886,16 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
         return 0;
     }
 
+    if (strstr(sema_err.message, "SEMA-CF-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: %s expected SEMA-CF-001, got: %s\n",
+                case_id,
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     if (strstr(sema_err.message, "all control-flow paths") == NULL) {
         fprintf(stderr,
                 "[semantic-reg] FAIL: %s expected all-paths-return diagnostic, got: %s\n",
@@ -905,12 +915,14 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
  * Control-flow comparison matrix groups:
  * 1) must_pass_or_fail_now
  *    - Current expectation is aligned with stricter all-path semantics.
- * 2) known_limitation_lock
- *    - Cases are intentionally accepted today.
- *    - They are guardrails against accidental behavior drift until Milestone D.
+ * 2) strict_path_target
+ *    - Cases now follow strict all-path return semantics.
+ *    - They were known limitations before Milestone D.
+ * 3) strict_path_edge_coverage
+ *    - Nested-loop and mixed break/continue edge coverage for Milestone D3.
  *
  * Strict-semantics migration note (Milestone D):
- * - Move CF-02/CF-03/CF-06 from known_limitation_lock to reject expectations.
+ * - CF-02/CF-03/CF-06 are now expected to reject.
  * - Keep CF-01/04/05/07/08/09/10 as-is unless semantics policy changes again.
  */
 typedef enum {
@@ -958,13 +970,32 @@ static const CfCase kCfMustPassOrFailNow[] = {
     {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-09", "int f(){while(1){continue;}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-10", "int f(){for(;;){int x=1;}return 0;}\n", CF_EXPECT_REJECT},
+    {"CF-11", "int f(){while(1){while(1){break;}break;}return 1;}\n", CF_EXPECT_ACCEPT},
 };
 
-/* known_limitation_lock: currently accepted; strict all-path semantics would reject. */
-static const CfCase kCfKnownLimitationLock[] = {
-    {"CF-02", "int f(int a){while(1){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
-    {"CF-03", "int f(int a){while(1){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_ACCEPT},
-    {"CF-06", "int f(int a){for(;;){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+/* strict_path_target: strict all-path semantics reject these non-termination mixes. */
+static const CfCase kCfStrictPathTarget[] = {
+    {"CF-02", "int f(int a){while(1){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-03", "int f(int a){while(1){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-06", "int f(int a){for(;;){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
+};
+
+/* strict_path_edge_coverage: nested + mixed-branch strict-path behavior locks. */
+static const CfCase kCfStrictPathEdgeCoverage[] = {
+    {"CF-12", "int f(int a){while(1){while(1){if(a){break;}else{continue;}}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-13", "int f(int a){for(;;){if(a){break;}else{while(1){break;}break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-14", "int f(int a){for(;;){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-15", "int f(int a){while(1){if(a){break;}else{while(1){}}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-16", "int f(int a){while(1){if(a){break;}else{return 2;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-17", "int f(int a){for(;;){if(a){break;}else{for(;;){}}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-18", "int f(int a){for(;;){if(a){break;}else{return 2;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-19", "int f(){while((1)){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-20", "int f(){while(+1){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-21", "int f(){while((0,1)){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-22", "int f(){for(;(1);){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-23", "int f(){for(;(0,1);){continue;}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-24", "int f(){while(+0){continue;}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-25", "int f(){for(;(0);){continue;}return 1;}\n", CF_EXPECT_ACCEPT},
 };
 
 static int run_must_pass_or_fail_now_group(void) {
@@ -973,9 +1004,16 @@ static int run_must_pass_or_fail_now_group(void) {
                              sizeof(kCfMustPassOrFailNow) / sizeof(kCfMustPassOrFailNow[0]));
 }
 
-static int run_known_limitation_lock_group(void) {
-    return run_cf_case_group("known_limitation_lock",
-                             kCfKnownLimitationLock,
-                             sizeof(kCfKnownLimitationLock) / sizeof(kCfKnownLimitationLock[0]));
+static int run_strict_path_target_group(void) {
+    return run_cf_case_group("strict_path_target",
+                             kCfStrictPathTarget,
+                             sizeof(kCfStrictPathTarget) / sizeof(kCfStrictPathTarget[0]));
+}
+
+static int run_strict_path_edge_coverage_group(void) {
+    return run_cf_case_group("strict_path_edge_coverage",
+                             kCfStrictPathEdgeCoverage,
+                             sizeof(kCfStrictPathEdgeCoverage) /
+                                 sizeof(kCfStrictPathEdgeCoverage[0]));
 }
 

@@ -618,6 +618,59 @@ static int test_ast_partial_return_not_all_paths(void) {
     return 1;
 }
 
+static int test_ast_flow_is_not_semantic_authority(void) {
+    const char *source =
+        "int f(){if((1)){return 1;}}\n"
+        "int g(){while((1)){} }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for parser-flow-authority AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: parser should not enforce semantic all-path return, got %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 2 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        program.externals[1].kind != AST_EXTERNAL_FUNCTION) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected two function externals in parser-flow-authority test, got %zu\n",
+                program.count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.externals[0].return_statement_count != 1 ||
+        program.externals[1].return_statement_count != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected return counts [1,0] in parser-flow-authority test, got [%zu,%zu]\n",
+                program.externals[0].return_statement_count,
+                program.externals[1].return_statement_count);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_ast_accepts_break_continue_inside_loops(void) {
     const char *source =
         "int f(int a){while(1){if(a){break;}a=a-1;continue;}return 1;}\n";

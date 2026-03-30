@@ -2,6 +2,20 @@
 
 > 目标：回答“AST 现在到底实现了什么”，并按文件/板块解释实现方案、内存所有权、与 parser/semantic 的连接方式，以及测试应该怎么写。
 
+## 导学
+
+这份讲义建议按“模型 -> 生命周期 -> 消费关系”的顺序阅读：
+
+1. 先看 AST 结构：Program/External/Statement/Expression 的职责。
+2. 再看所有权与释放：成功路径和失败路径如何收口。
+3. 最后看下游消费：semantic 规则和测试如何依赖这些字段。
+
+学完你应该能：
+
+1. 能解释 `AstProgram` / `AstExternal` / `AstStatement` / `AstExpression` 的分工。
+2. 能说清 AST 生命周期（成功路径与失败路径）如何避免泄漏。
+3. 能把一个语义规则映射回它依赖的 AST 字段。
+
 ---
 
 ## 1. 文件地图与职责
@@ -34,8 +48,8 @@ $$
 
 - 表达式节点：标识符、数字、括号、一元、后缀、调用、二元、三目
 - 语句节点：复合块、声明语句、表达式语句、if/while/for/return/break/continue
-- 函数元数据：参数数、是否定义、return/loop/if/break/continue/decl 计数
-- 调用元数据：调用名、位置、参数个数、callee kind
+- 函数外部契约：参数信息、是否定义、`function_body`、`return_statement_count`
+- 调用检查所需信息主要由语义阶段遍历 AST 实时计算
 - 全量递归释放（避免泄漏）
 - Program 级动态扩容 append
 
@@ -106,21 +120,16 @@ $$
 
 ### 3.4 外部节点 `AstExternal`
 
-`AstExternal` 现在既存“语法形状”，也存“函数行为元数据”：
+`AstExternal` 当前是“精简外部契约”：主要保存顶层声明/定义的必要结构信息：
 
 - 名字与定位：`name/name_length/line/column`
 - 声明信息：`has_initializer`（声明外部）
 - 函数信息：`parameter_count`, `is_function_definition`, `function_body`
-- 控制流统计：`return_statement_count`, `returns_on_all_paths`, `loop/if/break/continue/declaration` 计数
-- 调用视图：`called_function_names/lines/columns/arg_counts/kinds` + `called_function_count`
+- 控制流统计：`return_statement_count`（仅保留 return 计数）
+- 不再在 external 上暴露 `called_function_*` 调用元数据数组
 
-这让 semantic 可以做约束检查：
+semantic 的 return-flow、callable、scope 规则现在直接基于 `function_body`（语句/表达式 AST）进行分析，不依赖 external 附加调用元数据。
 
-$$
-\text{function def} \Rightarrow \text{returns\_on\_all\_paths}=1
-$$
-
-以及调用规则检查（未声明、参数数不匹配、callee 类型不支持）。
 
 ### 3.5 Program 容器 `AstProgram`
 
@@ -177,8 +186,8 @@ free(stmt)
 `ast_program_clear_storage` 会：
 
 - 遍历每个 external
-- 释放 `name`、`function_body`
-- 释放 `called_function_*` 全套数组
+- 释放 `name`
+- 释放 `parameter_names` 与 `function_body`，并清理 external 数组本体
 - 最后释放 `externals` 并把 `count/capacity` 归零
 
 这保证不变量：
@@ -258,27 +267,30 @@ else:
 
 ---
 
-## 7. 为什么 AST 里要放这么多元数据（semantic 视角）
+## 7. 为什么当前 AST 字段足够 semantic 使用（semantic 视角）
 
 `semantic.c` 对 AST 的消费说明了字段设计目的：
 
-1. `returns_on_all_paths`  
-用于函数定义全路径返回检查。
+1. `function_body` + 表达式/语句子树
+用于 return-flow、callable、scope 三类语义规则的 AST 直接分析。
 
-2. `parameter_count` / `kind` / `name`  
+2. `parameter_count` / `parameter_names` / `kind` / `name`  
 用于函数声明一致性、重定义冲突、函数/变量同名冲突检查。
 
-3. `function_body` + 表达式树  
-semantic 可以 AST-primary 地重新收集调用点（不是只信 parser metadata）。
+3. `return_statement_count`  
+作为轻量统计辅助（例如 parser/测试侧可快速断言函数体最基本结构）。
 
-4. `called_function_*`  
-可做 metadata fallback 或一致性校验（影子校验开关下对比 AST 收集结果）。
+4. `has_initializer`（顶层声明 external）  
+用于区分顶层声明的初始化器形态。
 
-语义上可写成两种调用视图来源：
+语义输入可简写为：
 
 $$
-CallView = CallView_{AST\_Primary} \;\text{or}\; CallView_{Metadata\_Fallback}
+SemanticInput = \{function\_body,\ params,\ top\_level\ externals\}
 $$
+
+
+
 
 ---
 
@@ -293,7 +305,7 @@ $$
 - `function_body` 结构正确性
 - 语句槽位索引（while/for/if/return）
 - unnamed 参数：prototype 允许、definition 拒绝
-- return/loop/if/break/continue/declaration 计数
+- `return_statement_count` 计数（其余控制流统计已下沉为语义遍历阶段计算）
 - 顶层声明 `has_initializer`
 - 多 declarator 拆分成多个 external
 - 失败后 Program 清空
@@ -304,10 +316,10 @@ $$
 已覆盖 AST 合约与消费：
 
 - `ast_program_add_external(..., NULL)` 的 unnamed external 合约
-- 元数据不完整 definition 的语义拒绝
-- tamper parser metadata 后，AST-primary 路径仍可驱动语义检查
+- 函数定义必须携带 `function_body` 的语义契约检查
+- callable/scope/return-flow 规则均由 AST 直接驱动
 
-这说明当前 semantic 不只是“被动吃 parser 字段”，也能从 statement/expression AST 结构重建关键信息。
+这说明当前语义层已以 AST 结构为主输入，parser external 字段保持精简并聚焦契约信息。
 
 ---
 
@@ -399,12 +411,36 @@ static int test_ast_failure_clears_program_contract(void) {
 
 ---
 
-## 10. 一句话结论
+## 10. 课堂易错点（很重要）
+
+当前 AST 生命周期实现有两套“必须同步维护”的释放/初始化逻辑：
+
+1. AST 主实现：`include/ast_internal.h` + `src/ast/ast.c`
+2. parser 兼容层：`src/parser/parser_ast_compat.inc`
+
+这意味着当你新增 `AstExpression`/`AstStatement`/`AstExternal` 字段时，至少要同步检查：
+
+1. `ast_expression_free_internal` / `ast_statement_free_internal` / `ast_program_clear_storage`
+2. `parser_ast_expression_free` / `parser_ast_statement_free` / `parser_ast_program_free`
+3. append 初始化路径（默认值、所有权转移）
+
+否则最常见的问题是“主链路正常，但 legacy-link 路径泄漏或崩溃”。
+
+---
+
+## 11. 一句话结论
 
 当前 AST 实现已经不是“只有语法树形”，而是：
 
 $$
-\text{AST} = \text{Structure} + \text{Control-flow summary} + \text{Callable metadata} + \text{Ownership contract}
+\text{AST} = \text{Structure} + \text{Minimal external contract} + \text{Ownership contract}
 $$
 
 它能支撑 parser 回归、semantic 规则、以及后续继续扩展（比如更多类型系统信息或更丰富语句节点）。
+
+---
+
+## 可选思考题
+
+1. 为什么 `AstStatement` 里既有 `expressions[]`，又要有 `*_expression_index` 这类槽位索引？
+2. 如果给 `AstExternal` 增加一个新字段，哪些释放/初始化路径必须同步修改？

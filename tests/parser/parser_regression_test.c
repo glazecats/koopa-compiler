@@ -462,6 +462,9 @@ int main(void) {
     if (!test_ast_partial_return_not_all_paths()) {
         return 1;
     }
+    if (!test_ast_flow_is_not_semantic_authority()) {
+        return 1;
+    }
     if (!test_ast_accepts_break_continue_inside_loops()) {
         return 1;
     }

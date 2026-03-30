@@ -313,10 +313,14 @@ int main(void) {
     }
 
     /*
-     * Run known-limitation locks as a dedicated group so they are not confused
-     * with strict-semantic baseline cases.
+     * Run strict-path target cases as a dedicated group so D-policy changes
+     * remain visible in one place.
      */
-    if (!run_known_limitation_lock_group()) {
+    if (!run_strict_path_target_group()) {
+        return 1;
+    }
+
+    if (!run_strict_path_edge_coverage_group()) {
         return 1;
     }
 
