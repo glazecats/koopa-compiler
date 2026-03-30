@@ -1,0 +1,430 @@
+#if defined(__INTELLISENSE__) && !defined(SEMANTIC_SPLIT_INTELLISENSE_CONTEXT) && \
+    !defined(SEMANTIC_SPLIT_AGGREGATOR)
+#define SEMANTIC_SPLIT_INTELLISENSE_CONTEXT
+#include "semantic.c"
+#else
+
+typedef int (*ExpressionPostVisitor)(const AstExpression *expr, void *ctx);
+
+typedef struct {
+    const AstProgram *program;
+    size_t func_index;
+    SemanticError *error;
+} CallableRuleVisitCtx;
+
+static void format_callee_preview(const char *name, char *out, size_t out_size) {
+    size_t len;
+
+    if (!out || out_size == 0) {
+        return;
+    }
+
+    if (!name) {
+        snprintf(out, out_size, "(null)");
+        return;
+    }
+
+    len = strlen(name);
+    if (len <= (CALLEE_PREVIEW_HEAD + CALLEE_PREVIEW_TAIL + 3)) {
+        snprintf(out, out_size, "%s", name);
+        return;
+    }
+
+    snprintf(out,
+             out_size,
+             "%.*s...%.*s(len=%zu)",
+             CALLEE_PREVIEW_HEAD,
+             name,
+             CALLEE_PREVIEW_TAIL,
+             name + (len - CALLEE_PREVIEW_TAIL),
+             len);
+}
+
+static void semantic_set_error(SemanticError *error,
+                               int line,
+                               int column,
+                               const char *message) {
+    if (!error) {
+        return;
+    }
+
+    error->line = line;
+    error->column = column;
+    snprintf(error->message, sizeof(error->message), "%s", message);
+}
+
+static int names_equal(const AstExternal *a, const AstExternal *b) {
+    if (!a->name || !b->name) {
+        return 0;
+    }
+    if (a->name_length != b->name_length) {
+        return 0;
+    }
+    return strncmp(a->name, b->name, a->name_length) == 0;
+}
+
+static const AstExpression *unwrap_paren_expression(const AstExpression *expr) {
+    const AstExpression *cur = expr;
+
+    while (cur && cur->kind == AST_EXPR_PAREN) {
+        cur = cur->as.inner;
+    }
+    return cur;
+}
+
+static int classify_ast_call_callee(const AstExpression *callee, const char **out_name) {
+    const AstExpression *base = unwrap_paren_expression(callee);
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+
+    if (!base) {
+        return AST_CALL_CALLEE_NON_IDENTIFIER;
+    }
+
+    if (base->kind == AST_EXPR_IDENTIFIER) {
+        if (out_name) {
+            *out_name = base->as.identifier.name;
+        }
+        return AST_CALL_CALLEE_DIRECT_IDENTIFIER;
+    }
+
+    if (base->kind == AST_EXPR_CALL) {
+        return AST_CALL_CALLEE_CALL_RESULT;
+    }
+
+    return AST_CALL_CALLEE_NON_IDENTIFIER;
+}
+
+static int walk_expression_postorder(const AstExpression *expr,
+                                     ExpressionPostVisitor visitor,
+                                     void *ctx) {
+    size_t i;
+
+    if (!expr) {
+        return 1;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_PAREN:
+        if (!walk_expression_postorder(expr->as.inner, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_UNARY:
+        if (!walk_expression_postorder(expr->as.unary.operand, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_POSTFIX:
+        if (!walk_expression_postorder(expr->as.postfix.operand, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_BINARY:
+        if (!walk_expression_postorder(expr->as.binary.left, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.binary.right, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_TERNARY:
+        if (!walk_expression_postorder(expr->as.ternary.condition, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.ternary.then_expr, visitor, ctx) ||
+            !walk_expression_postorder(expr->as.ternary.else_expr, visitor, ctx)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_CALL:
+        if (!walk_expression_postorder(expr->as.call.callee, visitor, ctx)) {
+            return 0;
+        }
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            if (!walk_expression_postorder(expr->as.call.args[i], visitor, ctx)) {
+                return 0;
+            }
+        }
+        break;
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+    default:
+        break;
+    }
+
+    if (visitor && !visitor(expr, ctx)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int walk_statement_postorder(const AstStatement *stmt,
+                                    ExpressionPostVisitor visitor,
+                                    void *ctx) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    for (i = 0; i < stmt->expression_count; ++i) {
+        if (!walk_expression_postorder(stmt->expressions[i], visitor, ctx)) {
+            return 0;
+        }
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (!walk_statement_postorder(stmt->children[i], visitor, ctx)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static const AstExpression *statement_get_condition_expression(const AstStatement *stmt) {
+    if (!stmt || !stmt->has_condition_expression) {
+        return NULL;
+    }
+
+    if (stmt->condition_expression_index >= stmt->expression_count) {
+        return NULL;
+    }
+
+    return stmt->expressions[stmt->condition_expression_index];
+}
+
+static int expression_is_constant_true_for_flow(const AstExpression *expr) {
+    return expr && expr->kind == AST_EXPR_NUMBER && expr->as.number_value != 0;
+}
+
+static int semantic_analyze_statement_flow(const AstStatement *stmt,
+                                           int *out_guaranteed_return,
+                                           int *out_may_fallthrough,
+                                           int *out_may_break) {
+    size_t i;
+    int guaranteed_return = 0;
+    int may_fallthrough = 1;
+    int may_break = 0;
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = 0;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = 1;
+    }
+    if (out_may_break) {
+        *out_may_break = 0;
+    }
+
+    if (!stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_COMPOUND: {
+        int block_guaranteed_return = 0;
+        int block_may_fallthrough = 1;
+        int block_may_break = 0;
+
+        for (i = 0; i < stmt->child_count; ++i) {
+            int child_guaranteed_return = 0;
+            int child_may_fallthrough = 1;
+            int child_may_break = 0;
+
+            if (!semantic_analyze_statement_flow(stmt->children[i],
+                                                 &child_guaranteed_return,
+                                                 &child_may_fallthrough,
+                                                 &child_may_break)) {
+                return 0;
+            }
+
+            if (block_may_fallthrough && child_may_break) {
+                block_may_break = 1;
+            }
+
+            if (block_may_fallthrough) {
+                if (child_guaranteed_return) {
+                    block_guaranteed_return = 1;
+                    block_may_fallthrough = 0;
+                } else if (!child_may_fallthrough) {
+                    block_guaranteed_return = 0;
+                    block_may_fallthrough = 0;
+                } else {
+                    block_guaranteed_return = 0;
+                }
+            }
+        }
+
+        guaranteed_return = block_guaranteed_return;
+        may_fallthrough = block_may_fallthrough;
+        may_break = block_may_break;
+        break;
+    }
+    case AST_STMT_IF: {
+        int then_guaranteed_return = 0;
+        int then_may_fallthrough = 1;
+        int then_may_break = 0;
+        int else_guaranteed_return = 0;
+        int else_may_fallthrough = 1;
+        int else_may_break = 0;
+        int has_else = stmt->child_count >= 2;
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &then_guaranteed_return,
+                                             &then_may_fallthrough,
+                                             &then_may_break)) {
+            return 0;
+        }
+
+        if (has_else &&
+            !semantic_analyze_statement_flow(stmt->children[1],
+                                             &else_guaranteed_return,
+                                             &else_may_fallthrough,
+                                             &else_may_break)) {
+            return 0;
+        }
+
+        guaranteed_return = has_else && then_guaranteed_return && else_guaranteed_return;
+        may_fallthrough = has_else ? (then_may_fallthrough || else_may_fallthrough) : 1;
+        may_break = has_else ? (then_may_break || else_may_break) : then_may_break;
+        break;
+    }
+    case AST_STMT_WHILE: {
+        int cond_always_true = expression_is_constant_true_for_flow(
+            statement_get_condition_expression(stmt));
+        int body_guaranteed_return = 0;
+        int body_may_break = 0;
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &body_guaranteed_return,
+                                             NULL,
+                                             &body_may_break)) {
+            return 0;
+        }
+
+        if (cond_always_true) {
+            if (body_may_break) {
+                guaranteed_return = 0;
+                may_fallthrough = 1;
+            } else {
+                guaranteed_return = body_guaranteed_return;
+                may_fallthrough = 0;
+            }
+        } else {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
+        }
+
+        may_break = 0;
+        break;
+    }
+    case AST_STMT_FOR: {
+        const AstExpression *cond_expr = statement_get_condition_expression(stmt);
+        int cond_always_true = 1;
+        int body_guaranteed_return = 0;
+        int body_may_break = 0;
+
+        if (stmt->has_condition_expression) {
+            cond_always_true = expression_is_constant_true_for_flow(cond_expr);
+        }
+
+        if (stmt->child_count >= 1 &&
+            !semantic_analyze_statement_flow(stmt->children[0],
+                                             &body_guaranteed_return,
+                                             NULL,
+                                             &body_may_break)) {
+            return 0;
+        }
+
+        if (cond_always_true) {
+            if (body_may_break) {
+                guaranteed_return = 0;
+                may_fallthrough = 1;
+            } else {
+                guaranteed_return = body_guaranteed_return;
+                may_fallthrough = 0;
+            }
+        } else {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
+        }
+
+        may_break = 0;
+        break;
+    }
+    case AST_STMT_RETURN:
+        guaranteed_return = 1;
+        may_fallthrough = 0;
+        may_break = 0;
+        break;
+    case AST_STMT_BREAK:
+        guaranteed_return = 0;
+        may_fallthrough = 0;
+        may_break = 1;
+        break;
+    case AST_STMT_CONTINUE:
+        guaranteed_return = 0;
+        may_fallthrough = 0;
+        may_break = 0;
+        break;
+    case AST_STMT_DECLARATION:
+    case AST_STMT_EXPRESSION:
+    default:
+        guaranteed_return = 0;
+        may_fallthrough = 1;
+        may_break = 0;
+        break;
+    }
+
+    if (out_guaranteed_return) {
+        *out_guaranteed_return = guaranteed_return;
+    }
+    if (out_may_fallthrough) {
+        *out_may_fallthrough = may_fallthrough;
+    }
+    if (out_may_break) {
+        *out_may_break = may_break;
+    }
+    return 1;
+}
+
+static int semantic_compute_function_returns_all_paths(const AstExternal *func,
+                                                       int *out_returns_all_paths,
+                                                       SemanticError *error) {
+    int guaranteed_return = 0;
+
+    if (out_returns_all_paths) {
+        *out_returns_all_paths = 0;
+    }
+
+    if (!func) {
+        return 1;
+    }
+
+    if (!func->function_body) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+        return 0;
+    }
+
+    if (!semantic_analyze_statement_flow(func->function_body, &guaranteed_return, NULL, NULL)) {
+        semantic_set_error(error,
+                           func->line,
+                           func->column,
+                           "SEMA-INT-007: failed to analyze function return-path flow from statement AST");
+        return 0;
+    }
+
+    if (out_returns_all_paths) {
+        *out_returns_all_paths = guaranteed_return;
+    }
+
+    return 1;
+}
+
+#endif
