@@ -2,32 +2,34 @@
 
 ## Current Guidance (agreed)
 
-1. Treat Semantic S2 migration as complete and move active implementation to S3 scope semantics.
-2. Keep callable/return behavior and diagnostics stable while introducing scope rules incrementally.
-3. Keep parser/AST internal decoupling and static-analysis hygiene as follow-up milestones after S3 baseline lands.
+1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
+2. Active implementation is Milestone B (parser/AST internal decoupling and parser-side metadata-retention cleanup).
+3. Execute Milestone B in small, non-semantic slices (one metadata family per slice) with full regression gates.
+4. Keep Milestone C (`-fanalyzer`/ASan cleanup) and Milestone D (strict path semantics) as follow-up phases.
 
 ## Why this order
 
-- S1+S2 AST-primary cutover is now in place for active definition paths (callable + return-flow gates).
-- Next highest-value gap is missing scope semantics (duplicate locals / undeclared local use / block shadowing behavior locks).
+- S1+S2 AST-primary cutover is in place, and S3 semantic-authority retirement has been completed and validated.
+- The remaining high-value risk is structural coupling and parser-side legacy retention, not missing semantic baseline rules.
 - `-fanalyzer` warning around `external.name` is currently treated as likely false positive.
 - Runtime tests and ASan runs did not reproduce a real leak.
-- Parser including internal AST helpers is a maintainability risk, not a functional blocker.
+- Parser dependence on AST internals and legacy metadata retention is now the primary maintainability target.
 
 ## Near-Term Milestone Plan
 
-### Milestone A: Semantic + AST expansion (now)
+### Milestone A: Semantic + AST expansion (closed)
 
 - Status snapshot:
 - S1 statement AST landing is complete.
 - S2 callable/control-flow AST-primary cutover is complete.
-- Active subphase is S3 scope semantics and metadata retirement stabilization.
-- Current objective:
-- Land minimal block-scope semantic rules with strict regression locks and no callable/CF behavior drift.
+- S3 scope semantics and semantic-authority retirement stabilization is complete.
+- Closure objective achieved:
+- Semantic callable/return/scope behavior is AST-primary in active paths with full regression locks green.
 
-### Milestone B: Internal decoupling (next small milestone)
+### Milestone B: Internal decoupling (active)
 
 - Reduce parser dependence on internal AST helpers.
+- Retire parser-side metadata retention touchpoints (`called_function_*`, `returns_on_all_paths`, statement counters) in controlled slices.
 - Preserve old API link behavior and test coverage.
 - Keep changes minimal and non-semantic.
 
@@ -141,27 +143,79 @@
 - 2026-03-29: Milestone A (Semantic S3-2) bugfix/hardening: scope traversal now evaluates each declarator initializer before introducing that declarator name (including `for(int ... )` init declarations), closing same-declaration forward-reference leaks such as `int x=y,y=1` and `for(int i=j,j=0;...)`; parser initializer slots are now aligned 1:1 with declarator order (nullable for no-initializer declarators), and parser+semantic regressions were batch-expanded for reject/accept ordering variants; full `make test` remained green.
 - 2026-03-29: Milestone A (Parser ergonomics) low-priority hardening: clarified expression recursion-limit diagnostic wording to explicitly state it is call-depth-frame based (`%zu call-depth frames`) so deep-parentheses failures are interpreted correctly; behavior unchanged and parser regressions remained green.
 - 2026-03-29: Milestone A stage-gate: revalidated full suite (`make test`) with scope/callable/CF matrices green after latest S3-2 hardening slices, and marked S3-2 complete for milestone tracking; active work now transitions to S3-3 cleanup.
+- 2026-03-30: Milestone A (Semantic S3-3) first cleanup slice landed: retired callable metadata parity rails from active semantic callable path by removing parser `called_function_*` consistency cross-check (`SEMA-INT-001/002/003`) for function-definition callable analysis; callable rules now remain AST-primary only in active flow, and full `make test` stayed green.
+- 2026-03-30: Milestone A (Semantic S3-3) callable-retirement closure: verified no remaining `called_function_*` references in semantic implementation (`src/semantic/semantic.c`) and revalidated full suite (`make test`) with callable/scope/CF behavior unchanged; mark `called_function_*` semantic-authority retirement complete and transition active cleanup to S3-4 (`returns_on_all_paths`).
+- 2026-03-30: Milestone A (Semantic S3-4) first cleanup slice landed: removed `returns_on_all_paths` parser-metadata parity gate from semantic return-path analysis (`SEMA-INT-008` rail retired), keeping return enforcement AST-primary from statement-flow results only; revalidated full suite (`make test`) with unchanged callable/scope/CF outcomes.
+- 2026-03-30: Milestone A (S3 post-cleanup verification) completed: confirmed semantic implementation has zero references to callable metadata (`called_function_*`), return metadata (`returns_on_all_paths`), and statement-counter metadata (`loop/if/break/continue/declaration counts`); S3 semantic-authority retirement goals are complete and handoff focus moves to Milestone B decoupling.
+- 2026-03-30: Milestone A tracking correction (historical, superseded by next clarification): S3 remains in progress; semantic-authority retirement is complete, but parser-side metadata retention cleanup (callable/return/counter legacy collection and compatibility touchpoints) is still pending before S3 closure.
+- 2026-03-30: Milestone A tracking clarification: S3 closure criterion follows semantic-authority retirement scope; parser-side metadata retention cleanup is classified as Milestone B decoupling work and does not block S3 completion.
+- 2026-03-30: Milestone transition checkpoint: Milestone A is closed for implementation tracking (semantic-authority retirement complete and validated), active implementation is switched to Milestone B, and a detailed B execution plan is recorded below as the next working contract.
+- 2026-03-30: Roadmap consistency sweep: normalized top-level guidance and near-term milestone states so document-wide wording reflects the same boundary (`A closed`, `B active`).
 
-## Current Milestone A Focus
+## Current Milestone Focus
 
-- S3-1 baseline is complete; S3-2 integration/hardening is closed for milestone tracking.
-- Active work transitions to S3-3 cleanup: retire first metadata family authority in semantic paths (starting with callable metadata parity rails) under current green matrices.
+- Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
+- Milestone B is now the active implementation phase.
+- Milestone B scope remains non-semantic: parser/AST internal decoupling and parser-side metadata-retention cleanup in controlled slices.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
 ## S2 Closure Snapshot
 
-- Completed: AST-primary callable checks for definitions, AST-primary return-path gate, migration strategy constants, visitor-based callable traversal, chained-call behavior locks (`a()()` included).
+- Completed: AST-primary callable checks for definitions, AST-primary return-path gate, visitor-based callable traversal, and chained-call behavior locks (`a()()` included).
 - Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
-- Remaining under S3+ scope: introduce scope rules, then continue controlled metadata dependency retirement.
+- S3 semantic-authority retirement has completed; active remaining work is Milestone B parser-side retention cleanup and decoupling.
 
-## Active Implementation Plan (S3 next)
+## Active Implementation Plan (Milestone B kickoff)
 
-1. S3-1 status: baseline scope core has landed (scope stack, duplicate-local rejection, undeclared-use rejection, and block shadowing lock).
-2. S3-2 status: complete; scope integration/hardening gate is satisfied with full-suite green.
-3. S3-3 (cleanup): in progress next; retire first metadata family only after scope + callable + CF matrices are green (`called_function_*` semantic dependency remains parity-only).
-4. S3-4 (cleanup): retire `returns_on_all_paths` semantic dependency usage where still present in active paths.
-7. Validation gate: `make test` must remain green at each substep before proceeding.
-8. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only after S3 stabilization.
+1. B0 status: complete (A closure and B handoff context recorded in this document).
+2. B1 status: next slice; retire parser-side `called_function_*` retention plumbing with compatibility-test updates.
+3. B2 status: pending after B1; retire parser-side `returns_on_all_paths` retention field and write paths.
+4. B3 status: pending after B2; retire parser-side statement-counter retention fields and accounting/write paths.
+5. B4 status: pending after B3; reduce parser dependence on AST-internal helpers while preserving stable parser-facing contracts.
+6. B5 status: pending finalization; run retirement verification bundle and close Milestone B with evidence notes.
+7. Validation gate: `make test` must remain green after every B-slice change.
+8. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only in Milestone D strict-path work.
+
+## Milestone B Detailed Execution Plan (active)
+
+1. B0 checkpoint freeze (documentation + baseline)
+- Goal: lock Milestone A closure context before B-side structural edits.
+- Touchpoints: `NEXT_STEPS.md` only.
+- Validation: `make test` green baseline already captured before B edits; no functional behavior changes in this step.
+
+2. B1 callable metadata retention cleanup slice
+- Goal: remove parser-side `called_function_*` retention fields and collection plumbing that are no longer semantic-authoritative.
+- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser dump/test adapters in `tests/parser`.
+- Safety constraints: keep parser parse/semantic behavior unchanged; only remove unused retention channels.
+- Validation gate: full `make test` plus direct grep check that `called_function_*` is retired from active parser/AST interfaces or limited to explicitly documented compatibility stubs.
+
+3. B2 return metadata retention cleanup slice
+- Goal: remove parser-side `returns_on_all_paths` retention field from `AstExternal` and corresponding parser write paths.
+- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regressions/dump expectations.
+- Safety constraints: semantic return enforcement must remain AST-primary with no behavior drift.
+- Validation gate: full `make test` plus targeted return-matrix checks in semantic regressions.
+
+4. B3 statement-counter retention cleanup slice
+- Goal: remove parser-side statement counters (`loop/if/break/continue/declaration`) from external metadata and related parser accounting paths.
+- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regression assertions, parser dump output.
+- Safety constraints: do not alter statement AST construction or scope/callable traversal semantics.
+- Validation gate: full `make test` plus parser smoke/regression confirmation that diagnostics and parse success behavior are unchanged.
+
+5. B4 parser/AST internal decoupling slice
+- Goal: reduce parser dependence on AST-internal helper coupling and keep only stable parser-facing contracts.
+- Primary touchpoints: parser include boundaries and AST helper visibility points.
+- Safety constraints: preserve old parser API link behavior and existing external call sites.
+- Validation gate: full `make test`, including legacy-link parser smoke.
+
+6. B5 cleanup verification and handoff record
+- Goal: close Milestone B with explicit evidence bundle and handoff notes for Milestone C static-analysis pass.
+- Evidence checklist: updated roadmap notes, `make test` green run, grep-based retirement checks for all B metadata families.
+- Exit criterion: no functional regression introduced; B changes remain structural/compatibility-focused only.
+
+7. Cross-slice operating rules (apply to B1-B5)
+- Rule 1: retire one metadata family per code-change slice; do not batch callable/return/counter removals together.
+- Rule 2: after each slice, run full `make test` before proceeding.
+- Rule 3: if any semantic behavior drift appears, pause and restore prior compatibility surface for that slice before continuing.
 
 ## Metadata Migration Schedule (anti-coupling plan)
 
@@ -170,11 +224,12 @@
 3. S3 rule: new scope semantics must be computed from statement AST traversal, not parser metadata.
 4. S3 cleanup gate: begin retirement only after scope/callable/CF matrices are simultaneously green.
 5. Retirement order (current):
-6. first retire `called_function_*` semantic authority (keep optional parity checks only if needed),
-7. then retire `returns_on_all_paths` semantic authority,
-8. then retire statement counters (`loop/if/break/continue/declaration`) from semantic dependencies.
-9. Safety rule: retire one metadata family per change slice and run full `make test` before next retirement.
-10. Rollback rule: if drift appears, restore previous gate and keep parity rails until root cause is fixed.
+6. first retire `called_function_*` semantic authority (completed in semantic active paths),
+7. then retire `returns_on_all_paths` semantic authority (completed in semantic active paths),
+8. then retire statement counters (`loop/if/break/continue/declaration`) from semantic dependencies (semantic-authority usage verified absent in active paths).
+9. parser-side retention cleanup is Milestone B decoupling scope (compatibility/test-oriented, non-semantic-authority).
+10. Safety rule: retire one metadata family per change slice and run full `make test` before next retirement.
+11. Rollback rule: if drift appears, restore previous gate and keep parity rails until root cause is fixed.
 
 ## Known Limitations (Current Behavior)
 

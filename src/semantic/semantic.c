@@ -7,48 +7,13 @@
 #define CALLEE_PREVIEW_HEAD 24
 #define CALLEE_PREVIEW_TAIL 16
 
-typedef enum {
-    SEMA_MIGRATION_STRICT_PARITY = 0,
-    SEMA_MIGRATION_AST_PRIMARY_ONLY,
-} SemanticMigrationStrategy;
-
-/*
- * S2 strategy selector:
- * - STRICT_PARITY: enforce AST-vs-metadata callable parity as hard gate.
- * - AST_PRIMARY_ONLY: use AST as source of truth; parity check is optional/deferred.
- */
-static const SemanticMigrationStrategy kSemanticMigrationStrategy =
-    SEMA_MIGRATION_AST_PRIMARY_ONLY;
-
-typedef struct {
-    char *name;
-    int line;
-    int column;
-    size_t arg_count;
-    int kind;
-} CollectedCall;
-
-typedef struct {
-    CollectedCall *items;
-    size_t count;
-    size_t capacity;
-} CollectedCallList;
-
 typedef int (*ExpressionPostVisitor)(const AstExpression *expr, void *ctx);
-
-typedef struct {
-    CollectedCallList *calls;
-} CallCollectCtx;
 
 typedef struct {
     const AstProgram *program;
     size_t func_index;
     SemanticError *error;
 } CallableRuleVisitCtx;
-
-static int semantic_strategy_requires_callable_parity(void) {
-    return kSemanticMigrationStrategy == SEMA_MIGRATION_STRICT_PARITY;
-}
 
 static void format_callee_preview(const char *name, char *out, size_t out_size) {
     size_t len;
@@ -133,65 +98,6 @@ static int classify_ast_call_callee(const AstExpression *callee, const char **ou
     }
 
     return AST_CALL_CALLEE_NON_IDENTIFIER;
-}
-
-static void free_collected_call_list(CollectedCallList *list) {
-    size_t i;
-
-    if (!list) {
-        return;
-    }
-
-    for (i = 0; i < list->count; ++i) {
-        free(list->items[i].name);
-    }
-    free(list->items);
-    list->items = NULL;
-    list->count = 0;
-    list->capacity = 0;
-}
-
-static int append_collected_call(CollectedCallList *list,
-                                 const char *name,
-                                 int line,
-                                 int column,
-                                 size_t arg_count,
-                                 int kind) {
-    CollectedCall *new_items;
-    size_t next_capacity;
-    char *name_copy = NULL;
-
-    if (!list) {
-        return 0;
-    }
-
-    if (list->count == list->capacity) {
-        next_capacity = (list->capacity == 0) ? 8 : (list->capacity * 2);
-        new_items = (CollectedCall *)realloc(list->items, next_capacity * sizeof(CollectedCall));
-        if (!new_items) {
-            return 0;
-        }
-        list->items = new_items;
-        list->capacity = next_capacity;
-    }
-
-    if (name && name[0] != '\0') {
-        size_t len = strlen(name);
-        name_copy = (char *)malloc(len + 1);
-        if (!name_copy) {
-            return 0;
-        }
-        memcpy(name_copy, name, len);
-        name_copy[len] = '\0';
-    }
-
-    list->items[list->count].name = name_copy;
-    list->items[list->count].line = line;
-    list->items[list->count].column = column;
-    list->items[list->count].arg_count = arg_count;
-    list->items[list->count].kind = kind;
-    list->count++;
-    return 1;
 }
 
 static int walk_expression_postorder(const AstExpression *expr,
@@ -517,115 +423,10 @@ static int semantic_compute_function_returns_all_paths(const AstExternal *func,
         return 0;
     }
 
-    if (kSemanticMigrationStrategy == SEMA_MIGRATION_STRICT_PARITY &&
-        guaranteed_return != func->returns_on_all_paths) {
-        semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-008: return-path metadata mismatch between parser metadata and statement AST");
-        return 0;
-    }
-
     if (out_returns_all_paths) {
         *out_returns_all_paths = guaranteed_return;
     }
 
-    return 1;
-}
-
-static int collect_call_expression_postorder(const AstExpression *expr, void *ctx) {
-    CallCollectCtx *collector;
-    const char *callee_name;
-    int callee_kind;
-
-    if (!ctx || !expr || expr->kind != AST_EXPR_CALL) {
-        return 1;
-    }
-
-    collector = (CallCollectCtx *)ctx;
-    callee_kind = classify_ast_call_callee(expr->as.call.callee, &callee_name);
-    return append_collected_call(collector->calls,
-                                 callee_name,
-                                 expr->line,
-                                 expr->column,
-                                 expr->as.call.arg_count,
-                                 callee_kind);
-}
-
-static int collect_calls_from_statement(const AstStatement *stmt, CollectedCallList *out_calls) {
-    CallCollectCtx ctx;
-
-    if (!out_calls) {
-        return 1;
-    }
-
-    ctx.calls = out_calls;
-    return walk_statement_postorder(stmt, collect_call_expression_postorder, &ctx);
-}
-
-static int call_name_equal(const char *a, const char *b) {
-    if (a == NULL && b == NULL) {
-        return 1;
-    }
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    return strcmp(a, b) == 0;
-}
-
-static int semantic_validate_callable_metadata_consistency(const AstExternal *func,
-                                                           SemanticError *error) {
-    CollectedCallList ast_calls;
-    size_t k;
-
-    if (!func || !func->function_body) {
-        return 1;
-    }
-
-    ast_calls.items = NULL;
-    ast_calls.count = 0;
-    ast_calls.capacity = 0;
-
-    if (!collect_calls_from_statement(func->function_body, &ast_calls)) {
-        free_collected_call_list(&ast_calls);
-        semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-001: failed to collect callable metadata from statement AST");
-        return 0;
-    }
-
-    if (ast_calls.count != func->called_function_count) {
-        free_collected_call_list(&ast_calls);
-        semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-002: callable metadata count mismatch between parser metadata and statement AST");
-        return 0;
-    }
-
-    for (k = 0; k < ast_calls.count; ++k) {
-        const char *meta_name = func->called_function_names ? func->called_function_names[k] : NULL;
-        int meta_line = func->called_function_lines ? func->called_function_lines[k] : func->line;
-        int meta_col = func->called_function_columns ? func->called_function_columns[k] : func->column;
-        size_t meta_arg_count =
-            func->called_function_arg_counts ? func->called_function_arg_counts[k] : 0;
-        int meta_kind =
-            func->called_function_kinds ? func->called_function_kinds[k] : AST_CALL_CALLEE_NON_IDENTIFIER;
-
-        if (!call_name_equal(meta_name, ast_calls.items[k].name) ||
-            meta_line != ast_calls.items[k].line || meta_col != ast_calls.items[k].column ||
-            meta_arg_count != ast_calls.items[k].arg_count || meta_kind != ast_calls.items[k].kind) {
-            free_collected_call_list(&ast_calls);
-            semantic_set_error(error,
-                               func->line,
-                               func->column,
-                               "SEMA-INT-003: callable metadata detail mismatch between parser metadata and statement AST");
-            return 0;
-        }
-    }
-
-    free_collected_call_list(&ast_calls);
     return 1;
 }
 
@@ -803,11 +604,6 @@ static int semantic_check_function_callable_rules(const AstProgram *program,
                            func->line,
                            func->column,
                            "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
-        return 0;
-    }
-
-    if (semantic_strategy_requires_callable_parity() &&
-        !semantic_validate_callable_metadata_consistency(func, error)) {
         return 0;
     }
 
@@ -1800,7 +1596,7 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
     for (i = 0; i < program->count; ++i) {
         const AstExternal *lhs = &program->externals[i];
-        int returns_on_all_paths = 0;
+        int returns_all_paths = 0;
 
         /* AST contract allows unnamed externals (name_token == NULL). */
         if (!lhs->name || lhs->name_length == 0) {
@@ -1808,11 +1604,11 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
         }
 
         if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition) {
-            if (!semantic_compute_function_returns_all_paths(lhs, &returns_on_all_paths, error)) {
+            if (!semantic_compute_function_returns_all_paths(lhs, &returns_all_paths, error)) {
                 return 0;
             }
 
-            if (!returns_on_all_paths) {
+            if (!returns_all_paths) {
                 if (error) {
                     semantic_set_error(error,
                                        lhs->line,
