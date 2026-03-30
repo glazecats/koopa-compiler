@@ -10,10 +10,16 @@ typedef struct {
     TokenArray *tokens;
 } TokenizeArgs;
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
+
 static int run_with_stderr_suppressed(int (*fn)(void *), void *ctx) {
     int saved_stderr_fd;
     int devnull_fd;
     int result;
+    int stderr_redirected = 0;
 
     fflush(stderr);
     saved_stderr_fd = dup(STDERR_FILENO);
@@ -22,27 +28,27 @@ static int run_with_stderr_suppressed(int (*fn)(void *), void *ctx) {
     }
 
     devnull_fd = open("/dev/null", O_WRONLY);
-    if (devnull_fd < 0) {
-        close(saved_stderr_fd);
-        return fn(ctx);
-    }
-
-    if (dup2(devnull_fd, STDERR_FILENO) < 0) {
+    if (devnull_fd >= 0) {
+        if (dup2(devnull_fd, STDERR_FILENO) >= 0) {
+            stderr_redirected = 1;
+        }
         close(devnull_fd);
-        close(saved_stderr_fd);
-        return fn(ctx);
     }
-
-    close(devnull_fd);
 
     result = fn(ctx);
 
-    fflush(stderr);
-    dup2(saved_stderr_fd, STDERR_FILENO);
+    if (stderr_redirected) {
+        fflush(stderr);
+        dup2(saved_stderr_fd, STDERR_FILENO);
+    }
     close(saved_stderr_fd);
 
     return result;
 }
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 static int run_lexer_tokenize_suppressed(void *ctx) {
     TokenizeArgs *args = (TokenizeArgs *)ctx;

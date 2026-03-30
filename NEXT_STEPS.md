@@ -5,7 +5,7 @@
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
 2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
 3. Active implementation is Milestone C (`-fanalyzer`/ASan cleanup and warning triage).
-4. Keep Milestone C (`-fanalyzer`/ASan cleanup) and Milestone D (strict path semantics) as follow-up phases.
+4. Keep Milestone D (strict path semantics) as the follow-up phase after Milestone C.
 
 ## Why this order
 
@@ -160,6 +160,9 @@
 - 2026-03-30: Milestone B (B4) completed: removed parser dependency on `ast_internal.h` by introducing parser-local AST lifecycle/add-external helpers (`parser_ast_*`) and routing parser AST ownership operations through that local compatibility layer, preserving legacy parser-only link behavior (`parser_legacy_link_test`) while reducing parser/AST internal coupling; full `make test` remained green.
 - 2026-03-30: Milestone B (B5) completed and milestone closed: executed retirement verification bundle (`make test` green + grep checks confirming retired metadata families absent from `AstExternal`, parser external write paths, active semantic implementation, and test assertions), and finalized handoff focus to Milestone C static-analysis cleanup.
 - 2026-03-30: Large-file split follow-up (Phase S parser slice) completed: split `src/parser/parser.c` into function-oriented fragments (`parser_ast_compat.inc`, `parser_core_expr.inc`, `parser_stmt_decl_tu.inc`) with `parser.c` as the aggregator entry, preserving parser behavior and legacy-link compatibility; full `make test` remained green.
+- 2026-03-30: Milestone C baseline started: re-ran full suite with GCC `-fanalyzer` and ASan instrumentation; all suites stayed green. Scoped suppression was added for one GCC `-Wanalyzer-fd-leak` false positive in `tests/lexer/lexer_regression_test.c` (`run_with_stderr_suppressed` stderr redirection helper), while preserving normal warning coverage for the rest of the codebase.
+- 2026-03-30: Milestone C strict-warning sweep: re-ran full suite under stricter warning flags (`-Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wformat=2`) and confirmed zero additional warnings with all regression suites green.
+- 2026-03-30: Milestone C ergonomics: added reusable Makefile targets `test-fanalyzer`, `test-asan`, and `test-strict-warnings` and validated all three targets end-to-end to keep static/runtime analysis checks one-command reproducible.
 
 ## Current Milestone Focus
 

@@ -1,5 +1,8 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Iinclude
+FANALYZER_CFLAGS := -std=c11 -Wall -Wextra -fanalyzer -Iinclude
+ASAN_CFLAGS := -std=c11 -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer -g -Iinclude
+STRICT_WARN_CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wformat=2 -Iinclude
 
 BUILD_DIR := build
 LEXER_BUILD_DIR := $(BUILD_DIR)/lexer
@@ -16,7 +19,7 @@ SEMANTIC_REGRESSION_BIN := $(SEMANTIC_BUILD_DIR)/semantic_regression_test
 LEXER_TEST_INPUT := tests/lexer/test.c
 PARSER_TEST_INPUT := tests/parser/test.c
 
-.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression clean
+.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-fanalyzer test-asan test-strict-warnings clean
 
 all: test
 
@@ -76,6 +79,18 @@ test:
 	@$(MAKE) --no-print-directory test-parser-regression
 	@$(MAKE) --no-print-directory test-parser-legacy-link
 	@$(MAKE) --no-print-directory test-semantic-regression
+
+test-fanalyzer:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory test CFLAGS='$(FANALYZER_CFLAGS)'
+
+test-asan:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory test CFLAGS='$(ASAN_CFLAGS)'
+
+test-strict-warnings:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory test CFLAGS='$(STRICT_WARN_CFLAGS)'
 
 clean:
 	rm -rf $(BUILD_DIR)
