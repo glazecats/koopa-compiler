@@ -3,8 +3,8 @@
 ## Current Guidance (agreed)
 
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
-2. Active implementation is Milestone B (parser/AST internal decoupling and parser-side metadata-retention cleanup).
-3. Execute Milestone B in small, non-semantic slices (one metadata family per slice) with full regression gates.
+2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
+3. Active implementation is Milestone C (`-fanalyzer`/ASan cleanup and warning triage).
 4. Keep Milestone C (`-fanalyzer`/ASan cleanup) and Milestone D (strict path semantics) as follow-up phases.
 
 ## Why this order
@@ -26,7 +26,7 @@
 - Closure objective achieved:
 - Semantic callable/return/scope behavior is AST-primary in active paths with full regression locks green.
 
-### Milestone B: Internal decoupling (active)
+### Milestone B: Internal decoupling (closed)
 
 - Reduce parser dependence on internal AST helpers.
 - Retire parser-side metadata retention touchpoints (`called_function_*`, `returns_on_all_paths`, statement counters) in controlled slices.
@@ -153,12 +153,19 @@
 - 2026-03-30: Roadmap consistency sweep: normalized top-level guidance and near-term milestone states so document-wide wording reflects the same boundary (`A closed`, `B active`).
 - 2026-03-30: Milestone B (B0.5) completed: split oversized regression suites into aggregator + themed include fragments (`tests/parser/parser_regression_test.c` + `tests/parser/parser_regression_cases_*.inc`, `tests/semantic/semantic_regression_test.c` + `tests/semantic/semantic_regression_*.inc`) while preserving original case execution order; full `make test` remained green.
 - 2026-03-30: Milestone B (B0.5) refinement: further split parser expression-heavy fragment into smaller themed files (`parser_regression_cases_expr_ast_a.inc`, `parser_regression_cases_expr_ast_b.inc`, `parser_regression_cases_ast_meta.inc`) and updated aggregator includes; full `make test` remained green.
+- 2026-03-30: Milestone B (B0.5) maintainability refinement: unified parser split-fragment IntelliSense prelude into one shared include (`parser_regression_intellisense_prelude.inc`), removed duplicated local macro/type guards across parser fragments, and added explicit split-fragment inventory comments in parser/semantic regression entry files for safer review and future edits; full `make test` remained green.
+- 2026-03-30: Milestone B (B1) completed: retired parser-side callable metadata retention interfaces by removing `called_function_*` fields from `AstExternal`, removing parser AST-output plumbing for callable metadata in translation-unit AST assembly, and updating semantic regressions to stop tampering retired callable metadata fields while preserving AST-primary callable behavior assertions; full `make test` remained green.
+- 2026-03-30: Milestone B (B2) completed: retired parser-side return all-path metadata retention by removing `returns_on_all_paths` from `AstExternal`, removing parser return-flow write plumbing from function-external/TU-AST assembly, and aligning parser/semantic regressions plus parser AST dump expectations to the AST-primary return-flow contract; full `make test` remained green.
+- 2026-03-30: Milestone B (B3) completed: retired parser-side statement-counter retention by removing `loop/if/break/continue/declaration` counter fields from `AstExternal`, removing parser accounting/write paths and parser dump output for these counters, and pruning parser regressions that specifically asserted retired metadata while keeping AST-primary parse/semantic behavior checks; full `make test` remained green.
+- 2026-03-30: Milestone B (B4) completed: removed parser dependency on `ast_internal.h` by introducing parser-local AST lifecycle/add-external helpers (`parser_ast_*`) and routing parser AST ownership operations through that local compatibility layer, preserving legacy parser-only link behavior (`parser_legacy_link_test`) while reducing parser/AST internal coupling; full `make test` remained green.
+- 2026-03-30: Milestone B (B5) completed and milestone closed: executed retirement verification bundle (`make test` green + grep checks confirming retired metadata families absent from `AstExternal`, parser external write paths, active semantic implementation, and test assertions), and finalized handoff focus to Milestone C static-analysis cleanup.
+- 2026-03-30: Large-file split follow-up (Phase S parser slice) completed: split `src/parser/parser.c` into function-oriented fragments (`parser_ast_compat.inc`, `parser_core_expr.inc`, `parser_stmt_decl_tu.inc`) with `parser.c` as the aggregator entry, preserving parser behavior and legacy-link compatibility; full `make test` remained green.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
-- Milestone B is now the active implementation phase.
-- Milestone B scope remains non-semantic: parser/AST internal decoupling and parser-side metadata-retention cleanup in controlled slices.
+- Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
+- Milestone C is now the active implementation phase (`-fanalyzer`/ASan cleanup and warning triage).
 - Large-file split is now scheduled as a B-support track: split oversized regression tests first, then split large implementation files after compatibility touchpoints shrink.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
@@ -166,17 +173,17 @@
 
 - Completed: AST-primary callable checks for definitions, AST-primary return-path gate, visitor-based callable traversal, and chained-call behavior locks (`a()()` included).
 - Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
-- S3 semantic-authority retirement has completed; active remaining work is Milestone B parser-side retention cleanup and decoupling.
+- S3 semantic-authority retirement has completed; active remaining work is Milestone C static-analysis cleanup.
 
 ## Active Implementation Plan (Milestone B kickoff)
 
 1. B0 status: complete (A closure and B handoff context recorded in this document).
 2. B0.5 status: complete; oversized regression tests are split into suite aggregators plus themed include fragments (no behavior change).
-3. B1 status: next slice; retire parser-side `called_function_*` retention plumbing with compatibility-test updates.
-4. B2 status: pending after B1; retire parser-side `returns_on_all_paths` retention field and write paths.
-5. B3 status: pending after B2; retire parser-side statement-counter retention fields and accounting/write paths.
-6. B4 status: pending after B3; reduce parser dependence on AST-internal helpers while preserving stable parser-facing contracts.
-7. B5 status: pending finalization; run retirement verification bundle and close Milestone B with evidence notes.
+3. B1 status: complete; parser-side `called_function_*` retention interfaces are retired from AST/parser output paths and tests are aligned.
+4. B2 status: complete; parser-side `returns_on_all_paths` retention field and parser write paths are retired.
+5. B3 status: complete; parser-side statement-counter retention fields and parser accounting/write paths are retired.
+6. B4 status: complete; parser no longer depends on `ast_internal.h`, and parser-only legacy link compatibility is preserved.
+7. B5 status: complete; retirement verification bundle is recorded and Milestone B is closed.
 8. Validation gate: `make test` must remain green after every B-slice change.
 9. Deferred tightening (Milestone D handoff): flip CF-02/CF-03/CF-06 expectations only in Milestone D strict-path work.
 
@@ -263,11 +270,6 @@
 - Semantic regression matrix lock: CF-02 / CF-03 / CF-06 are currently expected to pass and are tagged as known-limitation guardrails.
 - Future strict-path migration rule: CF-02 / CF-03 / CF-06 should be flipped to expected-fail together when Milestone D is implemented.
 - If we later adopt stricter semantics that treat non-termination paths as non-returning failures, this loop/break interaction is a priority tightening point.
-- `loop_statement_count` / `if_statement_count` are syntactic occurrence counters, not reachability-aware path counters.
-- `break_statement_count` / `continue_statement_count` follow the same syntactic counting model.
-- `declaration_statement_count` follows the same syntactic counting model.
-- `declaration_statement_count` currently counts only declarations parsed as compound-block statements; `for(int i=...)` init declarations are excluded.
-- Unreachable loop/if/break/continue/declaration statements are still counted by current metadata collection.
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
 - Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.

@@ -109,18 +109,6 @@ typedef struct {
     int is_function_definition;
     AstStatement *function_body;
     size_t return_statement_count;
-    int returns_on_all_paths;
-    size_t loop_statement_count;
-    size_t if_statement_count;
-    size_t break_statement_count;
-    size_t continue_statement_count;
-    size_t declaration_statement_count;
-    char **called_function_names;
-    int *called_function_lines;
-    int *called_function_columns;
-    size_t *called_function_arg_counts;
-    int *called_function_kinds;
-    size_t called_function_count;
     int line;
     int column;
 } AstExternal;

@@ -471,21 +471,6 @@ int main(void) {
     if (!test_ast_rejects_continue_outside_loop()) {
         return 1;
     }
-    if (!test_ast_records_function_loop_statement_count()) {
-        return 1;
-    }
-    if (!test_ast_records_function_if_statement_count()) {
-        return 1;
-    }
-    if (!test_ast_records_function_break_continue_statement_count()) {
-        return 1;
-    }
-    if (!test_ast_records_function_declaration_statement_count()) {
-        return 1;
-    }
-    if (!test_ast_does_not_count_for_init_declaration_statement()) {
-        return 1;
-    }
     if (!test_ast_records_declaration_initializer_metadata()) {
         return 1;
     }

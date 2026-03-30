@@ -1,16 +1,16 @@
-#ifndef AST_INTERNAL_H
-#define AST_INTERNAL_H
+#if defined(__INTELLISENSE__) && !defined(PARSER_SPLIT_INTELLISENSE_CONTEXT) && \
+    !defined(PARSER_SPLIT_AGGREGATOR)
+#define PARSER_SPLIT_INTELLISENSE_CONTEXT
+#include "parser.c"
+#else
 
-#include <stdlib.h>
-#include <string.h>
+/*
+ * Keep parser link-compatible without requiring src/ast/ast.c for legacy
+ * parser-only builds.
+ */
+static void parser_ast_expression_free(AstExpression *expr);
 
-#include "ast.h"
-
-/* Internal helper: recursively free an expression subtree. */
-static inline void ast_expression_free_internal(AstExpression *expr);
-
-/* Internal helper: recursively free a statement subtree. */
-static inline void ast_statement_free_internal(AstStatement *stmt) {
+static void parser_ast_statement_free(AstStatement *stmt) {
     size_t i;
 
     if (!stmt) {
@@ -18,10 +18,10 @@ static inline void ast_statement_free_internal(AstStatement *stmt) {
     }
 
     for (i = 0; i < stmt->child_count; ++i) {
-        ast_statement_free_internal(stmt->children[i]);
+        parser_ast_statement_free(stmt->children[i]);
     }
     for (i = 0; i < stmt->expression_count; ++i) {
-        ast_expression_free_internal(stmt->expressions[i]);
+        parser_ast_expression_free(stmt->expressions[i]);
     }
     for (i = 0; i < stmt->declaration_name_count; ++i) {
         free(stmt->declaration_names[i]);
@@ -32,8 +32,7 @@ static inline void ast_statement_free_internal(AstStatement *stmt) {
     free(stmt);
 }
 
-/* Internal helper: free all owned AstProgram storage and reset to empty. */
-static inline void ast_program_clear_storage(AstProgram *program) {
+static void parser_ast_program_free(AstProgram *program) {
     size_t i;
 
     if (!program) {
@@ -49,7 +48,7 @@ static inline void ast_program_clear_storage(AstProgram *program) {
             }
         }
         free(program->externals[i].parameter_names);
-        ast_statement_free_internal(program->externals[i].function_body);
+        parser_ast_statement_free(program->externals[i].function_body);
     }
 
     free(program->externals);
@@ -58,10 +57,9 @@ static inline void ast_program_clear_storage(AstProgram *program) {
     program->capacity = 0;
 }
 
-/* Internal helper: append one top-level external node. */
-static inline int ast_program_append_external(AstProgram *program,
-                                              AstExternalKind kind,
-                                              const Token *name_token) {
+static int parser_ast_program_add_external(AstProgram *program,
+                                           AstExternalKind kind,
+                                           const Token *name_token) {
     AstExternal external;
     AstExternal *new_data;
     size_t next_capacity;
@@ -108,8 +106,9 @@ static inline int ast_program_append_external(AstProgram *program,
     return 1;
 }
 
-/* Internal helper: recursively free an expression subtree. */
-static inline void ast_expression_free_internal(AstExpression *expr) {
+static void parser_ast_expression_free(AstExpression *expr) {
+    size_t i;
+
     if (!expr) {
         return;
     }
@@ -118,34 +117,33 @@ static inline void ast_expression_free_internal(AstExpression *expr) {
     case AST_EXPR_IDENTIFIER:
         free(expr->as.identifier.name);
         break;
+    case AST_EXPR_NUMBER:
+        break;
     case AST_EXPR_PAREN:
-        ast_expression_free_internal(expr->as.inner);
+        parser_ast_expression_free(expr->as.inner);
         break;
     case AST_EXPR_UNARY:
-        ast_expression_free_internal(expr->as.unary.operand);
+        parser_ast_expression_free(expr->as.unary.operand);
         break;
     case AST_EXPR_POSTFIX:
-        ast_expression_free_internal(expr->as.postfix.operand);
+        parser_ast_expression_free(expr->as.postfix.operand);
         break;
-    case AST_EXPR_CALL: {
-        size_t i;
-        ast_expression_free_internal(expr->as.call.callee);
+    case AST_EXPR_CALL:
+        parser_ast_expression_free(expr->as.call.callee);
         for (i = 0; i < expr->as.call.arg_count; ++i) {
-            ast_expression_free_internal(expr->as.call.args[i]);
+            parser_ast_expression_free(expr->as.call.args[i]);
         }
         free(expr->as.call.args);
         break;
-    }
     case AST_EXPR_BINARY:
-        ast_expression_free_internal(expr->as.binary.left);
-        ast_expression_free_internal(expr->as.binary.right);
+        parser_ast_expression_free(expr->as.binary.left);
+        parser_ast_expression_free(expr->as.binary.right);
         break;
     case AST_EXPR_TERNARY:
-        ast_expression_free_internal(expr->as.ternary.condition);
-        ast_expression_free_internal(expr->as.ternary.then_expr);
-        ast_expression_free_internal(expr->as.ternary.else_expr);
+        parser_ast_expression_free(expr->as.ternary.condition);
+        parser_ast_expression_free(expr->as.ternary.then_expr);
+        parser_ast_expression_free(expr->as.ternary.else_expr);
         break;
-    case AST_EXPR_NUMBER:
     default:
         break;
     }

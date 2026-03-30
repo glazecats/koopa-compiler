@@ -1,39 +1,4 @@
-#if defined(__INTELLISENSE__)
-#include "lexer.h"
-#include "parser.h"
-#include "semantic.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#ifndef SEMANTIC_CALLABLE_DIAG_CASE_TYPEDEF
-#define SEMANTIC_CALLABLE_DIAG_CASE_TYPEDEF
-typedef struct {
-    const char *case_id;
-    const char *source;
-    const char *expected_code;
-    const char *expected_snippet;
-    int expected_line;
-    int expected_column;
-} CallableDiagCase;
-#endif
-
-#ifndef SEMANTIC_CALLABLE_PASS_CASE_TYPEDEF
-#define SEMANTIC_CALLABLE_PASS_CASE_TYPEDEF
-typedef struct {
-    const char *case_id;
-    const char *source;
-} CallablePassCase;
-#endif
-
-static int parse_source_to_ast(const char *source,
-                               TokenArray *tokens,
-                               AstProgram *program,
-                               ParserError *parse_err);
-static int run_callable_diag_case(const CallableDiagCase *c);
-static int run_callable_pass_case(const CallablePassCase *c);
-#endif
+#include "semantic_regression_intellisense_prelude.inc"
 
 static int test_semantic_callable_diagnostic_matrix(void) {
     static const CallableDiagCase cases[] = {
@@ -1052,28 +1017,6 @@ static int test_semantic_rejects_metadata_only_definition_during_ast_primary_pha
     }
 
     program.externals[0].is_function_definition = 1;
-    program.externals[0].returns_on_all_paths = 1;
-    program.externals[0].called_function_count = 1;
-    program.externals[0].called_function_names = (char **)calloc(1, sizeof(char *));
-    program.externals[0].called_function_lines = (int *)calloc(1, sizeof(int));
-    program.externals[0].called_function_columns = (int *)calloc(1, sizeof(int));
-    program.externals[0].called_function_arg_counts = (size_t *)calloc(1, sizeof(size_t));
-    program.externals[0].called_function_kinds = (int *)calloc(1, sizeof(int));
-    if (!program.externals[0].called_function_names ||
-        !program.externals[0].called_function_lines ||
-        !program.externals[0].called_function_columns ||
-        !program.externals[0].called_function_arg_counts ||
-        !program.externals[0].called_function_kinds) {
-        fprintf(stderr,
-                "[semantic-reg] FAIL: out of memory while building metadata contract test\n");
-        ast_program_free(&program);
-        return 0;
-    }
-
-    program.externals[0].called_function_lines[0] = 1;
-    program.externals[0].called_function_columns[0] = 12;
-    program.externals[0].called_function_arg_counts[0] = 0;
-    program.externals[0].called_function_kinds[0] = AST_CALL_CALLEE_NON_IDENTIFIER;
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
