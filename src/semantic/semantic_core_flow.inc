@@ -194,10 +194,63 @@ static const AstExpression *statement_get_condition_expression(const AstStatemen
     return stmt->expressions[stmt->condition_expression_index];
 }
 
+static int flow_try_eval_constant_arithmetic(TokenType op,
+                                             long long lhs,
+                                             long long rhs,
+                                             long long *out_value) {
+    const int shift_width = (int)(sizeof(long long) * 8u);
+
+    if (!out_value) {
+        return 0;
+    }
+
+    switch (op) {
+    case TOKEN_PLUS:
+        return !__builtin_add_overflow(lhs, rhs, out_value);
+    case TOKEN_MINUS:
+        return !__builtin_sub_overflow(lhs, rhs, out_value);
+    case TOKEN_STAR:
+        return !__builtin_mul_overflow(lhs, rhs, out_value);
+    case TOKEN_SLASH:
+        if (rhs == 0) {
+            return 0;
+        }
+        if (lhs == LLONG_MIN && rhs == -1) {
+            return 0;
+        }
+        *out_value = lhs / rhs;
+        return 1;
+    case TOKEN_PERCENT:
+        if (rhs == 0) {
+            return 0;
+        }
+        *out_value = lhs % rhs;
+        return 1;
+    case TOKEN_SHIFT_LEFT:
+        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+            return 0;
+        }
+        if ((unsigned long long)lhs > ((unsigned long long)LLONG_MAX >> (unsigned long long)rhs)) {
+            return 0;
+        }
+        *out_value = lhs << rhs;
+        return 1;
+    case TOKEN_SHIFT_RIGHT:
+        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+            return 0;
+        }
+        *out_value = lhs >> rhs;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int flow_try_eval_constant_int(const AstExpression *expr, long long *out_value) {
     long long operand_value;
     long long lhs_value;
     long long rhs_value;
+    long long cond_value;
 
     if (!expr || !out_value) {
         return 0;
@@ -229,19 +282,96 @@ static int flow_try_eval_constant_int(const AstExpression *expr, long long *out_
         default:
             return 0;
         }
+    case AST_EXPR_TERNARY:
+        if (!flow_try_eval_constant_int(expr->as.ternary.condition, &cond_value)) {
+            return 0;
+        }
+        if (cond_value != 0) {
+            return flow_try_eval_constant_int(expr->as.ternary.then_expr, out_value);
+        }
+        return flow_try_eval_constant_int(expr->as.ternary.else_expr, out_value);
     case AST_EXPR_BINARY:
-        if (expr->as.binary.op != TOKEN_COMMA) {
+        switch (expr->as.binary.op) {
+        case TOKEN_AND_AND:
+            if (!flow_try_eval_constant_int(expr->as.binary.left, &lhs_value)) {
+                return 0;
+            }
+            if (lhs_value == 0) {
+                *out_value = 0;
+                return 1;
+            }
+            if (!flow_try_eval_constant_int(expr->as.binary.right, &rhs_value)) {
+                return 0;
+            }
+            *out_value = (rhs_value != 0) ? 1 : 0;
+            return 1;
+        case TOKEN_OR_OR:
+            if (!flow_try_eval_constant_int(expr->as.binary.left, &lhs_value)) {
+                return 0;
+            }
+            if (lhs_value != 0) {
+                *out_value = 1;
+                return 1;
+            }
+            if (!flow_try_eval_constant_int(expr->as.binary.right, &rhs_value)) {
+                return 0;
+            }
+            *out_value = (rhs_value != 0) ? 1 : 0;
+            return 1;
+        default:
+            break;
+        }
+
+        if (!flow_try_eval_constant_int(expr->as.binary.left, &lhs_value) ||
+            !flow_try_eval_constant_int(expr->as.binary.right, &rhs_value)) {
             return 0;
         }
-        if (!flow_try_eval_constant_int(expr->as.binary.left, &lhs_value)) {
+
+        switch (expr->as.binary.op) {
+        case TOKEN_COMMA:
+            *out_value = rhs_value;
+            return 1;
+        case TOKEN_EQ:
+            *out_value = (lhs_value == rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_NE:
+            *out_value = (lhs_value != rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_LT:
+            *out_value = (lhs_value < rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_LE:
+            *out_value = (lhs_value <= rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_GT:
+            *out_value = (lhs_value > rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_GE:
+            *out_value = (lhs_value >= rhs_value) ? 1 : 0;
+            return 1;
+        case TOKEN_AMP:
+            *out_value = lhs_value & rhs_value;
+            return 1;
+        case TOKEN_CARET:
+            *out_value = lhs_value ^ rhs_value;
+            return 1;
+        case TOKEN_PIPE:
+            *out_value = lhs_value | rhs_value;
+            return 1;
+        case TOKEN_PLUS:
+        case TOKEN_MINUS:
+        case TOKEN_STAR:
+        case TOKEN_SLASH:
+        case TOKEN_PERCENT:
+        case TOKEN_SHIFT_LEFT:
+        case TOKEN_SHIFT_RIGHT:
+            return flow_try_eval_constant_arithmetic(expr->as.binary.op,
+                                                     lhs_value,
+                                                     rhs_value,
+                                                     out_value);
+        default:
             return 0;
         }
-        if (!flow_try_eval_constant_int(expr->as.binary.right, &rhs_value)) {
-            return 0;
-        }
-        (void)lhs_value;
-        *out_value = rhs_value;
-        return 1;
     default:
         return 0;
     }

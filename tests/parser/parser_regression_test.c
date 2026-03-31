@@ -214,7 +214,7 @@ int main(void) {
     }
 
     /* Expression AST compatibility alias lock. */
-    if (!test_expression_ast_equality_alias_still_forwards_assignment()) {
+    if (!test_expression_ast_assignment_accepts_assignment_form()) {
         return 1;
     }
 
@@ -484,6 +484,9 @@ int main(void) {
         return 1;
     }
     if (!test_ast_failure_clears_previous_program()) {
+        return 1;
+    }
+    if (!test_ast_failure_clears_complex_previous_program()) {
         return 1;
     }
     if (!test_deep_assignment_hits_recursion_limit()) {

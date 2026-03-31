@@ -16,17 +16,12 @@ typedef struct {
     size_t statement_recursion_depth;
     size_t statement_recursion_limit;
     size_t loop_depth;
-    int track_function_return_count;
-    size_t function_return_count;
-    int track_function_calls;
-    char **function_called_names;
-    int *function_called_lines;
-    int *function_called_columns;
-    size_t *function_called_arg_counts;
-    int *function_called_kinds;
-    size_t function_called_count;
-    size_t function_called_capacity;
 } Parser;
+
+typedef struct {
+    int may_fallthrough;
+    int may_break;
+} ParserLocalControl;
 
 /*
  * Protect recursive-descent hotspots from stack overflow.
@@ -34,14 +29,6 @@ typedef struct {
  */
 #define PARSER_EXPRESSION_RECURSION_LIMIT 2048U
 #define PARSER_STATEMENT_RECURSION_LIMIT 2048U
-
-/*
- * Soft-retired by default: semantic callable checks are AST-primary.
- * Keep this gate for temporary legacy compatibility windows.
- */
-#ifndef PARSER_ENABLE_CALL_METADATA_TRACKING
-#define PARSER_ENABLE_CALL_METADATA_TRACKING 0
-#endif
 
 #define PARSER_SPLIT_AGGREGATOR 1
 #include "parser_ast_compat.inc"

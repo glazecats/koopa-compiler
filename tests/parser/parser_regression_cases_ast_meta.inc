@@ -1053,6 +1053,88 @@ static int test_ast_failure_clears_previous_program(void) {
     return 1;
 }
 
+static int test_ast_failure_clears_complex_previous_program(void) {
+    const char *valid_source =
+        "int f(int a,int b){"
+        "int x=0;"
+        "x=(a?b:a)+(~a);"
+        "x=f(a,b);"
+        "x=(x++,--b);"
+        "if(a){x=x+1;}else{x=x-1;}"
+        "while(a){break;}"
+        "for(x=0;a;x=x+1){continue;}"
+        "return x;"
+        "}\n";
+    TokenArray ok_tokens;
+    Token bad_tokens[1];
+    TokenArray bad_stream;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&ok_tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(valid_source, &ok_tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for complex stale-state setup input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&ok_tokens, &program, &err)) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: complex setup parse failed at %d:%d: %s\n",
+                err.line,
+                err.column,
+                err.message);
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 || !program.externals[0].function_body) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected complex setup AST with one function body, got count=%zu body=%p\n",
+                program.count,
+                (void *)(program.count > 0 ? program.externals[0].function_body : NULL));
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    bad_tokens[0].type = TOKEN_KW_INT;
+    bad_tokens[0].lexeme = "int";
+    bad_tokens[0].length = 3;
+    bad_tokens[0].number_value = 0;
+    bad_tokens[0].line = 1;
+    bad_tokens[0].column = 1;
+
+    bad_stream.data = bad_tokens;
+    bad_stream.magic = 0;
+    bad_stream.size = 1;
+    bad_stream.capacity = 1;
+
+    if (parser_parse_translation_unit_ast(&bad_stream, &program, &err)) {
+        fprintf(stderr, "[parser-reg] FAIL: AST parser accepted complex-clear stream without EOF\n");
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 0 || program.externals != NULL || program.capacity != 0) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: failed parse should fully clear complex AST, got count=%zu externals=%p capacity=%zu\n",
+                program.count,
+                (void *)program.externals,
+                program.capacity);
+        lexer_free_tokens(&ok_tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&ok_tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static char *build_deep_assignment_source(size_t chain_len) {
     const char *prefix = "int main(){int a;a";
     const char *suffix = "=1;return a;}";

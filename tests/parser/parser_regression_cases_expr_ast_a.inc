@@ -888,8 +888,8 @@ static int test_expression_ast_multiplicative_right_unary(void) {
     return 1;
 }
 
-/* Compatibility lock: legacy alias should keep forwarding to comma entrypoint. */
-static int test_expression_ast_equality_alias_still_forwards_assignment(void) {
+/* Assignment entrypoint should parse assignment-form expressions directly. */
+static int test_expression_ast_assignment_accepts_assignment_form(void) {
     const char *source = "a=b\n";
     TokenArray tokens;
     AstExpression *expr = NULL;
@@ -902,9 +902,9 @@ static int test_expression_ast_equality_alias_still_forwards_assignment(void) {
         return 0;
     }
 
-    if (!parser_parse_expression_ast_equality(&tokens, &expr, &err)) {
+    if (!parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
         fprintf(stderr,
-            "[parser-reg] FAIL: equality alias should forward comma-level parser: %s\n",
+            "[parser-reg] FAIL: assignment entrypoint should accept assignment form: %s\n",
                 err.message);
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);

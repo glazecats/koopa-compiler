@@ -38,25 +38,4 @@ int parser_parse_expression_ast_assignment(const TokenArray *tokens,
                                            AstExpression **out_expression,
                                            ParserError *error);
 
-/*
- * Backward-compatible aliases for previous API names.
- * Note: these aliases intentionally forward to the comma-level parser,
- * so accepted grammar is a superset of each alias name's literal layer.
- */
-int parser_parse_expression_ast_equality(const TokenArray *tokens,
-                                         AstExpression **out_expression,
-                                         ParserError *error);
-
-int parser_parse_expression_ast_relational(const TokenArray *tokens,
-                                           AstExpression **out_expression,
-                                           ParserError *error);
-
-int parser_parse_expression_ast_additive(const TokenArray *tokens,
-                                         AstExpression **out_expression,
-                                         ParserError *error);
-
-int parser_parse_expression_ast_primary(const TokenArray *tokens,
-                                        AstExpression **out_expression,
-                                        ParserError *error);
-
 #endif

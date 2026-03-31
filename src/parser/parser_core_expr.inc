@@ -140,127 +140,15 @@ static int consume_token(Parser *p, TokenType type, const char *what, const Toke
 }
 
 static int parse_expression(Parser *p);
-static int parse_statement_with_flow(Parser *p,
-                                     int *out_guaranteed_return,
-                                     int *out_may_fallthrough,
-                                     int *out_may_break,
-                                     AstStatement **out_statement);
+static int parse_statement_with_local_control(Parser *p,
+                                              ParserLocalControl *out_local_control,
+                                              AstStatement **out_statement);
 static int parse_declaration(Parser *p,
                              AstProgram *top_level_program,
                              char ***out_decl_names,
                              size_t *out_decl_name_count,
                              AstExpression ***out_decl_initializer_exprs,
                              size_t *out_decl_initializer_expr_count);
-
-static void parser_clear_function_called_names(Parser *p) {
-    size_t i;
-
-    if (!p) {
-        return;
-    }
-
-    for (i = 0; i < p->function_called_count; ++i) {
-        free(p->function_called_names[i]);
-    }
-    free(p->function_called_names);
-    free(p->function_called_lines);
-    free(p->function_called_columns);
-    free(p->function_called_arg_counts);
-    free(p->function_called_kinds);
-    p->function_called_names = NULL;
-    p->function_called_lines = NULL;
-    p->function_called_columns = NULL;
-    p->function_called_arg_counts = NULL;
-    p->function_called_kinds = NULL;
-    p->function_called_count = 0;
-    p->function_called_capacity = 0;
-}
-
-static int parser_record_function_call_name(Parser *p,
-                                            const Token *name_tok,
-                                            const Token *call_site_tok,
-                                            size_t arg_count,
-                                            int callee_kind) {
-#if !PARSER_ENABLE_CALL_METADATA_TRACKING
-    (void)p;
-    (void)name_tok;
-    (void)call_site_tok;
-    (void)arg_count;
-    (void)callee_kind;
-    return 1;
-#else
-    char **new_data;
-    int *new_lines;
-    int *new_columns;
-    size_t *new_arg_counts;
-    int *new_kinds;
-    size_t next_capacity;
-    char *name_copy;
-
-    if (!p || !p->track_function_calls || !call_site_tok) {
-        return 1;
-    }
-
-    if (p->function_called_count == p->function_called_capacity) {
-        next_capacity = (p->function_called_capacity == 0) ? 8 : (p->function_called_capacity * 2);
-        new_data = (char **)realloc(p->function_called_names, next_capacity * sizeof(char *));
-        if (!new_data) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        p->function_called_names = new_data;
-
-        new_lines = (int *)realloc(p->function_called_lines, next_capacity * sizeof(int));
-        if (!new_lines) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        p->function_called_lines = new_lines;
-
-        new_columns = (int *)realloc(p->function_called_columns, next_capacity * sizeof(int));
-        if (!new_columns) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        p->function_called_columns = new_columns;
-
-        new_arg_counts = (size_t *)realloc(p->function_called_arg_counts,
-                                           next_capacity * sizeof(size_t));
-        if (!new_arg_counts) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        p->function_called_arg_counts = new_arg_counts;
-
-        new_kinds = (int *)realloc(p->function_called_kinds, next_capacity * sizeof(int));
-        if (!new_kinds) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        p->function_called_kinds = new_kinds;
-        p->function_called_capacity = next_capacity;
-    }
-
-    name_copy = NULL;
-    if (name_tok && name_tok->lexeme && name_tok->length > 0) {
-        name_copy = (char *)malloc(name_tok->length + 1);
-        if (!name_copy) {
-            set_error(p, call_site_tok, "Out of memory while recording function call metadata");
-            return 0;
-        }
-        memcpy(name_copy, name_tok->lexeme, name_tok->length);
-        name_copy[name_tok->length] = '\0';
-    }
-
-    p->function_called_names[p->function_called_count] = name_copy;
-    p->function_called_lines[p->function_called_count] = call_site_tok->line;
-    p->function_called_columns[p->function_called_count] = call_site_tok->column;
-    p->function_called_arg_counts[p->function_called_count] = arg_count;
-    p->function_called_kinds[p->function_called_count] = callee_kind;
-    p->function_called_count++;
-    return 1;
-#endif
-}
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
 static AstExpression *parse_expression_ast_postfix(Parser *p);
@@ -367,73 +255,6 @@ static int token_slice_is_parenthesized_identifier_form(const TokenArray *tokens
                                                         size_t end) {
     trim_wrapping_parentheses(tokens, &start, &end);
     return end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER;
-}
-
-static int token_slice_is_callable_form(const TokenArray *tokens,
-                                        size_t start,
-                                        size_t end) {
-    size_t i;
-    int depth;
-    size_t match_start;
-
-    if (!tokens || !tokens->data || start >= end) {
-        return 0;
-    }
-
-    trim_wrapping_parentheses(tokens, &start, &end);
-
-    if (end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER) {
-        return 1;
-    }
-
-    if (end <= start + 1 || tokens->data[end - 1].type != TOKEN_RPAREN) {
-        return 0;
-    }
-
-    depth = 0;
-    match_start = end;
-    for (i = end; i > start; --i) {
-        TokenType type = tokens->data[i - 1].type;
-        if (type == TOKEN_RPAREN) {
-            depth++;
-        } else if (type == TOKEN_LPAREN) {
-            depth--;
-            if (depth == 0) {
-                match_start = i - 1;
-                break;
-            }
-            if (depth < 0) {
-                return 0;
-            }
-        }
-    }
-
-    if (depth != 0 || match_start <= start) {
-        return 0;
-    }
-
-    return token_slice_is_callable_form(tokens, start, match_start);
-}
-
-static const Token *token_slice_callable_name_token(const TokenArray *tokens,
-                                                    size_t start,
-                                                    size_t end) {
-    if (!tokens || !tokens->data || start >= end) {
-        return NULL;
-    }
-
-    trim_wrapping_parentheses(tokens, &start, &end);
-
-    /*
-     * Semantic callable metadata only supports direct identifier callees.
-     * Parenthesized call results like (f()) are callable syntactically, but
-     * should not be attributed to a direct function name token.
-     */
-    if (end != start + 1 || tokens->data[start].type != TOKEN_IDENTIFIER) {
-        return NULL;
-    }
-
-    return &tokens->data[start];
 }
 
 static int parse_initializer_expression(Parser *p) {
@@ -1452,9 +1273,7 @@ static AstExpression *parse_expression_ast_comma(Parser *p) {
 
 static int parse_primary_with_flags(Parser *p,
                                     int *out_is_identifier_lvalue,
-                                    int *out_is_callable_target,
-                                    const Token **out_callable_name_token,
-                                    int *out_callable_callee_kind) {
+                                    int *out_is_callable_target) {
     size_t expr_start_index;
 
     if (out_is_identifier_lvalue) {
@@ -1462,12 +1281,6 @@ static int parse_primary_with_flags(Parser *p,
     }
     if (out_is_callable_target) {
         *out_is_callable_target = 0;
-    }
-    if (out_callable_name_token) {
-        *out_callable_name_token = NULL;
-    }
-    if (out_callable_callee_kind) {
-        *out_callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
     }
 
     if (match(p, TOKEN_IDENTIFIER)) {
@@ -1477,12 +1290,6 @@ static int parse_primary_with_flags(Parser *p,
         if (out_is_callable_target) {
             *out_is_callable_target = 1;
         }
-        if (out_callable_name_token) {
-            *out_callable_name_token = previous(p);
-        }
-        if (out_callable_callee_kind) {
-            *out_callable_callee_kind = AST_CALL_CALLEE_DIRECT_IDENTIFIER;
-        }
         return 1;
     }
 
@@ -1491,9 +1298,6 @@ static int parse_primary_with_flags(Parser *p,
     }
 
     if (match(p, TOKEN_LPAREN)) {
-        int is_callable_form;
-        const Token *callable_name_tok;
-
         expr_start_index = p->current;
         if (!parse_expression(p)) {
             return 0;
@@ -1501,13 +1305,6 @@ static int parse_primary_with_flags(Parser *p,
         if (!consume(p, TOKEN_RPAREN, "')'")) {
             return 0;
         }
-
-        is_callable_form = token_slice_is_callable_form(p->tokens,
-                                                        expr_start_index,
-                                                        p->current - 1);
-        callable_name_tok = token_slice_callable_name_token(p->tokens,
-                                                            expr_start_index,
-                                                            p->current - 1);
 
         if (out_is_identifier_lvalue) {
             *out_is_identifier_lvalue = token_slice_is_parenthesized_identifier_form(p->tokens,
@@ -1521,18 +1318,6 @@ static int parse_primary_with_flags(Parser *p,
              */
             *out_is_callable_target = 1;
         }
-        if (out_callable_name_token) {
-            *out_callable_name_token = callable_name_tok;
-        }
-        if (out_callable_callee_kind) {
-            if (callable_name_tok) {
-                *out_callable_callee_kind = AST_CALL_CALLEE_DIRECT_IDENTIFIER;
-            } else if (is_callable_form) {
-                *out_callable_callee_kind = AST_CALL_CALLEE_CALL_RESULT;
-            } else {
-                *out_callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
-            }
-        }
         return 1;
     }
 
@@ -1543,23 +1328,15 @@ static int parse_primary_with_flags(Parser *p,
 static int parse_postfix(Parser *p) {
     int is_identifier_lvalue = 0;
     int is_callable_target = 0;
-    int callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
-    const Token *callable_name_token = NULL;
 
     if (!parse_primary_with_flags(p,
                                   &is_identifier_lvalue,
-                                  &is_callable_target,
-                                  &callable_name_token,
-                                  &callable_callee_kind)) {
+                                  &is_callable_target)) {
         return 0;
     }
 
     while (1) {
         if (match(p, TOKEN_LPAREN)) {
-            const Token *call_site_tok = previous(p);
-            size_t arg_count = 0;
-            int callee_kind = callable_callee_kind;
-
             if (!is_callable_target) {
                 set_error(p, previous(p), "Expected callable expression before '('");
                 return 0;
@@ -1569,24 +1346,13 @@ static int parse_postfix(Parser *p) {
                     if (!parse_assignment(p)) {
                         return 0;
                     }
-                    arg_count++;
                 } while (match(p, TOKEN_COMMA));
             }
             if (!consume(p, TOKEN_RPAREN, "')'")) {
                 return 0;
             }
-            if (!parser_record_function_call_name(p,
-                                                  callable_name_token,
-                                                  call_site_tok,
-                                                  arg_count,
-                                                  callee_kind)) {
-                return 0;
-            }
             is_identifier_lvalue = 0;
             is_callable_target = 1;
-            /* After a call, callee identity is no longer a direct identifier token. */
-            callable_name_token = NULL;
-            callable_callee_kind = AST_CALL_CALLEE_CALL_RESULT;
             continue;
         }
 
@@ -1603,8 +1369,6 @@ static int parse_postfix(Parser *p) {
 
             is_identifier_lvalue = 0;
             is_callable_target = 0;
-            callable_name_token = NULL;
-            callable_callee_kind = AST_CALL_CALLEE_NON_IDENTIFIER;
             continue;
         }
 
