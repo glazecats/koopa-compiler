@@ -6,6 +6,7 @@
 
 static int semantic_check_single_callable_rule(const AstProgram *program,
                                                size_t func_index,
+                                               int include_current_external,
                                                const char *called_name,
                                                int call_line,
                                                int call_column,
@@ -20,6 +21,7 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
     int later_decl_line = 0;
     int later_decl_column = 0;
     size_t expected_arg_count = 0;
+    size_t visible_external_count;
     char callee_preview[128];
 
     format_callee_preview(called_name, callee_preview, sizeof(callee_preview));
@@ -41,7 +43,16 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
         return 0;
     }
 
-    for (j = 0; j <= func_index; ++j) {
+    if (!program) {
+        return 1;
+    }
+
+    visible_external_count = include_current_external ? (func_index + 1) : func_index;
+    if (visible_external_count > program->count) {
+        visible_external_count = program->count;
+    }
+
+    for (j = 0; j < visible_external_count; ++j) {
         const AstExternal *candidate = &program->externals[j];
 
         if (!candidate->name) {
@@ -150,6 +161,7 @@ static int semantic_check_call_expr_postorder(const AstExpression *expr, void *c
 
     return semantic_check_single_callable_rule(visit_ctx->program,
                                                visit_ctx->func_index,
+                                               visit_ctx->include_current_external,
                                                called_name,
                                                expr->line,
                                                expr->column,
@@ -183,10 +195,29 @@ static int semantic_check_function_callable_rules(const AstProgram *program,
 
     visit_ctx.program = program;
     visit_ctx.func_index = func_index;
+    visit_ctx.include_current_external = 1;
     visit_ctx.error = error;
     return walk_statement_postorder(func->function_body,
                                     semantic_check_call_expr_postorder,
-                                    &visit_ctx);
+                                    &visit_ctx,
+                                    error);
+}
+
+static int semantic_check_top_level_initializer_callable_rules(const AstProgram *program,
+                                                               size_t external_index,
+                                                               const AstExpression *expr,
+                                                               SemanticError *error) {
+    CallableRuleVisitCtx visit_ctx;
+
+    if (!program || !expr) {
+        return 1;
+    }
+
+    visit_ctx.program = program;
+    visit_ctx.func_index = external_index;
+    visit_ctx.include_current_external = 0;
+    visit_ctx.error = error;
+    return walk_expression_postorder(expr, semantic_check_call_expr_postorder, &visit_ctx, error);
 }
 
 #endif

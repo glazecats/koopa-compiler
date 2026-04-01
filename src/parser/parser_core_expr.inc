@@ -323,6 +323,33 @@ static void free_name_array(char **names, size_t count) {
     free(names);
 }
 
+static int parser_next_growth_capacity(size_t current,
+                                       size_t initial,
+                                       size_t elem_size,
+                                       size_t *out_next_capacity) {
+    size_t next_capacity;
+
+    if (!out_next_capacity || initial == 0 || elem_size == 0) {
+        return 0;
+    }
+
+    if (current == 0) {
+        next_capacity = initial;
+    } else {
+        if (current > ((size_t)-1) / 2) {
+            return 0;
+        }
+        next_capacity = current * 2;
+    }
+
+    if (next_capacity > ((size_t)-1) / elem_size) {
+        return 0;
+    }
+
+    *out_next_capacity = next_capacity;
+    return 1;
+}
+
 static int append_name_array_item(Parser *p,
                                   char ***names,
                                   size_t *count,
@@ -338,7 +365,13 @@ static int append_name_array_item(Parser *p,
     }
 
     if (*count == *capacity) {
-        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        if (!parser_next_growth_capacity(*capacity, 4, sizeof(char *), &next_capacity)) {
+            set_error(p,
+                      anchor_tok ? anchor_tok : peek(p),
+                      "Out of memory while building AST identifier metadata");
+            free(name);
+            return 0;
+        }
         new_items = (char **)realloc(*names, next_capacity * sizeof(char *));
         if (!new_items) {
             set_error(p,
@@ -440,7 +473,16 @@ static int append_ast_statement_child(Parser *p,
     }
 
     if (*count == *capacity) {
-        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        if (!parser_next_growth_capacity(*capacity,
+                                         4,
+                                         sizeof(AstStatement *),
+                                         &next_capacity)) {
+            set_error(p,
+                      anchor_tok ? anchor_tok : peek(p),
+                      "Out of memory while building statement AST");
+            parser_ast_statement_free(child);
+            return 0;
+        }
         new_items = (AstStatement **)realloc(*items, next_capacity * sizeof(AstStatement *));
         if (!new_items) {
             set_error(p,
@@ -575,7 +617,14 @@ static int append_ast_expression_arg(Parser *p,
     }
 
     if (*count == *capacity) {
-        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        if (!parser_next_growth_capacity(*capacity,
+                                         4,
+                                         sizeof(AstExpression *),
+                                         &next_capacity)) {
+            set_error(p, peek(p), "Out of memory while building expression AST");
+            parser_ast_expression_free(arg);
+            return 0;
+        }
         new_items = (AstExpression **)realloc(*items, next_capacity * sizeof(AstExpression *));
         if (!new_items) {
             set_error(p, peek(p), "Out of memory while building expression AST");
@@ -606,7 +655,16 @@ static int append_ast_expression_slot(Parser *p,
     }
 
     if (*count == *capacity) {
-        next_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        if (!parser_next_growth_capacity(*capacity,
+                                         4,
+                                         sizeof(AstExpression *),
+                                         &next_capacity)) {
+            set_error(p,
+                      anchor_tok ? anchor_tok : peek(p),
+                      "Out of memory while building expression AST");
+            parser_ast_expression_free(expr);
+            return 0;
+        }
         new_items = (AstExpression **)realloc(*items, next_capacity * sizeof(AstExpression *));
         if (!new_items) {
             set_error(p,

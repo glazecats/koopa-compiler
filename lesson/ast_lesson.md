@@ -21,7 +21,8 @@
 ## 1. 文件地图与职责
 
 - 公开接口与数据结构：`include/ast.h`
-- 内部实现细节（free/append/clear）：`include/ast_internal.h`
+- 生命周期 helper 的实例化入口：`include/ast_internal.h`
+- 共享生命周期模板：`include/ast_lifecycle_template.h`
 - 对外 API 包装：`src/ast/ast.c`
 - 主要行为测试来源：
   - `tests/parser/parser_regression_test.c`（AST 结构与元数据主回归）
@@ -123,7 +124,7 @@ $$
 `AstExternal` 当前是“精简外部契约”：主要保存顶层声明/定义的必要结构信息：
 
 - 名字与定位：`name/name_length/line/column`
-- 声明信息：`has_initializer`（声明外部）
+- 声明信息：`has_initializer` + `declaration_initializer`（顶层声明 initializer 的表达式 AST）
 - 函数信息：`parameter_count`, `is_function_definition`, `function_body`
 - 控制流统计：`return_statement_count`（仅保留 return 计数）
 - 不再在 external 上暴露 `called_function_*` 调用元数据数组
@@ -143,7 +144,21 @@ append 时扩容策略在内部实现为倍增（初始 16）。
 
 ---
 
-## 4. `ast_internal.h`：核心实现细节
+## 4. `ast_internal.h` + `ast_lifecycle_template.h`：核心实现细节
+
+当前 AST 生命周期逻辑不是手写两份，而是“一个共享模板 + 两处实例化”：
+
+1. `include/ast_internal.h` 通过宏映射实例化 AST 主实现
+2. `src/parser/parser_ast_compat.inc` 用同一模板实例化 parser 兼容层
+
+所以你在源码里仍然会看到这些 helper 名字：
+
+- `ast_expression_free_internal`
+- `ast_statement_free_internal`
+- `ast_program_clear_storage`
+- `ast_program_append_external`
+
+但它们的函数体来自同一份 `ast_lifecycle_template.h`。
 
 ### 4.1 递归释放表达式树
 
@@ -280,8 +295,8 @@ else:
 3. `return_statement_count`  
 作为轻量统计辅助（例如 parser/测试侧可快速断言函数体最基本结构）。
 
-4. `has_initializer`（顶层声明 external）  
-用于区分顶层声明的初始化器形态。
+4. `has_initializer` + `declaration_initializer`（顶层声明 external）  
+用于顶层声明 initializer 的 callable/scope 规则，以及区分“声明”与“带初始化的定义”。
 
 语义输入可简写为：
 
@@ -306,7 +321,7 @@ $$
 - 语句槽位索引（while/for/if/return）
 - unnamed 参数：prototype 允许、definition 拒绝
 - `return_statement_count` 计数（其余控制流统计已下沉为语义遍历阶段计算）
-- 顶层声明 `has_initializer`
+- 顶层声明 `has_initializer` 与 `declaration_initializer`
 - 多 declarator 拆分成多个 external
 - 失败后 Program 清空
 - 表达式 AST 形状：优先级、结合性、调用链、赋值、条件、逗号等
@@ -413,16 +428,18 @@ static int test_ast_failure_clears_program_contract(void) {
 
 ## 10. 课堂易错点（很重要）
 
-当前 AST 生命周期实现有两套“必须同步维护”的释放/初始化逻辑：
+当前 AST 生命周期实现更准确地说是“同一模板的两处实例化”：
 
 1. AST 主实现：`include/ast_internal.h` + `src/ast/ast.c`
 2. parser 兼容层：`src/parser/parser_ast_compat.inc`
 
 这意味着当你新增 `AstExpression`/`AstStatement`/`AstExternal` 字段时，至少要同步检查：
 
-1. `ast_expression_free_internal` / `ast_statement_free_internal` / `ast_program_clear_storage`
-2. `parser_ast_expression_free` / `parser_ast_statement_free` / `parser_ast_program_free`
-3. append 初始化路径（默认值、所有权转移）
+1. `ast_lifecycle_template.h` 是否已经覆盖了新的所有权成员
+2. `include/ast_internal.h` 与 `src/parser/parser_ast_compat.inc` 的宏映射是否仍然对应正确
+3. append 初始化路径（默认值、所有权转移）是否同步更新
+
+这一条在本轮代码里已经有一个具体例子：`AstExternal.declaration_initializer` 新增后，模板里的 clear/free 与默认初始化都必须一起更新。
 
 否则最常见的问题是“主链路正常，但 legacy-link 路径泄漏或崩溃”。
 

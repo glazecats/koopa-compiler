@@ -228,7 +228,7 @@ $$
 
 用途：语义诊断码、行列定位、矩阵策略、控制流当前行为锁。
 
-当前也拆分为 `semantic_regression_callable_flow.inc` 与 `semantic_regression_scope_cf.inc`；另外 `semantic_regression_intellisense_prelude.inc` 专门承载编辑器补全前置声明。
+当前主测试文件实际 include 的是 `semantic_regression_callable_flow.inc` 与 `semantic_regression_scope_cf.inc`；另外这两个片段现在都会直接 `#include "semantic_regression_intellisense_prelude.inc"`，把共享 typedef / helper 声明集中到一处。
 
 已有高价值模式（建议保持）：
 
@@ -240,12 +240,27 @@ $$
    - 行列位置
 4. 控制流用 `CfCase` 分组：
    - `must_pass_or_fail_now`
-   - `known_limitation_lock`
+   - `conservative_loop_acceptance`
+   - `deterministic_loop_rejects`
 
 S3 之后建议把两类矩阵当成必选：
 
 1. callable shadow 诊断优先级矩阵：local/param/inner-block/for-init/parenthesized callee 都应稳定报 `SEMA-CALL-003`  
 2. 同声明顺序可见性矩阵：前向引用拒绝、反向引用通过（普通声明与 for-init 各一组）
+
+现在还建议补一组顶层 initializer 矩阵：
+
+1. 顶层变量 initializer 的前向/反向可见性
+2. 顶层 initializer 中的 callable 诊断顺序
+3. 重复带 initializer 的顶层定义应报 `SEMA-TOP-001`
+
+loop guard stability analysis 相关 case 现在也建议单独成组：
+
+1. 稳定 guard 死循环：`while(a){}`, `while(a){if(a){break;}}`, `for(;a;){continue;}` 应继续拒绝
+2. mutation-driven exits：`a=a-1`、`step` 改 guard、或 body 里直接赋值改 guard 的形态应继续接受
+3. call-driven exits：循环体里有普通函数调用时，默认视为“可能改 guard”，应避免误报
+4. shadow-sensitive cases：内层 `int a=...` 不能伪装成修改外层 guard
+5. rebuilt-guard accepts：`int c=b; int a=c; if(a) break; b--;` 这类按 initializer 重建 guard 的路径应继续接受
 
 新增语义规则时建议：
 

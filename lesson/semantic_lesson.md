@@ -41,20 +41,21 @@ $$
 
 ## 2. 当前总体结构（AST-only）
 
-当前语义主路径已经是 AST-only，不再走 parser metadata parity/fallback，也不读取 parser 内部的 `function_called_*` 临时缓存。
+当前语义主路径已经是 AST-only：直接遍历 `AstProgram` / `AstStatement` / `AstExpression`，不依赖 parser 侧旧的 metadata 补丁链路。
 
-主流程分 5 层：
+主流程分 6 层：
 
-1. return-flow 分析（函数是否所有路径返回）
-2. callable shadow precheck（局部遮蔽优先）
-3. callable 规则检查（`SEMA-CALL-001..006`）
-4. scope 规则检查（`SEMA-SCOPE-*`）
-5. 顶层符号一致性检查（重复定义/冲突/参数数一致）
+1. 顶层声明 initializer 规则（callable + scope）
+2. return-flow 分析（函数是否所有路径返回）
+3. callable shadow precheck（局部遮蔽优先）
+4. callable 规则检查（`SEMA-CALL-001..006`）
+5. scope 规则检查（`SEMA-SCOPE-*`）
+6. 顶层符号一致性检查（重复定义/冲突/参数数一致）
 
 数据流：
 
 $$
-\text{AST} \rightarrow \text{Flow} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Top-level Consistency}
+\text{Top-level Init} \rightarrow \text{Flow} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Top-level Consistency}
 $$
 
 ---
@@ -92,17 +93,103 @@ walk_expr(expr):
 - `semantic_analyze_statement_flow`
 - `semantic_compute_function_returns_all_paths`
 
-输出三元组：
+内部分析函数实际维护 5 个流标志：
 
 $$
-\mathrm{Flow}(stmt)=(R,F,B)
+\mathrm{Flow}(stmt)=(R,F,B,C,N)
 $$
 
 - `R`: guaranteed return
 - `F`: may fallthrough
 - `B`: may break
+- `C`: may continue loop
+- `N`: may non-terminating
 
 函数定义必须满足“所有控制流路径都返回”（由 AST 流分析直接计算，不依赖 parser 外挂字段）。
+
+### 4.1 loop guard stability analysis
+
+最近这版 semantic 对 `while` / `for` 的核心变化，不是把循环做成完整符号执行器，而是加入了一个“稳定 guard 死循环”启发式。
+
+目标很明确：
+
+1. 不因为值依赖循环而轻易误报 `SEMA-CF-001`
+2. 只在能可靠证明“guard 稳定且不会退出”时，才把循环视为 `may_non_terminating=1`
+
+实现骨架主要由这几组 helper 组成：
+
+- `flow_collect_expression_identifiers`
+- `flow_collect_loop_exit_summary`
+- `flow_statement_may_change_guard_state`
+- `flow_expression_may_change_guard_state`
+
+可以把它理解成三步：
+
+1. 收集 loop guard 依赖的标识符集合
+2. 看循环体里是否存在“所有路径都能退出循环”的 break/return 形态
+3. 看这些 guard 标识符在 body/step 里是否可能被改变
+
+对非恒真、非恒假的循环条件，semantic 现在会先取出 condition 里依赖的名字：
+
+$$
+GuardIds = Ids(cond)
+$$
+
+然后判断：
+
+$$
+StableGuard \equiv GuardIds \neq \varnothing \land \neg Changed(body,step)
+$$
+
+若同时又没有可可靠证明的全路径退出：
+
+$$
+StableGuard \land \neg ExitOnAllPaths \Rightarrow may\_non\_terminating = 1
+$$
+
+否则默认保持保守接受：
+
+$$
+\neg ProvedDeadLoop \Rightarrow may\_fallthrough = 1
+$$
+
+这就是为什么现在的策略是：
+
+- `while(a){}`：拒绝
+- `while(a){if(a){break;}}`：仍拒绝
+- `while(a){a=a-1; if(a==0) break;}`：接受
+- `for(;a;){continue;}`：拒绝
+- `for(;a; step_changes_a)`：倾向接受
+
+### 4.2 shadow-sensitive guard tracking
+
+这套 guard 分析还有一个最近补上的关键细节：名字不仅按字符串看，还要按 binding 看。
+
+实现上，`FlowIdentifierScopeStack` 会给名字解析一个“作用域绑定位点”，所以：
+
+- 外层 `a`
+- 循环体里 `int a = ...`
+
+在 guard tracking 里不是同一个标识符。
+
+因此下面这种写法不会再被误判成“修改了外层 guard”：
+
+```c
+while(a){int a=0; a=1;}
+```
+
+相反，若内层声明是从外层状态重建出来的，semantic 又会继续追 initializer 依赖：
+
+```c
+while(a){
+    int c=b;
+    int a=c;
+    if(a){break;}
+    b--;
+}
+```
+
+这类“通过 per-iteration declaration initializer 重建 break guard”的形态现在会被接受，因为退出条件依赖的外层状态 `b` 的确在变化。
 
 ---
 
@@ -129,6 +216,11 @@ callee 分类由 `classify_ast_call_callee` 给出：
   - 函数存在但参数不匹配 -> `SEMA-CALL-004`
   - 仅后方声明存在 -> `SEMA-CALL-002`
   - 无任何声明 -> `SEMA-CALL-001`
+
+顶层声明 initializer 也会复用同一套 callable 规则，但可见性窗口不同：
+
+- 函数体里检查调用时，当前 external 视为已可见
+- 顶层 initializer 检查时，当前 external 自己还不可见，只能看“它前面已经出现的顶层 external”
 
 ---
 
@@ -207,6 +299,12 @@ $$
 - `for(int i=j,j=0;...)` 拒绝
 - `for(int j=0,i=j;...)` 通过
 
+同样的“只看前面已可见名字”规则现在也应用在顶层声明 initializer：
+
+- `int x = y; int y;` 拒绝
+- `int y = 1; int x = y;` 通过
+- `int x = foo(); int foo(){...}` 报 `SEMA-CALL-002`
+
 ---
 
 ## 9. 当前活跃的 `SEMA-INT-*`
@@ -217,22 +315,25 @@ $$
 - `SEMA-INT-007`：return-flow AST 分析失败
 - `SEMA-INT-009`：scope 栈空时处理声明名
 - `SEMA-INT-010`：scope 栈扩容失败
+- `SEMA-INT-011`：顶层声明标记了 initializer，但缺失 `declaration_initializer` AST
+- `SEMA-INT-012`：表达式深度超过 semantic 分析上限（当前常量为 `4096`）
 
 ---
 
 ## 10. 回归测试怎么对应
 
-`tests/semantic/semantic_regression_test.c` 现在是主 harness，case 体拆到：
+`tests/semantic/semantic_regression_test.c` 现在是主 harness，实际 case 体拆到：
 
 - `semantic_regression_callable_flow.inc`
 - `semantic_regression_scope_cf.inc`
-- `semantic_regression_intellisense_prelude.inc`（仅编辑器补全预置）
+
+另外 `semantic_regression_intellisense_prelude.inc` 现在会被这两个片段直接 `#include`，承担共享 typedef / helper 声明，同时也保留在 Makefile 依赖清单里。
 
 建议固定覆盖三组：
 
 1. callable 诊断矩阵（`CALL-001..006` + shadow 变体）
-2. scope/cf 矩阵（局部可见性、for-init 生命周期）
-3. 同声明顺序矩阵（前向拒绝 / 反向通过）
+2. scope/cf 矩阵（局部可见性、for-init 生命周期、深表达式护栏）
+3. 顶层 initializer / 同声明顺序矩阵（前向拒绝 / 反向通过）
 
 ---
 
@@ -242,7 +343,8 @@ $$
 
 1. 同名函数声明参数个数必须一致，否则报冲突。
 2. 同名函数不能重复定义。
-3. 函数名与变量名不能在顶层同名共存。
+3. 同名顶层变量若都带 initializer，报 `SEMA-TOP-001`（duplicate top-level variable definition）。
+4. 函数名与变量名不能在顶层同名共存。
 
 可抽象为：
 

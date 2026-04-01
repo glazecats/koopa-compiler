@@ -104,6 +104,7 @@ typedef struct {
     char *name;
     size_t name_length;
     int has_initializer;
+    AstExpression *declaration_initializer;
     size_t parameter_count;
     char **parameter_names;
     int is_function_definition;

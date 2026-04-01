@@ -5,14 +5,14 @@
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
 2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
 3. Milestone C baseline validation is complete (`-fanalyzer`/ASan/strict-warning reruns are green).
-4. Active implementation is Milestone D (strict path semantics tightening).
+4. Active implementation is Milestone D (conservative control-flow semantics hardening plus bug-driven semantic fixes).
 
 ## Why this order
 
 - S1+S2 AST-primary cutover is in place, and S3 semantic-authority retirement has been completed and validated.
 - Structural coupling cleanup and static-analysis baselines are now complete.
-- The next high-value semantic risk is return-path strictness for non-termination/break/continue interactions.
-- Milestone D first strict-path slice is landed: CF matrix cases `CF-02`/`CF-03`/`CF-06` now enforce reject expectations.
+- The next high-value semantic risk is control-flow false-positive drift, semantic crash resistance, and bug closure around return-path reasoning.
+- Milestone D flow policy has converged on the conservative D17/D18 rules: avoid `SEMA-CF-001` false positives, reject only reliably proven must-not-return loop shapes, and keep mutation-driven or call-driven exits accepted unless a stable dead-loop shape is provable.
 
 ## Near-Term Milestone Plan
 
@@ -37,17 +37,22 @@
 - Status: completed baseline and rerun verification.
 - `test-fanalyzer`, `test-asan`, and `test-strict-warnings` are green with zero warnings in current runs.
 
-### Milestone D: Strict Path Semantics (active)
+### Milestone D: Conservative Control-Flow Semantics (active)
 
-- Define strict return-path policy for non-termination paths.
-- Replace current structured approximation with stricter path reasoning.
-- Add dedicated regressions for loop non-termination/break/continue edge paths.
+- Keep `SEMA-CF-001` focused on reliably provable must-not-return shapes.
+- Preserve strict branch requirements for `if/else` and plain `if` without turning value-dependent loops into false positives.
+- Continue bug-driven hardening for semantic diagnostics, crash resistance, and control-flow narrowing.
 
 ## Guardrails
 
 - Do not prioritize low-risk hygiene over semantic feature progress.
 - Every functional change should come with a regression test.
 - Keep `make test` green at each step.
+
+## Document Scope Note
+
+- `Current Guidance`, `Current Milestone Focus`, `Active Implementation Plan`, and `Known Limitations` are the current authority.
+- Older milestone slices and the long execution log below are retained as historical reference, not as current policy.
 
 ## Execution Log
 
@@ -183,13 +188,22 @@
 - 2026-03-31: Milestone D (parser convergence tail batch cleanup) landed: retired legacy expression AST alias APIs (`parser_parse_expression_ast_primary/additive/relational/equality`) and switched regression coverage to the canonical assignment-level entrypoint; also deduplicated parser public-entry setup (`parser_prepare`) across TU/TU-AST/expression parse entrypoints to remove compatibility-era duplicated state/bootstrap branches; `make test` remained green.
 - 2026-03-31: Milestone D (parser convergence tail function-external split) landed: split function external parsing into dedicated signature/body helpers (`parse_function_external_signature`, `parse_function_external_definition_body`) and centralized parameter-name ownership commit, reducing compatibility-era branching in `parse_function_external` while preserving AST contract outputs; `make test` remained green.
 - 2026-03-31: Milestone D (parser convergence tail TU-loop dedup) landed: introduced shared translation-unit external-or-declaration helper (`parse_translation_unit_external_or_declaration`) to unify TU and TU-AST loops that previously duplicated "try function external, then rewind and fallback to declaration" control flow; behavior preserved and `make test` remained green.
+- 2026-03-31: Milestone D (D11 top-level initializer semantic closure) landed: parser now persists file-scope declaration initializer AST on `AstExternal`, semantic entry now applies callable/scope checks to top-level initializer expressions (closing prior bypass where `has_initializer` existed without semantic expression traversal), and regressions now lock reject/pass matrix coverage for undeclared identifier, call-to-non-function, call-before-declaration, and same-declaration forward-reference top-level initializer cases; `make test` remained green.
+- 2026-03-31: Milestone D (D12 top-level definition + allocator hardening) landed: semantic entry now rejects duplicate top-level variable definitions when repeated declarations both carry initializer definitions (`SEMA-TOP-001`) while preserving declaration + single-definition compatibility; regressions now lock both reject and pass forms. In parallel, dynamic growth paths in lexer/parser/semantic scope stack/AST external storage now use overflow-safe capacity expansion guards to prevent `size_t` wraparound on very large inputs; `make test` remained green.
+- 2026-03-31: Milestone D (D13 initializer self-visibility + unary-overflow guard + strict-target reliability) landed: top-level initializer semantic checks now exclude the current external from visibility while still allowing prior declarations, fixing same-declaration self-reference/call false accepts and non-function misdiagnostics (`int x=x;`, `int x=x();`); callable and scope regressions were expanded (`TOPINIT-SCOPE-003`, `TOPINIT-CALL-003`). Strict-path constant folding now guards unary minus on `LLONG_MIN` to avoid signed-overflow UB during semantic flow evaluation, with CF coverage expansion (`CF-49`). Makefile test execution now runs copied test binaries (`*.run.$$`) to mitigate environment-specific `Text file busy` failures in strict-warning runs; `make test` and `make test-strict-warnings` are green.
+- 2026-04-01: Milestone D (D14 modulo-overflow guard + runner suffix fix) landed: strict-path constant folding now also guards modulo on `LLONG_MIN % -1` to avoid semantic-flow `SIGFPE`/UB from legal source in loop conditions, with CF coverage expansion (`CF-50`). Makefile test runner temp-copy suffix escaping was corrected from `.$$` to `.$$$$` so shell PID expansion is actually applied per run, avoiding fixed `.run.$` collisions across concurrent sessions; `make test` and `make test-strict-warnings` are green.
+- 2026-04-01: Milestone D (D15 semantic expression-depth guard) landed: semantic recursive expression traversals (callable postorder walk, scope/call-shadow visibility checks, strict-path constant folding) now enforce a shared depth ceiling and report `SEMA-INT-012` instead of crashing on extremely deep left-associative expression trees. Regression coverage now includes generated deep-chain input to lock non-crashing failure behavior; `make test` is green.
+- 2026-04-01: Milestone D (D16 constant-if flow narrowing) landed: `AST_STMT_IF` flow merge now narrows on constant condition truthiness using the same constant evaluator family used by loop strict-path checks, so constant-true/constant-false `if` branches no longer conservatively merge unreachable paths into false `SEMA-CF-001` rejects. CF matrix coverage now includes `if(1)`, `if((1))`, `if(+1)`, `if((0,1))`, `if(0) ... else ...`, and loop-contained constant-true break paths (`CF-51..CF-56`); `make test` is green.
+- 2026-04-01: Milestone D (D18 loop CF guard-stability heuristic) landed: non-constant `while`/`for` flow now assumes the loop may execute at least once, but no longer treats first-iteration exits implied only by reusing the entry condition as proof of fallthrough. Loops are rejected only when control flow can reliably prove a stable-guard dead-loop shape: the exit depends on identifiers that never change in the body/step and are not plausibly affected by calls. Mutation-driven exits and call-driven exits remain accepted, while shapes such as `while(a){}`, `while(a){if(a){break;}}`, `while(1){if(a){break;}}`, and `for(;a;){continue;}` are rejected; `make test` is green.
+- 2026-04-01: Milestone D (D19 loop guard shadow-sensitivity) landed: loop CF guard tracking now resolves identifiers against local declaration scopes, so same-name block or `for`-init shadowing inside loop bodies no longer counts as mutating or exiting the outer loop guard by name alone. Per-iteration body declarations now also contribute their initializer dependencies when a shadowed break guard is rebuilt from outer state, so mutation-driven exits like `int a=b; if(a) break; b--;` remain accepted while stable shadowed dead loops stay rejected. Regression coverage now locks both representative dead-loop forms (`CF-64..CF-66`) and rebuilt-guard accept cases (`CF-67..CF-68`); `make test` is green.
+- 2026-04-01: Roadmap consistency cleanup: top-level Milestone D wording, D10/D17/D18 status text, and known-limitations language were reconciled with the current conservative CF policy so historical strict-path slices are clearly archival only.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
 - Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
 - Milestone C baseline is complete and validated (`test-fanalyzer`/`test-asan`/`test-strict-warnings` are green with zero warnings).
-- Milestone D is now the active implementation phase (strict return-path semantics for non-termination/break/continue interactions).
+- Milestone D is now the active implementation phase (conservative CF hardening, semantic bug closure, and regression/documentation convergence).
 - Large-file split follow-up for parser + semantic implementation files is completed.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
 
@@ -197,12 +211,12 @@
 
 - Completed: AST-primary callable checks for definitions, AST-primary return-path gate, visitor-based callable traversal, and chained-call behavior locks (`a()()` included).
 - Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
-- S3 semantic-authority retirement has completed; active remaining work is Milestone D strict-path tightening.
+- S3 semantic-authority retirement has completed; active remaining work is Milestone D conservative CF hardening and related semantic bug closure.
 
-## Active Implementation Plan (Milestone D kickoff)
+## Active Implementation Plan (Milestone D status)
 
 1. D0 status: complete; roadmap status is synchronized to `C complete -> D active` and current baselines are recorded.
-2. D1 status: complete; CF-02/CF-03/CF-06 are now reject expectations in the semantic control-flow matrix.
+2. D1 status: complete as a historical tests-first slice; its temporary CF-02/CF-03/CF-06 reject stance has been superseded by the later D17/D18 conservative loop policy.
 3. D2 status: complete; loop return-path logic is tightened for cond-true loops that may both break and reiterate.
 4. D3 status: complete; strict-path edge coverage is expanded with nested-loop and mixed break/continue locks.
 5. D4 status: complete; validation bundle is green and include-fragment dependency tracking is hardened in Makefile.
@@ -211,7 +225,17 @@
 8. D7 status: complete; parser callable metadata retention/plumbing is retired from active parser flow.
 9. D8 status: complete; AST lifecycle helper logic is de-duplicated via shared template between AST core and parser compatibility layer.
 10. D9 status: complete; strict-path constant-condition reasoning now covers ternary plus logical/equality/relational/bitwise/arithmetic/shift binary forms, with conservative safety guards and dedicated CF matrix locks (`CF-26..CF-48`).
-11. D10 status: in progress; parser convergence tail cleanup is removing retired parser state/compatibility remnants (including parser-global return counting state, unused callable-name token plumbing, and legacy expression alias entrypoints), has split function-external parsing responsibilities into signature/body helpers, and now unifies TU/TU-AST external-vs-declaration fallback through a shared helper while preserving AST contract outputs and keeping local-control as the only statement-control channel.
+11. D10 status: complete; parser convergence tail cleanup retired parser-global return counting state, unused callable-name token plumbing, and legacy expression alias entrypoints, split function-external parsing into signature/body helpers, and unified TU/TU-AST external-vs-declaration fallback through a shared helper while preserving AST contract outputs and keeping local-control as the only statement-control channel.
+12. D11 status: complete; top-level declaration initializer path is now AST-primary semantic-authoritative (initializer AST persisted on `AstExternal` and validated with callable + scope checks in semantic entry), with dedicated regression matrix coverage and `make test` green.
+13. D12 status: complete; top-level declaration/declaration duplicate-definition hole is closed (`SEMA-TOP-001` when both declarations define with initializer), and core dynamic array growth paths now have overflow-safe capacity guards in lexer/parser/semantic-scope/AST lifecycle storage.
+14. D13 status: complete; top-level initializer visibility now excludes current external during callable/scope checks (closing same-declaration self-reference/call holes), unary-minus constant-fold path now guards `LLONG_MIN` to avoid UB in strict-flow evaluation, and strict-warning test target reliability is improved via copied-binary execution to avoid transient `Text file busy` runner races.
+15. D14 status: complete; strict-path modulo constant-fold path now guards `LLONG_MIN % -1` to avoid `SIGFPE`/UB in semantic evaluation, and Makefile copied-binary temp suffix escaping is fixed (`.$$$$`) so test runners use real PID-suffixed paths under concurrent executions.
+16. D15 status: complete; semantic expression recursion depth is now guarded across callable/scope/flow walkers, converting deep expression stack-overflow crashes into deterministic semantic failures (`SEMA-INT-012`) with dedicated regression coverage.
+17. D16 status: complete; semantic `AST_STMT_IF` flow analysis now applies constant-condition narrowing (true/false) before branch merge, eliminating conservative false negatives on constant-if return paths and loop-local break/return patterns, with dedicated CF locks (`CF-51..CF-56`).
+18. D17 status: complete; control-flow policy is explicitly conservative and false-positive-averse: `if/else` still requires all reachable branches to return, plain `if` still requires the surrounding path to return, and loop handling is no longer treated as a strict path solver for arbitrary value-dependent exits.
+19. D18 status: complete; loop CF now treats non-constant `while`/`for` conditions as possibly entering once, rejects only reliably proven stable-guard dead loops, and does not accept fallthrough merely because the first iteration could reuse the entry condition. Mutation-driven exits and plausibly state-changing calls remain accepted; stable same-guard shapes such as `while(a){if(a){break;}}` are intentionally rejected under the current policy because the guard is unchanged and the first-iteration implication is not used as proof.
+20. D19 status: complete; loop guard tracking is now scope-sensitive for direct local declaration shadowing, so inner `int a=...;` declarations inside loop bodies or `for` init scopes no longer masquerade as mutations or exits of an outer guard with the same spelling. Per-iteration body declarations also propagate initializer dependencies to a local fixpoint within each compound body, which keeps simple multi-hop rebuilt-guard exits accepted (`int c=b; int a=c; if(a) break; b--;`) without relaxing stable shadowed dead-loop rejects.
+21. Future reminder: if the language grows indirect mutation forms such as address-of/pointer writes (`&`, dereference-based stores), reference semantics, or lambda/closure-style callable bodies (including `auto` lambda-like forms), revisit D18/D19's guard-tracking heuristic. It is intentionally shallow today and will become unsound once mutation can escape direct assignment/call visibility.
 
 ## Milestone B Detailed Execution Plan (historical reference)
 
@@ -291,10 +315,13 @@
 ## Known Limitations (Current Behavior)
 
 - Return all-path analysis is still a structured approximation, not a full path solver.
-- Strict-path CF matrix has been tightened and expanded through `CF-25`; previously accepted non-termination/break mixes (`CF-02`/`CF-03`/`CF-06`) are now reject expectations.
+- Loop CF policy is intentionally false-positive-averse rather than fully symbolic: mutation-driven or call-driven exits (for example `CF-02`/`CF-03`/`CF-06`) remain accepted, while only reliably proven stable-guard dead loops are reject expectations.
+- Loop CF deliberately does not treat first-iteration implications from reusing the entry condition as proof of fallthrough. Under the current policy, shapes such as `while(a){if(a){break;}}` or `for(;a;){if(a){break;}}` remain reject expectations unless the guard is mutated or a call could plausibly mutate it.
 - Equivalent-true condition rewrites (for example `(1)`, `+1`, `(0,1)`, `for(;(1);...)`) are now treated as strict-path true in flow analysis and covered by regressions.
 - Parser `parse_*_with_flow` interfaces are explicitly syntax-local for parser constraints/AST shaping and now expose only `may_fallthrough`/`may_break`; parser return-path authority equations are removed from parser flow outputs and remain semantic-owned.
-- Current strict-path analysis remains intra-function and statement-structured (it is not a full symbolic path solver for arbitrary value-dependent loops).
+- Current control-flow analysis remains intra-function and statement-structured (it is not a full symbolic path solver for arbitrary value-dependent loops).
+- Loop CF's current "variable changed" heuristic only tracks direct body/step mutation plus conservative function-call side effects. If future language work adds indirect writes (`&`/pointer/reference mutation) or lambda/closure-style callables with captured state, this heuristic must be redesigned before trusting D18-style dead-loop proofs.
+- Loop CF guard tracking is now scope-sensitive for direct local declaration shadowing inside loop bodies and `for` init scopes, so same-name inner declarations no longer count as mutations or exit guards for the outer loop condition. It also follows a shallow local fixpoint over per-iteration declaration initializers when a shadowed guard is rebuilt from outer state, including simple multi-hop rebuilt-guard chains (for example `int c=b; int a=c; if(a) break; b--;`). The heuristic is still intentionally shallow: it does not model aliasing, address-taken mutation, pointer/reference writes, closure-captured indirect state, or broader value reasoning beyond these local declaration-initializer dependency chains.
 - Include-fragment rebuild reliability is hardened: parser/semantic `.inc` and regression fragment edits now trigger rebuilds via explicit Makefile prerequisites.
 - Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
 - Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.

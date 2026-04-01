@@ -7,6 +7,7 @@
 
 #define CALLEE_PREVIEW_HEAD 24
 #define CALLEE_PREVIEW_TAIL 16
+#define SEMANTIC_MAX_EXPRESSION_DEPTH 4096
 
 #define SEMANTIC_SPLIT_AGGREGATOR 1
 #include "semantic_core_flow.inc"

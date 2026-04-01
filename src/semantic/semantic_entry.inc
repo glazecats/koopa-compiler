@@ -28,7 +28,44 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             continue;
         }
 
+        if (lhs->kind == AST_EXTERNAL_DECLARATION && lhs->has_initializer) {
+            if (!lhs->declaration_initializer) {
+                semantic_set_error(
+                    error,
+                    lhs->line,
+                    lhs->column,
+                    "SEMA-INT-011: top-level declaration initializer metadata missing AST expression");
+                return 0;
+            }
+
+            if (!semantic_check_top_level_initializer_callable_rules(program,
+                                                                     i,
+                                                                     lhs->declaration_initializer,
+                                                                     error)) {
+                return 0;
+            }
+
+            if (!semantic_scope_check_top_level_initializer_expression(lhs->declaration_initializer,
+                                                                       program,
+                                                                       i,
+                                                                       error)) {
+                return 0;
+            }
+        }
+
         if (lhs->kind == AST_EXTERNAL_FUNCTION && lhs->is_function_definition) {
+            if (!semantic_check_function_callable_scope_shadow_rules(lhs, error)) {
+                return 0;
+            }
+
+            if (!semantic_check_function_callable_rules(program, i, lhs, error)) {
+                return 0;
+            }
+
+            if (!semantic_check_function_scope_rules(program, i, lhs, error)) {
+                return 0;
+            }
+
             if (!semantic_compute_function_returns_all_paths(lhs, &returns_all_paths, error)) {
                 return 0;
             }
@@ -40,18 +77,6 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                                        lhs->column,
                                        "SEMA-CF-001: Function definition must return on all control-flow paths");
                 }
-                return 0;
-            }
-
-            if (!semantic_check_function_callable_scope_shadow_rules(lhs, error)) {
-                return 0;
-            }
-
-            if (!semantic_check_function_callable_rules(program, i, lhs, error)) {
-                return 0;
-            }
-
-            if (!semantic_check_function_scope_rules(program, i, lhs, error)) {
                 return 0;
             }
         }
@@ -89,6 +114,21 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 }
 
                 /* Multiple compatible declarations are currently accepted. */
+                continue;
+            }
+
+            if (lhs->kind == AST_EXTERNAL_DECLARATION && rhs->kind == AST_EXTERNAL_DECLARATION) {
+                if (lhs->has_initializer && rhs->has_initializer) {
+                    if (error) {
+                        semantic_set_error(error,
+                                           rhs->line,
+                                           rhs->column,
+                                           "SEMA-TOP-001: duplicate top-level variable definition");
+                    }
+                    return 0;
+                }
+
+                /* Repeated top-level declarations without duplicate definition are accepted. */
                 continue;
             }
 

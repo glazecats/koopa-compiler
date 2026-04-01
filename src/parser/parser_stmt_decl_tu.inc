@@ -944,6 +944,7 @@ static int parse_declaration(Parser *p,
     int has_initializer = 0;
     size_t initializer_start = 0;
     size_t initializer_end = 0;
+    AstExpression *external_initializer_expr = NULL;
     char **decl_names = NULL;
     size_t decl_name_count = 0;
     size_t decl_name_capacity = 0;
@@ -972,6 +973,16 @@ static int parse_declaration(Parser *p,
                                &has_initializer,
                                &initializer_start,
                                &initializer_end)) {
+        free_name_array(decl_names, decl_name_count);
+        free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+        return 0;
+    }
+    if (top_level_program && has_initializer &&
+        !build_expression_ast_from_slice(p,
+                                         initializer_start,
+                                         initializer_end,
+                                         &external_initializer_expr,
+                                         ident)) {
         free_name_array(decl_names, decl_name_count);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
@@ -1014,12 +1025,16 @@ static int parse_declaration(Parser *p,
     }
     if (top_level_program && !parser_ast_program_add_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
         set_error(p, peek(p), "Out of memory while building AST");
+        parser_ast_expression_free(external_initializer_expr);
         free_name_array(decl_names, decl_name_count);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
     }
     if (top_level_program) {
         top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
+        top_level_program->externals[top_level_program->count - 1].declaration_initializer =
+            external_initializer_expr;
+        external_initializer_expr = NULL;
     }
 
     while (match(p, TOKEN_COMMA)) {
@@ -1028,6 +1043,16 @@ static int parse_declaration(Parser *p,
                                    &has_initializer,
                                    &initializer_start,
                                    &initializer_end)) {
+            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        if (top_level_program && has_initializer &&
+            !build_expression_ast_from_slice(p,
+                                             initializer_start,
+                                             initializer_end,
+                                             &external_initializer_expr,
+                                             ident)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
@@ -1071,12 +1096,16 @@ static int parse_declaration(Parser *p,
         if (top_level_program &&
             !parser_ast_program_add_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
             set_error(p, peek(p), "Out of memory while building AST");
+            parser_ast_expression_free(external_initializer_expr);
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
         if (top_level_program) {
             top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
+            top_level_program->externals[top_level_program->count - 1].declaration_initializer =
+                external_initializer_expr;
+            external_initializer_expr = NULL;
         }
     }
 

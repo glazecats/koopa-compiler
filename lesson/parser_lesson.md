@@ -71,17 +71,10 @@ else:
 2. `parser_parse_translation_unit_ast(...)`：解析 + 构建 `AstProgram`。  
 3. `parser_parse_expression_ast_assignment(...)`：解析独立表达式并产 `AstExpression`。  
 
-还有兼容别名：
-
-- `parser_parse_expression_ast_primary`
-- `parser_parse_expression_ast_additive`
-- `parser_parse_expression_ast_relational`
-- `parser_parse_expression_ast_equality`
-
-实现上它们都转发到 assignment/comma 入口，所以语义是：
+当前公开表达式入口只保留这一条 canonical API。虽然函数名里带 `assignment`，但实现上它会从 comma-level 开始解析，覆盖完整表达式层级，所以语义更接近：
 
 $$
-\text{ExprAlias}(T) \equiv \text{ExprAssignment}(T)
+\text{ExprEntry}(T)=\text{parse\_comma}(T)
 $$
 
 ### 2.3 输入契约
@@ -103,7 +96,7 @@ $$
 `Parser` 结构体核心字段可以抽象为：
 
 $$
-S = (i, E, D_e, D_s, L, M)
+S = (i, E, D_e, D_s, L)
 $$
 
 其中：
@@ -113,7 +106,6 @@ $$
 - $D_e$：表达式递归深度
 - $D_s$：语句递归深度
 - $L$：循环嵌套深度（`loop_depth`）
-- $M$：函数级统计/调用元数据缓存
 
 实现上所有 parse 函数都是对这个状态做转移。
 
@@ -193,46 +185,41 @@ depth++
 depth--
 ```
 
-### 3.5 函数调用元数据缓存（parser 内部临时状态）
+### 3.5 公共入口收敛：`parser_prepare`
 
-函数体解析时，parser 会记录 call-site 信息：
+3 个公开入口现在都会先走 `parser_prepare(...)`，统一做：
 
-- 名字数组 `function_called_names`
-- 行列 `function_called_lines/columns`
-- 参数个数 `function_called_arg_counts`
-- callee 形态 `function_called_kinds`
+1. token stream 合法性检查
+2. `Parser` 状态清零
+3. `ParserError` 清空
 
-扩容策略：
+它锁定的前置条件是：
 
 $$
-cap_{new} =
-\begin{cases}
-8 & cap=0 \\
-2\cdot cap & cap>0
-\end{cases}
+|T|>0 \land T_{|T|-1}=\texttt{TOKEN\_EOF}
 $$
-
-实现要点：
-
-- 每个数组单独 `realloc`。
-- 任一步失败都报 OOM 并终止该解析路径。
-- 这组数据属于 `Parser` 内部瞬态状态。
-- 本次解析结束后会被释放，不属于当前 `AstExternal` 对外契约字段。
-- 当前 semantic 主路径不会读取这组 parser 内部缓存；semantic 规则以 AST 遍历结果为准。
 
 ### 3.6 token slice 工具函数（可调用形态判定）
 
-`token_slice_is_callable_form`、`token_slice_callable_name_token`、`trim_wrapping_parentheses` 用于把 `(...)` 外壳剥掉并判断：
+当前 parser 里和“括号包裹表达式”相关的关键 helper 是：
 
-- 直接标识符 `f`
-- 调用结果 `(f())`
-- 其他表达式 `(f+1)`
+- `token_slice_has_balanced_parens`
+- `trim_wrapping_parentheses`
+- `token_slice_is_parenthesized_identifier_form`
+- `parse_primary_with_flags`
 
-这会映射到：
+它们负责两件事：
 
-- `AST_CALL_CALLEE_DIRECT_IDENTIFIER`
-- `AST_CALL_CALLEE_CALL_RESULT`
-- `AST_CALL_CALLEE_NON_IDENTIFIER`
+1. 判断一个 token slice 去掉外层括号后是不是“标识符 lvalue 形式”
+2. 在非 AST postfix 路径里给 primary 打上两个语法标志：
+   - `is_identifier_lvalue`
+   - `is_callable_target`
+
+当前语法策略是：
+
+- 直接标识符是 callable target
+- 任意被括号包起来的完整表达式也可以作为 postfix call callee
+- 更细的 callee 分类（direct identifier / call result / non-identifier）已经下放到 semantic 的 `classify_ast_call_callee`
 
 ### 3.7 `parser_ast_compat.inc`（重要兼容边界）
 
@@ -366,57 +353,39 @@ while next is '(' or postfix-op:
 
 ---
 
-## 5. 语句解析与控制流方程
+## 5. 语句解析与局部控制信息
 
-`parse_statement_with_flow` 同时产出语法结果与 3 个流属性：
+parser 现在的语句主入口是 `parse_statement_with_local_control`，它只维护“局部解析约束”需要的两个标志：
 
 $$
-\mathrm{Flow}(stmt) = (R,F,B)
+\mathrm{LocalControl}(stmt) = (F,B)
 $$
 
-- $R$: `guaranteed_return`
 - $F$: `may_fallthrough`
 - $B$: `may_break`
 
+这套信息只服务于 parser 自己的局部判断。函数是否“所有路径都 return”已经交给 semantic 的 AST flow 分析，不再由 parser 输出权威结论。
+
 ### 5.1 复合语句 `{...}`
 
-`parse_compound_statement_with_flow` 顺序扫描子语句，做流传播。核心思想是“前面路径已不再 fallthrough 时，后续语句不再影响 return 保证”。
+`parse_compound_statement_with_local_control` 顺序扫描子语句，做局部传播。核心思想是“前面路径一旦不再 fallthrough，后续语句不再影响 block 的局部 fallthrough 状态”。
 
 伪代码：
 
 ```text
 block_F = 1
 for child in block:
-    flow = Flow(child)
-    if block_F and flow.B: block_B = 1
+    ctrl = LocalControl(child)
+    if block_F and ctrl.B: block_B = 1
     if block_F:
-        if flow.R: block_R=1; block_F=0
-        elif not flow.F: block_R=0; block_F=0
+        if not ctrl.F:
+            block_F = 0
 ```
 
 ### 5.2 `if` 合成规则
 
-有 `else`：
-
-$$
-R = R_t \land R_e
-$$
-
-$$
-F = F_t \lor F_e
-$$
-
-$$
-B = B_t \lor B_e
-$$
-
-无 `else`：
-
-$$
-F = 1
-$$
-
-因为条件为假时会直接落到 if 后面。
+- 无 `else`：固定 `F = 1`，因为条件为假时直接落到 if 后面
+- 有 `else`：`F = F_t \lor F_e`，`B = B_t \lor B_e`
 
 ### 5.3 `while` 与 `for`（近似分析）
 
@@ -438,7 +407,7 @@ F =
 \end{cases}
 $$
 
-`R` 在常真且不可 break 时继承 body 的 `R`；其他情况置 0。
+parser 不再输出 `R`；这里只保留“会不会继续往后解析”的近似信息。
 
 ### 5.4 `break/continue` 的合法性
 
@@ -507,7 +476,7 @@ while not EOF:
 
 实现上有两个关键动作（现在这版非常重要）：
 
-1. 顶层 external 仍然“每个 declarator 展开一个 `AST_EXTERNAL_DECLARATION`”，并记录 `has_initializer`。  
+1. 顶层 external 仍然“每个 declarator 展开一个 `AST_EXTERNAL_DECLARATION`”，并记录 `has_initializer`；如果该 declarator 带 initializer，还会额外挂一份 `declaration_initializer` 表达式 AST。  
 2. 语句 AST 路径中，声明器名字与初始化器表达式槽位做一一对齐。
 
 对齐规则：
@@ -527,6 +496,11 @@ $$
 $$
 
 这解决了旧实现里“只存有 initializer 的表达式”带来的映射歧义，使 semantic 可以稳定按声明器顺序检查可见性。
+
+换句话说，当前 declaration 有两种 AST 落点：
+
+- 顶层 declaration external：`has_initializer` + `declaration_initializer`
+- 语句/for-init declaration statement：`declaration_names[]` 与对齐后的 `expressions[]`
 
 伪代码：
 
@@ -729,7 +703,7 @@ $$
 核心状态可看成：
 
 $$
-S=(current, has\_error, error\_index, loop\_depth, recursion\_depths, metrics)
+S=(current, has\_error, error\_index, loop\_depth, recursion\_depths)
 $$
 
 每次 `match/consume/advance` 都是对 `current` 的状态转移：
@@ -784,7 +758,7 @@ return left
 
 ### 10.4 `parse_postfix`：为什么能识别调用链
 
-`parse_postfix` 的 while 循环每吃到一个 `(`...`)`，就产生一次调用语义（并在非 AST 路径记录元数据）。
+`parse_postfix` / `parse_expression_ast_postfix` 的 while 循环每吃到一个 `(`...`)`，就追加一层 postfix call。
 
 链式形式：
 
@@ -792,27 +766,27 @@ $$
 a()()() = Call(Call(Call(a,[]),[]),[])
 $$
 
-所以 `a()()()` 会记录 3 条 call site。
+所以 `a()()()` 会自然长成 3 层嵌套调用树；非 AST 路径只保留 `is_callable_target` 这类局部语法标志，不再维护旧的 call-site 元数据缓存。
 
-### 10.5 `parse_statement_with_flow`：语句解析 + 控制流合成
+### 10.5 `parse_statement_with_local_control`：语句解析 + 局部控制信息
 
 它做两件事：
 
 1. 解析语句结构（`if/while/for/return/...`）
-2. 同步计算流属性：
+2. 同步计算局部控制标志：
 
 $$
-(g\_ret, may\_fall, may\_break)
+(may\_fall, may\_break)
 $$
 
 例如 block（compound）是折叠合成：
 
 ```text
 for stmt in block:
-    merge(flow, flow(stmt))
+    merge(local_control, local_control(stmt))
 ```
 
-### 10.6 `parse_compound_statement_with_flow`：声明与语句并行处理
+### 10.6 `parse_compound_statement_with_local_control`：声明与语句并行处理
 
 在 `{...}` 中：
 
@@ -850,7 +824,7 @@ $$
 
 这正是 semantic 能按声明器顺序做可见性检查的前提。
 
-### 10.8 `parse_for_statement_with_flow`：for-init 的两条路
+### 10.8 `parse_for_statement_with_local_control`：for-init 的两条路
 
 `for(init; cond; step)` 的 init 有两种：
 
@@ -882,16 +856,15 @@ if fail:
 
 ### 10.10 对外产出（当前精简契约）
 
-函数定义成功后，parser 对外主要写入：
+顶层 external 成功落盘后，parser 对外主要写入：
 
-1. `function_body`（statement AST）
-2. `return_statement_count`
-3. 形参信息（`parameter_count/parameter_names`）
+1. 函数 external：`function_body`、`return_statement_count`、`parameter_count/parameter_names`
+2. 声明 external：`has_initializer`，以及可选的 `declaration_initializer`
 
 换句话说，当前 external 契约更偏“结构主导、统计精简”。
 
 $$
-Output_{external} = \{AST\ body,\ params,\ return\_count\}
+Output_{external} = \{AST\ body,\ params,\ return\_count,\ decl\_initializer?\}
 $$
 
 ### 10.11 为什么 parser 仍保留非 AST 路径

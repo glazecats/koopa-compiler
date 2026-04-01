@@ -73,27 +73,51 @@ $(SEMANTIC_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c 
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"
-	@./$(LEXER_TEST_BIN) $(LEXER_TEST_INPUT)
+	@tmp="./$(LEXER_TEST_BIN).run.$$$$"; \
+	cp "./$(LEXER_TEST_BIN)" "$$tmp" && "$$tmp" $(LEXER_TEST_INPUT); \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test-lexer-regression: $(LEXER_REGRESSION_BIN)
 	@echo "[lexer] running regression tests"
-	@./$(LEXER_REGRESSION_BIN)
+	@tmp="./$(LEXER_REGRESSION_BIN).run.$$$$"; \
+	cp "./$(LEXER_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test-parser: $(PARSER_TEST_BIN)
 	@echo "[parser] running $(PARSER_TEST_INPUT)"
-	@./$(PARSER_TEST_BIN) $(PARSER_TEST_INPUT)
+	@tmp="./$(PARSER_TEST_BIN).run.$$$$"; \
+	cp "./$(PARSER_TEST_BIN)" "$$tmp" && "$$tmp" $(PARSER_TEST_INPUT); \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test-parser-regression: $(PARSER_REGRESSION_BIN)
 	@echo "[parser] running regression tests"
-	@./$(PARSER_REGRESSION_BIN)
+	@tmp="./$(PARSER_REGRESSION_BIN).run.$$$$"; \
+	cp "./$(PARSER_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test-parser-legacy-link: $(PARSER_LEGACY_LINK_BIN)
 	@echo "[parser] running legacy-link test"
-	@./$(PARSER_LEGACY_LINK_BIN)
+	@tmp="./$(PARSER_LEGACY_LINK_BIN).run.$$$$"; \
+	cp "./$(PARSER_LEGACY_LINK_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test-semantic-regression: $(SEMANTIC_REGRESSION_BIN)
 	@echo "[semantic] running regression tests"
-	@./$(SEMANTIC_REGRESSION_BIN)
+	@tmp="./$(SEMANTIC_REGRESSION_BIN).run.$$$$"; \
+	cp "./$(SEMANTIC_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
 
 test:
 	@$(MAKE) --no-print-directory test-lexer

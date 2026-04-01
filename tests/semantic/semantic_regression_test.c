@@ -179,6 +179,12 @@ int main(void) {
     if (!test_semantic_allows_repeated_declaration()) {
         return 1;
     }
+    if (!test_semantic_rejects_duplicate_initialized_top_level_definition()) {
+        return 1;
+    }
+    if (!test_semantic_allows_initialized_definition_with_redeclaration()) {
+        return 1;
+    }
     if (!test_semantic_allows_unnamed_external_contract()) {
         return 1;
     }
@@ -186,6 +192,12 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_accepts_function_definition_with_full_return()) {
+        return 1;
+    }
+    if (!test_semantic_prioritizes_scope_diagnostic_over_return_flow()) {
+        return 1;
+    }
+    if (!test_semantic_prioritizes_depth_diagnostic_over_return_flow()) {
         return 1;
     }
     if (!test_semantic_rejects_unreachable_return_after_while_true()) {
@@ -237,6 +249,12 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_rejects_call_before_visible_declaration()) {
+        return 1;
+    }
+    if (!test_semantic_top_level_initializer_semantic_matrix()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_excessive_expression_depth()) {
         return 1;
     }
     if (!test_semantic_rejects_duplicate_local_declaration_same_scope()) {
@@ -313,14 +331,14 @@ int main(void) {
     }
 
     /*
-     * Run strict-path target cases as a dedicated group so D-policy changes
-     * remain visible in one place.
+     * Run the control-flow policy groups explicitly so conservative-accepting
+     * loop behavior stays visible in one place.
      */
-    if (!run_strict_path_target_group()) {
+    if (!run_conservative_loop_acceptance_group()) {
         return 1;
     }
 
-    if (!run_strict_path_edge_coverage_group()) {
+    if (!run_deterministic_loop_rejects_group()) {
         return 1;
     }
 

@@ -26,9 +26,37 @@ static bool token_array_reserve(TokenArray *arr, size_t new_cap) {
     return true;
 }
 
+static bool token_array_next_capacity(size_t current, size_t *out_next_capacity) {
+    size_t next_capacity;
+    const size_t max_size = (size_t)-1;
+
+    if (!out_next_capacity) {
+        return false;
+    }
+
+    if (current == 0) {
+        next_capacity = 32;
+    } else {
+        if (current > max_size / 2) {
+            return false;
+        }
+        next_capacity = current * 2;
+    }
+
+    if (next_capacity > max_size / sizeof(Token)) {
+        return false;
+    }
+
+    *out_next_capacity = next_capacity;
+    return true;
+}
+
 static bool token_array_push(TokenArray *arr, Token token) {
     if (arr->size == arr->capacity) {
-        size_t next_cap = arr->capacity == 0 ? 32 : arr->capacity * 2;
+        size_t next_cap = 0;
+        if (!token_array_next_capacity(arr->capacity, &next_cap)) {
+            return false;
+        }
         if (!token_array_reserve(arr, next_cap)) {
             return false;
         }

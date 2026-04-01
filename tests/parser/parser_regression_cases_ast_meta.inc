@@ -828,6 +828,18 @@ static int test_ast_records_declaration_initializer_metadata(void) {
         return 0;
     }
 
+    if (program.externals[0].declaration_initializer != NULL ||
+        program.externals[1].declaration_initializer == NULL ||
+        program.externals[2].declaration_initializer != NULL ||
+        program.externals[1].declaration_initializer->kind != AST_EXPR_NUMBER ||
+        program.externals[1].declaration_initializer->as.number_value != 1) {
+        fprintf(stderr,
+                "[parser-reg] FAIL: expected declaration initializer AST slots [NULL,number(1),NULL]\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;

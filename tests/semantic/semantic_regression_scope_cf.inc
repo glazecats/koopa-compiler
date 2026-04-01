@@ -67,6 +67,67 @@ static int test_semantic_rejects_call_before_visible_declaration(void) {
     return 1;
 }
 
+static int test_semantic_top_level_initializer_semantic_matrix(void) {
+    static const CallableDiagCase reject_cases[] = {
+        {"TOPINIT-SCOPE-001",
+         "int x = y; int y; int main(){return 0;}\n",
+         "SEMA-SCOPE-002",
+         "identifier=y",
+         0,
+         0},
+        {"TOPINIT-CALL-001",
+         "int foo; int x = foo(); int main(){return 0;}\n",
+         "SEMA-CALL-003",
+         "callee=foo; symbol_kind=non_function",
+         0,
+         0},
+        {"TOPINIT-CALL-002",
+         "int x = foo(); int foo(){return 1;} int main(){return 0;}\n",
+         "SEMA-CALL-002",
+         "callee=foo; decl_line=1",
+         0,
+         0},
+        {"TOPINIT-SCOPE-002",
+         "int x = y, y = 1; int main(){return 0;}\n",
+         "SEMA-SCOPE-002",
+         "identifier=y",
+         0,
+         0},
+        {"TOPINIT-SCOPE-003",
+         "int x = x; int main(){return x;}\n",
+         "SEMA-SCOPE-002",
+         "identifier=x",
+         0,
+         0},
+        {"TOPINIT-CALL-003",
+         "int x = x(); int main(){return 0;}\n",
+         "SEMA-CALL-001",
+         "callee=x",
+         0,
+         0},
+    };
+    static const CallablePassCase pass_cases[] = {
+        {"TOPINIT-PASS-001", "int y = 1; int x = y; int main(){return x;}\n"},
+        {"TOPINIT-PASS-002",
+         "int foo(int a); int x = foo(1); int foo(int a){return a;} int main(){return x;}\n"},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(reject_cases) / sizeof(reject_cases[0]); ++i) {
+        if (!run_callable_diag_case(&reject_cases[i])) {
+            return 0;
+        }
+    }
+
+    for (i = 0; i < sizeof(pass_cases) / sizeof(pass_cases[0]); ++i) {
+        if (!run_callable_pass_case(&pass_cases[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int test_semantic_rejects_duplicate_local_declaration_same_scope(void) {
     const char *source = "int f(){int x; int x; return 0;}\n";
     TokenArray tokens;
@@ -837,6 +898,75 @@ static int test_semantic_accepts_call_with_prior_prototype_then_later_definition
     return 1;
 }
 
+static int test_semantic_rejects_excessive_expression_depth(void) {
+    const size_t repeat_count = 5000;
+    const size_t max_source_size = 64 + (repeat_count * 2);
+    char *source = (char *)malloc(max_source_size);
+    size_t offset = 0;
+    size_t i;
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!source) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: out of memory while building deep expression test source\n");
+        return 0;
+    }
+
+    offset += (size_t)snprintf(source + offset,
+                               max_source_size - offset,
+                               "int f(int a){return a");
+    for (i = 0; i < repeat_count; ++i) {
+        if (offset + 2 >= max_source_size) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: deep expression test source buffer overflow\n");
+            free(source);
+            return 0;
+        }
+        source[offset++] = '+';
+        source[offset++] = 'a';
+    }
+    if (offset + 4 >= max_source_size) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: deep expression test source terminator overflow\n");
+        free(source);
+        return 0;
+    }
+    source[offset++] = ';';
+    source[offset++] = '}';
+    source[offset++] = '\n';
+    source[offset] = '\0';
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        free(source);
+        return 0;
+    }
+    free(source);
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: deep expression should fail semantic analysis with depth guard\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-INT-012") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-INT-012 for deep expression, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int run_cf_matrix_expect_accepts(const char *case_id, const char *source) {
     TokenArray tokens;
     AstProgram program;
@@ -914,16 +1044,17 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
 /*
  * Control-flow comparison matrix groups:
  * 1) must_pass_or_fail_now
- *    - Current expectation is aligned with stricter all-path semantics.
- * 2) strict_path_target
- *    - Cases now follow strict all-path return semantics.
- *    - They were known limitations before Milestone D.
- * 3) strict_path_edge_coverage
- *    - Nested-loop and mixed break/continue edge coverage for Milestone D3.
+ *    - Stable, policy-independent accept/reject cases.
+ * 2) conservative_loop_acceptance
+ *    - Value-dependent or mixed-exit loops that must stay accepted unless
+ *      semantic flow can reliably prove non-return.
+ * 3) deterministic_loop_rejects
+ *    - Constant-condition loop shapes that are still reliably rejectable.
  *
- * Strict-semantics migration note (Milestone D):
- * - CF-02/CF-03/CF-06 are now expected to reject.
- * - Keep CF-01/04/05/07/08/09/10 as-is unless semantics policy changes again.
+ * Conservative CF policy note:
+ * - `SEMA-CF-001` should avoid false positives.
+ * - Unknown/value-dependent loop termination is accepted by default.
+ * - Only reliably proven must-not-return loop paths are rejected.
  */
 typedef enum {
     CF_EXPECT_ACCEPT,
@@ -967,21 +1098,21 @@ static const CfCase kCfMustPassOrFailNow[] = {
     {"CF-04", "int f(int a){while(1){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-05", "int f(){while(1){while(1){break;}}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-07", "int f(int a){for(;;){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
-    {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-09", "int f(){while(1){continue;}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-10", "int f(){for(;;){int x=1;}return 0;}\n", CF_EXPECT_REJECT},
     {"CF-11", "int f(){while(1){while(1){break;}break;}return 1;}\n", CF_EXPECT_ACCEPT},
 };
 
-/* strict_path_target: strict all-path semantics reject these non-termination mixes. */
-static const CfCase kCfStrictPathTarget[] = {
-    {"CF-02", "int f(int a){while(1){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
-    {"CF-03", "int f(int a){while(1){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_REJECT},
-    {"CF-06", "int f(int a){for(;;){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
+/* conservative_loop_acceptance: body/step updates keep loop exits plausible. */
+static const CfCase kCfConservativeLoopAcceptance[] = {
+    {"CF-02", "int f(int a){while(1){a=a-1; if(a==0){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-03", "int g; int tick(){g=g-1; return g;} int f(){while(1){tick(); if(g==0){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-06", "int f(int a){for(;;a=a-1){if(a==0){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
 };
 
-/* strict_path_edge_coverage: nested + mixed-branch strict-path behavior locks. */
-static const CfCase kCfStrictPathEdgeCoverage[] = {
+/* deterministic_loop_rejects: only reliably dead loop shapes stay rejected. */
+static const CfCase kCfDeterministicLoopRejects[] = {
     {"CF-12", "int f(int a){while(1){while(1){if(a){break;}else{continue;}}}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-13", "int f(int a){for(;;){if(a){break;}else{while(1){break;}break;}}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-14", "int f(int a){for(;;){if(a){break;}else{continue;}}return 1;}\n", CF_EXPECT_REJECT},
@@ -1035,6 +1166,36 @@ static const CfCase kCfStrictPathEdgeCoverage[] = {
     {"CF-48",
      "int f(){while((1?1:0)){for(;(1<<2);){break;}break;}return 1;}\n",
      CF_EXPECT_ACCEPT},
+    {"CF-49",
+     "int f(){while(-(~9223372036854775807)){continue;}return 1;}\n",
+     CF_EXPECT_ACCEPT},
+    {"CF-50",
+     "int f(){while((~9223372036854775807)%(-1)){return 1;}return 0;}\n",
+     CF_EXPECT_ACCEPT},
+    {"CF-51", "int f(){if(1) return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-52", "int f(){if((1)) return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-53", "int f(){if(+1) return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-54", "int f(){if((0,1)) return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-55", "int f(){if(0) ; else return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-56",
+     "int f(){while(1){if((0,1)) break;}return 2;}\n",
+     CF_EXPECT_ACCEPT},
+    {"CF-57", "int f(int a){while(a){} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-58", "int f(int a){while(a){continue;} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-59", "int f(int a){for(;a;){continue;} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-60", "int f(int a){while(a){break;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-61", "int f(int a){while(a){while(1){continue;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-62", "int f(int a){for(;a;){for(;;){continue;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-63", "int f(int a){for(;a;){if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-64", "int f(int a){while(a){int a=0; if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-65", "int f(int a){while(a){int a=0; a=1;} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-66", "int f(int a){for(;a;){int a=0; if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-67", "int f(int a,int b){while(a){int a=b; if(a){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-68", "int f(int a,int b){while(a){a=b; if(a) break; b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-69", "int f(int a,int b){while(a){int c=b; int a=c; if(a){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-70", "int f(int a,int b){for(;a;){int c=b; int a=c; if(a){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-71", "int f(int a,int b){while(a){int c=b; int d=c; if(d){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-72", "int f(int a,int b){while(a){int a=b; int c=a; if(c){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
 };
 
 static int run_must_pass_or_fail_now_group(void) {
@@ -1043,16 +1204,17 @@ static int run_must_pass_or_fail_now_group(void) {
                              sizeof(kCfMustPassOrFailNow) / sizeof(kCfMustPassOrFailNow[0]));
 }
 
-static int run_strict_path_target_group(void) {
-    return run_cf_case_group("strict_path_target",
-                             kCfStrictPathTarget,
-                             sizeof(kCfStrictPathTarget) / sizeof(kCfStrictPathTarget[0]));
+static int run_conservative_loop_acceptance_group(void) {
+    return run_cf_case_group("conservative_loop_acceptance",
+                             kCfConservativeLoopAcceptance,
+                             sizeof(kCfConservativeLoopAcceptance) /
+                                 sizeof(kCfConservativeLoopAcceptance[0]));
 }
 
-static int run_strict_path_edge_coverage_group(void) {
-    return run_cf_case_group("strict_path_edge_coverage",
-                             kCfStrictPathEdgeCoverage,
-                             sizeof(kCfStrictPathEdgeCoverage) /
-                                 sizeof(kCfStrictPathEdgeCoverage[0]));
+static int run_deterministic_loop_rejects_group(void) {
+    return run_cf_case_group("deterministic_loop_rejects",
+                             kCfDeterministicLoopRejects,
+                             sizeof(kCfDeterministicLoopRejects) /
+                                 sizeof(kCfDeterministicLoopRejects[0]));
 }
 

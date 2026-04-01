@@ -458,6 +458,64 @@ static int test_semantic_allows_repeated_declaration(void) {
     return 1;
 }
 
+static int test_semantic_rejects_duplicate_initialized_top_level_definition(void) {
+    const char *source = "int x = 1;\nint x = 2;\nint main(){return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: duplicate initialized top-level definition should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-TOP-001") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-TOP-001 diagnostic, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_allows_initialized_definition_with_redeclaration(void) {
+    const char *source = "int x = 1;\nint x;\nint main(){return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: initialized definition + redeclaration should pass, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_semantic_allows_unnamed_external_contract(void) {
     AstProgram program;
     SemanticError sema_err;
@@ -530,6 +588,115 @@ static int test_semantic_accepts_function_definition_with_full_return(void) {
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
                 "[semantic-reg] FAIL: full-return function definition should pass, got: %s\n",
+                sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_prioritizes_scope_diagnostic_over_return_flow(void) {
+    const char *cases[] = {
+        "int f(){if(foo){return 1;}}\n",
+        "int f(){while(foo){return 1;}}\n"
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        TokenArray tokens;
+        AstProgram program;
+        ParserError parse_err;
+        SemanticError sema_err;
+
+        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+            return 0;
+        }
+
+        if (semantic_analyze_program(&program, &sema_err)) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: scope-before-flow ordering case should fail semantic analysis\n");
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: expected SEMA-SCOPE-002 before flow diagnostic, got: %s\n",
+                    sema_err.message);
+            lexer_free_tokens(&tokens);
+            ast_program_free(&program);
+            return 0;
+        }
+
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+    }
+
+    return 1;
+}
+
+static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
+    const size_t repeat_count = 5000;
+    const size_t max_source_size = 80 + (repeat_count * 2);
+    char *source = (char *)malloc(max_source_size);
+    size_t offset = 0;
+    size_t i;
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!source) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: out of memory while building depth-before-flow source\n");
+        return 0;
+    }
+
+    offset += (size_t)snprintf(source + offset,
+                               max_source_size - offset,
+                               "int f(int a){if(a");
+    for (i = 0; i < repeat_count; ++i) {
+        if (offset + 2 >= max_source_size) {
+            fprintf(stderr,
+                    "[semantic-reg] FAIL: depth-before-flow source buffer overflow\n");
+            free(source);
+            return 0;
+        }
+        source[offset++] = '+';
+        source[offset++] = 'a';
+    }
+    if (offset + 14 >= max_source_size) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: depth-before-flow source terminator overflow\n");
+        free(source);
+        return 0;
+    }
+    offset += (size_t)snprintf(source + offset,
+                               max_source_size - offset,
+                               "){return 1;}}\n");
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        free(source);
+        return 0;
+    }
+    free(source);
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: depth-before-flow ordering case should fail semantic analysis\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-INT-012") == NULL) {
+        fprintf(stderr,
+                "[semantic-reg] FAIL: expected SEMA-INT-012 before flow diagnostic, got: %s\n",
                 sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);

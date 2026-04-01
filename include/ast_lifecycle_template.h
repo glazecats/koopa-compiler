@@ -51,6 +51,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
             }
         }
         free(program->externals[i].parameter_names);
+        AST_LIFECYCLE_EXPRESSION_FREE_FN(program->externals[i].declaration_initializer);
         AST_LIFECYCLE_STATEMENT_FREE_FN(program->externals[i].function_body);
     }
 
@@ -72,7 +73,17 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     }
 
     if (program->count == program->capacity) {
-        next_capacity = (program->capacity == 0) ? 16 : (program->capacity * 2);
+        if (program->capacity == 0) {
+            next_capacity = 16;
+        } else {
+            if (program->capacity > ((size_t)-1) / 2) {
+                return 0;
+            }
+            next_capacity = program->capacity * 2;
+        }
+        if (next_capacity > ((size_t)-1) / sizeof(AstExternal)) {
+            return 0;
+        }
         new_data = (AstExternal *)realloc(program->externals, next_capacity * sizeof(AstExternal));
         if (!new_data) {
             return 0;
@@ -85,6 +96,7 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.name = NULL;
     external.name_length = 0;
     external.has_initializer = 0;
+    external.declaration_initializer = NULL;
     external.parameter_count = 0;
     external.parameter_names = NULL;
     external.is_function_definition = 0;
