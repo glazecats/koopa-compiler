@@ -55,16 +55,16 @@ static int test_backtracking_error_not_polluted(void) {
 
     if (strstr(err.message, "';'") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected missing semicolon error, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected missing semicolon error, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (strstr(err.message, "'('") != NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: stale function-parse error leaked into final message: %s\n",
-                err.message);
+            "[parser-reg] FAIL: stale function-parse error leaked into final message: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -92,16 +92,16 @@ static int test_farthest_failure_preferred(void) {
 
     if (strstr(err.message, "'int'") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected deeper parameter-list error, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected deeper parameter-list error, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (strstr(err.message, "';'") != NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: got earlier declaration-style error instead of farthest failure: %s\n",
-                err.message);
+            "[parser-reg] FAIL: got earlier declaration-style error instead of farthest failure: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -133,10 +133,10 @@ static int test_success_clears_error_state(void) {
 
     if (err.line != 0 || err.column != 0 || err.message[0] != '\0') {
         fprintf(stderr,
-                "[parser-reg] FAIL: success should clear error state, got line=%d col=%d msg=%s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: success should clear error state, got line=%d col=%d msg=%s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -153,14 +153,14 @@ static int test_translation_unit_accepts_conditional_then_comma_in_return(void) 
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for conditional-then-comma return input\n");
+            "[parser-reg] FAIL: lexer failed for conditional-then-comma return input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept conditional-then-comma return input: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept conditional-then-comma return input: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -180,14 +180,14 @@ static int test_ast_accepts_conditional_then_comma_initializer_declarator_list(v
 
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for conditional-then-comma initializer input\n");
+            "[parser-reg] FAIL: lexer failed for conditional-then-comma initializer input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parser should accept conditional-then-comma initializer input: %s\n",
-                err.message);
+            "[parser-reg] FAIL: AST parser should accept conditional-then-comma initializer input: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -195,8 +195,8 @@ static int test_ast_accepts_conditional_then_comma_initializer_declarator_list(v
 
     if (program.count != 2) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 2 declarator externals for conditional initializer input, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 2 declarator externals for conditional initializer input, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -209,7 +209,7 @@ static int test_ast_accepts_conditional_then_comma_initializer_declarator_list(v
         !program.externals[1].name || strcmp(program.externals[1].name, "b") != 0 ||
         program.externals[1].has_initializer != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: unexpected declarator metadata for conditional initializer input\n");
+            "[parser-reg] FAIL: unexpected declarator metadata for conditional initializer input\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -228,21 +228,21 @@ static int test_translation_unit_rejects_prefix_increment_non_lvalue(void) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for prefix-increment non-lvalue input\n");
+            "[parser-reg] FAIL: lexer failed for prefix-increment non-lvalue input\n");
         return 0;
     }
 
     if (parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser unexpectedly accepted ++1 in statement context\n");
+            "[parser-reg] FAIL: parser unexpectedly accepted ++1 in statement context\n");
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (strstr(err.message, "lvalue") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected lvalue diagnostic for ++1, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected lvalue diagnostic for ++1, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -259,21 +259,21 @@ static int test_translation_unit_rejects_postfix_increment_non_lvalue(void) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for postfix-increment non-lvalue input\n");
+            "[parser-reg] FAIL: lexer failed for postfix-increment non-lvalue input\n");
         return 0;
     }
 
     if (parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser unexpectedly accepted 1++ in statement context\n");
+            "[parser-reg] FAIL: parser unexpectedly accepted 1++ in statement context\n");
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (strstr(err.message, "lvalue") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected lvalue diagnostic for 1++, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected lvalue diagnostic for 1++, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -292,14 +292,14 @@ static int test_translation_unit_accepts_function_call_expressions(void) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for function-call translation-unit input\n");
+            "[parser-reg] FAIL: lexer failed for function-call translation-unit input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept function-call expressions: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept function-call expressions: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -326,14 +326,14 @@ static int test_translation_unit_accepts_parenthesized_callable_callee(void) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for parenthesized callable callee input\n");
+            "[parser-reg] FAIL: lexer failed for parenthesized callable callee input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept parenthesized callable callee: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept parenthesized callable callee: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -352,14 +352,14 @@ static int test_translation_unit_accepts_parenthesized_non_identifier_callee(voi
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for parenthesized non-identifier callee input\n");
+            "[parser-reg] FAIL: lexer failed for parenthesized non-identifier callee input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept parenthesized non-identifier callee: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept parenthesized non-identifier callee: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -387,14 +387,14 @@ static int test_translation_unit_accepts_parenthesized_call_result_chaining(void
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for parenthesized call-result chaining input\n");
+            "[parser-reg] FAIL: lexer failed for parenthesized call-result chaining input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept ((f)(1))(2) in TU path: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept ((f)(1))(2) in TU path: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -413,14 +413,14 @@ static int test_translation_unit_accepts_parenthesized_zero_arg_call_result_chai
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for parenthesized zero-arg call-result chaining input\n");
+            "[parser-reg] FAIL: lexer failed for parenthesized zero-arg call-result chaining input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept ((f)())() in TU path: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept ((f)())() in TU path: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -437,14 +437,14 @@ static int test_translation_unit_accepts_parenthesized_identifier_increment(void
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for parenthesized identifier increment input\n");
+            "[parser-reg] FAIL: lexer failed for parenthesized identifier increment input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept parenthesized identifier ++ forms: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept parenthesized identifier ++ forms: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -462,14 +462,14 @@ static int test_translation_unit_accepts_compound_assignments(void) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for compound-assignment translation-unit input\n");
+            "[parser-reg] FAIL: lexer failed for compound-assignment translation-unit input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept compound assignments: %s\n",
-                err.message);
+            "[parser-reg] FAIL: parser should accept compound assignments: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -511,44 +511,44 @@ static int test_translation_unit_rejects_compound_assignment_parenthesized_ident
 }
 
 static int expect_translation_unit_parse_failure(const char *source,
-                                                 const char *case_name,
-                                                 const char *required_msg_a,
-                                                 const char *required_msg_b) {
+    const char *case_name,
+    const char *required_msg_a,
+    const char *required_msg_b) {
     TokenArray tokens;
     ParserError err;
 
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for %s\n",
-                case_name);
+            "[parser-reg] FAIL: lexer failed for %s\n",
+            case_name);
         return 0;
     }
 
     if (parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
-                case_name);
+            "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
+            case_name);
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (required_msg_a && strstr(err.message, required_msg_a) == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                required_msg_a,
-                case_name,
-                err.message);
+            "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+            required_msg_a,
+            case_name,
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
 
     if (required_msg_b && strstr(err.message, required_msg_b) == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                required_msg_b,
-                case_name,
-                err.message);
+            "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+            required_msg_b,
+            case_name,
+            err.message);
         lexer_free_tokens(&tokens);
         return 0;
     }
@@ -576,45 +576,45 @@ static int run_translation_unit_callable_case(const ParserTuCallableCase *c) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(c->source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for %s\n",
-                c->case_name);
+            "[parser-reg] FAIL: lexer failed for %s\n",
+            c->case_name);
         return 0;
     }
 
     if (c->expect_success) {
         if (!parser_parse_translation_unit(&tokens, &err)) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: parser should accept %s: %s\n",
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: parser should accept %s: %s\n",
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             return 0;
         }
     } else {
         if (parser_parse_translation_unit(&tokens, &err)) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
-                    c->case_name);
+                "[parser-reg] FAIL: parser unexpectedly accepted %s\n",
+                c->case_name);
             lexer_free_tokens(&tokens);
             return 0;
         }
 
         if (c->required_msg_a && strstr(err.message, c->required_msg_a) == NULL) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                    c->required_msg_a,
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                c->required_msg_a,
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             return 0;
         }
 
         if (c->required_msg_b && strstr(err.message, c->required_msg_b) == NULL) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                    c->required_msg_b,
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                c->required_msg_b,
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             return 0;
         }
@@ -627,55 +627,55 @@ static int run_translation_unit_callable_case(const ParserTuCallableCase *c) {
 static int test_translation_unit_callable_entry_matrix(void) {
     static const ParserTuCallableCase cases[] = {
         {"TU-CALL-ACCEPT-001 direct identifier",
-         "int f(int a){return a;}\nint main(){return f(1);}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(int a){return a;}\nint main(){return f(1);}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-002 parenthesized identifier",
-         "int f(int a){return a;}\nint main(){return (f)(1);}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(int a){return a;}\nint main(){return (f)(1);}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-003 nested parenthesized identifier",
-         "int f(int a){return a;}\nint main(){return ((f))(1);}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(int a){return a;}\nint main(){return ((f))(1);}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-004 call-result chaining",
-         "int f(){return 1;}\nint main(){return f()(1);}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(){return 1;}\nint main(){return f()(1);}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-005 parenthesized call-result chaining",
-         "int f(){return 1;}\nint main(){return (f())();}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(){return 1;}\nint main(){return (f())();}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-006 parenthesized non-identifier plus",
-         "int f(){return 1;}\nint main(){return (f+1)();}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(){return 1;}\nint main(){return (f+1)();}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-007 nested parenthesized non-identifier plus",
-         "int f(){return 1;}\nint main(){return ((f+1))();}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(){return 1;}\nint main(){return ((f+1))();}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-ACCEPT-008 parenthesized non-identifier ternary",
-         "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
-         1,
-         NULL,
-         NULL},
+        "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
+        1,
+        NULL,
+        NULL},
         {"TU-CALL-REJECT-001 non-parenthesized non-identifier plus",
-         "int f(){return 1;}\nint main(){return f+1();}\n",
-         0,
-         "callable",
-         NULL},
+        "int f(){return 1;}\nint main(){return f+1();}\n",
+        0,
+        "callable",
+        NULL},
         {"TU-CALL-REJECT-002 number callee",
-         "int main(){return 1(2);}\n",
-         0,
-         "callable",
-         NULL},
+        "int main(){return 1(2);}\n",
+        0,
+        "callable",
+        NULL},
     };
     size_t i;
 
@@ -745,9 +745,9 @@ static int test_translation_unit_rejects_call_incomplete_argument_expression(voi
 }
 
 static int parse_expression_source_to_ast(const char *source,
-                                         TokenArray *tokens,
-                                         AstExpression **out_expression,
-                                         ParserError *err) {
+    TokenArray *tokens,
+    AstExpression **out_expression,
+    ParserError *err) {
     lexer_init_tokens(tokens);
     if (out_expression) {
         *out_expression = NULL;
@@ -760,10 +760,10 @@ static int parse_expression_source_to_ast(const char *source,
 
     if (!parser_parse_expression_ast_assignment(tokens, out_expression, err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expression AST parse failed at %d:%d: %s\n",
-                err->line,
-                err->column,
-                err->message);
+            "[parser-reg] FAIL: expression AST parse failed at %d:%d: %s\n",
+            err->line,
+            err->column,
+            err->message);
         lexer_free_tokens(tokens);
         return 0;
     }
@@ -774,9 +774,9 @@ static int parse_expression_source_to_ast(const char *source,
 }
 
 static int expect_expression_assignment_parse_failure(const char *source,
-                                                     const char *case_name,
-                                                     const char *required_msg_a,
-                                                     const char *required_msg_b) {
+    const char *case_name,
+    const char *required_msg_a,
+    const char *required_msg_b) {
     TokenArray tokens;
     AstExpression *expr = NULL;
     ParserError err;
@@ -784,15 +784,15 @@ static int expect_expression_assignment_parse_failure(const char *source,
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for %s\n",
-                case_name);
+            "[parser-reg] FAIL: lexer failed for %s\n",
+            case_name);
         return 0;
     }
 
     if (parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
-                source);
+            "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
+            source);
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -800,10 +800,10 @@ static int expect_expression_assignment_parse_failure(const char *source,
 
     if (required_msg_a && strstr(err.message, required_msg_a) == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                required_msg_a,
-                source,
-                err.message);
+            "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+            required_msg_a,
+            source,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -811,10 +811,10 @@ static int expect_expression_assignment_parse_failure(const char *source,
 
     if (required_msg_b && strstr(err.message, required_msg_b) == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                required_msg_b,
-                source,
-                err.message);
+            "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+            required_msg_b,
+            source,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -848,17 +848,17 @@ static int run_expression_callable_case(const ParserExprCallableCase *c) {
     lexer_init_tokens(&tokens);
     if (!lexer_tokenize(c->source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for %s\n",
-                c->case_name);
+            "[parser-reg] FAIL: lexer failed for %s\n",
+            c->case_name);
         return 0;
     }
 
     if (c->expect_success) {
         if (!parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expression parser should accept %s: %s\n",
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: expression parser should accept %s: %s\n",
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             ast_expression_free(expr);
             return 0;
@@ -866,8 +866,8 @@ static int run_expression_callable_case(const ParserExprCallableCase *c) {
     } else {
         if (parser_parse_expression_ast_assignment(&tokens, &expr, &err)) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
-                    c->case_name);
+                "[parser-reg] FAIL: expression parser unexpectedly accepted %s\n",
+                c->case_name);
             lexer_free_tokens(&tokens);
             ast_expression_free(expr);
             return 0;
@@ -875,10 +875,10 @@ static int run_expression_callable_case(const ParserExprCallableCase *c) {
 
         if (c->required_msg_a && strstr(err.message, c->required_msg_a) == NULL) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                    c->required_msg_a,
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                c->required_msg_a,
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             ast_expression_free(expr);
             return 0;
@@ -886,10 +886,10 @@ static int run_expression_callable_case(const ParserExprCallableCase *c) {
 
         if (c->required_msg_b && strstr(err.message, c->required_msg_b) == NULL) {
             fprintf(stderr,
-                    "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
-                    c->required_msg_b,
-                    c->case_name,
-                    err.message);
+                "[parser-reg] FAIL: expected diagnostic containing '%s' for %s, got: %s\n",
+                c->required_msg_b,
+                c->case_name,
+                err.message);
             lexer_free_tokens(&tokens);
             ast_expression_free(expr);
             return 0;

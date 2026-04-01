@@ -13,9 +13,9 @@
  */
 
 static int parse_source_to_ast(const char *source,
-                               TokenArray *tokens,
-                               AstProgram *program,
-                               ParserError *parse_err) {
+    TokenArray *tokens,
+    AstProgram *program,
+    ParserError *parse_err) {
     lexer_init_tokens(tokens);
     ast_program_init(program);
 
@@ -26,10 +26,10 @@ static int parse_source_to_ast(const char *source,
 
     if (!parser_parse_translation_unit_ast(tokens, program, parse_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: parser failed at %d:%d: %s\n",
-                parse_err->line,
-                parse_err->column,
-                parse_err->message);
+            "[semantic-reg] FAIL: parser failed at %d:%d: %s\n",
+            parse_err->line,
+            parse_err->column,
+            parse_err->message);
         lexer_free_tokens(tokens);
         ast_program_free(program);
         return 0;
@@ -74,8 +74,8 @@ static int run_callable_diag_case(const CallableDiagCase *c) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: %s should fail semantic analysis\n",
-                c->case_id);
+            "[semantic-reg] FAIL: %s should fail semantic analysis\n",
+            c->case_id);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -83,10 +83,10 @@ static int run_callable_diag_case(const CallableDiagCase *c) {
 
     if (strstr(sema_err.message, c->expected_code) == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: %s expected %s, got: %s\n",
-                c->case_id,
-                c->expected_code,
-                sema_err.message);
+            "[semantic-reg] FAIL: %s expected %s, got: %s\n",
+            c->case_id,
+            c->expected_code,
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -94,10 +94,10 @@ static int run_callable_diag_case(const CallableDiagCase *c) {
 
     if (c->expected_snippet && strstr(sema_err.message, c->expected_snippet) == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: %s expected diagnostic snippet '%s', got: %s\n",
-                c->case_id,
-                c->expected_snippet,
-                sema_err.message);
+            "[semantic-reg] FAIL: %s expected diagnostic snippet '%s', got: %s\n",
+            c->case_id,
+            c->expected_snippet,
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -106,12 +106,12 @@ static int run_callable_diag_case(const CallableDiagCase *c) {
     if (c->expected_line > 0 && c->expected_column > 0 &&
         (sema_err.line != c->expected_line || sema_err.column != c->expected_column)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: %s expected location %d:%d, got %d:%d\n",
-                c->case_id,
-                c->expected_line,
-                c->expected_column,
-                sema_err.line,
-                sema_err.column);
+            "[semantic-reg] FAIL: %s expected location %d:%d, got %d:%d\n",
+            c->case_id,
+            c->expected_line,
+            c->expected_column,
+            sema_err.line,
+            sema_err.column);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -138,9 +138,9 @@ static int run_callable_pass_case(const CallablePassCase *c) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: %s should pass semantic analysis, got: %s\n",
-                c->case_id,
-                sema_err.message);
+            "[semantic-reg] FAIL: %s should pass semantic analysis, got: %s\n",
+            c->case_id,
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;

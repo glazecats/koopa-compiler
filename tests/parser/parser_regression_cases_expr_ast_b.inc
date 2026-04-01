@@ -16,7 +16,7 @@ static int test_expression_ast_relational_lower_precedence_than_additive(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_STAR) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a+b)<(c*d) tree for a+b<c*d\n");
+            "[parser-reg] FAIL: expected (a+b)<(c*d) tree for a+b<c*d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -43,7 +43,7 @@ static int test_expression_ast_relational_left_associative(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a<b)<c left-associative tree for a<b<c\n");
+            "[parser-reg] FAIL: expected (a<b)<c left-associative tree for a<b<c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -69,7 +69,7 @@ static int test_expression_ast_relational_with_parenthesized_right_additive(void
         !expr->as.binary.right->as.inner || expr->as.binary.right->as.inner->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.inner->as.binary.op != TOKEN_PLUS) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected a<=(b+c) relational tree with paren additive right side\n");
+            "[parser-reg] FAIL: expected a<=(b+c) relational tree with paren additive right side\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -92,7 +92,7 @@ static int test_expression_ast_relational_gt_operator(void) {
 
     if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_GT) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected binary '>' root for a>b\n");
+            "[parser-reg] FAIL: expected binary '>' root for a>b\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -115,7 +115,7 @@ static int test_expression_ast_relational_ge_operator(void) {
 
     if (!expr || expr->kind != AST_EXPR_BINARY || expr->as.binary.op != TOKEN_GE) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected binary '>=' root for a>=b\n");
+            "[parser-reg] FAIL: expected binary '>=' root for a>=b\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -142,7 +142,7 @@ static int test_expression_ast_equality_lower_precedence_than_relational(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a<b)==c tree for a<b==c\n");
+            "[parser-reg] FAIL: expected (a<b)==c tree for a<b==c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -169,7 +169,7 @@ static int test_expression_ast_equality_left_associative(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a==b)!=c left-associative tree for a==b!=c\n");
+            "[parser-reg] FAIL: expected (a==b)!=c left-associative tree for a==b!=c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -196,7 +196,7 @@ static int test_expression_ast_logical_and_lower_precedence_than_equality(void) 
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_NE) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a==b)&&(c!=d) tree for a==b&&c!=d\n");
+            "[parser-reg] FAIL: expected (a==b)&&(c!=d) tree for a==b&&c!=d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -223,7 +223,7 @@ static int test_expression_ast_logical_or_lower_precedence_than_logical_and(void
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_AND_AND) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a&&b)||(c&&d) tree for a&&b||c&&d\n");
+            "[parser-reg] FAIL: expected (a&&b)||(c&&d) tree for a&&b||c&&d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -250,7 +250,7 @@ static int test_expression_ast_logical_or_left_associative(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a||b)||c left-associative tree for a||b||c\n");
+            "[parser-reg] FAIL: expected (a||b)||c left-associative tree for a||b||c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -277,7 +277,7 @@ static int test_expression_ast_bitwise_and_lower_precedence_than_equality(void) 
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_EQ) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a==b)&(c==d) tree for a==b&c==d\n");
+            "[parser-reg] FAIL: expected (a==b)&(c==d) tree for a==b&c==d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -304,7 +304,7 @@ static int test_expression_ast_shift_lower_precedence_than_additive(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_MINUS) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a+b)<<(c-d) tree for a+b<<c-d\n");
+            "[parser-reg] FAIL: expected (a+b)<<(c-d) tree for a+b<<c-d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -331,7 +331,7 @@ static int test_expression_ast_relational_lower_precedence_than_shift(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_SHIFT_LEFT) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a<<b)<(c<<d) tree for a<<b<c<<d\n");
+            "[parser-reg] FAIL: expected (a<<b)<(c<<d) tree for a<<b<c<<d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -358,7 +358,7 @@ static int test_expression_ast_shift_left_associative(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a<<b)<<c left-associative tree for a<<b<<c\n");
+            "[parser-reg] FAIL: expected (a<<b)<<c left-associative tree for a<<b<<c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -385,7 +385,7 @@ static int test_expression_ast_bitwise_xor_lower_precedence_than_bitwise_and(voi
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_AMP) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a&b)^(c&d) tree for a&b^c&d\n");
+            "[parser-reg] FAIL: expected (a&b)^(c&d) tree for a&b^c&d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -412,7 +412,7 @@ static int test_expression_ast_bitwise_or_lower_precedence_than_bitwise_xor(void
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_CARET) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a^b)|(c^d) tree for a^b|c^d\n");
+            "[parser-reg] FAIL: expected (a^b)|(c^d) tree for a^b|c^d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -439,7 +439,7 @@ static int test_expression_ast_logical_and_lower_precedence_than_bitwise_or(void
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_PIPE) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a|b)&&(c|d) tree for a|b&&c|d\n");
+            "[parser-reg] FAIL: expected (a|b)&&(c|d) tree for a|b&&c|d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -468,7 +468,7 @@ static int test_expression_ast_conditional_lower_precedence_than_logical_or(void
         !expr->as.ternary.else_expr || expr->as.ternary.else_expr->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.ternary.else_expr->as.identifier.name, "d") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a||b)?c:d tree for a||b?c:d\n");
+            "[parser-reg] FAIL: expected (a||b)?c:d tree for a||b?c:d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -505,7 +505,7 @@ static int test_expression_ast_conditional_right_associative(void) {
         expr->as.ternary.else_expr->as.ternary.else_expr->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.ternary.else_expr->as.ternary.else_expr->as.identifier.name, "e") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected right-associative tree a?b:(c?d:e) for a?b:c?d:e\n");
+            "[parser-reg] FAIL: expected right-associative tree a?b:(c?d:e) for a?b:c?d:e\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -532,7 +532,7 @@ static int test_expression_ast_assignment_parses_simple(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected assignment tree a=b for assignment expression\n");
+            "[parser-reg] FAIL: expected assignment tree a=b for assignment expression\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -565,7 +565,7 @@ static int test_expression_ast_assignment_is_right_associative(void) {
         expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected right-associative assignment tree a=(b=c)\n");
+            "[parser-reg] FAIL: expected right-associative assignment tree a=(b=c)\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -592,7 +592,7 @@ static int test_expression_ast_compound_assignment_parses_simple(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "b") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected compound assignment tree a+=b for expression\n");
+            "[parser-reg] FAIL: expected compound assignment tree a+=b for expression\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -625,7 +625,7 @@ static int test_expression_ast_compound_assignment_is_right_associative(void) {
         expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected right-associative compound assignment tree a+=(b*=c)\n");
+            "[parser-reg] FAIL: expected right-associative compound assignment tree a+=(b*=c)\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -650,7 +650,7 @@ static int test_expression_ast_compound_assignment_lower_precedence_than_logical
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_OR_OR) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected compound assignment tree a+=(b||c) for a+=b||c\n");
+            "[parser-reg] FAIL: expected compound assignment tree a+=(b||c) for a+=b||c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -683,7 +683,7 @@ static int test_expression_ast_assignment_lower_precedence_than_equality(void) {
         expr->as.binary.right->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected assignment tree a=(b==c) for a=b==c\n");
+            "[parser-reg] FAIL: expected assignment tree a=(b==c) for a=b==c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -696,9 +696,9 @@ static int test_expression_ast_assignment_lower_precedence_than_equality(void) {
 
 static int test_expression_ast_rejects_compound_assignment_rhs_incomplete(void) {
     return expect_expression_assignment_parse_failure("a+=\n",
-                                                     "incomplete compound-assignment RHS input",
-                                                     "primary expression",
-                                                     NULL);
+    "incomplete compound-assignment RHS input",
+    "primary expression",
+    NULL);
 }
 
 static int test_expression_ast_equality_with_parenthesized_assignment_rhs(void) {
@@ -725,7 +725,7 @@ static int test_expression_ast_equality_with_parenthesized_assignment_rhs(void) 
         expr->as.binary.right->as.inner->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.inner->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected equality tree with parenthesized assignment rhs for a==(b=c)\n");
+            "[parser-reg] FAIL: expected equality tree with parenthesized assignment rhs for a==(b=c)\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -738,9 +738,9 @@ static int test_expression_ast_equality_with_parenthesized_assignment_rhs(void) 
 
 static int test_expression_ast_rejects_assignment_after_equality_chain(void) {
     return expect_expression_assignment_parse_failure("a==b=c\n",
-                                                     "assignment-after-equality input",
-                                                     "EOF",
-                                                     "ASSIGN");
+    "assignment-after-equality input",
+    "EOF",
+    "ASSIGN");
 }
 
 static int test_expression_ast_assignment_lower_precedence_than_logical_or(void) {
@@ -759,7 +759,7 @@ static int test_expression_ast_assignment_lower_precedence_than_logical_or(void)
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_OR_OR) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected assignment tree a=(b||c) for a=b||c\n");
+            "[parser-reg] FAIL: expected assignment tree a=(b||c) for a=b||c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -794,7 +794,7 @@ static int test_expression_ast_assignment_lower_precedence_than_conditional(void
         expr->as.binary.right->as.ternary.else_expr->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.ternary.else_expr->as.identifier.name, "d") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected assignment tree a=(b?c:d) for a=b?c:d\n");
+            "[parser-reg] FAIL: expected assignment tree a=(b?c:d) for a=b?c:d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -829,7 +829,7 @@ static int test_expression_ast_conditional_then_branch_allows_comma_expression(v
         !expr->as.ternary.else_expr || expr->as.ternary.else_expr->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.ternary.else_expr->as.identifier.name, "d") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected a?(b,c):d tree for a?b,c:d\n");
+            "[parser-reg] FAIL: expected a?(b,c):d tree for a?b,c:d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -864,7 +864,7 @@ static int test_expression_ast_comma_still_lowest_around_conditional(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "d") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a?b:c),d tree for a?b:c,d\n");
+            "[parser-reg] FAIL: expected (a?b:c),d tree for a?b:c,d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -895,7 +895,7 @@ static int test_expression_ast_conditional_else_parenthesized_comma(void) {
         expr->as.ternary.else_expr->as.inner->kind != AST_EXPR_BINARY ||
         expr->as.ternary.else_expr->as.inner->as.binary.op != TOKEN_COMMA) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected a?b:(c,d) tree for a?b:(c,d)\n");
+            "[parser-reg] FAIL: expected a?b:(c,d) tree for a?b:(c,d)\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -922,7 +922,7 @@ static int test_expression_ast_comma_lower_precedence_than_assignment(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_BINARY ||
         expr->as.binary.right->as.binary.op != TOKEN_ASSIGN) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a=b),(c=d) tree for a=b,c=d\n");
+            "[parser-reg] FAIL: expected (a=b),(c=d) tree for a=b,c=d\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -949,7 +949,7 @@ static int test_expression_ast_comma_left_associative(void) {
         !expr->as.binary.right || expr->as.binary.right->kind != AST_EXPR_IDENTIFIER ||
         strcmp(expr->as.binary.right->as.identifier.name, "c") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected (a,b),c left-associative tree for a,b,c\n");
+            "[parser-reg] FAIL: expected (a,b),c left-associative tree for a,b,c\n");
         lexer_free_tokens(&tokens);
         ast_expression_free(expr);
         return 0;
@@ -962,92 +962,92 @@ static int test_expression_ast_comma_left_associative(void) {
 
 static int test_expression_ast_rejects_incomplete_logical_and_rhs(void) {
     return expect_expression_assignment_parse_failure("a&&\n",
-                                                     "incomplete logical-and rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete logical-and rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_logical_or_rhs(void) {
     return expect_expression_assignment_parse_failure("a||\n",
-                                                     "incomplete logical-or rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete logical-or rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_bitwise_and_rhs(void) {
     return expect_expression_assignment_parse_failure("a&\n",
-                                                     "incomplete bitwise-and rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete bitwise-and rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_bitwise_xor_rhs(void) {
     return expect_expression_assignment_parse_failure("a^\n",
-                                                     "incomplete bitwise-xor rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete bitwise-xor rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_bitwise_or_rhs(void) {
     return expect_expression_assignment_parse_failure("a|\n",
-                                                     "incomplete bitwise-or rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete bitwise-or rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_shift_left_rhs(void) {
     return expect_expression_assignment_parse_failure("a<<\n",
-                                                     "incomplete shift-left rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete shift-left rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_shift_right_rhs(void) {
     return expect_expression_assignment_parse_failure("a>>\n",
-                                                     "incomplete shift-right rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete shift-right rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_conditional_missing_colon(void) {
     return expect_expression_assignment_parse_failure("a?b\n",
-                                                     "conditional missing-colon input",
-                                                     "':'",
-                                                     NULL);
+        "conditional missing-colon input",
+        "':'",
+        NULL);
 }
 
 static int test_expression_ast_rejects_conditional_incomplete_else_rhs(void) {
     return expect_expression_assignment_parse_failure("a?b:\n",
-                                                     "conditional incomplete-else rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "conditional incomplete-else rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_incomplete_comma_rhs(void) {
     return expect_expression_assignment_parse_failure("a,\n",
-                                                     "incomplete comma rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "incomplete comma rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_conditional_then_comma_missing_middle_rhs(void) {
     return expect_expression_assignment_parse_failure("a?b,:d\n",
-                                                     "conditional then-comma missing middle rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "conditional then-comma missing middle rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_conditional_missing_then_rhs(void) {
     return expect_expression_assignment_parse_failure("a?:c\n",
-                                                     "conditional missing then rhs input",
-                                                     "primary expression",
-                                                     NULL);
+        "conditional missing then rhs input",
+        "primary expression",
+        NULL);
 }
 
 static int test_expression_ast_rejects_conditional_else_trailing_comma(void) {
     return expect_expression_assignment_parse_failure("a?b:c,\n",
-                                                     "conditional else trailing-comma input",
-                                                     "primary expression",
-                                                     NULL);
+        "conditional else trailing-comma input",
+        "primary expression",
+        NULL);
 }
 

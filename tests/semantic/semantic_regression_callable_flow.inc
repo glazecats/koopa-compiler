@@ -3,191 +3,191 @@
 static int test_semantic_callable_diagnostic_matrix(void) {
     static const CallableDiagCase cases[] = {
         {"CALL-001",
-         "int main(){return foo(1);}\n",
-         "SEMA-CALL-001",
-         "callee=foo",
-         1,
-         22},
+        "int main(){return foo(1);}\n",
+        "SEMA-CALL-001",
+        "callee=foo",
+        1,
+        22},
         {"CALL-002",
-         "int main(){return foo(1);}\nint foo(int a){return a;}\n",
-         "SEMA-CALL-002",
-         "callee=foo; decl_line=2; decl_col=5",
-         1,
-         22},
+        "int main(){return foo(1);}\nint foo(int a){return a;}\n",
+        "SEMA-CALL-002",
+        "callee=foo; decl_line=2; decl_col=5",
+        1,
+        22},
         {"CALL-003",
-         "int foo;\nint main(){return foo(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         2,
-         22},
+        "int foo;\nint main(){return foo(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        2,
+        22},
         {"CALL-003-SHADOW-LOCAL",
-         "int foo(int a){return a;}\nint main(){int foo=1; return foo(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(){int foo=1; return foo(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-LOCAL-NO-TOPLEVEL",
-         "int main(){int foo=1; return foo(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(){int foo=1; return foo(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-LOCAL-WITH-LATER-DECL",
-         "int main(){int foo=1; return foo(1);}\nint foo(int a){return a;}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(){int foo=1; return foo(1);}\nint foo(int a){return a;}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-PARAM",
-         "int foo(int a){return a;}\nint main(int foo){return foo(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(int foo){return foo(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-PARAM-NO-TOPLEVEL",
-         "int main(int foo){return foo(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(int foo){return foo(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-INNER-BLOCK",
-         "int foo(int a){return a;}\nint main(){{int foo=1; return foo(1);} return 0;}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(){{int foo=1; return foo(1);} return 0;}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-FOR-INIT",
-         "int foo(int a){return a;}\nint main(){for(int foo=0;foo<1;foo=foo+1){return foo(1);}return 0;}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(){for(int foo=0;foo<1;foo=foo+1){return foo(1);}return 0;}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-PAREN-CALLEE",
-         "int foo(int a){return a;}\nint main(){int foo=1; return (foo)(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(){int foo=1; return (foo)(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-SHADOW-CALL-RESULT-CHAIN",
-         "int main(){int foo=1; return foo()(1);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(){int foo=1; return foo()(1);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-ORDER-BEFORE-ARG-UNDECL",
-         "int main(){int foo=1; return foo(bar);}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(){int foo=1; return foo(bar);}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-DECL-INIT-SHADOW-ORDER",
-         "int foo(int a){return a;}\nint main(){int foo=1; int x=foo(bar); return x;}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int foo(int a){return a;}\nint main(){int foo=1; int x=foo(bar); return x;}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-003-FOR-COND-SHADOW-ORDER",
-         "int main(){for(int foo=1;foo(bar);foo=foo+1){return 0;} return 0;}\n",
-         "SEMA-CALL-003",
-         "callee=foo; symbol_kind=non_function",
-         0,
-         0},
+        "int main(){for(int foo=1;foo(bar);foo=foo+1){return 0;} return 0;}\n",
+        "SEMA-CALL-003",
+        "callee=foo; symbol_kind=non_function",
+        0,
+        0},
         {"CALL-004",
-         "int foo(int a);\nint main(){return foo(1,2);}\n",
-         "SEMA-CALL-004",
-         "callee=foo; expected=1; got=2",
-         2,
-         22},
+        "int foo(int a);\nint main(){return foo(1,2);}\n",
+        "SEMA-CALL-004",
+        "callee=foo; expected=1; got=2",
+        2,
+        22},
         {"CALL-004-DECL-INIT-ORDER",
-         "int foo(int a);\nint main(){int x=foo(1,bar); return 0;}\n",
-         "SEMA-CALL-004",
-         "callee=foo; expected=1; got=2",
-         0,
-         0},
+        "int foo(int a);\nint main(){int x=foo(1,bar); return 0;}\n",
+        "SEMA-CALL-004",
+        "callee=foo; expected=1; got=2",
+        0,
+        0},
         {"CALL-004-FOR-STEP-ORDER",
-         "int foo(int a);\nint main(){int i=0; for(;i<1;foo(1,bar)){i=i+1;} return 0;}\n",
-         "SEMA-CALL-004",
-         "callee=foo; expected=1; got=2",
-         0,
-         0},
+        "int foo(int a);\nint main(){int i=0; for(;i<1;foo(1,bar)){i=i+1;} return 0;}\n",
+        "SEMA-CALL-004",
+        "callee=foo; expected=1; got=2",
+        0,
+        0},
         {"CALL-005-A",
-         "int f(){return 1;}\nint main(){return f()(1);}\n",
-         "SEMA-CALL-005",
-         "callee_kind=call_result",
-         2,
-         22},
+        "int f(){return 1;}\nint main(){return f()(1);}\n",
+        "SEMA-CALL-005",
+        "callee_kind=call_result",
+        2,
+        22},
         {"CALL-005-B",
-         "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
-         "SEMA-CALL-005",
-         "callee_kind=call_result",
-         2,
-         27},
+        "int f(int a){return a;}\nint main(){return ((f)(1))(2);}\n",
+        "SEMA-CALL-005",
+        "callee_kind=call_result",
+        2,
+        27},
         {"CALL-005-ORDER-BEFORE-ARG-UNDECL",
-         "int f(){return 1;}\nint main(){return f()(bar);}\n",
-         "SEMA-CALL-005",
-         "callee_kind=call_result",
-         0,
-         0},
+        "int f(){return 1;}\nint main(){return f()(bar);}\n",
+        "SEMA-CALL-005",
+        "callee_kind=call_result",
+        0,
+        0},
         {"CALL-005-DECL-INIT-ORDER",
-         "int f(){return 1;}\nint main(){int x=f()(bar); return 0;}\n",
-         "SEMA-CALL-005",
-         "callee_kind=call_result",
-         0,
-         0},
+        "int f(){return 1;}\nint main(){int x=f()(bar); return 0;}\n",
+        "SEMA-CALL-005",
+        "callee_kind=call_result",
+        0,
+        0},
         {"CALL-005-FOR-COND-ORDER",
-         "int f(){return 1;}\nint main(){for(;f()(bar);){return 0;} return 0;}\n",
-         "SEMA-CALL-005",
-         "callee_kind=call_result",
-         0,
-         0},
+        "int f(){return 1;}\nint main(){for(;f()(bar);){return 0;} return 0;}\n",
+        "SEMA-CALL-005",
+        "callee_kind=call_result",
+        0,
+        0},
         {"CALL-006-A",
-         "int f(){return 1;}\nint main(){return (f+1)();}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         2,
-         24},
+        "int f(){return 1;}\nint main(){return (f+1)();}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        2,
+        24},
         {"CALL-006-B",
-         "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         2,
-         26},
+        "int f(){return 1;}\nint main(){return (f?f:f)();}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        2,
+        26},
         {"CALL-006-C",
-         "int f(){return 1;}\nint main(){return ((f+1))();}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         2,
-         26},
+        "int f(){return 1;}\nint main(){return ((f+1))();}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        2,
+        26},
         {"CALL-006-D",
-         "int f(){return 1;}\nint main(){return (f&&f)();}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         2,
-         25},
+        "int f(){return 1;}\nint main(){return (f&&f)();}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        2,
+        25},
         {"CALL-006-SHADOW-NONIDENTIFIER-STABLE",
-         "int main(){int foo=1; return (foo+1)();}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         0,
-         0},
+        "int main(){int foo=1; return (foo+1)();}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        0,
+        0},
         {"CALL-006-ORDER-BEFORE-ARG-UNDECL",
-         "int main(){return (1+1)(bar);}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         0,
-         0},
+        "int main(){return (1+1)(bar);}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        0,
+        0},
         {"CALL-006-DECL-INIT-ORDER",
-         "int main(){int x=(1+1)(bar); return 0;}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         0,
-         0},
+        "int main(){int x=(1+1)(bar); return 0;}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        0,
+        0},
         {"CALL-006-FOR-STEP-ORDER",
-         "int main(){int i=0; for(;i<1;(1+1)(bar)){i=i+1;} return 0;}\n",
-         "SEMA-CALL-006",
-         "callee_kind=non_identifier",
-         0,
-         0},
+        "int main(){int i=0; for(;i<1;(1+1)(bar)){i=i+1;} return 0;}\n",
+        "SEMA-CALL-006",
+        "callee_kind=non_identifier",
+        0,
+        0},
     };
     size_t i;
 
@@ -209,11 +209,11 @@ static int test_semantic_callable_accept_matrix(void) {
         {"CALL-PASS-005", "int foo();\nint main(){return foo();}\n"},
         {"CALL-PASS-006", "int foo(int a);\nint main(){return foo(1);}\nint foo(int a){return a;}\n"},
         {"CALL-PASS-007",
-         "int foo(int a){return a;}\nint main(){{int foo=1;}return foo(1);}\n"},
+        "int foo(int a){return a;}\nint main(){{int foo=1;}return foo(1);}\n"},
         {"CALL-PASS-008",
-         "int foo(int a){return a;}\nint main(){int x=foo(1); return x;}\n"},
+        "int foo(int a){return a;}\nint main(){int x=foo(1); return x;}\n"},
         {"CALL-PASS-009",
-         "int foo(int a){return a;}\nint main(){for(int i=foo(1);i<2;i=foo(i)){} return 0;}\n"},
+        "int foo(int a){return a;}\nint main(){for(int i=foo(1);i<2;i=foo(i)){} return 0;}\n"},
     };
     size_t i;
 
@@ -239,10 +239,10 @@ static int test_semantic_accepts_valid_program(void) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: valid program rejected at %d:%d: %s\n",
-                sema_err.line,
-                sema_err.column,
-                sema_err.message);
+            "[semantic-reg] FAIL: valid program rejected at %d:%d: %s\n",
+            sema_err.line,
+            sema_err.column,
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -273,8 +273,8 @@ static int test_semantic_rejects_duplicate_function(void) {
 
     if (strstr(sema_err.message, "Duplicate function") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected duplicate-function diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected duplicate-function diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -298,8 +298,8 @@ static int test_semantic_allows_function_declaration_then_definition(void) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: declaration+definition should be accepted, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: declaration+definition should be accepted, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -323,8 +323,8 @@ static int test_semantic_allows_duplicate_function_declarations(void) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: duplicate function declarations should be accepted, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: duplicate function declarations should be accepted, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -348,7 +348,7 @@ static int test_semantic_rejects_function_declaration_count_mismatch(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: mismatched declaration parameter counts should fail\n");
+            "[semantic-reg] FAIL: mismatched declaration parameter counts should fail\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -356,8 +356,8 @@ static int test_semantic_rejects_function_declaration_count_mismatch(void) {
 
     if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -381,7 +381,7 @@ static int test_semantic_rejects_declaration_definition_count_mismatch(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: declaration/definition count mismatch should fail\n");
+            "[semantic-reg] FAIL: declaration/definition count mismatch should fail\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -389,8 +389,8 @@ static int test_semantic_rejects_declaration_definition_count_mismatch(void) {
 
     if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -421,8 +421,8 @@ static int test_semantic_rejects_function_variable_conflict(void) {
 
     if (strstr(sema_err.message, "conflict") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected conflict diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected conflict diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -446,8 +446,8 @@ static int test_semantic_allows_repeated_declaration(void) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: repeated declarations should currently pass, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: repeated declarations should currently pass, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -471,7 +471,7 @@ static int test_semantic_rejects_duplicate_initialized_top_level_definition(void
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: duplicate initialized top-level definition should fail\n");
+            "[semantic-reg] FAIL: duplicate initialized top-level definition should fail\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -479,8 +479,8 @@ static int test_semantic_rejects_duplicate_initialized_top_level_definition(void
 
     if (strstr(sema_err.message, "SEMA-TOP-001") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-TOP-001 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-TOP-001 diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -504,8 +504,8 @@ static int test_semantic_allows_initialized_definition_with_redeclaration(void) 
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: initialized definition + redeclaration should pass, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: initialized definition + redeclaration should pass, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -524,15 +524,15 @@ static int test_semantic_allows_unnamed_external_contract(void) {
 
     if (!ast_program_add_external(&program, AST_EXTERNAL_DECLARATION, NULL)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: failed to build unnamed external via AST contract\n");
+            "[semantic-reg] FAIL: failed to build unnamed external via AST contract\n");
         ast_program_free(&program);
         return 0;
     }
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: unnamed external should be accepted, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: unnamed external should be accepted, got: %s\n",
+            sema_err.message);
         ast_program_free(&program);
         return 0;
     }
@@ -554,7 +554,7 @@ static int test_semantic_rejects_function_definition_without_full_return(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: function definition without full return should fail\n");
+            "[semantic-reg] FAIL: function definition without full return should fail\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -562,8 +562,8 @@ static int test_semantic_rejects_function_definition_without_full_return(void) {
 
     if (strstr(sema_err.message, "all control-flow paths") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -587,8 +587,8 @@ static int test_semantic_accepts_function_definition_with_full_return(void) {
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: full-return function definition should pass, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: full-return function definition should pass, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -618,7 +618,7 @@ static int test_semantic_prioritizes_scope_diagnostic_over_return_flow(void) {
 
         if (semantic_analyze_program(&program, &sema_err)) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: scope-before-flow ordering case should fail semantic analysis\n");
+                "[semantic-reg] FAIL: scope-before-flow ordering case should fail semantic analysis\n");
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -626,8 +626,8 @@ static int test_semantic_prioritizes_scope_diagnostic_over_return_flow(void) {
 
         if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: expected SEMA-SCOPE-002 before flow diagnostic, got: %s\n",
-                    sema_err.message);
+                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 before flow diagnostic, got: %s\n",
+                sema_err.message);
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -653,17 +653,17 @@ static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
 
     if (!source) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: out of memory while building depth-before-flow source\n");
+            "[semantic-reg] FAIL: out of memory while building depth-before-flow source\n");
         return 0;
     }
 
     offset += (size_t)snprintf(source + offset,
-                               max_source_size - offset,
-                               "int f(int a){if(a");
+        max_source_size - offset,
+        "int f(int a){if(a");
     for (i = 0; i < repeat_count; ++i) {
         if (offset + 2 >= max_source_size) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: depth-before-flow source buffer overflow\n");
+                "[semantic-reg] FAIL: depth-before-flow source buffer overflow\n");
             free(source);
             return 0;
         }
@@ -672,13 +672,13 @@ static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
     }
     if (offset + 14 >= max_source_size) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: depth-before-flow source terminator overflow\n");
+            "[semantic-reg] FAIL: depth-before-flow source terminator overflow\n");
         free(source);
         return 0;
     }
     offset += (size_t)snprintf(source + offset,
-                               max_source_size - offset,
-                               "){return 1;}}\n");
+        max_source_size - offset,
+        "){return 1;}}\n");
 
     if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
         free(source);
@@ -688,7 +688,7 @@ static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: depth-before-flow ordering case should fail semantic analysis\n");
+            "[semantic-reg] FAIL: depth-before-flow ordering case should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -696,8 +696,8 @@ static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
 
     if (strstr(sema_err.message, "SEMA-INT-012") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-INT-012 before flow diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-INT-012 before flow diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -721,7 +721,7 @@ static int test_semantic_rejects_unreachable_return_after_while_true(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: while(1) with unreachable return should fail all-path rule\n");
+            "[semantic-reg] FAIL: while(1) with unreachable return should fail all-path rule\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -729,8 +729,8 @@ static int test_semantic_rejects_unreachable_return_after_while_true(void) {
 
     if (strstr(sema_err.message, "all control-flow paths") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -754,7 +754,7 @@ static int test_semantic_rejects_unreachable_return_after_for_true(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: for(;;) with unreachable return should fail all-path rule\n");
+            "[semantic-reg] FAIL: for(;;) with unreachable return should fail all-path rule\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -762,8 +762,8 @@ static int test_semantic_rejects_unreachable_return_after_for_true(void) {
 
     if (strstr(sema_err.message, "all control-flow paths") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -787,8 +787,8 @@ static int test_semantic_accepts_reachable_return_after_break_in_while_true(void
 
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: break should make trailing return reachable, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: break should make trailing return reachable, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -812,7 +812,7 @@ static int test_semantic_rejects_call_to_undeclared_function(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: call to undeclared function should fail semantic analysis\n");
+            "[semantic-reg] FAIL: call to undeclared function should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -820,8 +820,8 @@ static int test_semantic_rejects_call_to_undeclared_function(void) {
 
     if (strstr(sema_err.message, "SEMA-CALL-001") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -845,7 +845,7 @@ static int test_semantic_rejects_call_to_non_function_symbol(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: call to non-function symbol should fail semantic analysis\n");
+            "[semantic-reg] FAIL: call to non-function symbol should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -853,8 +853,8 @@ static int test_semantic_rejects_call_to_non_function_symbol(void) {
 
     if (strstr(sema_err.message, "SEMA-CALL-003") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-003 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-CALL-003 diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -867,9 +867,9 @@ static int test_semantic_rejects_call_to_non_function_symbol(void) {
 
 static int test_semantic_reports_call_site_for_callable_diagnostic(void) {
     const char *source = "int main(){\n"
-                         "  int x=0;\n"
-                         "  return foo(1);\n"
-                         "}\n";
+    "  int x=0;\n"
+    "  return foo(1);\n"
+    "}\n";
     TokenArray tokens;
     AstProgram program;
     ParserError parse_err;
@@ -881,7 +881,7 @@ static int test_semantic_reports_call_site_for_callable_diagnostic(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: call-site diagnostic test should fail semantic analysis\n");
+            "[semantic-reg] FAIL: call-site diagnostic test should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -889,8 +889,8 @@ static int test_semantic_reports_call_site_for_callable_diagnostic(void) {
 
     if (strstr(sema_err.message, "SEMA-CALL-001") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-CALL-001 diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -898,9 +898,9 @@ static int test_semantic_reports_call_site_for_callable_diagnostic(void) {
 
     if (sema_err.line != 3 || sema_err.column != 13) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected call-site at 3:13, got %d:%d\n",
-                sema_err.line,
-                sema_err.column);
+            "[semantic-reg] FAIL: expected call-site at 3:13, got %d:%d\n",
+            sema_err.line,
+            sema_err.column);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -924,7 +924,7 @@ static int test_semantic_rejects_call_argument_count_mismatch(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: call argument-count mismatch should fail semantic analysis\n");
+            "[semantic-reg] FAIL: call argument-count mismatch should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -932,8 +932,8 @@ static int test_semantic_rejects_call_argument_count_mismatch(void) {
 
     if (strstr(sema_err.message, "SEMA-CALL-004") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-CALL-004 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-CALL-004 diagnostic, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -959,10 +959,10 @@ static int test_semantic_call_argument_mismatch_long_name_not_truncated(void) {
     long_name[sizeof(long_name) - 1] = '\0';
 
     snprintf(source,
-             sizeof(source),
-             "int %s(int a);\nint main(){return %s(1,2);}\n",
-             long_name,
-             long_name);
+        sizeof(source),
+        "int %s(int a);\nint main(){return %s(1,2);}\n",
+        long_name,
+        long_name);
 
     if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
         return 0;
@@ -970,7 +970,7 @@ static int test_semantic_call_argument_mismatch_long_name_not_truncated(void) {
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: long-name argument-count mismatch should fail semantic analysis\n");
+            "[semantic-reg] FAIL: long-name argument-count mismatch should fail semantic analysis\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -979,8 +979,8 @@ static int test_semantic_call_argument_mismatch_long_name_not_truncated(void) {
     if (strstr(sema_err.message, "SEMA-CALL-004") == NULL ||
         strstr(sema_err.message, "expected=1; got=2") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected non-truncated SEMA-CALL-004 payload, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected non-truncated SEMA-CALL-004 payload, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1005,7 +1005,7 @@ static int test_semantic_rejects_missing_function_body_during_ast_primary_phase(
     if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         !program.externals[0].is_function_definition || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: setup expected one function definition with function_body\n");
+            "[semantic-reg] FAIL: setup expected one function definition with function_body\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1016,7 +1016,7 @@ static int test_semantic_rejects_missing_function_body_during_ast_primary_phase(
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: missing function_body should fail during AST-primary semantic phase\n");
+            "[semantic-reg] FAIL: missing function_body should fail during AST-primary semantic phase\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1024,8 +1024,8 @@ static int test_semantic_rejects_missing_function_body_during_ast_primary_phase(
 
     if (strstr(sema_err.message, "SEMA-INT-005") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-INT-005 for missing function_body, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-INT-005 for missing function_body, got: %s\n",
+            sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1055,7 +1055,7 @@ static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void)
 
         if (semantic_analyze_program(&program, &sema_err)) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: chained call should be rejected as unsupported indirect call\n");
+                "[semantic-reg] FAIL: chained call should be rejected as unsupported indirect call\n");
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1063,8 +1063,8 @@ static int test_semantic_rejects_chained_call_as_unsupported_indirect_call(void)
 
         if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
-                    sema_err.message);
+                "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
+                sema_err.message);
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1099,7 +1099,7 @@ static int test_semantic_rejects_parenthesized_call_result_forms(void) {
 
         if (semantic_analyze_program(&program, &sema_err)) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: parenthesized call-result form should be rejected\n");
+                "[semantic-reg] FAIL: parenthesized call-result form should be rejected\n");
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1108,7 +1108,7 @@ static int test_semantic_rejects_parenthesized_call_result_forms(void) {
         if (strstr(sema_err.message, "SEMA-CALL-005") == NULL) {
             fprintf(stderr,
                 "[semantic-reg] FAIL: expected SEMA-CALL-005 diagnostic, got: %s\n",
-                    sema_err.message);
+                sema_err.message);
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1140,7 +1140,7 @@ static int test_semantic_rejects_parenthesized_non_identifier_callee_form(void) 
 
         if (semantic_analyze_program(&program, &sema_err)) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: parenthesized non-identifier callee form should fail semantic analysis\n");
+                "[semantic-reg] FAIL: parenthesized non-identifier callee form should fail semantic analysis\n");
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1148,8 +1148,8 @@ static int test_semantic_rejects_parenthesized_non_identifier_callee_form(void) 
 
         if (strstr(sema_err.message, "SEMA-CALL-006") == NULL) {
             fprintf(stderr,
-                    "[semantic-reg] FAIL: expected SEMA-CALL-006 diagnostic, got: %s\n",
-                    sema_err.message);
+                "[semantic-reg] FAIL: expected SEMA-CALL-006 diagnostic, got: %s\n",
+                sema_err.message);
             lexer_free_tokens(&tokens);
             ast_program_free(&program);
             return 0;
@@ -1178,7 +1178,7 @@ static int test_semantic_rejects_metadata_only_definition_during_ast_primary_pha
 
     if (!ast_program_add_external(&program, AST_EXTERNAL_FUNCTION, &main_tok)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: failed to build function external for metadata contract test\n");
+            "[semantic-reg] FAIL: failed to build function external for metadata contract test\n");
         ast_program_free(&program);
         return 0;
     }
@@ -1187,15 +1187,15 @@ static int test_semantic_rejects_metadata_only_definition_during_ast_primary_pha
 
     if (semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: metadata-only function definition should fail semantic analysis\n");
+            "[semantic-reg] FAIL: metadata-only function definition should fail semantic analysis\n");
         ast_program_free(&program);
         return 0;
     }
 
     if (strstr(sema_err.message, "SEMA-INT-005") == NULL) {
         fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-INT-005 diagnostic, got: %s\n",
-                sema_err.message);
+            "[semantic-reg] FAIL: expected SEMA-INT-005 diagnostic, got: %s\n",
+            sema_err.message);
         ast_program_free(&program);
         return 0;
     }

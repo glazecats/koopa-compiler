@@ -39,16 +39,16 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             }
 
             if (!semantic_check_top_level_initializer_callable_rules(program,
-                                                                     i,
-                                                                     lhs->declaration_initializer,
-                                                                     error)) {
+                i,
+                lhs->declaration_initializer,
+                error)) {
                 return 0;
             }
 
             if (!semantic_scope_check_top_level_initializer_expression(lhs->declaration_initializer,
-                                                                       program,
-                                                                       i,
-                                                                       error)) {
+                program,
+                i,
+                error)) {
                 return 0;
             }
         }
@@ -73,9 +73,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             if (!returns_all_paths) {
                 if (error) {
                     semantic_set_error(error,
-                                       lhs->line,
-                                       lhs->column,
-                                       "SEMA-CF-001: Function definition must return on all control-flow paths");
+                        lhs->line,
+                        lhs->column,
+                        "SEMA-CF-001: Function definition must return on all control-flow paths");
                 }
                 return 0;
             }
@@ -96,9 +96,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 if (lhs->parameter_count != rhs->parameter_count) {
                     if (error) {
                         semantic_set_error(error,
-                                           rhs->line,
-                                           rhs->column,
-                                           "Conflicting function declarations: parameter count mismatch");
+                            rhs->line,
+                            rhs->column,
+                            "Conflicting function declarations: parameter count mismatch");
                     }
                     return 0;
                 }
@@ -106,9 +106,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 if (lhs->is_function_definition && rhs->is_function_definition) {
                     if (error) {
                         semantic_set_error(error,
-                                           rhs->line,
-                                           rhs->column,
-                                           "Duplicate function definition");
+                            rhs->line,
+                            rhs->column,
+                            "Duplicate function definition");
                     }
                     return 0;
                 }
@@ -121,9 +121,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 if (lhs->has_initializer && rhs->has_initializer) {
                     if (error) {
                         semantic_set_error(error,
-                                           rhs->line,
-                                           rhs->column,
-                                           "SEMA-TOP-001: duplicate top-level variable definition");
+                            rhs->line,
+                            rhs->column,
+                            "SEMA-TOP-001: duplicate top-level variable definition");
                     }
                     return 0;
                 }
@@ -135,9 +135,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             if (lhs->kind != rhs->kind) {
                 if (error) {
                     semantic_set_error(error,
-                                       rhs->line,
-                                       rhs->column,
-                                       "Function/variable name conflict at top level");
+                        rhs->line,
+                        rhs->column,
+                        "Function/variable name conflict at top level");
                 }
                 return 0;
             }

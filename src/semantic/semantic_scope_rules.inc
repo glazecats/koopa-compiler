@@ -17,9 +17,9 @@ typedef struct {
 } ScopeStack;
 
 static int scope_next_growth_capacity(size_t current,
-                                      size_t initial,
-                                      size_t elem_size,
-                                      size_t *out_next_capacity) {
+    size_t initial,
+    size_t elem_size,
+    size_t *out_next_capacity) {
     size_t next_capacity;
 
     if (!out_next_capacity || initial == 0 || elem_size == 0) {
@@ -81,9 +81,9 @@ static int scope_stack_push(ScopeStack *stack) {
 
     if (stack->count == stack->capacity) {
         if (!scope_next_growth_capacity(stack->capacity,
-                                        8,
-                                        sizeof(ScopeFrame),
-                                        &next_capacity)) {
+            8,
+            sizeof(ScopeFrame),
+            &next_capacity)) {
             return 0;
         }
         new_frames = (ScopeFrame *)realloc(stack->frames, next_capacity * sizeof(ScopeFrame));
@@ -155,9 +155,9 @@ static int scope_stack_add_to_current(ScopeStack *stack, const char *name) {
     frame = &stack->frames[stack->count - 1];
     if (frame->count == frame->capacity) {
         if (!scope_next_growth_capacity(frame->capacity,
-                                        8,
-                                        sizeof(const char *),
-                                        &next_capacity)) {
+            8,
+            sizeof(const char *),
+            &next_capacity)) {
             return 0;
         }
         new_names = (const char **)realloc(frame->names, next_capacity * sizeof(const char *));
@@ -174,9 +174,9 @@ static int scope_stack_add_to_current(ScopeStack *stack, const char *name) {
 }
 
 static int semantic_top_level_name_visible(const AstProgram *program,
-                                           size_t func_index,
-                                           int include_current_external,
-                                           const char *name) {
+    size_t func_index,
+    int include_current_external,
+    const char *name) {
     size_t i;
     size_t visible_external_count;
 
@@ -205,29 +205,29 @@ static int semantic_top_level_name_visible(const AstProgram *program,
 }
 
 static int semantic_scope_name_resolved(const AstProgram *program,
-                                        size_t func_index,
-                                        int include_current_external,
-                                        const ScopeStack *scopes,
-                                        const char *name) {
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    const char *name) {
     if (scope_stack_contains_local_name(scopes, name)) {
         return 1;
     }
 
     return semantic_top_level_name_visible(program,
-                                           func_index,
-                                           include_current_external,
-                                           name);
+        func_index,
+        include_current_external,
+        name);
 }
 
 static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
-                                                const AstProgram *program,
-                                                size_t func_index,
-                                                ScopeStack *mutable_scopes,
-                                                char *const *names,
-                                                size_t name_count,
-                                                int line,
-                                                int column,
-                                                SemanticError *error) {
+    const AstProgram *program,
+    size_t func_index,
+    ScopeStack *mutable_scopes,
+    char *const *names,
+    size_t name_count,
+    int line,
+    int column,
+    SemanticError *error) {
     size_t i;
 
     (void)scopes;
@@ -243,9 +243,9 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
 
         if (mutable_scopes->count == 0) {
             semantic_set_error(error,
-                               line,
-                               column,
-                               "SEMA-INT-009: scope stack is empty while processing declaration names");
+                line,
+                column,
+                "SEMA-INT-009: scope stack is empty while processing declaration names");
             return 0;
         }
 
@@ -254,9 +254,9 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
             if (error) {
                 char msg[512];
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-SCOPE-001: identifier=%s; duplicate local declaration in the same scope",
-                         preview);
+                    sizeof(msg),
+                    "SEMA-SCOPE-001: identifier=%s; duplicate local declaration in the same scope",
+                    preview);
                 semantic_set_error(error, line, column, msg);
             }
             return 0;
@@ -264,9 +264,9 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
 
         if (!scope_stack_add_to_current(mutable_scopes, name)) {
             semantic_set_error(error,
-                               line,
-                               column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                line,
+                column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
     }
@@ -275,8 +275,8 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
 }
 
 static int semantic_scope_callee_shadowed_by_local_non_function(const AstExpression *callee,
-                                                                const ScopeStack *scopes,
-                                                                const char **out_name) {
+    const ScopeStack *scopes,
+    const char **out_name) {
     const AstExpression *base = unwrap_paren_expression(callee);
 
     if (out_name) {
@@ -300,11 +300,11 @@ static int semantic_scope_callee_shadowed_by_local_non_function(const AstExpress
 }
 
 static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
-                                                            char *const *names,
-                                                            size_t name_count,
-                                                            int line,
-                                                            int column,
-                                                            SemanticError *error) {
+    char *const *names,
+    size_t name_count,
+    int line,
+    int column,
+    SemanticError *error) {
     size_t i;
 
     if (!scopes) {
@@ -320,9 +320,9 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
 
         if (scopes->count == 0) {
             semantic_set_error(error,
-                               line,
-                               column,
-                               "SEMA-INT-009: scope stack is empty while processing declaration names");
+                line,
+                column,
+                "SEMA-INT-009: scope stack is empty while processing declaration names");
             return 0;
         }
 
@@ -332,9 +332,9 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
 
         if (!scope_stack_add_to_current(scopes, name)) {
             semantic_set_error(error,
-                               line,
-                               column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                line,
+                column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
     }
@@ -343,9 +343,9 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
 }
 
 static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpression *expr,
-                                                                  const ScopeStack *scopes,
-                                                                  SemanticError *error,
-                                                                  size_t depth) {
+    const ScopeStack *scopes,
+    SemanticError *error,
+    size_t depth) {
     size_t i;
 
     if (!expr) {
@@ -354,80 +354,80 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
 
     if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
         semantic_set_error(error,
-                           expr->line,
-                           expr->column,
-                           "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
         return 0;
     }
 
     switch (expr->kind) {
     case AST_EXPR_PAREN:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.inner,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1);
+            scopes,
+            error,
+            depth + 1);
     case AST_EXPR_UNARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.unary.operand,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1);
+            scopes,
+            error,
+            depth + 1);
     case AST_EXPR_POSTFIX:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.postfix.operand,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1);
+            scopes,
+            error,
+            depth + 1);
     case AST_EXPR_BINARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.left,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1) &&
-               semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.right,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1);
+            scopes,
+            error,
+            depth + 1) &&
+            semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.right,
+                scopes,
+                error,
+                depth + 1);
     case AST_EXPR_TERNARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.condition,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1) &&
-               semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.then_expr,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1) &&
-               semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.else_expr,
-                                                                      scopes,
-                                                                      error,
-                                                                      depth + 1);
+            scopes,
+            error,
+            depth + 1) &&
+            semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.then_expr,
+                scopes,
+                error,
+                depth + 1) &&
+            semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.else_expr,
+                scopes,
+                error,
+                depth + 1);
     case AST_EXPR_CALL: {
         const char *shadowed_callee_name = NULL;
         if (semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
-                                                                  scopes,
-                                                                  &shadowed_callee_name)) {
+            scopes,
+            &shadowed_callee_name)) {
             if (error) {
                 char preview[128];
                 char msg[512];
                 format_callee_preview(shadowed_callee_name, preview, sizeof(preview));
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
-                         preview);
+                    sizeof(msg),
+                    "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
+                    preview);
                 semantic_set_error(error, expr->line, expr->column, msg);
             }
             return 0;
         }
 
         if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.call.callee,
-                                                                    scopes,
-                                                                    error,
-                                                                    depth + 1)) {
+            scopes,
+            error,
+            depth + 1)) {
             return 0;
         }
 
         for (i = 0; i < expr->as.call.arg_count; ++i) {
             if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.call.args[i],
-                                                                        scopes,
-                                                                        error,
-                                                                        depth + 1)) {
+                scopes,
+                error,
+                depth + 1)) {
                 return 0;
             }
         }
@@ -442,14 +442,14 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
 }
 
 static int semantic_scope_check_call_shadow_expression(const AstExpression *expr,
-                                                       const ScopeStack *scopes,
-                                                       SemanticError *error) {
+    const ScopeStack *scopes,
+    SemanticError *error) {
     return semantic_scope_check_call_shadow_expression_with_depth(expr, scopes, error, 0);
 }
 
 static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
-                                                      ScopeStack *scopes,
-                                                      SemanticError *error) {
+    ScopeStack *scopes,
+    SemanticError *error) {
     size_t i;
 
     if (!stmt) {
@@ -459,9 +459,9 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
     if (stmt->kind == AST_STMT_COMPOUND) {
         if (!scope_stack_push(scopes)) {
             semantic_set_error(error,
-                               stmt->line,
-                               stmt->column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                stmt->line,
+                stmt->column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
 
@@ -481,9 +481,9 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
 
         if (!scope_stack_push(scopes)) {
             semantic_set_error(error,
-                               stmt->line,
-                               stmt->column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                stmt->line,
+                stmt->column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
 
@@ -494,7 +494,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
                 stmt->condition_expression_index < init_expr_limit) {
                 init_expr_limit = stmt->condition_expression_index;
             } else if (stmt->has_for_step_expression &&
-                       stmt->for_step_expression_index < init_expr_limit) {
+                stmt->for_step_expression_index < init_expr_limit) {
                 init_expr_limit = stmt->for_step_expression_index;
             }
 
@@ -509,11 +509,11 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
                 }
 
                 if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
-                                                                       &single_name,
-                                                                       1,
-                                                                       stmt->line,
-                                                                       stmt->column,
-                                                                       error)) {
+                    &single_name,
+                    1,
+                    stmt->line,
+                    stmt->column,
+                    error)) {
                     scope_stack_pop(scopes);
                     return 0;
                 }
@@ -553,11 +553,11 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
             }
 
             if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
-                                                                   &single_name,
-                                                                   1,
-                                                                   stmt->line,
-                                                                   stmt->column,
-                                                                   error)) {
+                &single_name,
+                1,
+                stmt->line,
+                stmt->column,
+                error)) {
                 return 0;
             }
         }
@@ -598,7 +598,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
 }
 
 static int semantic_check_function_callable_scope_shadow_rules(const AstExternal *func,
-                                                               SemanticError *error) {
+    SemanticError *error) {
     ScopeStack scopes;
     const AstStatement *body;
     size_t i;
@@ -609,9 +609,9 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
 
     if (!func->function_body) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+            func->line,
+            func->column,
+            "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
         return 0;
     }
 
@@ -621,18 +621,18 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
 
     if (!scope_stack_push(&scopes)) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-010: failed to extend semantic scope stack");
+            func->line,
+            func->column,
+            "SEMA-INT-010: failed to extend semantic scope stack");
         return 0;
     }
 
     if (!semantic_scope_add_declaration_names_shadow_pass(&scopes,
-                                                           func->parameter_names,
-                                                           func->parameter_count,
-                                                           func->line,
-                                                           func->column,
-                                                           error)) {
+        func->parameter_names,
+        func->parameter_count,
+        func->line,
+        func->column,
+        error)) {
         scope_stack_free(&scopes);
         return 0;
     }
@@ -655,13 +655,13 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
 }
 
 static int semantic_scope_check_expression_with_visibility_impl(const AstExpression *expr,
-                                                                const AstProgram *program,
-                                                                size_t func_index,
-                                                                int include_current_external,
-                                                                const ScopeStack *scopes,
-                                                                int in_call_callee,
-                                                                SemanticError *error,
-                                                                size_t depth) {
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    int in_call_callee,
+    SemanticError *error,
+    size_t depth) {
     size_t i;
 
     if (!expr) {
@@ -670,9 +670,9 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
 
     if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
         semantic_set_error(error,
-                           expr->line,
-                           expr->column,
-                           "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
         return 0;
     }
 
@@ -680,18 +680,18 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
     case AST_EXPR_IDENTIFIER:
         if (!in_call_callee && expr->as.identifier.name && expr->as.identifier.name[0] != '\0' &&
             !semantic_scope_name_resolved(program,
-                                          func_index,
-                                          include_current_external,
-                                          scopes,
-                                          expr->as.identifier.name)) {
+                func_index,
+                include_current_external,
+                scopes,
+                expr->as.identifier.name)) {
             if (error) {
                 char preview[128];
                 char msg[512];
                 format_callee_preview(expr->as.identifier.name, preview, sizeof(preview));
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-SCOPE-002: identifier=%s; use of undeclared identifier",
-                         preview);
+                    sizeof(msg),
+                    "SEMA-SCOPE-002: identifier=%s; use of undeclared identifier",
+                    preview);
                 semantic_set_error(error, expr->line, expr->column, msg);
             }
             return 0;
@@ -701,109 +701,109 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
         return 1;
     case AST_EXPR_PAREN:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.inner,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1);
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            in_call_callee,
+            error,
+            depth + 1);
     case AST_EXPR_UNARY:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.unary.operand,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1);
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            in_call_callee,
+            error,
+            depth + 1);
     case AST_EXPR_POSTFIX:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.postfix.operand,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1);
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1);
     case AST_EXPR_BINARY:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.binary.left,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1) &&
-               semantic_scope_check_expression_with_visibility_impl(expr->as.binary.right,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1);
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1) &&
+            semantic_scope_check_expression_with_visibility_impl(expr->as.binary.right,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1);
     case AST_EXPR_TERNARY:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.condition,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1) &&
-               semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.then_expr,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1) &&
-               semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.else_expr,
-                                                                    program,
-                                                                    func_index,
-                                                                    include_current_external,
-                                                                    scopes,
-                                                                    in_call_callee,
-                                                                    error,
-                                                                    depth + 1);
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1) &&
+            semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.then_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1) &&
+            semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.else_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                error,
+                depth + 1);
     case AST_EXPR_CALL: {
         const char *shadowed_callee_name = NULL;
         if (semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
-                                                                  scopes,
-                                                                  &shadowed_callee_name)) {
+            scopes,
+            &shadowed_callee_name)) {
             if (error) {
                 char preview[128];
                 char msg[512];
                 format_callee_preview(shadowed_callee_name, preview, sizeof(preview));
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
-                         preview);
+                    sizeof(msg),
+                    "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
+                    preview);
                 semantic_set_error(error, expr->line, expr->column, msg);
             }
             return 0;
         }
         if (!semantic_scope_check_expression_with_visibility_impl(expr->as.call.callee,
-                                                                  program,
-                                                                  func_index,
-                                                                  include_current_external,
-                                                                  scopes,
-                                                                  1,
-                                                                  error,
-                                                                  depth + 1)) {
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            1,
+            error,
+            depth + 1)) {
             return 0;
         }
         for (i = 0; i < expr->as.call.arg_count; ++i) {
             if (!semantic_scope_check_expression_with_visibility_impl(expr->as.call.args[i],
-                                                                      program,
-                                                                      func_index,
-                                                                      include_current_external,
-                                                                      scopes,
-                                                                      0,
-                                                                      error,
-                                                                      depth + 1)) {
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                0,
+                error,
+                depth + 1)) {
                 return 0;
             }
         }
@@ -815,55 +815,55 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
 }
 
 static int semantic_scope_check_expression_with_visibility(const AstExpression *expr,
-                                                           const AstProgram *program,
-                                                           size_t func_index,
-                                                           int include_current_external,
-                                                           const ScopeStack *scopes,
-                                                           int in_call_callee,
-                                                           SemanticError *error) {
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    int in_call_callee,
+    SemanticError *error) {
     return semantic_scope_check_expression_with_visibility_impl(expr,
-                                                                program,
-                                                                func_index,
-                                                                include_current_external,
-                                                                scopes,
-                                                                in_call_callee,
-                                                                error,
-                                                                0);
+        program,
+        func_index,
+        include_current_external,
+        scopes,
+        in_call_callee,
+        error,
+        0);
 }
 
 static int semantic_scope_check_expression(const AstExpression *expr,
-                                           const AstProgram *program,
-                                           size_t func_index,
-                                           const ScopeStack *scopes,
-                                           int in_call_callee,
-                                           SemanticError *error) {
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    int in_call_callee,
+    SemanticError *error) {
     return semantic_scope_check_expression_with_visibility(expr,
-                                                           program,
-                                                           func_index,
-                                                           1,
-                                                           scopes,
-                                                           in_call_callee,
-                                                           error);
+        program,
+        func_index,
+        1,
+        scopes,
+        in_call_callee,
+        error);
 }
 
 static int semantic_scope_check_top_level_initializer_expression(const AstExpression *expr,
-                                                                 const AstProgram *program,
-                                                                 size_t external_index,
-                                                                 SemanticError *error) {
+    const AstProgram *program,
+    size_t external_index,
+    SemanticError *error) {
     return semantic_scope_check_expression_with_visibility(expr,
-                                                           program,
-                                                           external_index,
-                                                           0,
-                                                           NULL,
-                                                           0,
-                                                           error);
+        program,
+        external_index,
+        0,
+        NULL,
+        0,
+        error);
 }
 
 static int semantic_scope_check_statement(const AstStatement *stmt,
-                                          const AstProgram *program,
-                                          size_t func_index,
-                                          ScopeStack *scopes,
-                                          SemanticError *error) {
+    const AstProgram *program,
+    size_t func_index,
+    ScopeStack *scopes,
+    SemanticError *error) {
     size_t i;
 
     if (!stmt) {
@@ -873,18 +873,18 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
     if (stmt->kind == AST_STMT_COMPOUND) {
         if (!scope_stack_push(scopes)) {
             semantic_set_error(error,
-                               stmt->line,
-                               stmt->column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                stmt->line,
+                stmt->column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
             if (!semantic_scope_check_statement(stmt->children[i],
-                                                program,
-                                                func_index,
-                                                scopes,
-                                                error)) {
+                program,
+                func_index,
+                scopes,
+                error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
@@ -899,9 +899,9 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 
         if (!scope_stack_push(scopes)) {
             semantic_set_error(error,
-                               stmt->line,
-                               stmt->column,
-                               "SEMA-INT-010: failed to extend semantic scope stack");
+                stmt->line,
+                stmt->column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
             return 0;
         }
 
@@ -912,7 +912,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 stmt->condition_expression_index < init_expr_limit) {
                 init_expr_limit = stmt->condition_expression_index;
             } else if (stmt->has_for_step_expression &&
-                       stmt->for_step_expression_index < init_expr_limit) {
+                stmt->for_step_expression_index < init_expr_limit) {
                 init_expr_limit = stmt->for_step_expression_index;
             }
 
@@ -922,24 +922,24 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
 
                 if (!semantic_scope_check_expression(init_expr,
-                                                     program,
-                                                     func_index,
-                                                     scopes,
-                                                     0,
-                                                     error)) {
+                    program,
+                    func_index,
+                    scopes,
+                    0,
+                    error)) {
                     scope_stack_pop(scopes);
                     return 0;
                 }
 
                 if (!semantic_scope_add_declaration_names(scopes,
-                                                          program,
-                                                          func_index,
-                                                          scopes,
-                                                          &single_name,
-                                                          1,
-                                                          stmt->line,
-                                                          stmt->column,
-                                                          error)) {
+                    program,
+                    func_index,
+                    scopes,
+                    &single_name,
+                    1,
+                    stmt->line,
+                    stmt->column,
+                    error)) {
                     scope_stack_pop(scopes);
                     return 0;
                 }
@@ -950,11 +950,11 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 
         for (i = expression_start_index; i < stmt->expression_count; ++i) {
             if (!semantic_scope_check_expression(stmt->expressions[i],
-                                                 program,
-                                                 func_index,
-                                                 scopes,
-                                                 0,
-                                                 error)) {
+                program,
+                func_index,
+                scopes,
+                0,
+                error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
@@ -962,10 +962,10 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 
         for (i = 0; i < stmt->child_count; ++i) {
             if (!semantic_scope_check_statement(stmt->children[i],
-                                                program,
-                                                func_index,
-                                                scopes,
-                                                error)) {
+                program,
+                func_index,
+                scopes,
+                error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
@@ -984,23 +984,23 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 (stmt->expressions && i < stmt->expression_count) ? stmt->expressions[i] : NULL;
 
             if (!semantic_scope_check_expression(init_expr,
-                                                 program,
-                                                 func_index,
-                                                 scopes,
-                                                 0,
-                                                 error)) {
+                program,
+                func_index,
+                scopes,
+                0,
+                error)) {
                 return 0;
             }
 
             if (!semantic_scope_add_declaration_names(scopes,
-                                                      program,
-                                                      func_index,
-                                                      scopes,
-                                                      &single_name,
-                                                      1,
-                                                      stmt->line,
-                                                      stmt->column,
-                                                      error)) {
+                program,
+                func_index,
+                scopes,
+                &single_name,
+                1,
+                stmt->line,
+                stmt->column,
+                error)) {
                 return 0;
             }
         }
@@ -1012,21 +1012,21 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 
         for (i = expression_start_index; i < stmt->expression_count; ++i) {
             if (!semantic_scope_check_expression(stmt->expressions[i],
-                                                 program,
-                                                 func_index,
-                                                 scopes,
-                                                 0,
-                                                 error)) {
+                program,
+                func_index,
+                scopes,
+                0,
+                error)) {
                 return 0;
             }
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
             if (!semantic_scope_check_statement(stmt->children[i],
-                                                program,
-                                                func_index,
-                                                scopes,
-                                                error)) {
+                program,
+                func_index,
+                scopes,
+                error)) {
                 return 0;
             }
         }
@@ -1036,21 +1036,21 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 
     for (i = 0; i < stmt->expression_count; ++i) {
         if (!semantic_scope_check_expression(stmt->expressions[i],
-                                             program,
-                                             func_index,
-                                             scopes,
-                                             0,
-                                             error)) {
+            program,
+            func_index,
+            scopes,
+            0,
+            error)) {
             return 0;
         }
     }
 
     for (i = 0; i < stmt->child_count; ++i) {
         if (!semantic_scope_check_statement(stmt->children[i],
-                                            program,
-                                            func_index,
-                                            scopes,
-                                            error)) {
+            program,
+            func_index,
+            scopes,
+            error)) {
             return 0;
         }
     }
@@ -1059,9 +1059,9 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
 }
 
 static int semantic_check_function_scope_rules(const AstProgram *program,
-                                               size_t func_index,
-                                               const AstExternal *func,
-                                               SemanticError *error) {
+    size_t func_index,
+    const AstExternal *func,
+    SemanticError *error) {
     ScopeStack scopes;
     const AstStatement *body;
     size_t i;
@@ -1076,9 +1076,9 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
 
     if (!scope_stack_push(&scopes)) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-010: failed to extend semantic scope stack");
+            func->line,
+            func->column,
+            "SEMA-INT-010: failed to extend semantic scope stack");
         return 0;
     }
 
@@ -1089,14 +1089,14 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
                 continue;
             }
             if (!semantic_scope_add_declaration_names(&scopes,
-                                                      program,
-                                                      func_index,
-                                                      &scopes,
-                                                      &single_name,
-                                                      1,
-                                                      func->line,
-                                                      func->column,
-                                                      error)) {
+                program,
+                func_index,
+                &scopes,
+                &single_name,
+                1,
+                func->line,
+                func->column,
+                error)) {
                 scope_stack_free(&scopes);
                 return 0;
             }
@@ -1107,19 +1107,19 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
     if (body && body->kind == AST_STMT_COMPOUND) {
         for (i = 0; i < body->child_count; ++i) {
             if (!semantic_scope_check_statement(body->children[i],
-                                                program,
-                                                func_index,
-                                                &scopes,
-                                                error)) {
+                program,
+                func_index,
+                &scopes,
+                error)) {
                 scope_stack_free(&scopes);
                 return 0;
             }
         }
     } else if (!semantic_scope_check_statement(body,
-                                               program,
-                                               func_index,
-                                               &scopes,
-                                               error)) {
+        program,
+        func_index,
+        &scopes,
+        error)) {
         scope_stack_free(&scopes);
         return 0;
     }

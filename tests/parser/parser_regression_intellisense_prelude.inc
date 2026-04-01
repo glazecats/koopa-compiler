@@ -19,11 +19,11 @@ typedef struct {
 
 static int run_expression_callable_case(const ParserExprCallableCase *c);
 static int parse_expression_source_to_ast(const char *source,
-                                         TokenArray *tokens,
-                                         AstExpression **out_expression,
-                                         ParserError *err);
+    TokenArray *tokens,
+    AstExpression **out_expression,
+    ParserError *err);
 static int expect_expression_assignment_parse_failure(const char *source,
-                                                     const char *case_name,
-                                                     const char *required_msg_a,
-                                                     const char *required_msg_b);
+    const char *case_name,
+    const char *required_msg_a,
+    const char *required_msg_b);
 #endif

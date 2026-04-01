@@ -22,8 +22,8 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error);
  * Returns 1 on success, 0 on syntax/contract/allocation error.
  */
 int parser_parse_translation_unit_ast(const TokenArray *tokens,
-                                      AstProgram *out_program,
-                                      ParserError *error);
+    AstProgram *out_program,
+    ParserError *error);
 
 /*
  * Parses a standalone expression token stream into an expression AST supporting
@@ -35,7 +35,7 @@ int parser_parse_translation_unit_ast(const TokenArray *tokens,
  * On success, out_expression receives ownership of the allocated AST root.
  */
 int parser_parse_expression_ast_assignment(const TokenArray *tokens,
-                                           AstExpression **out_expression,
-                                           ParserError *error);
+    AstExpression **out_expression,
+    ParserError *error);
 
 #endif

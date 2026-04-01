@@ -39,10 +39,10 @@ static int parse_expression_statement(Parser *p, AstStatement **out_statement) {
             return 0;
         }
         if (!build_expression_ast_from_slice(p,
-                                             expr_start,
-                                             expr_end,
-                                             &expr_ast,
-                                             anchor_tok)) {
+            expr_start,
+            expr_end,
+            &expr_ast,
+            anchor_tok)) {
             parser_ast_statement_free(stmt);
             return 0;
         }
@@ -61,8 +61,8 @@ static int parse_expression_statement(Parser *p, AstStatement **out_statement) {
 }
 
 static int expression_slice_is_constant_true(const TokenArray *tokens,
-                                             size_t start,
-                                             size_t end) {
+    size_t start,
+    size_t end) {
     const Token *tok;
 
     if (!tokens || !tokens->data || end <= start) {
@@ -84,8 +84,8 @@ static int expression_slice_is_constant_true(const TokenArray *tokens,
  */
 
 static void parser_local_control_set(ParserLocalControl *out_local_control,
-                                     int may_fallthrough,
-                                     int may_break) {
+    int may_fallthrough,
+    int may_break) {
     if (!out_local_control) {
         return;
     }
@@ -95,8 +95,8 @@ static void parser_local_control_set(ParserLocalControl *out_local_control,
 }
 
 static int parse_compound_statement_with_local_control(Parser *p,
-                                                       ParserLocalControl *out_local_control,
-                                                       AstStatement **out_statement) {
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
     int block_may_fallthrough = 1;
     int block_may_break = 0;
     AstStatement **children = NULL;
@@ -123,11 +123,11 @@ static int parse_compound_statement_with_local_control(Parser *p,
             size_t decl_init_expr_count = 0;
 
             if (!parse_declaration(p,
-                                   NULL,
-                                   out_statement ? &decl_names : NULL,
-                                   out_statement ? &decl_name_count : NULL,
-                                   out_statement ? &decl_init_exprs : NULL,
-                                   out_statement ? &decl_init_expr_count : NULL)) {
+                NULL,
+                out_statement ? &decl_names : NULL,
+                out_statement ? &decl_name_count : NULL,
+                out_statement ? &decl_init_exprs : NULL,
+                out_statement ? &decl_init_expr_count : NULL)) {
                 free_ast_statement_array(children, child_count);
                 return 0;
             }
@@ -144,11 +144,11 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt->expressions = decl_init_exprs;
                 decl_stmt->expression_count = decl_init_expr_count;
                 if (!append_ast_statement_child(p,
-                                                &children,
-                                                &child_count,
-                                                &child_capacity,
-                                                decl_stmt,
-                                                decl_tok)) {
+                    &children,
+                    &child_count,
+                    &child_capacity,
+                    decl_stmt,
+                    decl_tok)) {
                     free_ast_statement_array(children, child_count);
                     return 0;
                 }
@@ -160,19 +160,19 @@ static int parse_compound_statement_with_local_control(Parser *p,
             parser_local_control_set(&stmt_local_control, 1, 0);
 
             if (!parse_statement_with_local_control(p,
-                                                    &stmt_local_control,
-                                                    out_statement ? &child_stmt : NULL)) {
+                &stmt_local_control,
+                out_statement ? &child_stmt : NULL)) {
                 free_ast_statement_array(children, child_count);
                 return 0;
             }
 
             if (out_statement && child_stmt) {
                 if (!append_ast_statement_child(p,
-                                                &children,
-                                                &child_count,
-                                                &child_capacity,
-                                                child_stmt,
-                                                lbrace_tok)) {
+                    &children,
+                    &child_count,
+                    &child_capacity,
+                    child_stmt,
+                    lbrace_tok)) {
                     free_ast_statement_array(children, child_count);
                     return 0;
                 }
@@ -213,8 +213,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
 }
 
 static int parse_if_statement_with_local_control(Parser *p,
-                                                 ParserLocalControl *out_local_control,
-                                                 AstStatement **out_statement) {
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
     ParserLocalControl then_local_control;
     ParserLocalControl else_local_control;
     int has_else = 0;
@@ -245,10 +245,10 @@ static int parse_if_statement_with_local_control(Parser *p,
         }
         cond_end = p->current;
         if (!build_expression_ast_from_slice(p,
-                                             cond_start,
-                                             cond_end,
-                                             out_statement ? &cond_expr : NULL,
-                                             if_tok)) {
+            cond_start,
+            cond_end,
+            out_statement ? &cond_expr : NULL,
+            if_tok)) {
             return 0;
         }
     }
@@ -257,16 +257,16 @@ static int parse_if_statement_with_local_control(Parser *p,
         return 0;
     }
     if (!parse_statement_with_local_control(p,
-                                            &then_local_control,
-                                            out_statement ? &then_stmt : NULL)) {
+        &then_local_control,
+        out_statement ? &then_stmt : NULL)) {
         parser_ast_expression_free(cond_expr);
         return 0;
     }
     if (match(p, TOKEN_KW_ELSE)) {
         has_else = 1;
         if (!parse_statement_with_local_control(p,
-                                                &else_local_control,
-                                                out_statement ? &else_stmt : NULL)) {
+            &else_local_control,
+            out_statement ? &else_stmt : NULL)) {
             parser_ast_statement_free(then_stmt);
             parser_ast_expression_free(cond_expr);
             return 0;
@@ -278,11 +278,11 @@ static int parse_if_statement_with_local_control(Parser *p,
 
         if (then_stmt &&
             !append_ast_statement_child(p,
-                                        &children,
-                                        &child_count,
-                                        &child_capacity,
-                                        then_stmt,
-                                        if_tok)) {
+                &children,
+                &child_count,
+                &child_capacity,
+                then_stmt,
+                if_tok)) {
             free_ast_statement_array(children, child_count);
             parser_ast_statement_free(else_stmt);
             parser_ast_expression_free(cond_expr);
@@ -290,11 +290,11 @@ static int parse_if_statement_with_local_control(Parser *p,
         }
         if (else_stmt &&
             !append_ast_statement_child(p,
-                                        &children,
-                                        &child_count,
-                                        &child_capacity,
-                                        else_stmt,
-                                        if_tok)) {
+                &children,
+                &child_count,
+                &child_capacity,
+                else_stmt,
+                if_tok)) {
             free_ast_statement_array(children, child_count);
             parser_ast_expression_free(cond_expr);
             return 0;
@@ -324,16 +324,16 @@ static int parse_if_statement_with_local_control(Parser *p,
         parser_local_control_set(out_local_control, 1, then_local_control.may_break);
     } else {
         parser_local_control_set(out_local_control,
-                                 then_local_control.may_fallthrough ||
-                                     else_local_control.may_fallthrough,
-                                 then_local_control.may_break || else_local_control.may_break);
+            then_local_control.may_fallthrough ||
+                else_local_control.may_fallthrough,
+            then_local_control.may_break || else_local_control.may_break);
     }
     return 1;
 }
 
 static int parse_while_statement_with_local_control(Parser *p,
-                                                    ParserLocalControl *out_local_control,
-                                                    AstStatement **out_statement) {
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
     size_t cond_start;
     int cond_always_true;
     ParserLocalControl body_local_control;
@@ -355,10 +355,10 @@ static int parse_while_statement_with_local_control(Parser *p,
         return 0;
     }
     if (!build_expression_ast_from_slice(p,
-                                         cond_start,
-                                         p->current,
-                                         out_statement ? &cond_expr : NULL,
-                                         while_tok)) {
+        cond_start,
+        p->current,
+        out_statement ? &cond_expr : NULL,
+        while_tok)) {
         return 0;
     }
     cond_always_true = expression_slice_is_constant_true(p->tokens, cond_start, p->current);
@@ -369,8 +369,8 @@ static int parse_while_statement_with_local_control(Parser *p,
 
     p->loop_depth++;
     if (!parse_statement_with_local_control(p,
-                                            &body_local_control,
-                                            out_statement ? &body_stmt : NULL)) {
+        &body_local_control,
+        out_statement ? &body_stmt : NULL)) {
         p->loop_depth--;
         parser_ast_expression_free(cond_expr);
         return 0;
@@ -420,8 +420,8 @@ static int parse_while_statement_with_local_control(Parser *p,
 }
 
 static int parse_for_statement_with_local_control(Parser *p,
-                                                  ParserLocalControl *out_local_control,
-                                                  AstStatement **out_statement) {
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
     int cond_always_true = 0;
     size_t cond_start = 0;
     ParserLocalControl body_local_control;
@@ -448,11 +448,11 @@ static int parse_for_statement_with_local_control(Parser *p,
     if (match(p, TOKEN_KW_INT)) {
         p->current--;
         if (!parse_declaration(p,
-                               NULL,
-                               out_statement ? &for_init_decl_names : NULL,
-                               out_statement ? &for_init_decl_name_count : NULL,
-                               out_statement ? &for_init_decl_exprs : NULL,
-                               out_statement ? &for_init_decl_expr_count : NULL)) {
+            NULL,
+            out_statement ? &for_init_decl_names : NULL,
+            out_statement ? &for_init_decl_name_count : NULL,
+            out_statement ? &for_init_decl_exprs : NULL,
+            out_statement ? &for_init_decl_expr_count : NULL)) {
             return 0;
         }
     } else {
@@ -466,10 +466,10 @@ static int parse_for_statement_with_local_control(Parser *p,
             }
             init_end = p->current;
             if (!build_expression_ast_from_slice(p,
-                                                 init_start,
-                                                 init_end,
-                                                 out_statement ? &init_expr : NULL,
-                                                 for_tok)) {
+                init_start,
+                init_end,
+                out_statement ? &init_expr : NULL,
+                for_tok)) {
                 free_name_array(for_init_decl_names, for_init_decl_name_count);
                 return 0;
             }
@@ -491,10 +491,10 @@ static int parse_for_statement_with_local_control(Parser *p,
             return 0;
         }
         if (!build_expression_ast_from_slice(p,
-                                             cond_start,
-                                             p->current,
-                                             out_statement ? &cond_expr : NULL,
-                                             for_tok)) {
+            cond_start,
+            p->current,
+            out_statement ? &cond_expr : NULL,
+            for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -525,10 +525,10 @@ static int parse_for_statement_with_local_control(Parser *p,
         }
         step_end = p->current;
         if (!build_expression_ast_from_slice(p,
-                                             step_start,
-                                             step_end,
-                                             out_statement ? &step_expr : NULL,
-                                             for_tok)) {
+            step_start,
+            step_end,
+            out_statement ? &step_expr : NULL,
+            for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -547,8 +547,8 @@ static int parse_for_statement_with_local_control(Parser *p,
 
     p->loop_depth++;
     if (!parse_statement_with_local_control(p,
-                                            &body_local_control,
-                                            out_statement ? &body_stmt : NULL)) {
+        &body_local_control,
+        out_statement ? &body_stmt : NULL)) {
         p->loop_depth--;
         free_name_array(for_init_decl_names, for_init_decl_name_count);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
@@ -672,10 +672,10 @@ static int parse_return_statement(Parser *p, AstStatement **out_statement) {
             return 0;
         }
         if (!build_expression_ast_from_slice(p,
-                                             expr_start,
-                                             expr_end,
-                                             &expr_ast,
-                                             return_tok)) {
+            expr_start,
+            expr_end,
+            &expr_ast,
+            return_tok)) {
             parser_ast_statement_free(stmt);
             return 0;
         }
@@ -765,8 +765,8 @@ static int parse_continue_statement(Parser *p, AstStatement **out_statement) {
 }
 
 static int parse_statement_with_local_control(Parser *p,
-                                              ParserLocalControl *out_local_control,
-                                              AstStatement **out_statement) {
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
     int ok;
     ParserLocalControl local_control;
 
@@ -785,13 +785,13 @@ static int parse_statement_with_local_control(Parser *p,
 
         p->current--;
         ok = parse_compound_statement_with_local_control(p,
-                                                         &local_control,
-                                                         out_statement ? &stmt : NULL);
+            &local_control,
+            out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok) {
             parser_local_control_set(out_local_control,
-                                     local_control.may_fallthrough,
-                                     local_control.may_break);
+                local_control.may_fallthrough,
+                local_control.may_break);
         }
         if (ok && out_statement) {
             *out_statement = stmt;
@@ -802,13 +802,13 @@ static int parse_statement_with_local_control(Parser *p,
         AstStatement *stmt = NULL;
 
         ok = parse_if_statement_with_local_control(p,
-                                                   &local_control,
-                                                   out_statement ? &stmt : NULL);
+            &local_control,
+            out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok) {
             parser_local_control_set(out_local_control,
-                                     local_control.may_fallthrough,
-                                     local_control.may_break);
+                local_control.may_fallthrough,
+                local_control.may_break);
         }
         if (ok && out_statement) {
             *out_statement = stmt;
@@ -819,13 +819,13 @@ static int parse_statement_with_local_control(Parser *p,
         AstStatement *stmt = NULL;
 
         ok = parse_while_statement_with_local_control(p,
-                                                      &local_control,
-                                                      out_statement ? &stmt : NULL);
+            &local_control,
+            out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok) {
             parser_local_control_set(out_local_control,
-                                     local_control.may_fallthrough,
-                                     local_control.may_break);
+                local_control.may_fallthrough,
+                local_control.may_break);
         }
         if (ok && out_statement) {
             *out_statement = stmt;
@@ -836,13 +836,13 @@ static int parse_statement_with_local_control(Parser *p,
         AstStatement *stmt = NULL;
 
         ok = parse_for_statement_with_local_control(p,
-                                                    &local_control,
-                                                    out_statement ? &stmt : NULL);
+            &local_control,
+            out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
         if (ok) {
             parser_local_control_set(out_local_control,
-                                     local_control.may_fallthrough,
-                                     local_control.may_break);
+                local_control.may_fallthrough,
+                local_control.may_break);
         }
         if (ok && out_statement) {
             *out_statement = stmt;
@@ -898,10 +898,10 @@ static int parse_statement_with_local_control(Parser *p,
 }
 
 static int parse_init_declarator(Parser *p,
-                                 const Token **out_ident,
-                                 int *out_has_initializer,
-                                 size_t *out_initializer_start,
-                                 size_t *out_initializer_end) {
+    const Token **out_ident,
+    int *out_has_initializer,
+    size_t *out_initializer_start,
+    size_t *out_initializer_end) {
     if (out_has_initializer) {
         *out_has_initializer = 0;
     }
@@ -935,11 +935,11 @@ static int parse_init_declarator(Parser *p,
 }
 
 static int parse_declaration(Parser *p,
-                             AstProgram *top_level_program,
-                             char ***out_decl_names,
-                             size_t *out_decl_name_count,
-                             AstExpression ***out_decl_initializer_exprs,
-                             size_t *out_decl_initializer_expr_count) {
+    AstProgram *top_level_program,
+    char ***out_decl_names,
+    size_t *out_decl_name_count,
+    AstExpression ***out_decl_initializer_exprs,
+    size_t *out_decl_initializer_expr_count) {
     const Token *ident = NULL;
     int has_initializer = 0;
     size_t initializer_start = 0;
@@ -969,20 +969,20 @@ static int parse_declaration(Parser *p,
         return 0;
     }
     if (!parse_init_declarator(p,
-                               &ident,
-                               &has_initializer,
-                               &initializer_start,
-                               &initializer_end)) {
+        &ident,
+        &has_initializer,
+        &initializer_start,
+        &initializer_end)) {
         free_name_array(decl_names, decl_name_count);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
     }
     if (top_level_program && has_initializer &&
         !build_expression_ast_from_slice(p,
-                                         initializer_start,
-                                         initializer_end,
-                                         &external_initializer_expr,
-                                         ident)) {
+            initializer_start,
+            initializer_end,
+            &external_initializer_expr,
+            ident)) {
         free_name_array(decl_names, decl_name_count);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
@@ -991,20 +991,20 @@ static int parse_declaration(Parser *p,
         AstExpression *initializer_expr = NULL;
         if (has_initializer &&
             !build_expression_ast_from_slice(p,
-                                             initializer_start,
-                                             initializer_end,
-                                             &initializer_expr,
-                                             ident)) {
+                initializer_start,
+                initializer_end,
+                &initializer_expr,
+                ident)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
         if (!append_ast_expression_slot(p,
-                                        &decl_initializer_exprs,
-                                        &decl_initializer_expr_count,
-                                        &decl_initializer_expr_capacity,
-                                        initializer_expr,
-                                        ident)) {
+            &decl_initializer_exprs,
+            &decl_initializer_expr_count,
+            &decl_initializer_expr_capacity,
+            initializer_expr,
+            ident)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
@@ -1013,11 +1013,11 @@ static int parse_declaration(Parser *p,
     if (out_decl_names) {
         char *name_copy = copy_token_identifier_lexeme(ident);
         if (!name_copy || !append_name_array_item(p,
-                                                  &decl_names,
-                                                  &decl_name_count,
-                                                  &decl_name_capacity,
-                                                  name_copy,
-                                                  ident)) {
+            &decl_names,
+            &decl_name_count,
+            &decl_name_capacity,
+            name_copy,
+            ident)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
@@ -1039,20 +1039,20 @@ static int parse_declaration(Parser *p,
 
     while (match(p, TOKEN_COMMA)) {
         if (!parse_init_declarator(p,
-                                   &ident,
-                                   &has_initializer,
-                                   &initializer_start,
-                                   &initializer_end)) {
+            &ident,
+            &has_initializer,
+            &initializer_start,
+            &initializer_end)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
         if (top_level_program && has_initializer &&
             !build_expression_ast_from_slice(p,
-                                             initializer_start,
-                                             initializer_end,
-                                             &external_initializer_expr,
-                                             ident)) {
+                initializer_start,
+                initializer_end,
+                &external_initializer_expr,
+                ident)) {
             free_name_array(decl_names, decl_name_count);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
@@ -1061,20 +1061,20 @@ static int parse_declaration(Parser *p,
             AstExpression *initializer_expr = NULL;
             if (has_initializer &&
                 !build_expression_ast_from_slice(p,
-                                                 initializer_start,
-                                                 initializer_end,
-                                                 &initializer_expr,
-                                                 ident)) {
+                    initializer_start,
+                    initializer_end,
+                    &initializer_expr,
+                    ident)) {
                 free_name_array(decl_names, decl_name_count);
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
             }
             if (!append_ast_expression_slot(p,
-                                            &decl_initializer_exprs,
-                                            &decl_initializer_expr_count,
-                                            &decl_initializer_expr_capacity,
-                                            initializer_expr,
-                                            ident)) {
+                &decl_initializer_exprs,
+                &decl_initializer_expr_count,
+                &decl_initializer_expr_capacity,
+                initializer_expr,
+                ident)) {
                 free_name_array(decl_names, decl_name_count);
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
@@ -1083,11 +1083,11 @@ static int parse_declaration(Parser *p,
         if (out_decl_names) {
             char *name_copy = copy_token_identifier_lexeme(ident);
             if (!name_copy || !append_name_array_item(p,
-                                                      &decl_names,
-                                                      &decl_name_count,
-                                                      &decl_name_capacity,
-                                                      name_copy,
-                                                      ident)) {
+                &decl_names,
+                &decl_name_count,
+                &decl_name_capacity,
+                name_copy,
+                ident)) {
                 free_name_array(decl_names, decl_name_count);
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
@@ -1137,9 +1137,9 @@ static int parse_declaration(Parser *p,
 }
 
 static int parse_parameter_list(Parser *p,
-                                size_t *out_param_count,
-                                int *out_has_unnamed_parameter,
-                                char ***out_parameter_names) {
+    size_t *out_param_count,
+    int *out_has_unnamed_parameter,
+    char ***out_parameter_names) {
     size_t count = 0;
     size_t name_capacity = 0;
     char **parameter_names = NULL;
@@ -1183,18 +1183,18 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_copy = copy_token_identifier_lexeme(parameter_name_tok);
                 if (!parameter_name_copy) {
                     set_error(p,
-                              parameter_name_tok,
-                              "Out of memory while building function parameter metadata");
+                        parameter_name_tok,
+                        "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
                     return 0;
                 }
             }
             if (!append_name_array_item(p,
-                                        &parameter_names,
-                                        &count,
-                                        &name_capacity,
-                                        parameter_name_copy,
-                                        parameter_name_tok)) {
+                &parameter_names,
+                &count,
+                &name_capacity,
+                parameter_name_copy,
+                parameter_name_tok)) {
                 free_name_array(parameter_names, count);
                 return 0;
             }
@@ -1242,8 +1242,8 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
 }
 
 static void parser_commit_parameter_names(char ***out_parameter_names,
-                                          char **parameter_names,
-                                          size_t parameter_count) {
+    char **parameter_names,
+    size_t parameter_count) {
     if (out_parameter_names) {
         *out_parameter_names = parameter_names;
     } else {
@@ -1252,8 +1252,8 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
 }
 
 static int parse_function_external_signature(Parser *p,
-                                             int capture_parameter_names,
-                                             ParsedFunctionSignature *out_signature) {
+    int capture_parameter_names,
+    ParsedFunctionSignature *out_signature) {
     parsed_function_signature_init(out_signature);
 
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
@@ -1266,9 +1266,9 @@ static int parse_function_external_signature(Parser *p,
         return 0;
     }
     if (!parse_parameter_list(p,
-                              &out_signature->parameter_count,
-                              &out_signature->has_unnamed_parameter,
-                              capture_parameter_names ? &out_signature->parameter_names : NULL)) {
+        &out_signature->parameter_count,
+        &out_signature->has_unnamed_parameter,
+        capture_parameter_names ? &out_signature->parameter_names : NULL)) {
         return 0;
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
@@ -1280,23 +1280,23 @@ static int parse_function_external_signature(Parser *p,
 }
 
 static int parse_function_external_definition_body(Parser *p,
-                                                   const ParsedFunctionSignature *signature,
-                                                   AstStatement **out_function_body,
-                                                   size_t *out_return_statement_count) {
+    const ParsedFunctionSignature *signature,
+    AstStatement **out_function_body,
+    size_t *out_return_statement_count) {
     int needs_function_body_ast;
     AstStatement *function_body = NULL;
 
     if (signature->has_unnamed_parameter) {
         set_error(p,
-                  peek(p),
-                  "Function definition parameters must have names");
+            peek(p),
+            "Function definition parameters must have names");
         return 0;
     }
 
     needs_function_body_ast = (out_function_body != NULL) || (out_return_statement_count != NULL);
     if (!parse_compound_statement_with_local_control(p,
-                                                     NULL,
-                                                     needs_function_body_ast ? &function_body : NULL)) {
+            NULL,
+            needs_function_body_ast ? &function_body : NULL)) {
         parser_ast_statement_free(function_body);
         return 0;
     }
@@ -1315,12 +1315,12 @@ static int parse_function_external_definition_body(Parser *p,
 }
 
 static int parse_function_external(Parser *p,
-                                   const Token **out_name_token,
-                                   size_t *out_parameter_count,
-                                   char ***out_parameter_names,
-                                   int *out_is_definition,
-                                   AstStatement **out_function_body,
-                                   size_t *out_return_statement_count) {
+    const Token **out_name_token,
+    size_t *out_parameter_count,
+    char ***out_parameter_names,
+    int *out_is_definition,
+    AstStatement **out_function_body,
+    size_t *out_return_statement_count) {
     ParsedFunctionSignature signature;
     int body_ok;
 
@@ -1344,8 +1344,8 @@ static int parse_function_external(Parser *p,
     }
 
     if (!parse_function_external_signature(p,
-                                           out_parameter_names != NULL,
-                                           &signature)) {
+        out_parameter_names != NULL,
+        &signature)) {
         return 0;
     }
 
@@ -1358,8 +1358,8 @@ static int parse_function_external(Parser *p,
 
     if (match(p, TOKEN_SEMICOLON)) {
         parser_commit_parameter_names(out_parameter_names,
-                                      signature.parameter_names,
-                                      signature.parameter_count);
+            signature.parameter_names,
+            signature.parameter_count);
         signature.parameter_names = NULL;
         if (out_is_definition) {
             *out_is_definition = 0;
@@ -1372,13 +1372,13 @@ static int parse_function_external(Parser *p,
             *out_is_definition = 1;
         }
         body_ok = parse_function_external_definition_body(p,
-                                                          &signature,
-                                                          out_function_body,
-                                                          out_return_statement_count);
+            &signature,
+            out_function_body,
+            out_return_statement_count);
         if (body_ok) {
             parser_commit_parameter_names(out_parameter_names,
-                                          signature.parameter_names,
-                                          signature.parameter_count);
+                signature.parameter_names,
+                signature.parameter_count);
             signature.parameter_names = NULL;
         } else {
             parsed_function_signature_release(&signature);
@@ -1388,9 +1388,9 @@ static int parse_function_external(Parser *p,
     }
 
     set_error(p,
-              peek(p),
-              "Expected function body '{' or declaration terminator ';', got %s",
-              lexer_token_type_name(peek(p)->type));
+        peek(p),
+        "Expected function body '{' or declaration terminator ';', got %s",
+        lexer_token_type_name(peek(p)->type));
     parsed_function_signature_release(&signature);
     return 0;
 }
@@ -1445,12 +1445,12 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     size_t external_return_statement_count = 0;
 
     if (!parse_function_external(p,
-                                 out_program ? &external_name : NULL,
-                                 out_program ? &external_parameter_count : NULL,
-                                 out_program ? &external_parameter_names : NULL,
-                                 out_program ? &external_is_definition : NULL,
-                                 out_program ? &external_function_body : NULL,
-                                 out_program ? &external_return_statement_count : NULL)) {
+        out_program ? &external_name : NULL,
+        out_program ? &external_parameter_count : NULL,
+        out_program ? &external_parameter_names : NULL,
+        out_program ? &external_is_definition : NULL,
+        out_program ? &external_function_body : NULL,
+        out_program ? &external_return_statement_count : NULL)) {
         p->current = start;
         return parse_declaration(p, out_program, NULL, NULL, NULL, NULL);
     }
@@ -1476,8 +1476,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 }
 
 int parser_parse_translation_unit_ast(const TokenArray *tokens,
-                                      AstProgram *out_program,
-                                      ParserError *error) {
+    AstProgram *out_program,
+    ParserError *error) {
     Parser p;
 
     if (!out_program) {
@@ -1535,8 +1535,8 @@ int parser_parse_translation_unit(const TokenArray *tokens, ParserError *error) 
 }
 
 int parser_parse_expression_ast_assignment(const TokenArray *tokens,
-                                           AstExpression **out_expression,
-                                           ParserError *error) {
+    AstExpression **out_expression,
+    ParserError *error) {
     Parser p;
     AstExpression *expr;
 

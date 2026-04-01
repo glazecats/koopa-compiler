@@ -16,10 +16,10 @@ int main(void) {
 
     if (!parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-legacy] parser failed at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-legacy] parser failed at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         return 1;
     }

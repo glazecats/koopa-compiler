@@ -80,10 +80,10 @@ static void set_error(Parser *p, const Token *at, const char *fmt, ...) {
 static int enter_expression_recursion(Parser *p, const char *rule_name) {
     if (p->expression_recursion_depth >= p->expression_recursion_limit) {
         set_error(p,
-                  peek(p),
-                  "Parser expression recursion limit (%zu call-depth frames) exceeded while parsing %s",
-                  p->expression_recursion_limit,
-                  rule_name);
+            peek(p),
+            "Parser expression recursion limit (%zu call-depth frames) exceeded while parsing %s",
+            p->expression_recursion_limit,
+            rule_name);
         return 0;
     }
     p->expression_recursion_depth++;
@@ -99,10 +99,10 @@ static void leave_expression_recursion(Parser *p) {
 static int enter_statement_recursion(Parser *p, const char *rule_name) {
     if (p->statement_recursion_depth >= p->statement_recursion_limit) {
         set_error(p,
-                  peek(p),
-                  "Parser statement recursion limit (%zu) exceeded while parsing %s",
-                  p->statement_recursion_limit,
-                  rule_name);
+            peek(p),
+            "Parser statement recursion limit (%zu) exceeded while parsing %s",
+            p->statement_recursion_limit,
+            rule_name);
         return 0;
     }
     p->statement_recursion_depth++;
@@ -141,14 +141,14 @@ static int consume_token(Parser *p, TokenType type, const char *what, const Toke
 
 static int parse_expression(Parser *p);
 static int parse_statement_with_local_control(Parser *p,
-                                              ParserLocalControl *out_local_control,
-                                              AstStatement **out_statement);
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement);
 static int parse_declaration(Parser *p,
-                             AstProgram *top_level_program,
-                             char ***out_decl_names,
-                             size_t *out_decl_name_count,
-                             AstExpression ***out_decl_initializer_exprs,
-                             size_t *out_decl_initializer_expr_count);
+    AstProgram *top_level_program,
+    char ***out_decl_names,
+    size_t *out_decl_name_count,
+    AstExpression ***out_decl_initializer_exprs,
+    size_t *out_decl_initializer_expr_count);
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
 static AstExpression *parse_expression_ast_postfix(Parser *p);
@@ -188,9 +188,9 @@ static int match_assignment_operator(Parser *p, const Token **out_op_tok) {
 }
 
 static int token_slice_has_balanced_parens(const TokenArray *tokens,
-                                           size_t start,
-                                           size_t end,
-                                           int *out_zero_depth_inside) {
+    size_t start,
+    size_t end,
+    int *out_zero_depth_inside) {
     size_t i;
     int depth = 0;
     int zero_depth_inside = 0;
@@ -239,9 +239,9 @@ static void trim_wrapping_parentheses(const TokenArray *tokens, size_t *io_start
     end = *io_end;
 
     while (end > start + 1 && tokens->data[start].type == TOKEN_LPAREN &&
-           tokens->data[end - 1].type == TOKEN_RPAREN &&
-           token_slice_has_balanced_parens(tokens, start, end, &zero_depth_inside) &&
-           !zero_depth_inside) {
+        tokens->data[end - 1].type == TOKEN_RPAREN &&
+        token_slice_has_balanced_parens(tokens, start, end, &zero_depth_inside) &&
+        !zero_depth_inside) {
         start++;
         end--;
     }
@@ -251,8 +251,8 @@ static void trim_wrapping_parentheses(const TokenArray *tokens, size_t *io_start
 }
 
 static int token_slice_is_parenthesized_identifier_form(const TokenArray *tokens,
-                                                        size_t start,
-                                                        size_t end) {
+    size_t start,
+    size_t end) {
     trim_wrapping_parentheses(tokens, &start, &end);
     return end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER;
 }
@@ -263,14 +263,14 @@ static int parse_initializer_expression(Parser *p) {
 }
 
 static AstStatement *alloc_ast_statement(Parser *p,
-                                         AstStatementKind kind,
-                                         const Token *anchor_tok) {
+    AstStatementKind kind,
+    const Token *anchor_tok) {
     AstStatement *stmt = (AstStatement *)malloc(sizeof(AstStatement));
 
     if (!stmt) {
         set_error(p,
-                  anchor_tok ? anchor_tok : peek(p),
-                  "Out of memory while building statement AST");
+            anchor_tok ? anchor_tok : peek(p),
+            "Out of memory while building statement AST");
         return NULL;
     }
 
@@ -324,9 +324,9 @@ static void free_name_array(char **names, size_t count) {
 }
 
 static int parser_next_growth_capacity(size_t current,
-                                       size_t initial,
-                                       size_t elem_size,
-                                       size_t *out_next_capacity) {
+    size_t initial,
+    size_t elem_size,
+    size_t *out_next_capacity) {
     size_t next_capacity;
 
     if (!out_next_capacity || initial == 0 || elem_size == 0) {
@@ -351,11 +351,11 @@ static int parser_next_growth_capacity(size_t current,
 }
 
 static int append_name_array_item(Parser *p,
-                                  char ***names,
-                                  size_t *count,
-                                  size_t *capacity,
-                                  char *name,
-                                  const Token *anchor_tok) {
+    char ***names,
+    size_t *count,
+    size_t *capacity,
+    char *name,
+    const Token *anchor_tok) {
     char **new_items;
     size_t next_capacity;
 
@@ -367,16 +367,16 @@ static int append_name_array_item(Parser *p,
     if (*count == *capacity) {
         if (!parser_next_growth_capacity(*capacity, 4, sizeof(char *), &next_capacity)) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building AST identifier metadata");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST identifier metadata");
             free(name);
             return 0;
         }
         new_items = (char **)realloc(*names, next_capacity * sizeof(char *));
         if (!new_items) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building AST identifier metadata");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST identifier metadata");
             free(name);
             return 0;
         }
@@ -390,10 +390,10 @@ static int append_name_array_item(Parser *p,
 }
 
 static int build_expression_ast_from_slice(Parser *p,
-                                           size_t start,
-                                           size_t end,
-                                           AstExpression **out_expr,
-                                           const Token *anchor_tok) {
+    size_t start,
+    size_t end,
+    AstExpression **out_expr,
+    const Token *anchor_tok) {
     ParserError nested_error;
     TokenArray slice;
     Token *owned_tokens;
@@ -413,8 +413,8 @@ static int build_expression_ast_from_slice(Parser *p,
     owned_tokens = (Token *)malloc((len + 1) * sizeof(Token));
     if (!owned_tokens) {
         set_error(p,
-                  anchor_tok ? anchor_tok : peek(p),
-                  "Out of memory while building expression AST");
+            anchor_tok ? anchor_tok : peek(p),
+            "Out of memory while building expression AST");
         return 0;
     }
 
@@ -435,11 +435,11 @@ static int build_expression_ast_from_slice(Parser *p,
 
     if (!ok) {
         set_error(p,
-                  anchor_tok ? anchor_tok : peek(p),
-                  "Failed to build expression AST slice at %d:%d: %s",
-                  nested_error.line,
-                  nested_error.column,
-                  nested_error.message[0] ? nested_error.message : "unknown");
+            anchor_tok ? anchor_tok : peek(p),
+            "Failed to build expression AST slice at %d:%d: %s",
+            nested_error.line,
+            nested_error.column,
+            nested_error.message[0] ? nested_error.message : "unknown");
         return 0;
     }
 
@@ -460,11 +460,11 @@ static void free_ast_statement_array(AstStatement **items, size_t count) {
 }
 
 static int append_ast_statement_child(Parser *p,
-                                      AstStatement ***items,
-                                      size_t *count,
-                                      size_t *capacity,
-                                      AstStatement *child,
-                                      const Token *anchor_tok) {
+    AstStatement ***items,
+    size_t *count,
+    size_t *capacity,
+    AstStatement *child,
+    const Token *anchor_tok) {
     AstStatement **new_items;
     size_t next_capacity;
 
@@ -474,20 +474,20 @@ static int append_ast_statement_child(Parser *p,
 
     if (*count == *capacity) {
         if (!parser_next_growth_capacity(*capacity,
-                                         4,
-                                         sizeof(AstStatement *),
-                                         &next_capacity)) {
+            4,
+            sizeof(AstStatement *),
+            &next_capacity)) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building statement AST");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building statement AST");
             parser_ast_statement_free(child);
             return 0;
         }
         new_items = (AstStatement **)realloc(*items, next_capacity * sizeof(AstStatement *));
         if (!new_items) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building statement AST");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building statement AST");
             parser_ast_statement_free(child);
             return 0;
         }
@@ -501,9 +501,9 @@ static int append_ast_statement_child(Parser *p,
 }
 
 static int append_ast_statement_expression(Parser *p,
-                                           AstStatement *stmt,
-                                           AstExpression *expr,
-                                           const Token *anchor_tok) {
+    AstStatement *stmt,
+    AstExpression *expr,
+    const Token *anchor_tok) {
     AstExpression **new_items;
 
     if (!stmt || !expr) {
@@ -511,12 +511,12 @@ static int append_ast_statement_expression(Parser *p,
     }
 
     new_items = (AstExpression **)realloc(stmt->expressions,
-                                          (stmt->expression_count + 1) *
-                                              sizeof(AstExpression *));
+        (stmt->expression_count + 1) *
+        sizeof(AstExpression *));
     if (!new_items) {
         set_error(p,
-                  anchor_tok ? anchor_tok : peek(p),
-                  "Out of memory while building statement AST");
+            anchor_tok ? anchor_tok : peek(p),
+            "Out of memory while building statement AST");
         parser_ast_expression_free(expr);
         return 0;
     }
@@ -528,8 +528,8 @@ static int append_ast_statement_expression(Parser *p,
 }
 
 static AstExpression *alloc_ast_expression(AstExpressionKind kind,
-                                           int line,
-                                           int column) {
+    int line,
+    int column) {
     AstExpression *expr = (AstExpression *)malloc(sizeof(AstExpression));
     if (!expr) {
         return NULL;
@@ -543,9 +543,9 @@ static AstExpression *alloc_ast_expression(AstExpressionKind kind,
 }
 
 static AstExpression *build_binary_expression_node(Parser *p,
-                                                   const Token *op_tok,
-                                                   AstExpression *left,
-                                                   AstExpression *right) {
+    const Token *op_tok,
+    AstExpression *left,
+    AstExpression *right) {
     AstExpression *expr = alloc_ast_expression(AST_EXPR_BINARY, op_tok->line, op_tok->column);
     if (!expr) {
         set_error(p, op_tok, "Out of memory while building expression AST");
@@ -561,8 +561,8 @@ static AstExpression *build_binary_expression_node(Parser *p,
 }
 
 static AstExpression *build_unary_expression_node(Parser *p,
-                                                  const Token *op_tok,
-                                                  AstExpression *operand) {
+    const Token *op_tok,
+    AstExpression *operand) {
     AstExpression *expr = alloc_ast_expression(AST_EXPR_UNARY, op_tok->line, op_tok->column);
     if (!expr) {
         set_error(p, op_tok, "Out of memory while building expression AST");
@@ -576,8 +576,8 @@ static AstExpression *build_unary_expression_node(Parser *p,
 }
 
 static AstExpression *build_postfix_expression_node(Parser *p,
-                                                    const Token *op_tok,
-                                                    AstExpression *operand) {
+    const Token *op_tok,
+    AstExpression *operand) {
     AstExpression *expr = alloc_ast_expression(AST_EXPR_POSTFIX, op_tok->line, op_tok->column);
     if (!expr) {
         set_error(p, op_tok, "Out of memory while building expression AST");
@@ -605,10 +605,10 @@ static void free_ast_expression_array(AstExpression **items, size_t count) {
 }
 
 static int append_ast_expression_arg(Parser *p,
-                                     AstExpression ***items,
-                                     size_t *count,
-                                     size_t *capacity,
-                                     AstExpression *arg) {
+    AstExpression ***items,
+    size_t *count,
+    size_t *capacity,
+    AstExpression *arg) {
     AstExpression **new_items;
     size_t next_capacity;
 
@@ -618,9 +618,9 @@ static int append_ast_expression_arg(Parser *p,
 
     if (*count == *capacity) {
         if (!parser_next_growth_capacity(*capacity,
-                                         4,
-                                         sizeof(AstExpression *),
-                                         &next_capacity)) {
+            4,
+            sizeof(AstExpression *),
+            &next_capacity)) {
             set_error(p, peek(p), "Out of memory while building expression AST");
             parser_ast_expression_free(arg);
             return 0;
@@ -641,11 +641,11 @@ static int append_ast_expression_arg(Parser *p,
 }
 
 static int append_ast_expression_slot(Parser *p,
-                                      AstExpression ***items,
-                                      size_t *count,
-                                      size_t *capacity,
-                                      AstExpression *expr,
-                                      const Token *anchor_tok) {
+    AstExpression ***items,
+    size_t *count,
+    size_t *capacity,
+    AstExpression *expr,
+    const Token *anchor_tok) {
     AstExpression **new_items;
     size_t next_capacity;
 
@@ -656,20 +656,20 @@ static int append_ast_expression_slot(Parser *p,
 
     if (*count == *capacity) {
         if (!parser_next_growth_capacity(*capacity,
-                                         4,
-                                         sizeof(AstExpression *),
-                                         &next_capacity)) {
+            4,
+            sizeof(AstExpression *),
+            &next_capacity)) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building expression AST");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building expression AST");
             parser_ast_expression_free(expr);
             return 0;
         }
         new_items = (AstExpression **)realloc(*items, next_capacity * sizeof(AstExpression *));
         if (!new_items) {
             set_error(p,
-                      anchor_tok ? anchor_tok : peek(p),
-                      "Out of memory while building expression AST");
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building expression AST");
             parser_ast_expression_free(expr);
             return 0;
         }
@@ -683,10 +683,10 @@ static int append_ast_expression_slot(Parser *p,
 }
 
 static AstExpression *build_call_expression_node(Parser *p,
-                                                 const Token *lparen_tok,
-                                                 AstExpression *callee,
-                                                 AstExpression **args,
-                                                 size_t arg_count) {
+    const Token *lparen_tok,
+    AstExpression *callee,
+    AstExpression **args,
+    size_t arg_count) {
     AstExpression *expr = alloc_ast_expression(AST_EXPR_CALL, lparen_tok->line, lparen_tok->column);
     if (!expr) {
         set_error(p, lparen_tok, "Out of memory while building expression AST");
@@ -731,13 +731,13 @@ static int ast_expression_is_callable_callee(const AstExpression *expr) {
 }
 
 static AstExpression *build_ternary_expression_node(Parser *p,
-                                                    const Token *question_tok,
-                                                    AstExpression *condition,
-                                                    AstExpression *then_expr,
-                                                    AstExpression *else_expr) {
+    const Token *question_tok,
+    AstExpression *condition,
+    AstExpression *then_expr,
+    AstExpression *else_expr) {
     AstExpression *expr = alloc_ast_expression(AST_EXPR_TERNARY,
-                                               question_tok->line,
-                                               question_tok->column);
+        question_tok->line,
+        question_tok->column);
     if (!expr) {
         set_error(p, question_tok, "Out of memory while building expression AST");
         parser_ast_expression_free(condition);
@@ -753,7 +753,7 @@ static AstExpression *build_ternary_expression_node(Parser *p,
 }
 
 static AstExpression *parse_parenthesized_expression_ast_primary_only(Parser *p,
-                                                                      const Token *lparen) {
+    const Token *lparen) {
     AstExpression *inner;
     AstExpression *paren_expr;
 
@@ -848,9 +848,9 @@ static AstExpression *parse_expression_ast_unary(Parser *p) {
         }
         if (!ast_expression_is_identifier_lvalue(expr)) {
             set_error(p,
-                      op_tok,
-                      "Expected identifier lvalue for %s operand",
-                      lexer_token_type_name(op_tok->type));
+                op_tok,
+                "Expected identifier lvalue for %s operand",
+                lexer_token_type_name(op_tok->type));
             parser_ast_expression_free(expr);
             leave_expression_recursion(p);
             return NULL;
@@ -895,8 +895,8 @@ static AstExpression *parse_expression_ast_postfix(Parser *p) {
 
             if (!ast_expression_is_callable_callee(expr)) {
                 set_error(p,
-                          lparen_tok,
-                          "Expected callable expression before '('");
+                    lparen_tok,
+                    "Expected callable expression before '('");
                 parser_ast_expression_free(expr);
                 free_ast_expression_array(args, arg_count);
                 return NULL;
@@ -936,9 +936,9 @@ static AstExpression *parse_expression_ast_postfix(Parser *p) {
 
             if (!ast_expression_is_identifier_lvalue(expr)) {
                 set_error(p,
-                          op_tok,
-                          "Expected identifier lvalue before %s",
-                          lexer_token_type_name(op_tok->type));
+                    op_tok,
+                    "Expected identifier lvalue before %s",
+                    lexer_token_type_name(op_tok->type));
                 parser_ast_expression_free(expr);
                 return NULL;
             }
@@ -1262,10 +1262,10 @@ static AstExpression *parse_expression_ast_conditional(Parser *p) {
     }
 
     condition = build_ternary_expression_node(p,
-                                              question_tok,
-                                              condition,
-                                              then_expr,
-                                              else_expr);
+        question_tok,
+        condition,
+        then_expr,
+        else_expr);
     leave_expression_recursion(p);
     return condition;
 }
@@ -1330,8 +1330,8 @@ static AstExpression *parse_expression_ast_comma(Parser *p) {
 }
 
 static int parse_primary_with_flags(Parser *p,
-                                    int *out_is_identifier_lvalue,
-                                    int *out_is_callable_target) {
+    int *out_is_identifier_lvalue,
+    int *out_is_callable_target) {
     size_t expr_start_index;
 
     if (out_is_identifier_lvalue) {
@@ -1366,8 +1366,8 @@ static int parse_primary_with_flags(Parser *p,
 
         if (out_is_identifier_lvalue) {
             *out_is_identifier_lvalue = token_slice_is_parenthesized_identifier_form(p->tokens,
-                                                                                      expr_start_index,
-                                                                                      p->current - 1);
+                expr_start_index,
+                p->current - 1);
         }
         if (out_is_callable_target) {
             /*
@@ -1388,8 +1388,8 @@ static int parse_postfix(Parser *p) {
     int is_callable_target = 0;
 
     if (!parse_primary_with_flags(p,
-                                  &is_identifier_lvalue,
-                                  &is_callable_target)) {
+        &is_identifier_lvalue,
+        &is_callable_target)) {
         return 0;
     }
 
@@ -1419,9 +1419,9 @@ static int parse_postfix(Parser *p) {
 
             if (!is_identifier_lvalue) {
                 set_error(p,
-                          op_tok,
-                          "Expected identifier lvalue before %s",
-                          lexer_token_type_name(op_tok->type));
+                    op_tok,
+                    "Expected identifier lvalue before %s",
+                    lexer_token_type_name(op_tok->type));
                 return 0;
             }
 
@@ -1450,9 +1450,9 @@ static int parse_unary(Parser *p) {
         ok = parse_unary(p);
         if (ok && !token_slice_is_parenthesized_identifier_form(p->tokens, operand_start, p->current)) {
             set_error(p,
-                      op_tok,
-                      "Expected identifier lvalue for %s operand",
-                      lexer_token_type_name(op_tok->type));
+                op_tok,
+                "Expected identifier lvalue for %s operand",
+                lexer_token_type_name(op_tok->type));
             ok = 0;
         }
         leave_expression_recursion(p);

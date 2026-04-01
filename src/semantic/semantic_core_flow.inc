@@ -32,19 +32,19 @@ static void format_callee_preview(const char *name, char *out, size_t out_size) 
     }
 
     snprintf(out,
-             out_size,
-             "%.*s...%.*s(len=%zu)",
-             CALLEE_PREVIEW_HEAD,
-             name,
-             CALLEE_PREVIEW_TAIL,
-             name + (len - CALLEE_PREVIEW_TAIL),
-             len);
+        out_size,
+        "%.*s...%.*s(len=%zu)",
+        CALLEE_PREVIEW_HEAD,
+        name,
+        CALLEE_PREVIEW_TAIL,
+        name + (len - CALLEE_PREVIEW_TAIL),
+        len);
 }
 
 static void semantic_set_error(SemanticError *error,
-                               int line,
-                               int column,
-                               const char *message) {
+    int line,
+    int column,
+    const char *message) {
     if (!error) {
         return;
     }
@@ -99,10 +99,10 @@ static int classify_ast_call_callee(const AstExpression *callee, const char **ou
 }
 
 static int walk_expression_postorder_with_depth(const AstExpression *expr,
-                                                ExpressionPostVisitor visitor,
-                                                void *ctx,
-                                                SemanticError *error,
-                                                size_t depth) {
+    ExpressionPostVisitor visitor,
+    void *ctx,
+    SemanticError *error,
+    size_t depth) {
     size_t i;
 
     if (!expr) {
@@ -111,87 +111,87 @@ static int walk_expression_postorder_with_depth(const AstExpression *expr,
 
     if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
         semantic_set_error(error,
-                           expr->line,
-                           expr->column,
-                           "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
         return 0;
     }
 
     switch (expr->kind) {
     case AST_EXPR_PAREN:
         if (!walk_expression_postorder_with_depth(expr->as.inner,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         break;
     case AST_EXPR_UNARY:
         if (!walk_expression_postorder_with_depth(expr->as.unary.operand,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         break;
     case AST_EXPR_POSTFIX:
         if (!walk_expression_postorder_with_depth(expr->as.postfix.operand,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         break;
     case AST_EXPR_BINARY:
         if (!walk_expression_postorder_with_depth(expr->as.binary.left,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1) ||
+            visitor,
+            ctx,
+            error,
+            depth + 1) ||
             !walk_expression_postorder_with_depth(expr->as.binary.right,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         break;
     case AST_EXPR_TERNARY:
         if (!walk_expression_postorder_with_depth(expr->as.ternary.condition,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1) ||
+            visitor,
+            ctx,
+            error,
+            depth + 1) ||
             !walk_expression_postorder_with_depth(expr->as.ternary.then_expr,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1) ||
+            visitor,
+            ctx,
+            error,
+            depth + 1) ||
             !walk_expression_postorder_with_depth(expr->as.ternary.else_expr,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         break;
     case AST_EXPR_CALL:
         if (!walk_expression_postorder_with_depth(expr->as.call.callee,
-                                                  visitor,
-                                                  ctx,
-                                                  error,
-                                                  depth + 1)) {
+            visitor,
+            ctx,
+            error,
+            depth + 1)) {
             return 0;
         }
         for (i = 0; i < expr->as.call.arg_count; ++i) {
             if (!walk_expression_postorder_with_depth(expr->as.call.args[i],
-                                                      visitor,
-                                                      ctx,
-                                                      error,
-                                                      depth + 1)) {
+                visitor,
+                ctx,
+                error,
+                depth + 1)) {
                 return 0;
             }
         }
@@ -210,16 +210,16 @@ static int walk_expression_postorder_with_depth(const AstExpression *expr,
 }
 
 static int walk_expression_postorder(const AstExpression *expr,
-                                     ExpressionPostVisitor visitor,
-                                     void *ctx,
-                                     SemanticError *error) {
+    ExpressionPostVisitor visitor,
+    void *ctx,
+    SemanticError *error) {
     return walk_expression_postorder_with_depth(expr, visitor, ctx, error, 0);
 }
 
 static int walk_statement_postorder(const AstStatement *stmt,
-                                    ExpressionPostVisitor visitor,
-                                    void *ctx,
-                                    SemanticError *error) {
+    ExpressionPostVisitor visitor,
+    void *ctx,
+    SemanticError *error) {
     size_t i;
 
     if (!stmt) {
@@ -268,11 +268,11 @@ static const AstExpression *statement_get_for_step_expression(const AstStatement
 static int expression_is_constant_true_for_flow(const AstExpression *expr);
 static int expression_is_constant_false_for_flow(const AstExpression *expr);
 static int semantic_analyze_statement_flow(const AstStatement *stmt,
-                                           int *out_guaranteed_return,
-                                           int *out_may_fallthrough,
-                                           int *out_may_break,
-                                           int *out_may_continue_loop,
-                                           int *out_may_non_terminating);
+    int *out_guaranteed_return,
+    int *out_may_fallthrough,
+    int *out_may_break,
+    int *out_may_continue_loop,
+    int *out_may_non_terminating);
 
 #define FLOW_GUARD_IDENTIFIER_LIMIT 64
 #define FLOW_GUARD_SCOPE_LIMIT 32
@@ -300,9 +300,9 @@ typedef struct {
 } FlowLoopExitSummary;
 
 static void flow_guard_identifier_set_add(FlowGuardIdentifierSet *set,
-                                          const char *name,
-                                          size_t name_length,
-                                          size_t binding) {
+    const char *name,
+    size_t name_length,
+    size_t binding) {
     size_t i;
 
     if (!set || !name || name_length == 0 || set->overflowed) {
@@ -328,9 +328,9 @@ static void flow_guard_identifier_set_add(FlowGuardIdentifierSet *set,
 }
 
 static int flow_guard_identifier_set_contains(const FlowGuardIdentifierSet *set,
-                                              const char *name,
-                                              size_t name_length,
-                                              size_t binding) {
+    const char *name,
+    size_t name_length,
+    size_t binding) {
     size_t i;
 
     if (!set || !name || name_length == 0) {
@@ -362,8 +362,8 @@ static int flow_scope_stack_push(FlowIdentifierScopeStack *stack) {
 }
 
 static void flow_scope_stack_add_name(FlowIdentifierScopeStack *stack,
-                                      const char *name,
-                                      size_t name_length) {
+    const char *name,
+    size_t name_length) {
     if (!stack || !name || name_length == 0 || stack->overflowed) {
         return;
     }
@@ -379,8 +379,8 @@ static void flow_scope_stack_add_name(FlowIdentifierScopeStack *stack,
 }
 
 static void flow_scope_stack_add_declaration_names(FlowIdentifierScopeStack *stack,
-                                                   char **names,
-                                                   size_t name_count) {
+    char **names,
+    size_t name_count) {
     size_t i;
 
     for (i = 0; i < name_count; ++i) {
@@ -395,8 +395,8 @@ static void flow_scope_stack_add_declaration_names(FlowIdentifierScopeStack *sta
 }
 
 static size_t flow_scope_stack_resolve_binding(const FlowIdentifierScopeStack *stack,
-                                               const char *name,
-                                               size_t name_length) {
+    const char *name,
+    size_t name_length) {
     size_t i;
 
     if (!stack || !name || name_length == 0) {
@@ -426,8 +426,8 @@ static const AstExpression *flow_unwrap_paren_expression(const AstExpression *ex
 }
 
 static void flow_collect_expression_identifiers(const AstExpression *expr,
-                                                FlowGuardIdentifierSet *set,
-                                                const FlowIdentifierScopeStack *scopes) {
+    FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     size_t i;
 
     if (!expr || !set || set->overflowed) {
@@ -442,11 +442,11 @@ static void flow_collect_expression_identifiers(const AstExpression *expr,
     switch (expr->kind) {
     case AST_EXPR_IDENTIFIER:
         flow_guard_identifier_set_add(set,
-                                      expr->as.identifier.name,
-                                      expr->as.identifier.name_length,
-                                      flow_scope_stack_resolve_binding(scopes,
-                                                                       expr->as.identifier.name,
-                                                                       expr->as.identifier.name_length));
+            expr->as.identifier.name,
+            expr->as.identifier.name_length,
+            flow_scope_stack_resolve_binding(scopes,
+                expr->as.identifier.name,
+                expr->as.identifier.name_length));
         return;
     case AST_EXPR_PAREN:
         flow_collect_expression_identifiers(expr->as.inner, set, scopes);
@@ -479,8 +479,8 @@ static void flow_collect_expression_identifiers(const AstExpression *expr,
 }
 
 static void flow_collect_guard_dependencies_from_declaration(const AstStatement *stmt,
-                                                            FlowGuardIdentifierSet *set,
-                                                            const FlowIdentifierScopeStack *scopes) {
+    FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     size_t i;
     size_t scope_base_count;
 
@@ -518,8 +518,8 @@ static void flow_collect_guard_dependencies_from_declaration(const AstStatement 
 }
 
 static void flow_collect_guard_dependencies_in_compound(const AstStatement *stmt,
-                                                        FlowGuardIdentifierSet *set,
-                                                        const FlowIdentifierScopeStack *scopes) {
+    FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     size_t pass;
 
     if (!stmt || stmt->kind != AST_STMT_COMPOUND || !set || set->overflowed) {
@@ -549,8 +549,8 @@ static void flow_collect_guard_dependencies_in_compound(const AstStatement *stmt
                 }
 
                 flow_scope_stack_add_declaration_names(&block_scopes,
-                                                       child->declaration_names,
-                                                       child->declaration_name_count);
+                    child->declaration_names,
+                    child->declaration_name_count);
                 if (block_scopes.overflowed) {
                     set->overflowed = 1;
                     return;
@@ -567,8 +567,8 @@ static void flow_collect_guard_dependencies_in_compound(const AstStatement *stmt
 }
 
 static int flow_expression_targets_guard_identifier(const AstExpression *expr,
-                                                    const FlowGuardIdentifierSet *set,
-                                                    const FlowIdentifierScopeStack *scopes) {
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     const AstExpression *base = flow_unwrap_paren_expression(expr);
 
     if (!base || base->kind != AST_EXPR_IDENTIFIER) {
@@ -576,16 +576,16 @@ static int flow_expression_targets_guard_identifier(const AstExpression *expr,
     }
 
     return flow_guard_identifier_set_contains(set,
-                                              base->as.identifier.name,
-                                              base->as.identifier.name_length,
-                                              flow_scope_stack_resolve_binding(scopes,
-                                                                               base->as.identifier.name,
-                                                                               base->as.identifier.name_length));
+        base->as.identifier.name,
+        base->as.identifier.name_length,
+        flow_scope_stack_resolve_binding(scopes,
+            base->as.identifier.name,
+            base->as.identifier.name_length));
 }
 
 static int flow_expression_may_change_guard_state(const AstExpression *expr,
-                                                  const FlowGuardIdentifierSet *set,
-                                                  const FlowIdentifierScopeStack *scopes) {
+        const FlowGuardIdentifierSet *set,
+        const FlowIdentifierScopeStack *scopes) {
     if (!expr || !set || set->count == 0 || set->overflowed) {
         return 0;
     }
@@ -632,11 +632,11 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
             break;
         }
         return flow_expression_may_change_guard_state(expr->as.binary.left, set, scopes) ||
-               flow_expression_may_change_guard_state(expr->as.binary.right, set, scopes);
+            flow_expression_may_change_guard_state(expr->as.binary.right, set, scopes);
     case AST_EXPR_TERNARY:
         return flow_expression_may_change_guard_state(expr->as.ternary.condition, set, scopes) ||
-               flow_expression_may_change_guard_state(expr->as.ternary.then_expr, set, scopes) ||
-               flow_expression_may_change_guard_state(expr->as.ternary.else_expr, set, scopes);
+            flow_expression_may_change_guard_state(expr->as.ternary.then_expr, set, scopes) ||
+            flow_expression_may_change_guard_state(expr->as.ternary.else_expr, set, scopes);
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
     default:
@@ -645,10 +645,10 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
 }
 
 static int flow_expression_range_may_change_guard_state(const AstStatement *stmt,
-                                                        size_t start_index,
-                                                        size_t end_index,
-                                                        const FlowGuardIdentifierSet *set,
-                                                        const FlowIdentifierScopeStack *scopes) {
+    size_t start_index,
+    size_t end_index,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     size_t i;
 
     if (!stmt) {
@@ -669,8 +669,8 @@ static int flow_expression_range_may_change_guard_state(const AstStatement *stmt
 }
 
 static int flow_statement_may_change_guard_state(const AstStatement *stmt,
-                                                 FlowGuardIdentifierSet *set,
-                                                 const FlowIdentifierScopeStack *scopes) {
+    FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
     size_t i;
 
     if (!stmt || !set || set->count == 0 || set->overflowed) {
@@ -702,8 +702,8 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
             }
             if (stmt->children[i] && stmt->children[i]->kind == AST_STMT_DECLARATION) {
                 flow_scope_stack_add_declaration_names(&block_scopes,
-                                                       stmt->children[i]->declaration_names,
-                                                       stmt->children[i]->declaration_name_count);
+                    stmt->children[i]->declaration_names,
+                    stmt->children[i]->declaration_name_count);
                 if (block_scopes.overflowed) {
                     return 1;
                 }
@@ -722,10 +722,10 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
         }
 
         if (flow_expression_range_may_change_guard_state(stmt,
-                                                         0,
-                                                         declaration_expr_count,
-                                                         set,
-                                                         &loop_scopes)) {
+            0,
+            declaration_expr_count,
+            set,
+            &loop_scopes)) {
             return 1;
         }
 
@@ -734,18 +734,18 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
                 return 1;
             }
             flow_scope_stack_add_declaration_names(&loop_scopes,
-                                                   stmt->declaration_names,
-                                                   stmt->declaration_name_count);
+                stmt->declaration_names,
+                stmt->declaration_name_count);
             if (loop_scopes.overflowed) {
                 return 1;
             }
         }
 
         if (flow_expression_range_may_change_guard_state(stmt,
-                                                         declaration_expr_count,
-                                                         stmt->expression_count,
-                                                         set,
-                                                         &loop_scopes)) {
+            declaration_expr_count,
+            stmt->expression_count,
+            set,
+            &loop_scopes)) {
             return 1;
         }
 
@@ -774,12 +774,12 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
 }
 
 static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *stmt,
-                                                          FlowGuardIdentifierSet *guard_ids,
-                                                          const FlowIdentifierScopeStack *scopes);
+    FlowGuardIdentifierSet *guard_ids,
+    const FlowIdentifierScopeStack *scopes);
 
 static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *stmt,
-                                                          FlowGuardIdentifierSet *guard_ids,
-                                                          const FlowIdentifierScopeStack *scopes) {
+    FlowGuardIdentifierSet *guard_ids,
+    const FlowIdentifierScopeStack *scopes) {
     FlowLoopExitSummary summary = {0, 0};
 
     if (!stmt) {
@@ -816,7 +816,7 @@ static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *st
 
         summary.may_exit_loop = then_summary.may_exit_loop || else_summary.may_exit_loop;
         summary.exits_loop_on_all_paths = has_else && then_summary.exits_loop_on_all_paths &&
-                                          else_summary.exits_loop_on_all_paths;
+            else_summary.exits_loop_on_all_paths;
 
         if (summary.may_exit_loop && !summary.exits_loop_on_all_paths) {
             flow_collect_expression_identifiers(cond_expr, guard_ids, scopes);
@@ -851,11 +851,11 @@ static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *st
             }
 
             if (!semantic_analyze_statement_flow(stmt->children[i],
-                                                 NULL,
-                                                 &child_may_fallthrough,
-                                                 NULL,
-                                                 NULL,
-                                                 NULL)) {
+                NULL,
+                &child_may_fallthrough,
+                NULL,
+                NULL,
+                NULL)) {
                 return summary;
             }
 
@@ -865,8 +865,8 @@ static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *st
 
             if (stmt->children[i] && stmt->children[i]->kind == AST_STMT_DECLARATION) {
                 flow_scope_stack_add_declaration_names(&block_scopes,
-                                                       stmt->children[i]->declaration_names,
-                                                       stmt->children[i]->declaration_name_count);
+                    stmt->children[i]->declaration_names,
+                    stmt->children[i]->declaration_name_count);
                 if (block_scopes.overflowed) {
                     guard_ids->overflowed = 1;
                     return summary;
@@ -881,11 +881,11 @@ static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *st
         int child_guaranteed_return = 0;
 
         if (!semantic_analyze_statement_flow(stmt,
-                                             &child_guaranteed_return,
-                                             NULL,
-                                             NULL,
-                                             NULL,
-                                             NULL)) {
+            &child_guaranteed_return,
+            NULL,
+            NULL,
+            NULL,
+            NULL)) {
             return summary;
         }
 
@@ -902,9 +902,9 @@ static FlowLoopExitSummary flow_collect_loop_exit_summary(const AstStatement *st
 }
 
 static int flow_try_eval_constant_arithmetic(TokenType op,
-                                             long long lhs,
-                                             long long rhs,
-                                             long long *out_value) {
+    long long lhs,
+    long long rhs,
+    long long *out_value) {
     const int shift_width = (int)(sizeof(long long) * 8u);
 
     if (!out_value) {
@@ -957,8 +957,8 @@ static int flow_try_eval_constant_arithmetic(TokenType op,
 }
 
 static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
-                                                 long long *out_value,
-                                                 size_t depth) {
+    long long *out_value,
+    size_t depth) {
     long long operand_value;
     long long lhs_value;
     long long rhs_value;
@@ -980,8 +980,8 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         return flow_try_eval_constant_int_with_depth(expr->as.inner, out_value, depth + 1);
     case AST_EXPR_UNARY:
         if (!flow_try_eval_constant_int_with_depth(expr->as.unary.operand,
-                                                   &operand_value,
-                                                   depth + 1)) {
+            &operand_value,
+            depth + 1)) {
             return 0;
         }
         switch (expr->as.unary.op) {
@@ -1005,24 +1005,24 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         }
     case AST_EXPR_TERNARY:
         if (!flow_try_eval_constant_int_with_depth(expr->as.ternary.condition,
-                                                   &cond_value,
-                                                   depth + 1)) {
+            &cond_value,
+            depth + 1)) {
             return 0;
         }
         if (cond_value != 0) {
             return flow_try_eval_constant_int_with_depth(expr->as.ternary.then_expr,
-                                                         out_value,
-                                                         depth + 1);
+                out_value,
+                depth + 1);
         }
         return flow_try_eval_constant_int_with_depth(expr->as.ternary.else_expr,
-                                                     out_value,
-                                                     depth + 1);
+            out_value,
+            depth + 1);
     case AST_EXPR_BINARY:
         switch (expr->as.binary.op) {
         case TOKEN_AND_AND:
             if (!flow_try_eval_constant_int_with_depth(expr->as.binary.left,
-                                                       &lhs_value,
-                                                       depth + 1)) {
+                &lhs_value,
+                depth + 1)) {
                 return 0;
             }
             if (lhs_value == 0) {
@@ -1030,16 +1030,16 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
                 return 1;
             }
             if (!flow_try_eval_constant_int_with_depth(expr->as.binary.right,
-                                                       &rhs_value,
-                                                       depth + 1)) {
+                &rhs_value,
+                depth + 1)) {
                 return 0;
             }
             *out_value = (rhs_value != 0) ? 1 : 0;
             return 1;
         case TOKEN_OR_OR:
             if (!flow_try_eval_constant_int_with_depth(expr->as.binary.left,
-                                                       &lhs_value,
-                                                       depth + 1)) {
+                &lhs_value,
+                depth + 1)) {
                 return 0;
             }
             if (lhs_value != 0) {
@@ -1047,8 +1047,8 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
                 return 1;
             }
             if (!flow_try_eval_constant_int_with_depth(expr->as.binary.right,
-                                                       &rhs_value,
-                                                       depth + 1)) {
+                &rhs_value,
+                depth + 1)) {
                 return 0;
             }
             *out_value = (rhs_value != 0) ? 1 : 0;
@@ -1058,11 +1058,11 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         }
 
         if (!flow_try_eval_constant_int_with_depth(expr->as.binary.left,
-                                                   &lhs_value,
-                                                   depth + 1) ||
+            &lhs_value,
+            depth + 1) ||
             !flow_try_eval_constant_int_with_depth(expr->as.binary.right,
-                                                   &rhs_value,
-                                                   depth + 1)) {
+                &rhs_value,
+                depth + 1)) {
             return 0;
         }
 
@@ -1105,9 +1105,9 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         case TOKEN_SHIFT_LEFT:
         case TOKEN_SHIFT_RIGHT:
             return flow_try_eval_constant_arithmetic(expr->as.binary.op,
-                                                     lhs_value,
-                                                     rhs_value,
-                                                     out_value);
+                lhs_value,
+                rhs_value,
+                out_value);
         default:
             return 0;
         }
@@ -1133,11 +1133,11 @@ static int expression_is_constant_false_for_flow(const AstExpression *expr) {
 }
 
 static int semantic_analyze_statement_flow(const AstStatement *stmt,
-                                           int *out_guaranteed_return,
-                                           int *out_may_fallthrough,
-                                           int *out_may_break,
-                                           int *out_may_continue_loop,
-                                           int *out_may_non_terminating) {
+    int *out_guaranteed_return,
+    int *out_may_fallthrough,
+    int *out_may_break,
+    int *out_may_continue_loop,
+    int *out_may_non_terminating) {
     size_t i;
     int guaranteed_return = 0;
     int may_fallthrough = 1;
@@ -1181,11 +1181,11 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             int child_may_non_terminating = 0;
 
             if (!semantic_analyze_statement_flow(stmt->children[i],
-                                                 &child_guaranteed_return,
-                                                 &child_may_fallthrough,
-                                                 &child_may_break,
-                                                 &child_may_continue_loop,
-                                                 &child_may_non_terminating)) {
+                &child_guaranteed_return,
+                &child_may_fallthrough,
+                &child_may_break,
+                &child_may_continue_loop,
+                &child_may_non_terminating)) {
                 return 0;
             }
 
@@ -1237,21 +1237,21 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
 
         if (stmt->child_count >= 1 &&
             !semantic_analyze_statement_flow(stmt->children[0],
-                                             &then_guaranteed_return,
-                                             &then_may_fallthrough,
-                                             &then_may_break,
-                                             &then_may_continue_loop,
-                                             &then_may_non_terminating)) {
+                &then_guaranteed_return,
+                &then_may_fallthrough,
+                &then_may_break,
+                &then_may_continue_loop,
+                &then_may_non_terminating)) {
             return 0;
         }
 
         if (has_else &&
             !semantic_analyze_statement_flow(stmt->children[1],
-                                             &else_guaranteed_return,
-                                             &else_may_fallthrough,
-                                             &else_may_break,
-                                             &else_may_continue_loop,
-                                             &else_may_non_terminating)) {
+                &else_guaranteed_return,
+                &else_may_fallthrough,
+                &else_may_break,
+                &else_may_continue_loop,
+                &else_may_non_terminating)) {
             return 0;
         }
 
@@ -1272,9 +1272,9 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             may_fallthrough = has_else ? (then_may_fallthrough || else_may_fallthrough) : 1;
             may_break = has_else ? (then_may_break || else_may_break) : then_may_break;
             may_continue_loop = has_else ? (then_may_continue_loop || else_may_continue_loop)
-                                         : then_may_continue_loop;
+                : then_may_continue_loop;
             may_non_terminating = has_else ? (then_may_non_terminating || else_may_non_terminating)
-                                           : then_may_non_terminating;
+                : then_may_non_terminating;
         }
         break;
     }
@@ -1294,11 +1294,11 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
 
         if (body_stmt &&
             !semantic_analyze_statement_flow(body_stmt,
-                                             &body_guaranteed_return,
-                                             NULL,
-                                             &body_may_break,
-                                             NULL,
-                                             NULL)) {
+                &body_guaranteed_return,
+                NULL,
+                &body_may_break,
+                NULL,
+                NULL)) {
             return 0;
         }
 
@@ -1308,8 +1308,8 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         if (body_stmt) {
             exit_summary = flow_collect_loop_exit_summary(body_stmt, &guard_ids, &loop_scopes);
             body_changes_guard_state = flow_statement_may_change_guard_state(body_stmt,
-                                                                             &guard_ids,
-                                                                             &loop_scopes);
+                &guard_ids,
+                &loop_scopes);
         }
 
         if (cond_always_false) {
@@ -1363,11 +1363,11 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
 
         if (body_stmt &&
             !semantic_analyze_statement_flow(body_stmt,
-                                             &body_guaranteed_return,
-                                             NULL,
-                                             &body_may_break,
-                                             NULL,
-                                             NULL)) {
+                &body_guaranteed_return,
+                NULL,
+                &body_may_break,
+                NULL,
+                NULL)) {
             return 0;
         }
 
@@ -1376,8 +1376,8 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
                 guard_ids.overflowed = 1;
             }
             flow_scope_stack_add_declaration_names(&loop_scopes,
-                                                   stmt->declaration_names,
-                                                   stmt->declaration_name_count);
+                stmt->declaration_names,
+                stmt->declaration_name_count);
             if (loop_scopes.overflowed) {
                 guard_ids.overflowed = 1;
             }
@@ -1389,13 +1389,13 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         if (body_stmt) {
             exit_summary = flow_collect_loop_exit_summary(body_stmt, &guard_ids, &loop_scopes);
             body_changes_guard_state = flow_statement_may_change_guard_state(body_stmt,
-                                                                             &guard_ids,
-                                                                             &loop_scopes);
+                &guard_ids,
+                &loop_scopes);
         }
         if (step_expr) {
             step_changes_guard_state = flow_expression_may_change_guard_state(step_expr,
-                                                                              &guard_ids,
-                                                                              &loop_scopes);
+                &guard_ids,
+                &loop_scopes);
         }
 
         if (cond_always_false) {
@@ -1411,7 +1411,7 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             may_fallthrough = 1;
             may_non_terminating = 0;
         } else if (!guard_ids.overflowed && guard_ids.count > 0 &&
-                   !body_changes_guard_state && !step_changes_guard_state) {
+            !body_changes_guard_state && !step_changes_guard_state) {
             guaranteed_return = 0;
             may_fallthrough = 0;
             may_non_terminating = 1;
@@ -1480,8 +1480,8 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
 }
 
 static int semantic_compute_function_returns_all_paths(const AstExternal *func,
-                                                       int *out_returns_all_paths,
-                                                       SemanticError *error) {
+    int *out_returns_all_paths,
+    SemanticError *error) {
     int guaranteed_return = 0;
     int may_non_terminating = 0;
 
@@ -1495,22 +1495,22 @@ static int semantic_compute_function_returns_all_paths(const AstExternal *func,
 
     if (!func->function_body) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+            func->line,
+            func->column,
+            "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
         return 0;
     }
 
     if (!semantic_analyze_statement_flow(func->function_body,
-                                         &guaranteed_return,
-                                         NULL,
-                                         NULL,
-                                         NULL,
-                                         &may_non_terminating)) {
+            &guaranteed_return,
+            NULL,
+            NULL,
+            NULL,
+            &may_non_terminating)) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-007: failed to analyze function return-path flow from statement AST");
+            func->line,
+            func->column,
+            "SEMA-INT-007: failed to analyze function return-path flow from statement AST");
         return 0;
     }
 

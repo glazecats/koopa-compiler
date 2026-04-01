@@ -147,7 +147,7 @@ static bool match(Lexer *lx, char expected) {
 }
 
 static bool add_token(Lexer *lx, TokenType type, const char *lexeme, size_t length,
-                      long long number_value, int line, int column) {
+    long long number_value, int line, int column) {
     Token t;
     t.type = type;
     t.lexeme = lexeme;

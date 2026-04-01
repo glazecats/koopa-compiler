@@ -6,9 +6,9 @@
 #include <string.h>
 
 static int expect_translation_unit_parse_failure(const char *source,
-                                                 const char *case_name,
-                                                 const char *required_msg_a,
-                                                 const char *required_msg_b);
+    const char *case_name,
+    const char *required_msg_a,
+    const char *required_msg_b);
 
 /*
  * Split fragment inventory (keep this list in sync with includes below):

@@ -3,7 +3,7 @@ int main() {
 
     // line comment with tokens: == != <= >=
     /* block comment
-       with operators + - * / %
+        with operators + - * / %
     */
 
     if (x >= y) {

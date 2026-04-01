@@ -16,10 +16,10 @@ static int test_ast_collects_top_level_externals(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse unexpectedly failed at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse unexpectedly failed at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -27,8 +27,8 @@ static int test_ast_collects_top_level_externals(void) {
 
     if (program.count != 2) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 2 top-level externals, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 2 top-level externals, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -37,9 +37,9 @@ static int test_ast_collects_top_level_externals(void) {
     if (program.externals[0].kind != AST_EXTERNAL_DECLARATION ||
         strcmp(program.externals[0].name, "x") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected first external to be declaration x, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[0].kind),
-                program.externals[0].name ? program.externals[0].name : "<null>");
+            "[parser-reg] FAIL: expected first external to be declaration x, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[0].kind),
+            program.externals[0].name ? program.externals[0].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -48,9 +48,9 @@ static int test_ast_collects_top_level_externals(void) {
     if (program.externals[1].kind != AST_EXTERNAL_FUNCTION ||
         strcmp(program.externals[1].name, "main") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected second external to be function main, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[1].kind),
-                program.externals[1].name ? program.externals[1].name : "<null>");
+            "[parser-reg] FAIL: expected second external to be function main, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[1].kind),
+            program.externals[1].name ? program.externals[1].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -77,10 +77,10 @@ static int test_ast_records_function_parameter_count(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for function-parameter-count input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for function-parameter-count input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -88,8 +88,8 @@ static int test_ast_records_function_parameter_count(void) {
 
     if (program.count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 1 top-level external, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 1 top-level external, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -98,9 +98,9 @@ static int test_ast_records_function_parameter_count(void) {
     if (program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         !program.externals[0].name || strcmp(program.externals[0].name, "add") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected function add, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[0].kind),
-                program.externals[0].name ? program.externals[0].name : "<null>");
+            "[parser-reg] FAIL: expected function add, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[0].kind),
+            program.externals[0].name ? program.externals[0].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -108,8 +108,8 @@ static int test_ast_records_function_parameter_count(void) {
 
     if (program.externals[0].parameter_count != 2) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected add parameter_count=2, got %zu\n",
-                program.externals[0].parameter_count);
+            "[parser-reg] FAIL: expected add parameter_count=2, got %zu\n",
+            program.externals[0].parameter_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -117,8 +117,8 @@ static int test_ast_records_function_parameter_count(void) {
 
     if (program.externals[0].is_function_definition != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected add to be a function definition (def=1), got def=%d\n",
-                program.externals[0].is_function_definition);
+            "[parser-reg] FAIL: expected add to be a function definition (def=1), got def=%d\n",
+            program.externals[0].is_function_definition);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -127,7 +127,7 @@ static int test_ast_records_function_parameter_count(void) {
     if (!program.externals[0].function_body ||
         program.externals[0].function_body->kind != AST_STMT_COMPOUND) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected add function_body compound statement AST\n");
+            "[parser-reg] FAIL: expected add function_body compound statement AST\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -139,7 +139,7 @@ static int test_ast_records_function_parameter_count(void) {
         program.externals[0].function_body->children[0]->expression_count != 1 ||
         !program.externals[0].function_body->children[0]->expressions[0]) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected add return statement with one expression subtree\n");
+            "[parser-reg] FAIL: expected add return statement with one expression subtree\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -148,7 +148,7 @@ static int test_ast_records_function_parameter_count(void) {
     if (!program.externals[0].function_body->children[0]->has_primary_expression ||
         program.externals[0].function_body->children[0]->primary_expression_index != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected return statement primary expression slot metadata\n");
+            "[parser-reg] FAIL: expected return statement primary expression slot metadata\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -156,8 +156,8 @@ static int test_ast_records_function_parameter_count(void) {
 
     if (program.externals[0].return_statement_count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected add return_statement_count=1, got %zu\n",
-                program.externals[0].return_statement_count);
+            "[parser-reg] FAIL: expected add return_statement_count=1, got %zu\n",
+            program.externals[0].return_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -184,10 +184,10 @@ static int test_ast_parses_function_declaration_external(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for function declaration at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for function declaration at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -195,8 +195,8 @@ static int test_ast_parses_function_declaration_external(void) {
 
     if (program.count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 1 function external for declaration, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 1 function external for declaration, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -205,9 +205,9 @@ static int test_ast_parses_function_declaration_external(void) {
     if (program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         !program.externals[0].name || strcmp(program.externals[0].name, "add") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected function declaration add, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[0].kind),
-                program.externals[0].name ? program.externals[0].name : "<null>");
+            "[parser-reg] FAIL: expected function declaration add, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[0].kind),
+            program.externals[0].name ? program.externals[0].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -219,8 +219,8 @@ static int test_ast_parses_function_declaration_external(void) {
         program.externals[0].return_statement_count != 0) {
         fprintf(stderr,
             "[parser-reg] FAIL: expected declaration metadata params=2 def=0 body=NULL returns=0, got params=%zu def=%d body=%p returns=%zu\n",
-                program.externals[0].parameter_count,
-                program.externals[0].is_function_definition,
+            program.externals[0].parameter_count,
+            program.externals[0].is_function_definition,
             (void *)program.externals[0].function_body,
             program.externals[0].return_statement_count);
         lexer_free_tokens(&tokens);
@@ -255,10 +255,10 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for statement-slot input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for statement-slot input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -266,7 +266,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
 
     if (program.count != 1 || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected one function with body for statement-slot test\n");
+            "[parser-reg] FAIL: expected one function with body for statement-slot test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -275,9 +275,9 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     body = program.externals[0].function_body;
     if (body->kind != AST_STMT_COMPOUND || body->child_count != 4) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected compound body with 4 statements, got kind=%d count=%zu\n",
-                (int)body->kind,
-                body->child_count);
+            "[parser-reg] FAIL: expected compound body with 4 statements, got kind=%d count=%zu\n",
+            (int)body->kind,
+            body->child_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -291,7 +291,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     if (!while_stmt || while_stmt->kind != AST_STMT_WHILE || !while_stmt->has_condition_expression ||
         while_stmt->condition_expression_index != 0 || while_stmt->expression_count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: while statement condition slot metadata mismatch\n");
+            "[parser-reg] FAIL: while statement condition slot metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -302,7 +302,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
         for_stmt->for_init_expression_index != 0 || for_stmt->condition_expression_index != 1 ||
         for_stmt->for_step_expression_index != 2 || for_stmt->expression_count != 3) {
         fprintf(stderr,
-                "[parser-reg] FAIL: for statement slot metadata mismatch\n");
+            "[parser-reg] FAIL: for statement slot metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -311,7 +311,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     if (!if_stmt || if_stmt->kind != AST_STMT_IF || !if_stmt->has_condition_expression ||
         if_stmt->condition_expression_index != 0 || if_stmt->expression_count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: if statement condition slot metadata mismatch\n");
+            "[parser-reg] FAIL: if statement condition slot metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -320,7 +320,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     if (!ret_stmt || ret_stmt->kind != AST_STMT_RETURN || !ret_stmt->has_primary_expression ||
         ret_stmt->primary_expression_index != 0 || ret_stmt->expression_count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: return statement primary slot metadata mismatch\n");
+            "[parser-reg] FAIL: return statement primary slot metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -351,10 +351,10 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for scope-name input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for scope-name input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -363,7 +363,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
     if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         !program.externals[0].is_function_definition || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected one function definition with body for scope-name test\n");
+            "[parser-reg] FAIL: expected one function definition with body for scope-name test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -374,7 +374,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
         strcmp(program.externals[0].parameter_names[0], "a") != 0 ||
         strcmp(program.externals[0].parameter_names[1], "b") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected function parameter names [a,b] to be recorded\n");
+            "[parser-reg] FAIL: expected function parameter names [a,b] to be recorded\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -383,7 +383,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
     body = program.externals[0].function_body;
     if (body->kind != AST_STMT_COMPOUND || body->child_count != 3) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected compound body with 3 statements in scope-name test\n");
+            "[parser-reg] FAIL: expected compound body with 3 statements in scope-name test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -398,7 +398,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
         strcmp(decl_stmt->declaration_names[0], "x") != 0 ||
         strcmp(decl_stmt->declaration_names[1], "y") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected declaration statement names [x,y] to be recorded\n");
+            "[parser-reg] FAIL: expected declaration statement names [x,y] to be recorded\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -411,7 +411,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
         decl_stmt->expressions[0]->as.number_value != 0 ||
         decl_stmt->expressions[1]->as.number_value != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected declaration initializer expressions [0,1] in statement AST\n");
+            "[parser-reg] FAIL: expected declaration initializer expressions [0,1] in statement AST\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -421,7 +421,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
         !for_stmt->declaration_names || !for_stmt->declaration_names[0] ||
         strcmp(for_stmt->declaration_names[0], "i") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected for-init declaration name [i] to be recorded\n");
+            "[parser-reg] FAIL: expected for-init declaration name [i] to be recorded\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -432,7 +432,7 @@ static int test_ast_records_scope_declaration_and_parameter_names(void) {
         for_stmt->condition_expression_index != 1 || for_stmt->for_step_expression_index != 2 ||
         for_stmt->expression_count != 3) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected for-init declaration expression slots to be recorded\n");
+            "[parser-reg] FAIL: expected for-init declaration expression slots to be recorded\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -460,10 +460,10 @@ static int test_ast_parses_unnamed_parameter_prototype(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: unnamed-parameter prototype should parse, failed at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: unnamed-parameter prototype should parse, failed at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -476,7 +476,7 @@ static int test_ast_parses_unnamed_parameter_prototype(void) {
         program.externals[0].is_function_definition != 0 ||
         program.externals[0].return_statement_count != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: unnamed-parameter prototype metadata mismatch\n");
+            "[parser-reg] FAIL: unnamed-parameter prototype metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -504,7 +504,7 @@ static int test_ast_rejects_unnamed_parameter_definition(void) {
 
     if (parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: unnamed-parameter definition should fail but parsed successfully\n");
+            "[parser-reg] FAIL: unnamed-parameter definition should fail but parsed successfully\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -512,8 +512,8 @@ static int test_ast_rejects_unnamed_parameter_definition(void) {
 
     if (strstr(err.message, "must have names") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected unnamed-definition diagnostic, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected unnamed-definition diagnostic, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -540,10 +540,10 @@ static int test_ast_records_multiple_function_returns(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for function-return-count input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for function-return-count input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -551,7 +551,7 @@ static int test_ast_records_multiple_function_returns(void) {
 
     if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected exactly one function external for return-count test\n");
+            "[parser-reg] FAIL: expected exactly one function external for return-count test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -559,8 +559,8 @@ static int test_ast_records_multiple_function_returns(void) {
 
     if (program.externals[0].return_statement_count != 2) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected function return_statement_count=2, got %zu\n",
-                program.externals[0].return_statement_count);
+            "[parser-reg] FAIL: expected function return_statement_count=2, got %zu\n",
+            program.externals[0].return_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -587,10 +587,10 @@ static int test_ast_partial_return_not_all_paths(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for partial-return input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for partial-return input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -598,7 +598,7 @@ static int test_ast_partial_return_not_all_paths(void) {
 
     if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected exactly one function external for partial-return test\n");
+            "[parser-reg] FAIL: expected exactly one function external for partial-return test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -606,8 +606,8 @@ static int test_ast_partial_return_not_all_paths(void) {
 
     if (program.externals[0].return_statement_count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected partial-return metadata returns=1, got returns=%zu\n",
-                program.externals[0].return_statement_count);
+            "[parser-reg] FAIL: expected partial-return metadata returns=1, got returns=%zu\n",
+            program.externals[0].return_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -636,10 +636,10 @@ static int test_ast_flow_is_not_semantic_authority(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should not enforce semantic all-path return, got %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: parser should not enforce semantic all-path return, got %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -648,8 +648,8 @@ static int test_ast_flow_is_not_semantic_authority(void) {
     if (program.count != 2 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         program.externals[1].kind != AST_EXTERNAL_FUNCTION) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected two function externals in parser-flow-authority test, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected two function externals in parser-flow-authority test, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -658,9 +658,9 @@ static int test_ast_flow_is_not_semantic_authority(void) {
     if (program.externals[0].return_statement_count != 1 ||
         program.externals[1].return_statement_count != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected return counts [1,0] in parser-flow-authority test, got [%zu,%zu]\n",
-                program.externals[0].return_statement_count,
-                program.externals[1].return_statement_count);
+            "[parser-reg] FAIL: expected return counts [1,0] in parser-flow-authority test, got [%zu,%zu]\n",
+            program.externals[0].return_statement_count,
+            program.externals[1].return_statement_count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -688,10 +688,10 @@ static int test_ast_accepts_break_continue_inside_loops(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser should accept break/continue inside loops, got %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: parser should accept break/continue inside loops, got %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -700,7 +700,7 @@ static int test_ast_accepts_break_continue_inside_loops(void) {
     if (program.count != 1 ||
     program.externals[0].kind != AST_EXTERNAL_FUNCTION) {
         fprintf(stderr,
-        "[parser-reg] FAIL: expected function external after break/continue loop\n");
+            "[parser-reg] FAIL: expected function external after break/continue loop\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -734,8 +734,8 @@ static int test_ast_rejects_break_outside_loop(void) {
 
     if (strstr(err.message, "inside loops") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected break-outside-loop diagnostic, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected break-outside-loop diagnostic, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -769,8 +769,8 @@ static int test_ast_rejects_continue_outside_loop(void) {
 
     if (strstr(err.message, "inside loops") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected continue-outside-loop diagnostic, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected continue-outside-loop diagnostic, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -797,10 +797,10 @@ static int test_ast_records_declaration_initializer_metadata(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for declaration-initializer input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for declaration-initializer input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -808,8 +808,8 @@ static int test_ast_records_declaration_initializer_metadata(void) {
 
     if (program.count != 3) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 3 declaration externals, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 3 declaration externals, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -819,10 +819,10 @@ static int test_ast_records_declaration_initializer_metadata(void) {
         program.externals[1].has_initializer != 1 ||
         program.externals[2].has_initializer != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected initializer flags [0,1,0], got [%d,%d,%d]\n",
-                program.externals[0].has_initializer,
-                program.externals[1].has_initializer,
-                program.externals[2].has_initializer);
+            "[parser-reg] FAIL: expected initializer flags [0,1,0], got [%d,%d,%d]\n",
+            program.externals[0].has_initializer,
+            program.externals[1].has_initializer,
+            program.externals[2].has_initializer);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -834,7 +834,7 @@ static int test_ast_records_declaration_initializer_metadata(void) {
         program.externals[1].declaration_initializer->kind != AST_EXPR_NUMBER ||
         program.externals[1].declaration_initializer->as.number_value != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected declaration initializer AST slots [NULL,number(1),NULL]\n");
+            "[parser-reg] FAIL: expected declaration initializer AST slots [NULL,number(1),NULL]\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -860,16 +860,16 @@ static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
 
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: lexer failed for initializer-slot alignment test input\n");
+            "[parser-reg] FAIL: lexer failed for initializer-slot alignment test input\n");
         return 0;
     }
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for initializer-slot alignment input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for initializer-slot alignment input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -878,7 +878,7 @@ static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
     if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
         !program.externals[0].is_function_definition || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected one function definition for initializer-slot alignment test\n");
+            "[parser-reg] FAIL: expected one function definition for initializer-slot alignment test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -887,7 +887,7 @@ static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
     body = program.externals[0].function_body;
     if (body->kind != AST_STMT_COMPOUND || body->child_count != 3) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected compound body with 3 statements for initializer-slot alignment test\n");
+            "[parser-reg] FAIL: expected compound body with 3 statements for initializer-slot alignment test\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -904,7 +904,7 @@ static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
         decl_stmt->expressions[1]->kind != AST_EXPR_NUMBER ||
         decl_stmt->expressions[1]->as.number_value != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: declaration initializer slots did not align with declarator order [x,y,z]\n");
+            "[parser-reg] FAIL: declaration initializer slots did not align with declarator order [x,y,z]\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -924,7 +924,7 @@ static int test_ast_aligns_initializer_slots_with_declarator_order(void) {
         for_stmt->expressions[1]->kind != AST_EXPR_NUMBER ||
         for_stmt->expressions[1]->as.number_value != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: for-init declaration initializer slots did not align with declarator order [i,j,k]\n");
+            "[parser-reg] FAIL: for-init declaration initializer slots did not align with declarator order [i,j,k]\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -951,10 +951,10 @@ static int test_ast_collects_all_top_level_declarators(void) {
 
     if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST parse failed for multi-declarator input at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST parse failed for multi-declarator input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -962,8 +962,8 @@ static int test_ast_collects_all_top_level_declarators(void) {
 
     if (program.count != 2) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected 2 declarations for int a,b;, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected 2 declarations for int a,b;, got %zu\n",
+            program.count);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -972,9 +972,9 @@ static int test_ast_collects_all_top_level_declarators(void) {
     if (program.externals[0].kind != AST_EXTERNAL_DECLARATION ||
         !program.externals[0].name || strcmp(program.externals[0].name, "a") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected first declarator name a, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[0].kind),
-                program.externals[0].name ? program.externals[0].name : "<null>");
+            "[parser-reg] FAIL: expected first declarator name a, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[0].kind),
+            program.externals[0].name ? program.externals[0].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -983,9 +983,9 @@ static int test_ast_collects_all_top_level_declarators(void) {
     if (program.externals[1].kind != AST_EXTERNAL_DECLARATION ||
         !program.externals[1].name || strcmp(program.externals[1].name, "b") != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected second declarator name b, got kind=%s name=%s\n",
-                ast_external_kind_name(program.externals[1].kind),
-                program.externals[1].name ? program.externals[1].name : "<null>");
+            "[parser-reg] FAIL: expected second declarator name b, got kind=%s name=%s\n",
+            ast_external_kind_name(program.externals[1].kind),
+            program.externals[1].name ? program.externals[1].name : "<null>");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
@@ -1014,10 +1014,10 @@ static int test_ast_failure_clears_previous_program(void) {
 
     if (!parser_parse_translation_unit_ast(&ok_tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: AST setup parse failed at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: AST setup parse failed at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1025,8 +1025,8 @@ static int test_ast_failure_clears_previous_program(void) {
 
     if (program.count != 1) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected setup AST count=1, got %zu\n",
-                program.count);
+            "[parser-reg] FAIL: expected setup AST count=1, got %zu\n",
+            program.count);
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1053,8 +1053,8 @@ static int test_ast_failure_clears_previous_program(void) {
 
     if (program.count != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: failed parse should clear AST, got count=%zu\n",
-                program.count);
+            "[parser-reg] FAIL: failed parse should clear AST, got count=%zu\n",
+            program.count);
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1093,10 +1093,10 @@ static int test_ast_failure_clears_complex_previous_program(void) {
 
     if (!parser_parse_translation_unit_ast(&ok_tokens, &program, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: complex setup parse failed at %d:%d: %s\n",
-                err.line,
-                err.column,
-                err.message);
+            "[parser-reg] FAIL: complex setup parse failed at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1104,9 +1104,9 @@ static int test_ast_failure_clears_complex_previous_program(void) {
 
     if (program.count != 1 || !program.externals[0].function_body) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected complex setup AST with one function body, got count=%zu body=%p\n",
-                program.count,
-                (void *)(program.count > 0 ? program.externals[0].function_body : NULL));
+            "[parser-reg] FAIL: expected complex setup AST with one function body, got count=%zu body=%p\n",
+            program.count,
+            (void *)(program.count > 0 ? program.externals[0].function_body : NULL));
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1133,10 +1133,10 @@ static int test_ast_failure_clears_complex_previous_program(void) {
 
     if (program.count != 0 || program.externals != NULL || program.capacity != 0) {
         fprintf(stderr,
-                "[parser-reg] FAIL: failed parse should fully clear complex AST, got count=%zu externals=%p capacity=%zu\n",
-                program.count,
-                (void *)program.externals,
-                program.capacity);
+            "[parser-reg] FAIL: failed parse should fully clear complex AST, got count=%zu externals=%p capacity=%zu\n",
+            program.count,
+            (void *)program.externals,
+            program.capacity);
         lexer_free_tokens(&ok_tokens);
         ast_program_free(&program);
         return 0;
@@ -1194,7 +1194,7 @@ static int test_deep_assignment_hits_recursion_limit(void) {
 
     if (parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser unexpectedly accepted excessively deep assignment chain\n");
+            "[parser-reg] FAIL: parser unexpectedly accepted excessively deep assignment chain\n");
         lexer_free_tokens(&tokens);
         free(source);
         return 0;
@@ -1202,8 +1202,8 @@ static int test_deep_assignment_hits_recursion_limit(void) {
 
     if (strstr(err.message, "recursion limit") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected recursion-limit diagnostic, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected recursion-limit diagnostic, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         free(source);
         return 0;
@@ -1269,7 +1269,7 @@ static int test_deep_statement_nesting_hits_recursion_limit(void) {
 
     if (parser_parse_translation_unit(&tokens, &err)) {
         fprintf(stderr,
-                "[parser-reg] FAIL: parser unexpectedly accepted excessively deep statement nesting\n");
+            "[parser-reg] FAIL: parser unexpectedly accepted excessively deep statement nesting\n");
         lexer_free_tokens(&tokens);
         free(source);
         return 0;
@@ -1277,8 +1277,8 @@ static int test_deep_statement_nesting_hits_recursion_limit(void) {
 
     if (strstr(err.message, "recursion limit") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected recursion-limit diagnostic for statements, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected recursion-limit diagnostic for statements, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         free(source);
         return 0;
@@ -1286,8 +1286,8 @@ static int test_deep_statement_nesting_hits_recursion_limit(void) {
 
     if (strstr(err.message, "statement") == NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: expected statement recursion diagnostic, got: %s\n",
-                err.message);
+            "[parser-reg] FAIL: expected statement recursion diagnostic, got: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         free(source);
         return 0;
@@ -1295,8 +1295,8 @@ static int test_deep_statement_nesting_hits_recursion_limit(void) {
 
     if (strstr(err.message, "unary-expression") != NULL) {
         fprintf(stderr,
-                "[parser-reg] FAIL: statement nesting should not be reported as unary-expression: %s\n",
-                err.message);
+            "[parser-reg] FAIL: statement nesting should not be reported as unary-expression: %s\n",
+            err.message);
         lexer_free_tokens(&tokens);
         free(source);
         return 0;

@@ -62,8 +62,8 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
 }
 
 AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *program,
-                                                               AstExternalKind kind,
-                                                               const Token *name_token) {
+    AstExternalKind kind,
+    const Token *name_token) {
     AstExternal external;
     AstExternal *new_data;
     size_t next_capacity;

@@ -28,9 +28,9 @@ typedef struct {
 #endif
 
 static int parse_source_to_ast(const char *source,
-                               TokenArray *tokens,
-                               AstProgram *program,
-                               ParserError *parse_err);
+    TokenArray *tokens,
+    AstProgram *program,
+    ParserError *parse_err);
 static int run_callable_diag_case(const CallableDiagCase *c);
 static int run_callable_pass_case(const CallablePassCase *c);
 #endif

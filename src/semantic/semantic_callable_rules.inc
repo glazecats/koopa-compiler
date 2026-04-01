@@ -5,14 +5,14 @@
 #else
 
 static int semantic_check_single_callable_rule(const AstProgram *program,
-                                               size_t func_index,
-                                               int include_current_external,
-                                               const char *called_name,
-                                               int call_line,
-                                               int call_column,
-                                               size_t called_arg_count,
-                                               int callee_kind,
-                                               SemanticError *error) {
+    size_t func_index,
+    int include_current_external,
+    const char *called_name,
+    int call_line,
+    int call_column,
+    size_t called_arg_count,
+    int callee_kind,
+    SemanticError *error) {
     size_t j;
     int found_decl = 0;
     int found_matching_param_count = 0;
@@ -30,14 +30,14 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
         if (error) {
             if (callee_kind == AST_CALL_CALLEE_CALL_RESULT) {
                 semantic_set_error(error,
-                                   call_line,
-                                   call_column,
-                                   "SEMA-CALL-005: call result is not callable in this semantic subset; callee_kind=call_result");
+                    call_line,
+                    call_column,
+                    "SEMA-CALL-005: call result is not callable in this semantic subset; callee_kind=call_result");
             } else {
                 semantic_set_error(error,
-                                   call_line,
-                                   call_column,
-                                   "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset; callee_kind=non_identifier");
+                    call_line,
+                    call_column,
+                    "SEMA-CALL-006: non-identifier callee is not supported in this semantic subset; callee_kind=non_identifier");
             }
         }
         return 0;
@@ -97,9 +97,9 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
         if (error) {
             char msg[512];
             snprintf(msg,
-                     sizeof(msg),
-                     "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
-                     callee_preview);
+                sizeof(msg),
+                "SEMA-CALL-003: callee=%s; symbol_kind=non_function; call to non-function symbol",
+                callee_preview);
             semantic_set_error(error, call_line, call_column, msg);
         }
         return 0;
@@ -109,11 +109,11 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
         if (error) {
             char msg[512];
             snprintf(msg,
-                     sizeof(msg),
-                     "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
-                     callee_preview,
-                     expected_arg_count,
-                     called_arg_count);
+                sizeof(msg),
+                "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
+                callee_preview,
+                expected_arg_count,
+                called_arg_count);
             semantic_set_error(error, call_line, call_column, msg);
         }
         return 0;
@@ -124,16 +124,16 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
             char msg[512];
             if (has_later_function_decl) {
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-CALL-002: callee=%s; decl_line=%d; decl_col=%d; call before declaration",
-                         callee_preview,
-                         later_decl_line,
-                         later_decl_column);
+                    sizeof(msg),
+                    "SEMA-CALL-002: callee=%s; decl_line=%d; decl_col=%d; call before declaration",
+                    callee_preview,
+                    later_decl_line,
+                    later_decl_column);
             } else {
                 snprintf(msg,
-                         sizeof(msg),
-                         "SEMA-CALL-001: callee=%s; call to undeclared function",
-                         callee_preview);
+                    sizeof(msg),
+                    "SEMA-CALL-001: callee=%s; call to undeclared function",
+                    callee_preview);
             }
             semantic_set_error(error, call_line, call_column, msg);
         }
@@ -160,20 +160,20 @@ static int semantic_check_call_expr_postorder(const AstExpression *expr, void *c
     callee_kind = classify_ast_call_callee(expr->as.call.callee, &called_name);
 
     return semantic_check_single_callable_rule(visit_ctx->program,
-                                               visit_ctx->func_index,
-                                               visit_ctx->include_current_external,
-                                               called_name,
-                                               expr->line,
-                                               expr->column,
-                                               expr->as.call.arg_count,
-                                               callee_kind,
-                                               visit_ctx->error);
+        visit_ctx->func_index,
+        visit_ctx->include_current_external,
+        called_name,
+        expr->line,
+        expr->column,
+        expr->as.call.arg_count,
+        callee_kind,
+        visit_ctx->error);
 }
 
 static int semantic_check_function_callable_rules(const AstProgram *program,
-                                                  size_t func_index,
-                                                  const AstExternal *func,
-                                                  SemanticError *error) {
+    size_t func_index,
+    const AstExternal *func,
+    SemanticError *error) {
     CallableRuleVisitCtx visit_ctx;
 
     if (!program || !func) {
@@ -187,9 +187,9 @@ static int semantic_check_function_callable_rules(const AstProgram *program,
 
     if (!func->function_body) {
         semantic_set_error(error,
-                           func->line,
-                           func->column,
-                           "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
+            func->line,
+            func->column,
+            "SEMA-INT-005: function definition missing statement AST body during AST-primary semantic phase");
         return 0;
     }
 
@@ -198,15 +198,15 @@ static int semantic_check_function_callable_rules(const AstProgram *program,
     visit_ctx.include_current_external = 1;
     visit_ctx.error = error;
     return walk_statement_postorder(func->function_body,
-                                    semantic_check_call_expr_postorder,
-                                    &visit_ctx,
-                                    error);
+        semantic_check_call_expr_postorder,
+        &visit_ctx,
+        error);
 }
 
 static int semantic_check_top_level_initializer_callable_rules(const AstProgram *program,
-                                                               size_t external_index,
-                                                               const AstExpression *expr,
-                                                               SemanticError *error) {
+    size_t external_index,
+    const AstExpression *expr,
+    SemanticError *error) {
     CallableRuleVisitCtx visit_ctx;
 
     if (!program || !expr) {
