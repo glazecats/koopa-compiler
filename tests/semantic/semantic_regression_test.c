@@ -176,6 +176,9 @@ int main(void) {
     if (!test_semantic_rejects_function_variable_conflict()) {
         return 1;
     }
+    if (!test_semantic_rejects_variable_function_conflict()) {
+        return 1;
+    }
     if (!test_semantic_allows_repeated_declaration()) {
         return 1;
     }
@@ -186,6 +189,9 @@ int main(void) {
         return 1;
     }
     if (!test_semantic_allows_unnamed_external_contract()) {
+        return 1;
+    }
+    if (!test_semantic_rejects_null_program_contract()) {
         return 1;
     }
     if (!test_semantic_rejects_function_definition_without_full_return()) {

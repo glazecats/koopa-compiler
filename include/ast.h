@@ -107,6 +107,8 @@ typedef struct {
     AstExpression *declaration_initializer;
     size_t parameter_count;
     char **parameter_names;
+    int *parameter_name_lines;
+    int *parameter_name_columns;
     int is_function_definition;
     AstStatement *function_body;
     size_t return_statement_count;

@@ -1085,8 +1085,16 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
     if (func->parameter_names) {
         for (i = 0; i < func->parameter_count; ++i) {
             char *single_name = func->parameter_names[i];
+            int declaration_line = func->line;
+            int declaration_column = func->column;
             if (!single_name || single_name[0] == '\0') {
                 continue;
+            }
+            if (func->parameter_name_lines && func->parameter_name_lines[i] > 0) {
+                declaration_line = func->parameter_name_lines[i];
+            }
+            if (func->parameter_name_columns && func->parameter_name_columns[i] > 0) {
+                declaration_column = func->parameter_name_columns[i];
             }
             if (!semantic_scope_add_declaration_names(&scopes,
                 program,
@@ -1094,8 +1102,8 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
                 &scopes,
                 &single_name,
                 1,
-                func->line,
-                func->column,
+                declaration_line,
+                declaration_column,
                 error)) {
                 scope_stack_free(&scopes);
                 return 0;

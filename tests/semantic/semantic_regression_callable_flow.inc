@@ -254,35 +254,16 @@ static int test_semantic_accepts_valid_program(void) {
 }
 
 static int test_semantic_rejects_duplicate_function(void) {
-    const char *source = "int main(){return 0;}\nint main(){return 1;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "TOP-003 duplicate function definition",
+        "int main(){return 0;}\nint main(){return 1;}\n",
+        "SEMA-TOP-003",
+        "identifier=main; duplicate function definition",
+        2,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr, "[semantic-reg] FAIL: duplicate function definitions should fail\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "Duplicate function") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected duplicate-function diagnostic, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_allows_function_declaration_then_definition(void) {
@@ -336,101 +317,55 @@ static int test_semantic_allows_duplicate_function_declarations(void) {
 }
 
 static int test_semantic_rejects_function_declaration_count_mismatch(void) {
-    const char *source = "int f(int a);\nint f(int a,int b);\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "TOP-002 declaration count mismatch",
+        "int f(int a);\nint f(int a,int b);\n",
+        "SEMA-TOP-002",
+        "identifier=f; prior_params=1; current_params=2; conflicting function declarations: parameter count mismatch",
+        2,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: mismatched declaration parameter counts should fail\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_rejects_declaration_definition_count_mismatch(void) {
-    const char *source = "int f(int a);\nint f(){return 0;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "TOP-002 declaration definition mismatch",
+        "int f(int a);\nint f(){return 0;}\n",
+        "SEMA-TOP-002",
+        "identifier=f; prior_params=1; current_params=0; conflicting function declarations: parameter count mismatch",
+        2,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: declaration/definition count mismatch should fail\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "parameter count mismatch") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected parameter-count mismatch diagnostic, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_rejects_function_variable_conflict(void) {
-    const char *source = "int main;\nint main(){return 0;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "TOP-004 function variable conflict",
+        "int main;\nint main(){return 0;}\n",
+        "SEMA-TOP-004",
+        "identifier=main; function/variable name conflict at top level",
+        2,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
+    return run_callable_diag_case(&c);
+}
 
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr, "[semantic-reg] FAIL: function/variable conflict should fail\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
+static int test_semantic_rejects_variable_function_conflict(void) {
+    static const CallableDiagCase c = {
+        "TOP-004 variable function conflict",
+        "int main(){return 0;}\nint main;\n",
+        "SEMA-TOP-004",
+        "identifier=main; function/variable name conflict at top level",
+        2,
+        5,
+    };
 
-    if (strstr(sema_err.message, "conflict") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected conflict diagnostic, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_allows_repeated_declaration(void) {
@@ -541,37 +476,45 @@ static int test_semantic_allows_unnamed_external_contract(void) {
     return 1;
 }
 
-static int test_semantic_rejects_function_definition_without_full_return(void) {
-    const char *source = "int f(int a){if(a){return 1;}}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
+static int test_semantic_rejects_null_program_contract(void) {
     SemanticError sema_err;
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+    if (semantic_analyze_program(NULL, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: NULL program contract should fail semantic analysis\n");
         return 0;
     }
 
-    if (semantic_analyze_program(&program, &sema_err)) {
+    if (strstr(sema_err.message, "SEMA-INT-013") == NULL ||
+        strstr(sema_err.message, "semantic input program is NULL") == NULL) {
         fprintf(stderr,
-            "[semantic-reg] FAIL: function definition without full return should fail\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
+            "[semantic-reg] FAIL: expected SEMA-INT-013 NULL-program diagnostic, got: %s\n",
             sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
         return 0;
     }
 
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
+    if (sema_err.line != 0 || sema_err.column != 0) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: expected NULL-program diagnostic at 0:0, got %d:%d\n",
+            sema_err.line,
+            sema_err.column);
+        return 0;
+    }
+
     return 1;
+}
+
+static int test_semantic_rejects_function_definition_without_full_return(void) {
+    static const CallableDiagCase c = {
+        "CF-001 missing full return",
+        "int f(int a){if(a){return 1;}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_accepts_function_definition_with_full_return(void) {
@@ -600,41 +543,26 @@ static int test_semantic_accepts_function_definition_with_full_return(void) {
 }
 
 static int test_semantic_prioritizes_scope_diagnostic_over_return_flow(void) {
-    const char *cases[] = {
+    static const CallableDiagCase cases[] = {
+        {"ORDER-SCOPE-BEFORE-FLOW-IF",
         "int f(){if(foo){return 1;}}\n",
-        "int f(){while(foo){return 1;}}\n"
+        "SEMA-SCOPE-002",
+        "identifier=foo; use of undeclared identifier",
+        1,
+        12},
+        {"ORDER-SCOPE-BEFORE-FLOW-WHILE",
+        "int f(){while(foo){return 1;}}\n",
+        "SEMA-SCOPE-002",
+        "identifier=foo; use of undeclared identifier",
+        1,
+        15},
     };
     size_t i;
 
     for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        TokenArray tokens;
-        AstProgram program;
-        ParserError parse_err;
-        SemanticError sema_err;
-
-        if (!parse_source_to_ast(cases[i], &tokens, &program, &parse_err)) {
+        if (!run_callable_diag_case(&cases[i])) {
             return 0;
         }
-
-        if (semantic_analyze_program(&program, &sema_err)) {
-            fprintf(stderr,
-                "[semantic-reg] FAIL: scope-before-flow ordering case should fail semantic analysis\n");
-            lexer_free_tokens(&tokens);
-            ast_program_free(&program);
-            return 0;
-        }
-
-        if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL) {
-            fprintf(stderr,
-                "[semantic-reg] FAIL: expected SEMA-SCOPE-002 before flow diagnostic, got: %s\n",
-                sema_err.message);
-            lexer_free_tokens(&tokens);
-            ast_program_free(&program);
-            return 0;
-        }
-
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
     }
 
     return 1;
@@ -703,75 +631,54 @@ static int test_semantic_prioritizes_depth_diagnostic_over_return_flow(void) {
         return 0;
     }
 
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
-}
-
-static int test_semantic_rejects_unreachable_return_after_while_true(void) {
-    const char *source = "int f(){while(1){}return 1;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
-
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
+    if (strstr(sema_err.message, "expression depth exceeds semantic analysis limit") == NULL) {
         fprintf(stderr,
-            "[semantic-reg] FAIL: while(1) with unreachable return should fail all-path rule\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
+            "[semantic-reg] FAIL: expected depth-limit diagnostic snippet, got: %s\n",
             sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;
     }
 
+    if (sema_err.line != 1 || sema_err.column != 1822) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: expected depth-before-flow location at 1:1822, got %d:%d\n",
+            sema_err.line,
+            sema_err.column);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
+}
+
+static int test_semantic_rejects_unreachable_return_after_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-001 while true unreachable return",
+        "int f(){while(1){}return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_rejects_unreachable_return_after_for_true(void) {
-    const char *source = "int f(){for(;;){}return 1;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "CF-001 for true unreachable return",
+        "int f(){for(;;){}return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: for(;;) with unreachable return should fail all-path rule\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected all-paths-return diagnostic, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_accepts_reachable_return_after_break_in_while_true(void) {

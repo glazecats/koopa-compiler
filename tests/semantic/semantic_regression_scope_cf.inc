@@ -459,6 +459,16 @@ static int test_semantic_rejects_duplicate_parameter_names(void) {
         return 0;
     }
 
+    if (sema_err.line != 1 || sema_err.column != 17) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: expected duplicate parameter location at 1:17, got %d:%d\n",
+            sema_err.line,
+            sema_err.column);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
@@ -738,45 +748,16 @@ static int test_semantic_allows_for_init_same_declaration_reverse_reference(void
 }
 
 static int test_semantic_ast_primary_return_flow_ignores_tampered_metadata(void) {
-    const char *source = "int main(){while(1){continue;}return 1;}\n";
-    TokenArray tokens;
-    AstProgram program;
-    ParserError parse_err;
-    SemanticError sema_err;
+    static const CallableDiagCase c = {
+        "CF-001 ast primary return flow",
+        "int main(){while(1){continue;}return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
 
-    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
-        return 0;
-    }
-
-    if (program.count != 1 || program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
-        !program.externals[0].is_function_definition || !program.externals[0].function_body) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: setup expected one function definition with statement AST body\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (semantic_analyze_program(&program, &sema_err)) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: non-returning function should fail semantic analysis\n");
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    if (strstr(sema_err.message, "all control-flow paths") == NULL) {
-        fprintf(stderr,
-            "[semantic-reg] FAIL: expected all-paths-return diagnostic from AST-primary flow, got: %s\n",
-            sema_err.message);
-        lexer_free_tokens(&tokens);
-        ast_program_free(&program);
-        return 0;
-    }
-
-    lexer_free_tokens(&tokens);
-    ast_program_free(&program);
-    return 1;
+    return run_callable_diag_case(&c);
 }
 
 static int test_semantic_ast_primary_callable_ignores_tampered_metadata(void) {
@@ -1031,6 +1012,17 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
             "[semantic-reg] FAIL: %s expected all-paths-return diagnostic, got: %s\n",
             case_id,
             sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (sema_err.line != 1 || sema_err.column != 5) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: %s expected location 1:5, got %d:%d\n",
+            case_id,
+            sema_err.line,
+            sema_err.column);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;

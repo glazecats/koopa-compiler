@@ -9,7 +9,7 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
     size_t j;
 
     if (!program) {
-        semantic_set_error(error, 0, 0, "Semantic input program is NULL");
+        semantic_set_error(error, 0, 0, "SEMA-INT-013: semantic input program is NULL");
         return 0;
     }
 
@@ -95,20 +95,38 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             if (lhs->kind == AST_EXTERNAL_FUNCTION && rhs->kind == AST_EXTERNAL_FUNCTION) {
                 if (lhs->parameter_count != rhs->parameter_count) {
                     if (error) {
+                        char preview[128];
+                        char msg[512];
+
+                        format_callee_preview(lhs->name, preview, sizeof(preview));
+                        snprintf(msg,
+                            sizeof(msg),
+                            "SEMA-TOP-002: identifier=%s; prior_params=%zu; current_params=%zu; conflicting function declarations: parameter count mismatch",
+                            preview,
+                            lhs->parameter_count,
+                            rhs->parameter_count);
                         semantic_set_error(error,
                             rhs->line,
                             rhs->column,
-                            "Conflicting function declarations: parameter count mismatch");
+                            msg);
                     }
                     return 0;
                 }
 
                 if (lhs->is_function_definition && rhs->is_function_definition) {
                     if (error) {
+                        char preview[128];
+                        char msg[512];
+
+                        format_callee_preview(lhs->name, preview, sizeof(preview));
+                        snprintf(msg,
+                            sizeof(msg),
+                            "SEMA-TOP-003: identifier=%s; duplicate function definition",
+                            preview);
                         semantic_set_error(error,
                             rhs->line,
                             rhs->column,
-                            "Duplicate function definition");
+                            msg);
                     }
                     return 0;
                 }
@@ -134,10 +152,18 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
 
             if (lhs->kind != rhs->kind) {
                 if (error) {
+                    char preview[128];
+                    char msg[512];
+
+                    format_callee_preview(lhs->name, preview, sizeof(preview));
+                    snprintf(msg,
+                        sizeof(msg),
+                        "SEMA-TOP-004: identifier=%s; function/variable name conflict at top level",
+                        preview);
                     semantic_set_error(error,
                         rhs->line,
                         rhs->column,
-                        "Function/variable name conflict at top level");
+                        msg);
                 }
                 return 0;
             }

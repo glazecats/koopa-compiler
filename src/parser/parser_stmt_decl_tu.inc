@@ -1139,10 +1139,14 @@ static int parse_declaration(Parser *p,
 static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
-    char ***out_parameter_names) {
+    char ***out_parameter_names,
+    int **out_parameter_name_lines,
+    int **out_parameter_name_columns) {
     size_t count = 0;
     size_t name_capacity = 0;
     char **parameter_names = NULL;
+    int *parameter_name_lines = NULL;
+    int *parameter_name_columns = NULL;
 
     if (out_param_count) {
         *out_param_count = 0;
@@ -1153,24 +1157,42 @@ static int parse_parameter_list(Parser *p,
     if (out_parameter_names) {
         *out_parameter_names = NULL;
     }
+    if (out_parameter_name_lines) {
+        *out_parameter_name_lines = NULL;
+    }
+    if (out_parameter_name_columns) {
+        *out_parameter_name_columns = NULL;
+    }
 
     if (check(p, TOKEN_RPAREN)) {
         if (out_parameter_names) {
             *out_parameter_names = parameter_names;
+        }
+        if (out_parameter_name_lines) {
+            *out_parameter_name_lines = parameter_name_lines;
+        }
+        if (out_parameter_name_columns) {
+            *out_parameter_name_columns = parameter_name_columns;
         }
         return 1;
     }
 
     do {
         const Token *parameter_name_tok = NULL;
+        int parameter_line = 0;
+        int parameter_column = 0;
 
         if (!consume(p, TOKEN_KW_INT, "'int'")) {
             free_name_array(parameter_names, count);
+            free(parameter_name_lines);
+            free(parameter_name_columns);
             return 0;
         }
         /* C-style prototypes may omit parameter names: int f(int); */
         if (check(p, TOKEN_IDENTIFIER)) {
             consume_token(p, TOKEN_IDENTIFIER, "identifier", &parameter_name_tok);
+            parameter_line = parameter_name_tok->line;
+            parameter_column = parameter_name_tok->column;
         } else {
             if (out_has_unnamed_parameter) {
                 *out_has_unnamed_parameter = 1;
@@ -1186,6 +1208,8 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok,
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
                     return 0;
                 }
             }
@@ -1196,7 +1220,56 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_copy,
                 parameter_name_tok)) {
                 free_name_array(parameter_names, count);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
                 return 0;
+            }
+            if (out_parameter_name_lines) {
+                int *new_lines;
+
+                if (!parameter_name_lines) {
+                    new_lines = (int *)malloc(name_capacity * sizeof(int));
+                } else {
+                    new_lines = (int *)realloc(parameter_name_lines, name_capacity * sizeof(int));
+                }
+                if (!new_lines) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    return 0;
+                }
+                parameter_name_lines = new_lines;
+                parameter_name_lines[count - 1] = parameter_line;
+            }
+            if (out_parameter_name_columns) {
+                int *new_columns;
+
+                if (!parameter_name_columns) {
+                    new_columns = (int *)malloc(name_capacity * sizeof(int));
+                } else {
+                    new_columns = (int *)realloc(parameter_name_columns,
+                        name_capacity * sizeof(int));
+                }
+                if (!new_columns) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    return 0;
+                }
+                parameter_name_columns = new_columns;
+                parameter_name_columns[count - 1] = parameter_column;
+            }
+            if (out_parameter_name_lines && !parameter_name_tok) {
+                parameter_name_lines[count - 1] = 0;
+            }
+            if (out_parameter_name_columns && !parameter_name_tok) {
+                parameter_name_columns[count - 1] = 0;
             }
         } else {
             count++;
@@ -1209,6 +1282,18 @@ static int parse_parameter_list(Parser *p,
 
     if (out_parameter_names) {
         *out_parameter_names = parameter_names;
+    } else {
+        free_name_array(parameter_names, count);
+    }
+    if (out_parameter_name_lines) {
+        *out_parameter_name_lines = parameter_name_lines;
+    } else {
+        free(parameter_name_lines);
+    }
+    if (out_parameter_name_columns) {
+        *out_parameter_name_columns = parameter_name_columns;
+    } else {
+        free(parameter_name_columns);
     }
 
     return 1;
@@ -1218,6 +1303,8 @@ typedef struct {
     const Token *name_tok;
     size_t parameter_count;
     char **parameter_names;
+    int *parameter_name_lines;
+    int *parameter_name_columns;
     int has_unnamed_parameter;
 } ParsedFunctionSignature;
 
@@ -1229,6 +1316,8 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
+    signature->parameter_name_lines = NULL;
+    signature->parameter_name_columns = NULL;
     signature->has_unnamed_parameter = 0;
 }
 
@@ -1238,16 +1327,32 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
     }
 
     free_name_array(signature->parameter_names, signature->parameter_count);
+    free(signature->parameter_name_lines);
+    free(signature->parameter_name_columns);
     parsed_function_signature_init(signature);
 }
 
 static void parser_commit_parameter_names(char ***out_parameter_names,
+    int **out_parameter_name_lines,
+    int **out_parameter_name_columns,
     char **parameter_names,
+    int *parameter_name_lines,
+    int *parameter_name_columns,
     size_t parameter_count) {
     if (out_parameter_names) {
         *out_parameter_names = parameter_names;
     } else {
         free_name_array(parameter_names, parameter_count);
+    }
+    if (out_parameter_name_lines) {
+        *out_parameter_name_lines = parameter_name_lines;
+    } else {
+        free(parameter_name_lines);
+    }
+    if (out_parameter_name_columns) {
+        *out_parameter_name_columns = parameter_name_columns;
+    } else {
+        free(parameter_name_columns);
     }
 }
 
@@ -1268,7 +1373,9 @@ static int parse_function_external_signature(Parser *p,
     if (!parse_parameter_list(p,
         &out_signature->parameter_count,
         &out_signature->has_unnamed_parameter,
-        capture_parameter_names ? &out_signature->parameter_names : NULL)) {
+        capture_parameter_names ? &out_signature->parameter_names : NULL,
+        capture_parameter_names ? &out_signature->parameter_name_lines : NULL,
+        capture_parameter_names ? &out_signature->parameter_name_columns : NULL)) {
         return 0;
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
@@ -1318,6 +1425,8 @@ static int parse_function_external(Parser *p,
     const Token **out_name_token,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    int **out_parameter_name_lines,
+    int **out_parameter_name_columns,
     int *out_is_definition,
     AstStatement **out_function_body,
     size_t *out_return_statement_count) {
@@ -1332,6 +1441,12 @@ static int parse_function_external(Parser *p,
     }
     if (out_parameter_names) {
         *out_parameter_names = NULL;
+    }
+    if (out_parameter_name_lines) {
+        *out_parameter_name_lines = NULL;
+    }
+    if (out_parameter_name_columns) {
+        *out_parameter_name_columns = NULL;
     }
     if (out_is_definition) {
         *out_is_definition = 0;
@@ -1358,9 +1473,15 @@ static int parse_function_external(Parser *p,
 
     if (match(p, TOKEN_SEMICOLON)) {
         parser_commit_parameter_names(out_parameter_names,
+            out_parameter_name_lines,
+            out_parameter_name_columns,
             signature.parameter_names,
+            signature.parameter_name_lines,
+            signature.parameter_name_columns,
             signature.parameter_count);
         signature.parameter_names = NULL;
+        signature.parameter_name_lines = NULL;
+        signature.parameter_name_columns = NULL;
         if (out_is_definition) {
             *out_is_definition = 0;
         }
@@ -1377,9 +1498,15 @@ static int parse_function_external(Parser *p,
             out_return_statement_count);
         if (body_ok) {
             parser_commit_parameter_names(out_parameter_names,
+                out_parameter_name_lines,
+                out_parameter_name_columns,
                 signature.parameter_names,
+                signature.parameter_name_lines,
+                signature.parameter_name_columns,
                 signature.parameter_count);
             signature.parameter_names = NULL;
+            signature.parameter_name_lines = NULL;
+            signature.parameter_name_columns = NULL;
         } else {
             parsed_function_signature_release(&signature);
         }
@@ -1440,6 +1567,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     const Token *external_name = NULL;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
+    int *external_parameter_name_lines = NULL;
+    int *external_parameter_name_columns = NULL;
     int external_is_definition = 0;
     AstStatement *external_function_body = NULL;
     size_t external_return_statement_count = 0;
@@ -1448,6 +1577,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_name : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
+        out_program ? &external_parameter_name_lines : NULL,
+        out_program ? &external_parameter_name_columns : NULL,
         out_program ? &external_is_definition : NULL,
         out_program ? &external_function_body : NULL,
         out_program ? &external_return_statement_count : NULL)) {
@@ -1461,6 +1592,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     if (!parser_ast_program_add_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
         free_name_array(external_parameter_names, external_parameter_count);
+        free(external_parameter_name_lines);
+        free(external_parameter_name_columns);
         parser_ast_statement_free(external_function_body);
         set_error(p, peek(p), "Out of memory while building AST");
         return 0;
@@ -1468,6 +1601,10 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
+    out_program->externals[out_program->count - 1].parameter_name_lines =
+        external_parameter_name_lines;
+    out_program->externals[out_program->count - 1].parameter_name_columns =
+        external_parameter_name_columns;
     out_program->externals[out_program->count - 1].is_function_definition = external_is_definition;
     out_program->externals[out_program->count - 1].function_body = external_function_body;
     out_program->externals[out_program->count - 1].return_statement_count =
