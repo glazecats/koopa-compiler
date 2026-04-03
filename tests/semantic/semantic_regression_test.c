@@ -212,6 +212,9 @@ int main(void) {
     if (!test_semantic_rejects_unreachable_return_after_for_true()) {
         return 1;
     }
+    if (!test_semantic_rejects_call_guard_return_only_without_tail_return()) {
+        return 1;
+    }
     if (!test_semantic_accepts_reachable_return_after_break_in_while_true()) {
         return 1;
     }

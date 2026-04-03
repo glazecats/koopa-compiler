@@ -1045,8 +1045,12 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
  *
  * Conservative CF policy note:
  * - `SEMA-CF-001` should avoid false positives.
- * - Unknown/value-dependent loop termination is accepted by default.
- * - Only reliably proven must-not-return loop paths are rejected.
+ * - Value-dependent loops are accepted when exit remains plausibly mutation-driven
+ *   or call-driven under the current heuristic.
+ * - Value-dependent loops can still be rejected when the guard is treated as
+ *   stable and loop entry does not by itself prove all-path return.
+ * - Only loop shapes that remain conservatively non-returning under that policy
+ *   are rejected.
  */
 typedef enum {
     CF_EXPECT_ACCEPT,
@@ -1094,6 +1098,14 @@ static const CfCase kCfMustPassOrFailNow[] = {
     {"CF-09", "int f(){while(1){continue;}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-10", "int f(){for(;;){int x=1;}return 0;}\n", CF_EXPECT_REJECT},
     {"CF-11", "int f(){while(1){while(1){break;}break;}return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-73", "int f(int a){while(a){return 1;}}\n", CF_EXPECT_REJECT},
+    {"CF-74", "int f(int a){for(;a;){return 1;}}\n", CF_EXPECT_REJECT},
+    {"CF-76", "int f(int a){for(;a;){if(1){return 1;} else {return 2;}}}\n", CF_EXPECT_REJECT},
+    {"CF-77", "int f(int a){while(a){{return 1;}}}\n", CF_EXPECT_REJECT},
+    {"CF-78", "int f(int a){while(a){return 1;} return 0;}\n", CF_EXPECT_ACCEPT},
+    {"CF-79", "int f(int a){for(;a;){return 1;} return 0;}\n", CF_EXPECT_ACCEPT},
+    {"CF-80", "int f(){while(1){break;return 1;}}\n", CF_EXPECT_REJECT},
+    {"CF-81", "int f(){for(;;){break;return 1;}}\n", CF_EXPECT_REJECT},
 };
 
 /* conservative_loop_acceptance: body/step updates keep loop exits plausible. */

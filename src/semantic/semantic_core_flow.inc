@@ -1316,9 +1316,13 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             guaranteed_return = 0;
             may_fallthrough = 1;
             may_non_terminating = 0;
-        } else if (body_guaranteed_return) {
+        } else if (body_guaranteed_return && cond_always_true) {
             guaranteed_return = 1;
             may_fallthrough = 0;
+            may_non_terminating = 0;
+        } else if (body_guaranteed_return) {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
             may_non_terminating = 0;
         } else if (exit_summary.exits_loop_on_all_paths) {
             guaranteed_return = 0;
@@ -1402,9 +1406,13 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             guaranteed_return = 0;
             may_fallthrough = 1;
             may_non_terminating = 0;
-        } else if (body_guaranteed_return) {
+        } else if (body_guaranteed_return && cond_always_true) {
             guaranteed_return = 1;
             may_fallthrough = 0;
+            may_non_terminating = 0;
+        } else if (body_guaranteed_return) {
+            guaranteed_return = 0;
+            may_fallthrough = 1;
             may_non_terminating = 0;
         } else if (exit_summary.exits_loop_on_all_paths) {
             guaranteed_return = 0;

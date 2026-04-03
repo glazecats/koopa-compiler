@@ -681,6 +681,19 @@ static int test_semantic_rejects_unreachable_return_after_for_true(void) {
     return run_callable_diag_case(&c);
 }
 
+static int test_semantic_rejects_call_guard_return_only_without_tail_return(void) {
+    static const CallableDiagCase c = {
+        "CF-75 call guard return only",
+        "int g();\nint f(){while(g()){return 1;}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        2,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
 static int test_semantic_accepts_reachable_return_after_break_in_while_true(void) {
     const char *source = "int f(){while(1){break;}return 1;}\n";
     TokenArray tokens;
