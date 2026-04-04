@@ -8,6 +8,7 @@ BUILD_DIR := build
 LEXER_BUILD_DIR := $(BUILD_DIR)/lexer
 PARSER_BUILD_DIR := $(BUILD_DIR)/parser
 SEMANTIC_BUILD_DIR := $(BUILD_DIR)/semantic
+IR_BUILD_DIR := $(BUILD_DIR)/ir
 
 LEXER_TEST_BIN := $(LEXER_BUILD_DIR)/lexer_test
 PARSER_TEST_BIN := $(PARSER_BUILD_DIR)/parser_test
@@ -15,6 +16,8 @@ LEXER_REGRESSION_BIN := $(LEXER_BUILD_DIR)/lexer_regression_test
 PARSER_REGRESSION_BIN := $(PARSER_BUILD_DIR)/parser_regression_test
 PARSER_LEGACY_LINK_BIN := $(PARSER_BUILD_DIR)/parser_legacy_link_test
 SEMANTIC_REGRESSION_BIN := $(SEMANTIC_BUILD_DIR)/semantic_regression_test
+IR_REGRESSION_BIN := $(IR_BUILD_DIR)/ir_regression_test
+IR_VERIFIER_BIN := $(IR_BUILD_DIR)/ir_verifier_test
 
 LEXER_TEST_INPUT := tests/lexer/test.c
 PARSER_TEST_INPUT := tests/parser/test.c
@@ -30,6 +33,16 @@ SEMANTIC_SPLIT_INCLUDES := \
 	src/semantic/semantic_scope_rules.inc \
 	src/semantic/semantic_entry.inc
 
+IR_SPLIT_INCLUDES := \
+	src/ir/ir_core.inc \
+	src/ir/ir_lower_scope.inc \
+	src/ir/ir_lower_expr.inc \
+	src/ir/ir_lower_stmt.inc \
+	src/ir/ir_global_dep.inc \
+	src/ir/ir_global_init.inc \
+	src/ir/ir_verify.inc \
+	src/ir/ir_dump.inc
+
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -42,12 +55,12 @@ SEMANTIC_REGRESSION_INCLUDES := \
 	tests/semantic/semantic_regression_callable_flow.inc \
 	tests/semantic/semantic_regression_scope_cf.inc
 
-.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-fanalyzer test-asan test-strict-warnings clean
 
 all: test
 
 dirs:
-	@mkdir -p $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR)
+	@mkdir -p $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR) $(IR_BUILD_DIR)
 
 lexer: $(LEXER_TEST_BIN)
 
@@ -70,6 +83,12 @@ $(PARSER_LEGACY_LINK_BIN): src/lexer/lexer.c src/parser/parser.c tests/parser/pa
 
 $(SEMANTIC_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/semantic/semantic_regression_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(SEMANTIC_REGRESSION_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c tests/semantic/semantic_regression_test.c -o $@
+
+$(IR_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_regression_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_regression_test.c -o $@
+
+$(IR_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c -o $@
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"
@@ -119,6 +138,22 @@ test-semantic-regression: $(SEMANTIC_REGRESSION_BIN)
 	rm -f "$$tmp"; \
 	exit $$status
 
+test-ir-regression: $(IR_REGRESSION_BIN)
+	@echo "[ir] running regression tests"
+	@tmp="./$(IR_REGRESSION_BIN).run.$$$$"; \
+	cp "./$(IR_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
+test-ir-verifier: $(IR_VERIFIER_BIN)
+	@echo "[ir] running verifier tests"
+	@tmp="./$(IR_VERIFIER_BIN).run.$$$$"; \
+	cp "./$(IR_VERIFIER_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
 test:
 	@$(MAKE) --no-print-directory test-lexer
 	@$(MAKE) --no-print-directory test-lexer-regression
@@ -126,6 +161,8 @@ test:
 	@$(MAKE) --no-print-directory test-parser-regression
 	@$(MAKE) --no-print-directory test-parser-legacy-link
 	@$(MAKE) --no-print-directory test-semantic-regression
+	@$(MAKE) --no-print-directory test-ir-regression
+	@$(MAKE) --no-print-directory test-ir-verifier
 
 test-fanalyzer:
 	@$(MAKE) --no-print-directory clean

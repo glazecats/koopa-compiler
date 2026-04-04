@@ -138,10 +138,18 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             if (lhs->kind == AST_EXTERNAL_DECLARATION && rhs->kind == AST_EXTERNAL_DECLARATION) {
                 if (lhs->has_initializer && rhs->has_initializer) {
                     if (error) {
+                        char preview[128];
+                        char msg[512];
+
+                        format_callee_preview(lhs->name, preview, sizeof(preview));
+                        snprintf(msg,
+                            sizeof(msg),
+                            "SEMA-TOP-001: identifier=%s; duplicate top-level variable definition",
+                            preview);
                         semantic_set_error(error,
                             rhs->line,
                             rhs->column,
-                            "SEMA-TOP-001: duplicate top-level variable definition");
+                            msg);
                     }
                     return 0;
                 }

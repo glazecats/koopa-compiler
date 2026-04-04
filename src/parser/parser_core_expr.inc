@@ -115,8 +115,6 @@ static void leave_statement_recursion(Parser *p) {
     }
 }
 
-static int consume_token(Parser *p, TokenType type, const char *what, const Token **out_token);
-
 static int consume(Parser *p, TokenType type, const char *what) {
     return consume_token(p, type, what, NULL);
 }
@@ -138,17 +136,6 @@ static int consume_token(Parser *p, TokenType type, const char *what, const Toke
     set_error(p, peek(p), "Expected %s, got %s", what, lexer_token_type_name(peek(p)->type));
     return 0;
 }
-
-static int parse_expression(Parser *p);
-static int parse_statement_with_local_control(Parser *p,
-    ParserLocalControl *out_local_control,
-    AstStatement **out_statement);
-static int parse_declaration(Parser *p,
-    AstProgram *top_level_program,
-    char ***out_decl_names,
-    size_t *out_decl_name_count,
-    AstExpression ***out_decl_initializer_exprs,
-    size_t *out_decl_initializer_expr_count);
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
 static AstExpression *parse_expression_ast_postfix(Parser *p);

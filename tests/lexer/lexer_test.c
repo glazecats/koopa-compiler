@@ -63,6 +63,12 @@ static void print_token(const Token *t) {
     putchar('\n');
 }
 
+static int lexer_test_verbose_enabled(void) {
+    const char *value = getenv("LEXER_TEST_VERBOSE");
+
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <source-file>\n", argv[0]);
@@ -81,8 +87,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    for (size_t i = 0; i < tokens.size; ++i) {
-        print_token(&tokens.data[i]);
+    if (lexer_test_verbose_enabled()) {
+        for (size_t i = 0; i < tokens.size; ++i) {
+            print_token(&tokens.data[i]);
+        }
     }
 
     lexer_free_tokens(&tokens);

@@ -5,14 +5,17 @@
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
 2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
 3. Milestone C baseline validation is complete (`-fanalyzer`/ASan/strict-warning reruns are green).
-4. Active implementation is Milestone D (conservative control-flow semantics hardening plus bug-driven semantic fixes).
+4. Milestone D front-end control-flow semantics is in a stable handoff state; reopen it only for concrete bug-driven findings.
+5. Active implementation is Milestone E (IR generation bootstrap via a single canonical block-based three-address IR).
+6. IR layering, if it becomes necessary later, should be serial lowering (`AST -> canonical IR -> lower IR/target IR`), not multiple peer IRs generated directly from AST in parallel.
 
 ## Why this order
 
 - S1+S2 AST-primary cutover is in place, and S3 semantic-authority retirement has been completed and validated.
 - Structural coupling cleanup and static-analysis baselines are now complete.
-- The next high-value semantic risk is control-flow false-positive drift, semantic crash resistance, and bug closure around return-path reasoning.
-- Milestone D flow policy has converged on the conservative D17/D18 rules: avoid `SEMA-CF-001` false positives, reject only reliably proven must-not-return loop shapes, and keep mutation-driven or call-driven exits accepted unless a stable dead-loop shape is provable.
+- Milestone D flow policy has now converged far enough to hand the front end off to IR work: the recent zero-iteration loop-return hole is closed, the CF matrix is broad, and semantic diagnostics are structurally stabilized.
+- The next highest-value milestone is no longer more front-end hygiene; it is establishing a stable post-semantic representation that can carry control flow, local entities, and expression results without leaning on AST shape directly.
+- A single canonical block-based three-address IR is the right first step because it matches the current AST/semantic maturity level, preserves explicit CFG structure, and leaves room for later SSA or lower-target IR only if the project actually needs them.
 
 ## Near-Term Milestone Plan
 
@@ -37,17 +40,36 @@
 - Status: completed baseline and rerun verification.
 - `test-fanalyzer`, `test-asan`, and `test-strict-warnings` are green with zero warnings in current runs.
 
-### Milestone D: Conservative Control-Flow Semantics (active)
+### Milestone D: Conservative Control-Flow Semantics (stabilized)
 
 - Keep `SEMA-CF-001` focused on reliably provable must-not-return shapes.
 - Preserve strict branch requirements for `if/else` and plain `if` without turning value-dependent loops into false positives.
-- Continue bug-driven hardening for semantic diagnostics, crash resistance, and control-flow narrowing.
+- Status: stable enough for IR handoff; continue only as bug-driven semantic maintenance.
+
+### Milestone E: IR Generation Bootstrap (active)
+
+- Introduce a single canonical IR as the only new post-semantic source of truth.
+- Use basic blocks plus three-address instructions with explicit terminators (`return` / `jump` / `branch`).
+- Start with a non-SSA local model; distinguish declarations by unique internal IDs and treat user-facing names like `a.1` as dump formatting, not identity.
+- Land lowering in narrow slices: function shell, returns, literals/identifiers, arithmetic, local declarations, structured control flow, and direct calls.
+- Add dedicated `tests/ir/` regressions for `source -> AST -> semantic -> IR text` rather than overloading semantic regressions.
 
 ## Guardrails
 
 - Do not prioritize low-risk hygiene over semantic feature progress.
 - Every functional change should come with a regression test.
 - Keep `make test` green at each step.
+- Keep IR work behind successful semantic analysis; IR generation must not become a second semantic authority surface.
+- Do not build multiple peer IRs in parallel. If a lower IR is needed later, lower from the canonical IR rather than generating both from AST.
+- Use stable internal numeric IDs for blocks, locals, and temporaries; human-friendly names such as `bb.1`, `a.2`, and `tmp.3` belong in dumps, not core identity.
+
+## IR Design Direction
+
+- IR v1 should be block-based, three-address, and non-SSA.
+- Every function should own an explicit CFG of basic blocks, and every block should end in a terminator.
+- Source-level shadowing must be resolved into distinct local entities before printing; different declarations with the same source name are not the same IR object.
+- SSA-style versioning is a later optimization/normalization concern, not a v1 requirement.
+- If the project later grows optimization or backend-specific needs, introduce an additional lower IR as a serial stage rather than replacing or bypassing the canonical IR.
 
 ## Document Scope Note
 
@@ -197,45 +219,87 @@
 - 2026-04-01: Milestone D (D18 loop CF guard-stability heuristic) landed: non-constant `while`/`for` flow now assumes the loop may execute at least once, but no longer treats first-iteration exits implied only by reusing the entry condition as proof of fallthrough. Loops are rejected only when control flow can reliably prove a stable-guard dead-loop shape: the exit depends on identifiers that never change in the body/step and are not plausibly affected by calls. Mutation-driven exits and call-driven exits remain accepted, while shapes such as `while(a){}`, `while(a){if(a){break;}}`, `while(1){if(a){break;}}`, and `for(;a;){continue;}` are rejected; `make test` is green.
 - 2026-04-01: Milestone D (D19 loop guard shadow-sensitivity) landed: loop CF guard tracking now resolves identifiers against local declaration scopes, so same-name block or `for`-init shadowing inside loop bodies no longer counts as mutating or exiting the outer loop guard by name alone. Per-iteration body declarations now also contribute their initializer dependencies when a shadowed break guard is rebuilt from outer state, so mutation-driven exits like `int a=b; if(a) break; b--;` remain accepted while stable shadowed dead loops stay rejected. Regression coverage now locks both representative dead-loop forms (`CF-64..CF-66`) and rebuilt-guard accept cases (`CF-67..CF-68`); `make test` is green.
 - 2026-04-01: Roadmap consistency cleanup: top-level Milestone D wording, D10/D17/D18 status text, and known-limitations language were reconciled with the current conservative CF policy so historical strict-path slices are clearly archival only.
+- 2026-04-03: Milestone D bugfix landed: non-constant `while`/`for` conditions no longer inherit all-path return from a return-only loop body without proving first-iteration entry. Regression coverage now locks zero-iteration holes such as `while(a){return 1;}`, `for(;a;){return 1;}`, call-guard variants, and `break; return ...` unreachable-tail forms; `make test` is green.
+- 2026-04-03: Milestone D documentation alignment landed: CF matrix commentary was synchronized with the actual stable-guard policy so value-dependent loops are no longer described as unconditionally accepted.
+- 2026-04-03: Milestone transition checkpoint: front-end control-flow/diagnostic work is considered sufficiently stabilized for handoff, and active implementation focus shifts to Milestone E IR generation bootstrap.
+- 2026-04-03: Milestone E planning decision: the first IR will be a single canonical block-based three-address IR with explicit basic blocks/terminators, non-SSA locals, unique internal IDs for blocks/locals/temps, and pretty-printed names only at dump time.
+- 2026-04-03: Milestone E implementation slice landed: IR core was split into focused include fragments (`ir_core`, scope lowering, expression lowering, statement lowering, verify, dump) with IntelliSense-safe aggregation, and the build now tracks split IR dependencies.
+- 2026-04-03: Milestone E implementation slice landed: canonical CFG lowering now covers explicit `ret/jmp/br` terminators, `if/while/for`, and `break/continue`, using stable block IDs in lowering state to avoid realloc-driven stale block pointers.
+- 2026-04-03: Milestone E implementation slice landed: expression lowering now covers compare/equality, short-circuit logical forms, bitwise/shift/comma, direct calls, compound assignment, prefix/postfix `++/--`, and ternary in both value and branch contexts.
+- 2026-04-03: Milestone E verifier slice landed: public `ir_verify_program` now enforces structural and flow invariants (mandatory terminators, target validity, reachability, known ops, temp definition coverage, all-path temp availability at use sites, and direct-call arity checks).
+- 2026-04-03: Milestone E declaration-awareness slice landed: IR now preserves function declarations as signature-only entries, merges declaration+definition by function name, validates declaration-only shape constraints, and allows declaration-driven call arity verification.
+- 2026-04-03: Milestone E verifier hardening landed: verifier now rejects duplicate temp definitions inside the same basic block (`IR-VERIFY-031`) while preserving cross-block join-temp materialization patterns used by branch-merging lowering.
+- 2026-04-03: Milestone E callable-boundary slice landed: declaration/definition merges now tolerate parameter-name drift (arity remains authoritative), definition lowering rejects duplicate body-lowering attempts, and verifier rejects unknown direct-call targets (`IR-VERIFY-032`) in addition to call-arity checks.
+- 2026-04-03: Milestone E verifier hardening landed: call instruction payload consistency is now validated (`IR-VERIFY-033` rejects `arg_count>0` with `args=NULL`), preventing malformed-IR null-dereference risk during verification.
+- 2026-04-03: Milestone E large-slice coverage expansion landed: declaration-aware IR regressions now lock repeated declaration merge behavior and declared-call CFG lowering paths (including call-driven `if` conditions), while verifier regressions now lock duplicate-function-name rejection (`IR-VERIFY-027`) and declaration-only invariant failures for temps/non-parameter-locals (`IR-VERIFY-029`/`IR-VERIFY-030`).
+- 2026-04-03: Milestone E verifier resilience hardening landed: verifier now guards malformed function/block payload tables (`IR-VERIFY-034/035/036`) and rejects non-canonical zero-arg call payloads (`IR-VERIFY-037`), with dedicated malformed-IR regression coverage.
+- 2026-04-03: Milestone E declaration-aware matrix expansion landed: regressions now lock unnamed-declaration to named-definition merge behavior and declared-call lowering under while-condition CFG paths, extending mixed callable+CFG coverage beyond if-only cases.
+- 2026-04-03: Milestone E declaration-aware mixed-path expansion landed: regressions now also lock declared-call behavior under logical short-circuit condition lowering, logical value materialization, and ternary value lowering, reinforcing call+CFG interactions across branch-producing expression families.
+- 2026-04-03: Milestone E verifier metadata-consistency expansion landed: verifier now rejects malformed count/capacity relationships for locals/blocks/instructions (`IR-VERIFY-038/039/040`) before deep traversal, and regression coverage now locks those invariant failures explicitly.
+- 2026-04-03: Milestone E declaration-aware mixed-path expansion landed: regression matrix now also locks declared-call behavior in ternary branch-context conditions, extending call+CFG interaction coverage for branch-producing ternary forms.
+- 2026-04-03: Milestone E verifier metadata-consistency expansion landed: verifier now also enforces program-level function table consistency (`IR-VERIFY-041/042` for function_count/capacity and NULL function-table payload violations), with dedicated malformed-program regression locks.
+- 2026-04-03: Milestone E declaration-aware mixed-path expansion landed: regression matrix now locks declared-call behavior in comma-expression sequencing, extending declaration-call coverage beyond branch-only expression contexts.
+- 2026-04-03: Milestone E global-symbol slice landed: IR data model now includes first-class globals (`IR_VALUE_GLOBAL`, global symbol table in `IrProgram`), lowering now records top-level declarations as globals (with constant initializer evaluation and dependency support on prior initialized globals), and expression lowering now resolves identifier lvalues as local-first then global (enabling global `=`, compound assignment, and prefix/postfix `++/--` in function bodies).
+- 2026-04-03: Milestone E global-verifier/dump coverage landed: verifier now validates global value references and global-table metadata/name/id invariants (`IR-VERIFY-043..047`), dump output now emits `global ...` declarations, and IR regression/verifier suites were expanded to lock global read/write/update/shadowing behavior plus malformed-global metadata cases.
+- 2026-04-03: Milestone E runtime-global-init slice landed: non-constant top-level initializers are now lowered into a reserved internal IR function (`__global.init`) that evaluates initializer expressions at runtime and writes results into target globals in source order.
+- 2026-04-03: Milestone E runtime-init integration landed: when runtime global initialization is present, lowering now injects a startup call from lowered `main` entry to `__global.init`, and verifier now enforces constant/runtime initializer-flag exclusivity on globals (`IR-VERIFY-048`) with dedicated regression locks.
+- 2026-04-03: Milestone E runtime-init entrypoint fallback landed: when runtime global initialization exists but no lowered `main` definition is available, lowering now auto-exports `__program.init` that calls `__global.init` once and returns, replacing the previous hard error path.
+- 2026-04-03: Milestone E global-init dependency hardening landed: runtime top-level initializer lowering now collects referenced global dependencies and rejects initializers that depend on globals before those globals are initialized (`IR-LOWER-022`), preventing self/loop-style uninitialized dependency chains.
+- 2026-04-03: Milestone E global-operator matrix expansion landed: IR regressions now explicitly lock global shift/bitwise compound assignment paths and runtime-global-init dependency rejection behavior in addition to existing global read/write/update coverage.
+- 2026-04-03: Milestone E runtime-init verifier contract hardening landed: verifier now enforces that runtime global initialization implies a valid `__global.init` helper and a startup entry call path from either `main` entry or `__program.init` (`IR-VERIFY-049/050`), with dedicated malformed-IR regression locks.
+- 2026-04-03: Milestone E runtime-init contract tightening landed: verifier now enforces fixed internal-init function shapes (`__global.init` / `__program.init` must be zero-parameter, zero-local, single-block, `ret 0`) and `__program.init` entry must begin with `call __global.init()` (`IR-VERIFY-051..054`), with dedicated no-main fallback tamper negative coverage.
+- 2026-04-03: Milestone E runtime-init contract tightening follow-up landed: verifier now additionally requires `__program.init` entry to contain exactly one instruction before `ret 0` (`call __global.init()` only), and rejects reserved internal helper names when runtime global initialization is absent (`IR-VERIFY-055/056`), with dedicated malformed-IR negative locks.
+- 2026-04-03: Milestone E runtime-global dependency closure landed: top-level runtime initializer dependency analysis now traverses function-body call chains (with scope-aware global-read collection) instead of only direct initializer AST identifiers, so indirect reads of not-yet-initialized globals are rejected under existing `IR-LOWER-022` policy; IR regressions now include indirect-call dependency negative coverage.
+- 2026-04-03: Milestone E runtime-global dependency precision follow-up landed: function-body dependency collection is now reachability-aware for obvious dead-code shapes (statement fallthrough after `return`/`break`/`continue`, constant-condition pruning for `if(1)` / `if(0)` / `while(0)` / `for(...;0;...)`), reducing `IR-LOWER-022` false positives from syntactic-only traversal while keeping conservative behavior for non-constant loop reachability.
+- 2026-04-03: Milestone E runtime-global dependency diagnostics follow-up landed: lowering now predeclares global symbol slots before initializer lowering and, on `IR-LOWER-022` failures, attempts dependency-graph cycle reconstruction to emit concrete chain diagnostics (for example `a -> b -> a`) when the failure is cycle-driven; regression coverage now locks this chain output.
+- 2026-04-04: Milestone E runtime-global-init error-contract alignment landed: overflow/unsupported-constant top-level initializer forms now mark `invalid_constant` and attempt runtime-init fallback instead of surfacing a dedicated top-level overflow code; `IR-LOWER-023` is retired from active diagnostics, while hard-stop behavior remains on `IR-LOWER-018` (for example divide/mod by zero or unsupported constant operator), `IR-LOWER-019` (shift-count out of range), and `IR-LOWER-022` (not-yet-initialized global dependency).
+- 2026-04-04: Milestone E runtime-global cycle diagnostics upgrade landed: `IR-LOWER-022` cycle output is now callee-aware by stitching per-edge dependency paths (for example `a -> read_b() -> b -> read_a() -> a`) instead of only global-level node chains; IR regression coverage now locks this callee-aware cycle-chain form.
+- 2026-04-04: Milestone E verifier value-legality hardening slice landed: verifier now enforces that `IR_INSTR_BINARY` and `IR_INSTR_CALL` results must be temporaries (`IR-VERIFY-057/058`), preventing malformed IR from writing compute/call results directly into non-temp destinations; verifier regressions now include dedicated negative locks for both constraints.
+- 2026-04-04: Milestone E callable-boundary hardening slice landed: call lowering now performs pre-emit callable validation against the IR function symbol table and rejects malformed call sites early with source-local diagnostics (`IR-LOWER-025` unknown callee, `IR-LOWER-026` arity mismatch) instead of relying only on post-lowering verifier checks; IR regressions now include semantic-skipped negative locks to keep these lowering guardrails stable.
+- 2026-04-04: Milestone E callable declaration/definition boundary follow-up landed: IR regressions now also lock lowering-side declaration/definition interaction guardrails under semantic-skipped mode (`IR-LOWER-020` declaration arity mismatch and `IR-LOWER-021` duplicate function body lowering), ensuring these safety checks remain enforced even when semantic gating is bypassed.
+- 2026-04-04: Milestone E/E7 regression matrix expansion slice landed: declaration-aware call coverage now explicitly includes `for` condition + step call paths (for example `for(;pred(x);x=step(x))`) so mixed control-flow/call lowering remains stable beyond existing `if`/`while`/ternary/comma call-shape locks.
+- 2026-04-04: Milestone E/E7 regression matrix follow-up landed: declaration-aware `for` coverage now also locks init-position call lowering (for example `for(x=init(x);pred(x);x=step(x))`), extending mixed control-flow/call stability from condition/step-only to full init+condition+step call shapes.
+- 2026-04-04: Milestone E/E7 regression matrix expansion follow-up landed: declaration-aware call coverage now also locks logical-OR short-circuit shapes in both condition and value contexts (for example `if(pred(x)||pred(0))` and `return pred(x)||pred(1)`), plus standalone `for` init-call lowering (`for(x=init(x);x;x=x-1)`) to close remaining mixed short-circuit/loop call-form gaps.
+- 2026-04-04: Milestone E/E7 regression matrix large-batch follow-up landed: declaration-aware `for` call coverage now additionally locks logical-AND and logical-OR loop-condition short-circuit forms plus comma-expression call shapes in both step and init positions (for example `for(;pred(x)&&gate(x);x=step(x))`, `for(;pred(x)||gate(x);x=step(x))`, `x=(step1(x),step2(x))`, `x=(init1(x),init2(x))`).
+- 2026-04-04: Milestone E/E7 regression matrix completion slice landed: declaration-aware mixed control-flow/call coverage now also locks nested short-circuit compositions in value/condition/loop contexts (for example `(pred(x)&&gate(x))||tail(x)` and `if((pred(x)||gate(x))&&tail(x))`), closing the remaining nested-mix edge cases identified for E7.
+- 2026-04-04: Milestone E callable-boundary policy follow-up landed: verifier now enforces reserved internal initializer helper call-site policy (`IR-VERIFY-059/060`): `__global.init` is only legal at startup entry call sites (`main` entry or `__program.init` entry), and `__program.init` is rejected as a normal in-body call target; verifier tests now include both acceptance and negative locks for these policy boundaries.
+- 2026-04-04: Milestone E/E8 verifier metadata-consistency slice landed: verifier now rejects duplicate global symbol entries (`IR-VERIFY-062`) so malformed IR with colliding global names cannot pass structural checks; verifier coverage now includes dedicated negative lock for duplicate global-name collisions.
+- 2026-04-04: Milestone E/E8 verifier symbol-namespace consistency slice landed: verifier now rejects function/global symbol-name collisions (`IR-VERIFY-063`) so malformed IR cannot bind one identifier to both a function entry and a global entry in the same program namespace; verifier coverage now includes dedicated negative lock for this collision shape.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
 - Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
 - Milestone C baseline is complete and validated (`test-fanalyzer`/`test-asan`/`test-strict-warnings` are green with zero warnings).
-- Milestone D is now the active implementation phase (conservative CF hardening, semantic bug closure, and regression/documentation convergence).
+- Milestone D is now maintenance-mode only: reopen it for concrete semantic bugs, but do not keep spending roadmap budget on generalized hygiene.
+- Milestone E is the active implementation phase: build the first canonical IR layer and make it the handoff surface after semantic success.
+- Milestone E is now beyond bootstrap: canonical IR v1 lowering and verifier baselines are implemented and green.
 - Large-file split follow-up for parser + semantic implementation files is completed.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
+- IR v1 shipped baseline: block-based CFG, explicit terminators, unique IDs for blocks/locals/temps, non-SSA locals, expression/control-flow lowering matrix, dedicated IR regressions, and verifier coverage are all in place.
+- Current E focus is quality and expansion: tighten verifier semantics and extend callable/lowering coverage in controlled slices while keeping full-suite stability.
+- Current E focus now also includes first-class global variable semantics and remaining operator coverage across local/global lvalues.
+- IR v1 non-goals: SSA phi placement, optimization passes, register allocation, or multiple parallel IR families.
 
-## S2 Closure Snapshot
+## Milestone D Closure Snapshot
 
-- Completed: AST-primary callable checks for definitions, AST-primary return-path gate, visitor-based callable traversal, and chained-call behavior locks (`a()()` included).
-- Retired from active definition-path callable flow: `SEMA-INT-004`, `SEMA-INT-006` (historical only).
-- S3 semantic-authority retirement has completed; active remaining work is Milestone D conservative CF hardening and related semantic bug closure.
+- Completed: conservative branch/loop return-path policy, constant-if narrowing, stable-guard loop rejection, shadow-sensitive guard tracking, and structural semantic diagnostic unification.
+- Recent bug closure: non-constant zero-iteration loops no longer falsely satisfy all-path return just because the loop body returns when entered.
+- Regression baseline now covers constant-condition loops, stable-guard value-dependent loops, rebuilt-guard accept cases, zero-iteration return-only holes, and unreachable-return-after-break shapes.
+- Remaining D work is bug-driven only; it is no longer the roadmap's main implementation track.
 
-## Active Implementation Plan (Milestone D status)
+## Active Implementation Plan (Milestone E status)
 
-1. D0 status: complete; roadmap status is synchronized to `C complete -> D active` and current baselines are recorded.
-2. D1 status: complete as a historical tests-first slice; its temporary CF-02/CF-03/CF-06 reject stance has been superseded by the later D17/D18 conservative loop policy.
-3. D2 status: complete; loop return-path logic is tightened for cond-true loops that may both break and reiterate.
-4. D3 status: complete; strict-path edge coverage is expanded with nested-loop and mixed break/continue locks.
-5. D4 status: complete; validation bundle is green and include-fragment dependency tracking is hardened in Makefile.
-6. D5 status: complete; strict-path behavior changes and accepted limitations are recorded in this document.
-7. D6 status: complete; parser local-flow interfaces are converged to syntax-local fallthrough/break outputs (no parser return-path authority surface).
-8. D7 status: complete; parser callable metadata retention/plumbing is retired from active parser flow.
-9. D8 status: complete; AST lifecycle helper logic is de-duplicated via shared template between AST core and parser compatibility layer.
-10. D9 status: complete; strict-path constant-condition reasoning now covers ternary plus logical/equality/relational/bitwise/arithmetic/shift binary forms, with conservative safety guards and dedicated CF matrix locks (`CF-26..CF-48`).
-11. D10 status: complete; parser convergence tail cleanup retired parser-global return counting state, unused callable-name token plumbing, and legacy expression alias entrypoints, split function-external parsing into signature/body helpers, and unified TU/TU-AST external-vs-declaration fallback through a shared helper while preserving AST contract outputs and keeping local-control as the only statement-control channel.
-12. D11 status: complete; top-level declaration initializer path is now AST-primary semantic-authoritative (initializer AST persisted on `AstExternal` and validated with callable + scope checks in semantic entry), with dedicated regression matrix coverage and `make test` green.
-13. D12 status: complete; top-level declaration/declaration duplicate-definition hole is closed (`SEMA-TOP-001` when both declarations define with initializer), and core dynamic array growth paths now have overflow-safe capacity guards in lexer/parser/semantic-scope/AST lifecycle storage.
-14. D13 status: complete; top-level initializer visibility now excludes current external during callable/scope checks (closing same-declaration self-reference/call holes), unary-minus constant-fold path now guards `LLONG_MIN` to avoid UB in strict-flow evaluation, and strict-warning test target reliability is improved via copied-binary execution to avoid transient `Text file busy` runner races.
-15. D14 status: complete; strict-path modulo constant-fold path now guards `LLONG_MIN % -1` to avoid `SIGFPE`/UB in semantic evaluation, and Makefile copied-binary temp suffix escaping is fixed (`.$$$$`) so test runners use real PID-suffixed paths under concurrent executions.
-16. D15 status: complete; semantic expression recursion depth is now guarded across callable/scope/flow walkers, converting deep expression stack-overflow crashes into deterministic semantic failures (`SEMA-INT-012`) with dedicated regression coverage.
-17. D16 status: complete; semantic `AST_STMT_IF` flow analysis now applies constant-condition narrowing (true/false) before branch merge, eliminating conservative false negatives on constant-if return paths and loop-local break/return patterns, with dedicated CF locks (`CF-51..CF-56`).
-18. D17 status: complete; control-flow policy is explicitly conservative and false-positive-averse: `if/else` still requires all reachable branches to return, plain `if` still requires the surrounding path to return, and loop handling is no longer treated as a strict path solver for arbitrary value-dependent exits.
-19. D18 status: complete; loop CF now treats non-constant `while`/`for` conditions as possibly entering once, rejects only reliably proven stable-guard dead loops, and does not accept fallthrough merely because the first iteration could reuse the entry condition. Mutation-driven exits and plausibly state-changing calls remain accepted; stable same-guard shapes such as `while(a){if(a){break;}}` are intentionally rejected under the current policy because the guard is unchanged and the first-iteration implication is not used as proof.
-20. D19 status: complete; loop guard tracking is now scope-sensitive for direct local declaration shadowing, so inner `int a=...;` declarations inside loop bodies or `for` init scopes no longer masquerade as mutations or exits of an outer guard with the same spelling. Per-iteration body declarations also propagate initializer dependencies to a local fixpoint within each compound body, which keeps simple multi-hop rebuilt-guard exits accepted (`int c=b; int a=c; if(a) break; b--;`) without relaxing stable shadowed dead-loop rejects.
-21. Future reminder: if the language grows indirect mutation forms such as address-of/pointer writes (`&`, dereference-based stores), reference semantics, or lambda/closure-style callable bodies (including `auto` lambda-like forms), revisit D18/D19's guard-tracking heuristic. It is intentionally shallow today and will become unsound once mutation can escape direct assignment/call visibility.
+1. E0 status: canonical IR v1 baseline is implemented and validated (`make test-ir-regression`, `make test-ir-verifier`, and `make test` are green).
+2. E1 status: IR ownership/lifecycle, stable numeric identity model, dump pipeline, and split-file architecture are complete.
+3. E2 status: statement lowering (`if/while/for`, `break/continue`) and expression lowering (arithmetic through ternary/calls/compound updates) are complete for the current semantic subset.
+4. E3 status: verifier baseline is active and integrated after lowering, including structural CFG checks and all-path temp-availability checks.
+5. E4 status: `IR-LOWER-022` cycle diagnostics now include callee-aware chain segments (for example `f() -> g() -> a`) in addition to global-level cycle output.
+6. E5 in progress: verifier value-legality hardening has started (binary/call result destinations are now temp-only); next slices should continue broadening def-use and metadata consistency coverage where not yet enforced.
+7. E6 status: callable validation/lowering boundary hardening is complete for the current scope (unknown callee + arity mismatch + declaration/definition conflict guardrails at lowering boundaries, plus reserved internal-helper external-call policy locks in verifier).
+8. E7 status: declaration-aware and mixed control-flow/call regression matrix expansion is complete for the current scope, including `if`/`while`/`for` call paths, `for` init+condition+step, short-circuit `&&/||`, comma-expression call shapes, and nested short-circuit mixes.
+9. E8 in progress: keep all IR evolution incremental and test-locked, with each slice proving no front-end semantic drift and no regression in full-suite stability.
+10. Future reminder: if optimization or backend work later demands SSA or a lower target-facing IR, add it as a serial lowering stage from the canonical IR instead of creating a second peer AST-to-IR pipeline.
 
 ## Milestone B Detailed Execution Plan (historical reference)
 

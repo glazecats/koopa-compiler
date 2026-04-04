@@ -1144,6 +1144,10 @@ static int parse_parameter_list(Parser *p,
     int **out_parameter_name_columns) {
     size_t count = 0;
     size_t name_capacity = 0;
+    int capture_parameter_metadata =
+        (out_parameter_names != NULL) ||
+        (out_parameter_name_lines != NULL) ||
+        (out_parameter_name_columns != NULL);
     char **parameter_names = NULL;
     int *parameter_name_lines = NULL;
     int *parameter_name_columns = NULL;
@@ -1199,7 +1203,7 @@ static int parse_parameter_list(Parser *p,
             }
         }
 
-        if (out_parameter_names) {
+        if (capture_parameter_metadata) {
             char *parameter_name_copy = NULL;
             if (parameter_name_tok) {
                 parameter_name_copy = copy_token_identifier_lexeme(parameter_name_tok);
@@ -1298,15 +1302,6 @@ static int parse_parameter_list(Parser *p,
 
     return 1;
 }
-
-typedef struct {
-    const Token *name_tok;
-    size_t parameter_count;
-    char **parameter_names;
-    int *parameter_name_lines;
-    int *parameter_name_columns;
-    int has_unnamed_parameter;
-} ParsedFunctionSignature;
 
 static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     if (!signature) {
@@ -1431,6 +1426,10 @@ static int parse_function_external(Parser *p,
     AstStatement **out_function_body,
     size_t *out_return_statement_count) {
     ParsedFunctionSignature signature;
+    int capture_parameter_metadata =
+        (out_parameter_names != NULL) ||
+        (out_parameter_name_lines != NULL) ||
+        (out_parameter_name_columns != NULL);
     int body_ok;
 
     if (out_name_token) {
@@ -1459,7 +1458,7 @@ static int parse_function_external(Parser *p,
     }
 
     if (!parse_function_external_signature(p,
-        out_parameter_names != NULL,
+        capture_parameter_metadata,
         &signature)) {
         return 0;
     }

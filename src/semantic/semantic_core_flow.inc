@@ -4,15 +4,6 @@
 #include "semantic.c"
 #else
 
-typedef int (*ExpressionPostVisitor)(const AstExpression *expr, void *ctx);
-
-typedef struct {
-    const AstProgram *program;
-    size_t func_index;
-    int include_current_external;
-    SemanticError *error;
-} CallableRuleVisitCtx;
-
 static void format_callee_preview(const char *name, char *out, size_t out_size) {
     size_t len;
 
@@ -293,11 +284,6 @@ typedef struct {
     size_t scope_count;
     int overflowed;
 } FlowIdentifierScopeStack;
-
-typedef struct {
-    int may_exit_loop;
-    int exits_loop_on_all_paths;
-} FlowLoopExitSummary;
 
 static void flow_guard_identifier_set_add(FlowGuardIdentifierSet *set,
     const char *name,

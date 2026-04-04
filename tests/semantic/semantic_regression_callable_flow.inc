@@ -421,6 +421,16 @@ static int test_semantic_rejects_duplicate_initialized_top_level_definition(void
         return 0;
     }
 
+    if (strstr(sema_err.message,
+        "identifier=x; duplicate top-level variable definition") == NULL) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: expected SEMA-TOP-001 identifier payload, got: %s\n",
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     lexer_free_tokens(&tokens);
     ast_program_free(&program);
     return 1;
