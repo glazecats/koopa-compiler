@@ -101,7 +101,8 @@ $$
 ### 3.2 动态数组管理（实现 + 伪代码）
 
 - `token_array_reserve`: `realloc` 到新容量
-- `token_array_push`: 满容时扩容
+- `token_array_next_capacity`: 计算下一次容量，并先做溢出保护
+- `token_array_push`: 满容时通过 `token_array_next_capacity` 扩容
 
 扩容策略：
 
@@ -112,14 +113,21 @@ $$
 \end{cases}
 $$
 
-所以 `push` 的摊还复杂度是 $O(1)$。
+但当前实现不会盲目做 `capacity * 2`，而是先检查：
+
+1. `current > SIZE_MAX / 2` 时拒绝继续倍增
+2. `next_capacity > SIZE_MAX / sizeof(Token)` 时拒绝分配
+
+所以这里的真实语义是“倍增策略 + `size_t` 溢出保护”，`push` 的摊还复杂度仍然是 $O(1)$。
 
 实现伪代码：
 
 ```text
 function token_array_push(arr, token):
     if arr.size == arr.capacity:
-        next_cap = 32 if arr.capacity == 0 else arr.capacity * 2
+        next_cap = checked_next_capacity(arr.capacity)
+        if next_cap overflow:
+            return false
         if reserve(arr, next_cap) failed:
             return false
     arr.data[arr.size] = token
@@ -132,6 +140,7 @@ function token_array_push(arr, token):
 - `lexer_init_tokens`: 写入 `TOKEN_ARRAY_MAGIC` 并清空
 - `lexer_free_tokens`: magic 合法才释放；不合法则重置
 - `token_array_state_is_valid`: 定义合法状态
+- `lexer_tokenize`: 接受全零 `{0}` 状态并自动补做一次 `lexer_init_tokens`
 
 合法性条件：
 
@@ -181,6 +190,20 @@ static int test_invalid_token_array_state_rejected(void) {
     return 1;
 }
 ```
+
+这里要注意当前实现的一个小细节：
+
+- `TokenArray tokens = {0};` 这种“全零态”现在会被 `lexer_tokenize` 视为可恢复状态，并自动初始化
+- 但像“`size=1, capacity=0`”这种部分损坏或伪造状态，仍然会稳定报 `TokenArray is not initialized; call lexer_init_tokens first`
+
+也就是说，当前契约更准确地写成：
+
+$$
+\text{accepted state}=
+\text{initialized state}
+\ \cup\ 
+\text{all-zero recoverable state}
+$$
 
 ---
 

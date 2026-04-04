@@ -18,11 +18,13 @@
 
 ## 1. 总览：`tests/` 目录怎么组织
 
-当前测试入口 C 文件（8 个）：
+当前测试入口 C 文件（10 个）：
 
 - `tests/lexer/test.c`
 - `tests/lexer/lexer_test.c`
 - `tests/lexer/lexer_regression_test.c`
+- `tests/ir/ir_regression_test.c`
+- `tests/ir/ir_verifier_test.c`
 - `tests/parser/test.c`
 - `tests/parser/parser_test.c`
 - `tests/parser/parser_legacy_link_test.c`
@@ -44,13 +46,38 @@
 
 1. `test.c`：输入样例文件（fixture）
 2. `*_test.c`：可执行冒烟/调试程序（CLI harness）
-3. `*_regression_test.c`：回归断言（CI 主力）
+3. `*_regression_test.c`：回归断言（CI 主力，当前已覆盖 lexer/parser/semantic/ir）
 
 可抽象为测试收益函数：
 
 $$
 \mathrm{Coverage}=\mathrm{Smoke}+\mathrm{Regression}+\mathrm{Negative\ Cases}
 $$
+
+当前 IR 测试也已经不只是“直线表达式”了，当前至少锁住了这些行为族：
+
+如果只按最近几轮 IR 改动来归类，新增测试重点主要也是 3 组：
+
+- global-aware lowering：`global ...`、global update、global/local shadowing
+- runtime global init：`__global.init()`、`__program.init()`、`IR-LOWER-022` 依赖顺序拒绝、`dependency path` / `dependency cycle` 诊断、依赖收集对 direct call callee body 的递归覆盖、以及 `&&/||/?:` 与常量条件 `if/while/for` 的有限裁剪
+- runtime-init verifier：`IR-VERIFY-048` 到 `IR-VERIFY-060`
+
+1. 表达式 family：算术、comparison、bitwise、shift、ternary、逗号表达式
+2. 更新表达式 family：compound assignment、prefix/postfix `++`、prefix/postfix `--`
+3. 一元 family：`-`、`~`、`!`
+4. 调用 family：直接调用、带表达式参数的调用
+5. 逻辑短路值 lowering：`!`、`&&`、`||`
+6. `if` 无 `else` 时的 then + continuation
+7. `if/else` 双边 fallthrough 时的 join block
+8. `if/else` 双边都 `return` 时“不生成多余 join block”
+9. comparison / logical 条件驱动的 `if`
+10. `while` 的 header/body/exit + backedge
+11. `while` 里的 `break`
+12. `for` 的 init/header/body/step/exit
+13. 嵌套 loop 的 `break/continue` 就近匹配
+14. declaration-aware IR：prototype 会保留成 `declare` 签名项，而不是直接丢掉
+15. global-aware IR：顶层声明会 lower 成 `global ...`，global bitwise/shift compound、global initializer 依赖、静态求值失败到 runtime-init 的回退、按需懒创建并复用的 `__global.init()`、没有可注入 `main` 定义时导出的 `__program.init()`、直接/间接依赖未初始化 global 的 `IR-LOWER-022`、以及 local-shadow-over-global 都有回归
+16. verifier 结构与数据流校验：缺 terminator、不可达 block、非法 binary op、binary/call 结果不是 temp、空 callee、unknown callee、NULL/非 NULL call-args payload 不匹配、undefined/use-before-def temp、同一 block 内重复 temp 定义、call arity 漂移、count-capacity/table-pointer 破坏、global table/global id/global name 破坏、duplicate global / function-global name collision、constant/runtime initializer flag 冲突、runtime-init helper 契约破坏、startup helper 非法调用、declaration-only function 被错误塞入 blocks
 
 ---
 
@@ -262,6 +289,21 @@ loop guard stability analysis 相关 case 现在也建议单独成组：
 4. shadow-sensitive cases：内层 `int a=...` 不能伪装成修改外层 guard
 5. rebuilt-guard accepts：`int c=b; int a=c; if(a) break; b--;` 这类按 initializer 重建 guard 的路径应继续接受
 
+constant-if narrowing 也值得固定锁一组：
+
+1. `if(1) return 1;`
+2. `if((1)) return 1;`
+3. `if(+1) return 1;`
+4. `if((0,1)) return 1;`
+5. `if(0) ; else return 1;`
+
+这些 case 的目标不是测 parser，而是防 semantic 把不可达分支错误合并回 return-flow。
+
+另外建议专门补“诊断顺序”锁：
+
+1. scope 错误优先于 `SEMA-CF-001`
+2. depth guard（`SEMA-INT-012`）优先于 `SEMA-CF-001`
+
 新增语义规则时建议：
 
 - 至少补 1 个 pass + 1 个 fail。
@@ -320,14 +362,26 @@ $$
 - `make test-parser-regression`
 - `make test-parser-legacy-link`
 - `make test-semantic-regression`
+- `make test-ir-regression`
+- `make test-ir-verifier`
 - `make test`
+- `make test-fanalyzer`
+- `make test-asan`
+- `make test-strict-warnings`
+
+当前 Makefile 里还有一个值得知道的实现细节：
+
+- `test-parser-legacy-link`、`test-semantic-regression`、`test-ir-regression`、`test-ir-verifier` 等目标在执行前会先把二进制复制成临时 `*.run.$$$$` 文件，再运行临时副本
+- 这样做是为了减少调试或并发构建时遇到 `Text file busy` 的概率；讲义里写命令时按 `make test-*` 目标理解即可，不需要手动执行这些临时文件
 
 建议日常节奏：
 
 1. 改 lexer 后先跑 `make test-lexer-regression`
 2. 改 parser 后先跑 `make test-parser-regression`
 3. 改 semantic 后先跑 `make test-semantic-regression`
-4. 合并前跑一次 `make test`
+4. 改 IR lowering 后先跑 `make test-ir-regression`
+5. 改 IR 结构体 / CFG / verifier / declaration-only function 处理后再跑 `make test-ir-verifier`
+6. 合并前跑一次 `make test`
 
 Milestone C（静态分析清理）建议加跑下面两条：
 

@@ -25,6 +25,19 @@
 - 结构：`semantic.c` 是聚合入口，核心规则分片在 `semantic_core_flow.inc`、`semantic_callable_rules.inc`、`semantic_scope_rules.inc`、`semantic_entry.inc`
 - 回归：`tests/semantic/semantic_regression_test.c` + `semantic_regression_callable_flow.inc` + `semantic_regression_scope_cf.inc`
 
+`semantic.c` 现在也不只是“include 四个分片”的薄入口了。它当前会先集中放置：
+
+1. 共享 visitor typedef：`ExpressionPostVisitor`
+2. 跨分片共享上下文：`CallableRuleVisitCtx`
+3. flow 分析摘要：`FlowLoopExitSummary`
+4. 一组跨分片 helper 前置声明（postorder walker、constant-if helper、callable/scope/flow 入口）
+
+所以现在更准确的组织关系是：
+
+$$
+\texttt{semantic.c} = \text{shared analysis scaffolding} + \text{aggregator}
+$$
+
 语义入口：
 
 ```c
@@ -46,16 +59,16 @@ $$
 主流程分 6 层：
 
 1. 顶层声明 initializer 规则（callable + scope）
-2. return-flow 分析（函数是否所有路径返回）
-3. callable shadow precheck（局部遮蔽优先）
-4. callable 规则检查（`SEMA-CALL-001..006`）
-5. scope 规则检查（`SEMA-SCOPE-*`）
+2. callable shadow precheck（局部遮蔽优先）
+3. callable 规则检查（`SEMA-CALL-001..006`）
+4. scope 规则检查（`SEMA-SCOPE-*`）
+5. return-flow 分析（函数是否所有路径返回）
 6. 顶层符号一致性检查（重复定义/冲突/参数数一致）
 
 数据流：
 
 $$
-\text{Top-level Init} \rightarrow \text{Flow} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Top-level Consistency}
+\text{Top-level Init} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Flow} \rightarrow \text{Top-level Consistency}
 $$
 
 ---
@@ -83,6 +96,8 @@ walk_expr(expr):
 ```
 
 这让“遍历逻辑”和“规则逻辑”解耦。
+
+最近的源码整理也让这个分工更明显了：`ExpressionPostVisitor`、`CallableRuleVisitCtx` 和 walker 原型现在都集中定义在 `semantic.c`，分片里的 `callable` / `scope` / `flow` 逻辑直接复用这些共享骨架，而不再各自保留一份局部 typedef/前置声明。
 
 ---
 
@@ -161,6 +176,15 @@ $$
 - `for(;a;){continue;}`：拒绝
 - `for(;a; step_changes_a)`：倾向接受
 
+这里“可能改 guard”的判定范围也比旧文档宽，当前会把下面这些都算进去：
+
+- 直接赋值 `a = ...`
+- 复合赋值 `a += 1`、`a <<= 1`、`a &= b`
+- 前后缀更新 `++a`、`a++`
+- 普通函数调用（保守视为可能改外部状态）
+
+所以现在的 “call-driven exits” / “step-driven exits” 之所以能被接受，不是靠特殊白名单，而是靠这套统一的 `may_change_guard_state` 启发式。
+
 ### 4.2 shadow-sensitive guard tracking
 
 这套 guard 分析还有一个最近补上的关键细节：名字不仅按字符串看，还要按 binding 看。
@@ -191,6 +215,65 @@ while(a){
 
 这类“通过 per-iteration declaration initializer 重建 break guard”的形态现在会被接受，因为退出条件依赖的外层状态 `b` 的确在变化。
 
+### 4.3 constant-if narrowing
+
+`AST_STMT_IF` 的 flow merge 现在也会先尝试判断条件是不是常量真/假，而不是一律保守合并 then/else。
+
+核心判断仍然复用同一套常量求值族：
+
+- `flow_try_eval_constant_int`
+- `expression_is_constant_true_for_flow`
+- `expression_is_constant_false_for_flow`
+
+所以这些形态现在都会被当成“恒真条件”：
+
+- `if(1)`
+- `if((1))`
+- `if(+1)`
+- `if((0,1))`
+
+而 `if(0)` / `if((0,0))` 这类会被当成恒假。
+
+这一步的价值是：先把不可达分支裁掉，再做 return-flow 合成，避免把本来不可达的分支错误并进来，造成假的 `SEMA-CF-001`。
+
+### 4.4 flow 常量求值的真实支持面
+
+最近这版文档里最容易低估的一点是：`flow_try_eval_constant_int(...)` 现在已经不只是识别 `1`、`+1` 这种简单字面量了。
+
+它当前能在 semantic flow 里直接求值的 AST 形态包括：
+
+- 括号表达式
+- 一元 `+ - ! ~`
+- 三目 `?:`
+- 逻辑短路 `&& ||`
+- 逗号表达式 `,`
+- 比较 `== != < <= > >=`
+- 位运算 `& ^ |`
+- 算术 `+ - * / %`
+- 移位 `<< >>`
+
+所以这些条件现在都能被收窄：
+
+- `while(+1){...}`
+- `while((1||0)){...}`
+- `while((1?1:0)){...}`
+- `while((1<<3)){...}`
+- `if((0?1:0)) ... else ...`
+
+但这套常量求值不是“无条件相信一切字面量表达式”，它仍然保守地拒绝不安全或未定义边界，比如：
+
+- 除零：`1/0`
+- 会溢出的移位：`1<<63`
+- 负移位或超宽移位
+
+对这些表达式，semantic 会回退成“无法证明常量”，而不是强行当成恒真/恒假。
+
+这也是当前回归里这些 case 的真实行为来源：
+
+- `while((1<<3)){continue;}`：拒绝
+- `while((1/0)){continue;}`：保守接受
+- `for(;(1<<63);){continue;}`：保守接受
+
 ---
 
 ## 5. callable 规则（`SEMA-CALL-001..006`）
@@ -205,6 +288,14 @@ callee 分类由 `classify_ast_call_callee` 给出：
 - `DIRECT_IDENTIFIER`
 - `CALL_RESULT`
 - `NON_IDENTIFIER`
+
+这里的分类不是只看最外层 token，而是先 unwrap 掉多余括号再看 AST 形状，所以：
+
+- `foo(1)`、`(foo)(1)`、`((foo))(1)` 仍算 `DIRECT_IDENTIFIER`
+- `f()(1)`、`((f)(1))(2)` 算 `CALL_RESULT`
+- `(f+1)()`、`(f?f:f)()`、`(f&&f)()` 算 `NON_IDENTIFIER`
+
+这也是为什么现在“括号本身”不会改变 callable 分类；真正决定 `CALL-005` 还是 `CALL-006` 的，是去掉括号后的 callee AST 形状。
 
 规则摘要：
 
@@ -221,6 +312,24 @@ callee 分类由 `classify_ast_call_callee` 给出：
 
 - 函数体里检查调用时，当前 external 视为已可见
 - 顶层 initializer 检查时，当前 external 自己还不可见，只能看“它前面已经出现的顶层 external”
+
+实现上这个窗口差异就是 `CallableRuleVisitCtx.include_current_external`：
+
+- function body：`include_current_external = 1`
+- top-level initializer：`include_current_external = 0`
+
+scope 规则那边也沿用了同样的可见性窗口，而不是只在 callable 分支单独实现一份。
+
+### 5.1 诊断里的名字预览是截断过的
+
+很多 `SEMA-CALL-*` / `SEMA-TOP-*` / `SEMA-SCOPE-*` 诊断里都会带 `identifier=` 或 `callee=` 预览串。
+
+当前这些预览统一走 `format_callee_preview(...)`，对超长名字会做“头尾保留、中间省略”的截断，而不是把整段名字原样塞进错误消息。
+
+所以这些带 preview 的诊断现在有两个稳定特征：
+
+- 统一格式
+- 超长标识符不会把 message 撑爆
 
 ---
 
@@ -262,6 +371,8 @@ walk_shadow(stmt, scope):
 1. 局部非函数遮蔽 callee 时，优先报 `SEMA-CALL-003`（shadow precheck 先行）。
 2. `call result` / `non-identifier callee` 先报 `SEMA-CALL-005/006`，不会被 `SEMA-SCOPE-002` 抢先。
 3. 若 callee 合法，但参数表达式里有未声明标识符，才报 `SEMA-SCOPE-002`。
+4. 对函数定义来说，callable/scope/depth 相关诊断会先于 `SEMA-CF-001`，因为 `semantic_entry.inc` 现在先跑 shadow/callable/scope，再做 return-flow gate。
+5. `SEMA-INT-012` 这类深度护栏也会先于 flow 诊断，因为 scope/call-shadow walker 本身带表达式深度上限。
 
 可抽象为：
 
@@ -269,6 +380,14 @@ $$
 CALL\text{-}003/005/006 \succ SCOPE\text{-}002\ (callee\ path),\quad
 SCOPE\text{-}002\ applies\ to\ non\text{-}callee\ identifiers
 $$
+
+另外现在也已经有回归专门锁这一条：
+
+$$
+SEMA\text{-}INT\text{-}012 \succ SEMA\text{-}CF\text{-}001
+$$
+
+也就是深表达式输入不会先掉到 “all control-flow paths return” 的报错上。
 
 ---
 
@@ -283,6 +402,35 @@ $$
 ### 8.1 作用域栈
 
 显式 `ScopeStack`：`push/pop` 管理 `{}` 与 `for` 作用域。
+
+名字解析顺序也很明确：
+
+$$
+\text{resolve}(x)=
+\begin{cases}
+\text{nearest local binding}, & x \in LocalScope \\
+\text{visible top-level external}, & x \notin LocalScope
+\end{cases}
+$$
+
+也就是“先局部，后顶层”，并且顶层是否可见还要继续受 `include_current_external` 窗口控制。
+
+### 8.1.1 为什么 callee 自己不会先报 `SEMA-SCOPE-002`
+
+scope walker 现在区分了两种上下文：
+
+- `in_call_callee = 1`
+- `in_call_callee = 0`
+
+当表达式正位于 call 的 callee 槽位时，未解析名字不会立刻报 `SEMA-SCOPE-002`，而是把诊断机会留给 callable 规则去决定：
+
+- `SEMA-CALL-001`
+- `SEMA-CALL-002`
+- `SEMA-CALL-003`
+- `SEMA-CALL-005`
+- `SEMA-CALL-006`
+
+只有参数表达式、普通赋值右侧、条件表达式等“非 callee 位置”的未解析标识符，才会走 `SEMA-SCOPE-002`。
 
 ### 8.2 同声明顺序
 
@@ -311,12 +459,26 @@ $$
 
 当前实现里常见内部护栏：
 
+- `SEMA-INT-013`：`semantic_analyze_program(NULL, ...)`
 - `SEMA-INT-005`：函数定义缺失 `function_body`
 - `SEMA-INT-007`：return-flow AST 分析失败
 - `SEMA-INT-009`：scope 栈空时处理声明名
 - `SEMA-INT-010`：scope 栈扩容失败
 - `SEMA-INT-011`：顶层声明标记了 initializer，但缺失 `declaration_initializer` AST
 - `SEMA-INT-012`：表达式深度超过 semantic 分析上限（当前常量为 `4096`）
+
+其中 `SEMA-INT-012` 不只可能从一条路径抛出：
+
+- scope/call-shadow 的表达式遍历会报它
+- flow 常量求值 / postorder walker 也会受同一上限约束
+
+所以它本质上是 semantic 全局共享的深度护栏，不是某一个子规则独占的错误码。
+
+另外当前还有一个值得强调的 AST-primary 契约：
+
+- function definition 若缺 `function_body`，会直接报 `SEMA-INT-005`
+
+这条不仅发生在“正常 parser 产出的 AST 被破坏”时，连“只手工塞 metadata、没给 body AST”的输入也会被拦住。也就是说，semantic 现在明确把 `function_body` 当成 AST-primary 时代的必需契约，而不是可选 metadata。
 
 ---
 
@@ -332,8 +494,17 @@ $$
 建议固定覆盖三组：
 
 1. callable 诊断矩阵（`CALL-001..006` + shadow 变体）
-2. scope/cf 矩阵（局部可见性、for-init 生命周期、深表达式护栏）
+2. scope/cf 矩阵（局部可见性、for-init 生命周期、constant-if narrowing、深表达式护栏）
 3. 顶层 initializer / 同声明顺序矩阵（前向拒绝 / 反向通过）
+
+再细一点说，当前 `scope_cf` 回归实际上已经锁了这些 semantic flow 行为：
+
+1. constant-if narrowing：`if(1)`、`if(+1)`、`if((0,1))`
+2. 常量循环条件：逻辑、三目、算术、位运算、移位
+3. 保守求值失败边界：`1/0`、`1<<63` 这类不强判常量
+4. loop guard stability：stable reject / mutation-driven accept / call-driven accept
+5. shadow-sensitive guard tracking：内层同名声明不应伪装成外层 guard mutation
+6. rebuilt-guard acceptance：通过 declaration initializer 重建 break guard 的形态继续接受
 
 ---
 
@@ -341,10 +512,15 @@ $$
 
 除了函数体内部规则，`semantic_analyze_program` 还会在顶层做名字一致性检查：
 
-1. 同名函数声明参数个数必须一致，否则报冲突。
-2. 同名函数不能重复定义。
+1. 同名函数声明参数个数必须一致，否则报 `SEMA-TOP-002`。
+2. 同名函数不能重复定义，否则报 `SEMA-TOP-003`。
 3. 同名顶层变量若都带 initializer，报 `SEMA-TOP-001`（duplicate top-level variable definition）。
-4. 函数名与变量名不能在顶层同名共存。
+4. 函数名与变量名不能在顶层同名共存，否则报 `SEMA-TOP-004`。
+
+反过来说，下面这些当前是被接受的：
+
+- 多个同名函数声明，只要参数个数一致
+- 顶层变量重复声明，只要不是“两个都带 initializer”
 
 可抽象为：
 
@@ -363,6 +539,7 @@ $$
 1. return all-path 仍是结构化近似，不是完整路径求解器。
 2. callable 子集当前只支持 direct-identifier callee；call-result/chained 统一拒绝（`SEMA-CALL-005`）。
 3. 非标识符 callee 仅在 parser 可接受子集下进入 semantic，并按 `SEMA-CALL-006` 报错。
+4. loop guard stability 仍是保守启发式，不是跨迭代符号执行；它只在“稳定 guard 且无法可靠退出”时才拒绝。
 
 这些限制是当前回归矩阵锁住的行为边界，不是临时偶发现象。
 

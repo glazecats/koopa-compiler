@@ -202,7 +202,7 @@ free(stmt)
 
 - 遍历每个 external
 - 释放 `name`
-- 释放 `parameter_names` 与 `function_body`，并清理 external 数组本体
+- 释放 `parameter_names`、`declaration_initializer` 与 `function_body`，并清理 external 数组本体
 - 最后释放 `externals` 并把 `count/capacity` 归零
 
 这保证不变量：
@@ -216,6 +216,7 @@ $$
 `ast_program_append_external`：
 
 - `count==capacity` 时扩容
+- 扩容前会先做 `size_t` 溢出保护，避免极大输入下的容量乘法回绕
 - 初始化一个 `AstExternal external` 临时对象（所有字段先置默认值）
 - 若 `name_token` 有效则复制字符串
 - 写入 `program->externals[program->count++]`

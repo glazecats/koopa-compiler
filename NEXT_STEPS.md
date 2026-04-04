@@ -5,17 +5,18 @@
 1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
 2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
 3. Milestone C baseline validation is complete (`-fanalyzer`/ASan/strict-warning reruns are green).
-4. Milestone D front-end control-flow semantics is in a stable handoff state; reopen it only for concrete bug-driven findings.
-5. Active implementation is Milestone E (IR generation bootstrap via a single canonical block-based three-address IR).
-6. IR layering, if it becomes necessary later, should be serial lowering (`AST -> canonical IR -> lower IR/target IR`), not multiple peer IRs generated directly from AST in parallel.
+4. Milestone D front-end control-flow semantics is in maintenance mode only (reopen for concrete bug-driven findings).
+5. Milestone E canonical IR bootstrap and precision-hardening work is considered complete for current scope.
+6. Active implementation focus moves to pass-stage work on the existing canonical IR (analysis + transformation passes), not to a new peer IR layer.
+7. If a lower IR is ever needed later, it must be introduced as serial lowering (`AST -> canonical IR -> lower/target IR`), never as multiple parallel AST-to-IR pipelines.
 
 ## Why this order
 
-- S1+S2 AST-primary cutover is in place, and S3 semantic-authority retirement has been completed and validated.
-- Structural coupling cleanup and static-analysis baselines are now complete.
-- Milestone D flow policy has now converged far enough to hand the front end off to IR work: the recent zero-iteration loop-return hole is closed, the CF matrix is broad, and semantic diagnostics are structurally stabilized.
-- The next highest-value milestone is no longer more front-end hygiene; it is establishing a stable post-semantic representation that can carry control flow, local entities, and expression results without leaning on AST shape directly.
-- A single canonical block-based three-address IR is the right first step because it matches the current AST/semantic maturity level, preserves explicit CFG structure, and leaves room for later SSA or lower-target IR only if the project actually needs them.
+- Front-end authority and decoupling work (A/B/C/D) are already stable enough to avoid roadmap re-opening.
+- Canonical IR v1 now has explicit CFG, verifier contracts, declaration/global semantics, and broad regression locks.
+- `IR-LOWER-022` dependency analysis has moved beyond syntactic scanning and now includes several rounds of reachability precision tightening, reducing false positives.
+- Highest-value next work is no longer adding IR surface area; it is controlled pass-stage evolution on top of the current IR to improve optimization readiness while preserving contracts.
+- Delaying a second IR layer avoids premature complexity and keeps diagnostics, tests, and ownership concentrated around one canonical representation.
 
 ## Near-Term Milestone Plan
 
@@ -46,13 +47,19 @@
 - Preserve strict branch requirements for `if/else` and plain `if` without turning value-dependent loops into false positives.
 - Status: stable enough for IR handoff; continue only as bug-driven semantic maintenance.
 
-### Milestone E: IR Generation Bootstrap (active)
+### Milestone E: Canonical IR v1 (closed for current scope)
 
-- Introduce a single canonical IR as the only new post-semantic source of truth.
-- Use basic blocks plus three-address instructions with explicit terminators (`return` / `jump` / `branch`).
-- Start with a non-SSA local model; distinguish declarations by unique internal IDs and treat user-facing names like `a.1` as dump formatting, not identity.
-- Land lowering in narrow slices: function shell, returns, literals/identifiers, arithmetic, local declarations, structured control flow, and direct calls.
-- Add dedicated `tests/ir/` regressions for `source -> AST -> semantic -> IR text` rather than overloading semantic regressions.
+- Canonical block-based non-SSA IR is established as the post-semantic handoff surface.
+- Verifier baseline/hardening, declaration-awareness, global/runtime-init semantics, and dependency diagnostics are in place.
+- Regression matrix for callable + CFG combinations and dependency precision guardrails is broad and green.
+
+### Milestone F: Pass Pipeline on Canonical IR (active)
+
+- F0: add a minimal pass execution framework over canonical IR (deterministic ordering, pass-level fail-fast diagnostics, no behavior change by default).
+- F1: land first low-risk analysis pass(es) to support later transforms (for example local const-value/use info or side-effect classification).
+- F2: land first low-risk transform pass(es) with strict safety rails (for example trivial constant folding / dead expression cleanup).
+- F3: expand regression/verifier locks to keep pass outputs structurally valid and behavior-preserving.
+- F4: only after measurable pass-stage pressure, evaluate whether SSA/lower IR is justified as a serial downstream stage.
 
 ## Guardrails
 
@@ -62,6 +69,8 @@
 - Keep IR work behind successful semantic analysis; IR generation must not become a second semantic authority surface.
 - Do not build multiple peer IRs in parallel. If a lower IR is needed later, lower from the canonical IR rather than generating both from AST.
 - Use stable internal numeric IDs for blocks, locals, and temporaries; human-friendly names such as `bb.1`, `a.2`, and `tmp.3` belong in dumps, not core identity.
+- Pass-stage work must preserve canonical IR contracts: verifier must remain green before and after passes.
+- Optimization passes must be introduced incrementally with behavior locks (regression cases proving no semantic drift).
 
 ## IR Design Direction
 
@@ -69,7 +78,8 @@
 - Every function should own an explicit CFG of basic blocks, and every block should end in a terminator.
 - Source-level shadowing must be resolved into distinct local entities before printing; different declarations with the same source name are not the same IR object.
 - SSA-style versioning is a later optimization/normalization concern, not a v1 requirement.
-- If the project later grows optimization or backend-specific needs, introduce an additional lower IR as a serial stage rather than replacing or bypassing the canonical IR.
+- Optimization should first happen as passes over canonical IR; only introduce an additional lower IR if canonical-pass evolution shows clear structural limits.
+- If the project later grows optimization or backend-specific needs beyond canonical IR limits, introduce an additional lower IR as a serial stage rather than replacing or bypassing the canonical IR.
 
 ## Document Scope Note
 
@@ -265,21 +275,26 @@
 - 2026-04-04: Milestone E callable-boundary policy follow-up landed: verifier now enforces reserved internal initializer helper call-site policy (`IR-VERIFY-059/060`): `__global.init` is only legal at startup entry call sites (`main` entry or `__program.init` entry), and `__program.init` is rejected as a normal in-body call target; verifier tests now include both acceptance and negative locks for these policy boundaries.
 - 2026-04-04: Milestone E/E8 verifier metadata-consistency slice landed: verifier now rejects duplicate global symbol entries (`IR-VERIFY-062`) so malformed IR with colliding global names cannot pass structural checks; verifier coverage now includes dedicated negative lock for duplicate global-name collisions.
 - 2026-04-04: Milestone E/E8 verifier symbol-namespace consistency slice landed: verifier now rejects function/global symbol-name collisions (`IR-VERIFY-063`) so malformed IR cannot bind one identifier to both a function entry and a global entry in the same program namespace; verifier coverage now includes dedicated negative lock for this collision shape.
+- 2026-04-04: Milestone E runtime-global dependency precision follow-up landed: loop dependency collection now uses loop-control reachability effects to prune dead post-loop paths and unreachable `for` step reads (for example `while(1){return ...}` and `for(;1;step){return ...}` no longer over-collect), while preserving reachable-step dependencies via `continue`; IR regressions now include both dead-loop acceptance and live-step-via-continue negative locks.
+- 2026-04-04: Milestone E runtime-global dependency precision guard follow-up landed: IR regressions now additionally lock `for`-step reachability boundaries for unconditional `break` (step dead, should not count) versus infinite-loop fallthrough (step live, should count), reducing future risk of both over-pruning and under-pruning around `IR-LOWER-022` loop-step dependency collection.
+- 2026-04-04: Milestone E runtime-global dependency nested-loop guard follow-up landed: IR regressions now lock constant-true `while` nested-branch loop-exit precision in both directions (`if(0) break` keeps post-loop reads dead; `if(1) break` keeps post-loop reads live), further reducing `IR-LOWER-022` false positives without hiding real reachable dependencies.
+- 2026-04-04: Milestone E runtime-global dependency inner-loop control guard follow-up landed: regressions now additionally lock that inner-loop `break` does not incorrectly make outer-loop post-read/step paths live unless outer control actually exits via outer `break`/`continue` (outer-break keeps step dead, outer-continue keeps step live), tightening `IR-LOWER-022` precision around nested loop-control composition.
+- 2026-04-04: Milestone E runtime-global dependency consistency guard follow-up landed: regressions now explicitly lock that unreachable `continue` edges in constant-true loops do not leak into post-loop dependency reachability (`while(1){if(0) continue; return 1;} return b;` keeps post-loop `b` dead), reinforcing alignment between dependency collection and diagnostic-path tracing.
+- 2026-04-04: Roadmap transition checkpoint: Milestone E is marked closed for current scope (canonical IR bootstrap + hardening complete), and active roadmap focus is switched to Milestone F pass-stage work on canonical IR.
 
 ## Current Milestone Focus
 
 - Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
 - Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
 - Milestone C baseline is complete and validated (`test-fanalyzer`/`test-asan`/`test-strict-warnings` are green with zero warnings).
-- Milestone D is now maintenance-mode only: reopen it for concrete semantic bugs, but do not keep spending roadmap budget on generalized hygiene.
-- Milestone E is the active implementation phase: build the first canonical IR layer and make it the handoff surface after semantic success.
-- Milestone E is now beyond bootstrap: canonical IR v1 lowering and verifier baselines are implemented and green.
+- Milestone D is maintenance-mode only: reopen it for concrete semantic bugs, but do not spend roadmap budget on generalized hygiene.
+- Milestone E is closed for current scope: canonical IR v1 bootstrap + verifier hardening + dependency precision guardrails are landed and regression-locked.
+- Active implementation focus is now Milestone F: pass-stage analysis/transformation work on the existing canonical IR.
 - Large-file split follow-up for parser + semantic implementation files is completed.
 - Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
-- IR v1 shipped baseline: block-based CFG, explicit terminators, unique IDs for blocks/locals/temps, non-SSA locals, expression/control-flow lowering matrix, dedicated IR regressions, and verifier coverage are all in place.
-- Current E focus is quality and expansion: tighten verifier semantics and extend callable/lowering coverage in controlled slices while keeping full-suite stability.
-- Current E focus now also includes first-class global variable semantics and remaining operator coverage across local/global lvalues.
-- IR v1 non-goals: SSA phi placement, optimization passes, register allocation, or multiple parallel IR families.
+- IR v1 shipped baseline remains the core handoff surface: block-based CFG, explicit terminators, unique IDs for blocks/locals/temps, non-SSA locals, broad lowering matrix, dedicated IR regressions, and verifier coverage.
+- Current roadmap emphasis is pass-stage evolution without adding a second peer IR pipeline.
+- IR v1 non-goals for this phase: SSA phi placement, register allocation, backend-specific lowering, or multiple parallel AST-to-IR families.
 
 ## Milestone D Closure Snapshot
 
@@ -288,18 +303,15 @@
 - Regression baseline now covers constant-condition loops, stable-guard value-dependent loops, rebuilt-guard accept cases, zero-iteration return-only holes, and unreachable-return-after-break shapes.
 - Remaining D work is bug-driven only; it is no longer the roadmap's main implementation track.
 
-## Active Implementation Plan (Milestone E status)
+## Active Implementation Plan (Milestone F status)
 
-1. E0 status: canonical IR v1 baseline is implemented and validated (`make test-ir-regression`, `make test-ir-verifier`, and `make test` are green).
-2. E1 status: IR ownership/lifecycle, stable numeric identity model, dump pipeline, and split-file architecture are complete.
-3. E2 status: statement lowering (`if/while/for`, `break/continue`) and expression lowering (arithmetic through ternary/calls/compound updates) are complete for the current semantic subset.
-4. E3 status: verifier baseline is active and integrated after lowering, including structural CFG checks and all-path temp-availability checks.
-5. E4 status: `IR-LOWER-022` cycle diagnostics now include callee-aware chain segments (for example `f() -> g() -> a`) in addition to global-level cycle output.
-6. E5 in progress: verifier value-legality hardening has started (binary/call result destinations are now temp-only); next slices should continue broadening def-use and metadata consistency coverage where not yet enforced.
-7. E6 status: callable validation/lowering boundary hardening is complete for the current scope (unknown callee + arity mismatch + declaration/definition conflict guardrails at lowering boundaries, plus reserved internal-helper external-call policy locks in verifier).
-8. E7 status: declaration-aware and mixed control-flow/call regression matrix expansion is complete for the current scope, including `if`/`while`/`for` call paths, `for` init+condition+step, short-circuit `&&/||`, comma-expression call shapes, and nested short-circuit mixes.
-9. E8 in progress: keep all IR evolution incremental and test-locked, with each slice proving no front-end semantic drift and no regression in full-suite stability.
-10. Future reminder: if optimization or backend work later demands SSA or a lower target-facing IR, add it as a serial lowering stage from the canonical IR instead of creating a second peer AST-to-IR pipeline.
+1. E-close status: canonical IR v1 implementation + hardening is complete for current roadmap scope, including lowering baseline, verifier baseline, declaration/global/runtime-init support, and dependency precision follow-ups.
+2. F0 in progress: establish a minimal pass pipeline scaffold on canonical IR (ordered execution, pass failure propagation, and stable test hooks) without changing default program behavior.
+3. F1 planned: introduce first analysis pass utilities that later transforms can depend on (for example local const/use or effect classification), with tests that lock analysis output contracts.
+4. F2 planned: introduce first low-risk transform pass (for example trivial constant fold / dead expression cleanup) with strict side-effect and control-flow safety guards.
+5. F3 planned: strengthen verifier + regression coupling around pass outputs so transformed IR remains structurally valid and semantically equivalent.
+6. F4 planned: evaluate CFG cleanup/canonicalization opportunities only after F0-F3 prove stable in repeated full-suite runs.
+7. Future reminder: if optimization or backend requirements eventually exceed canonical IR passability, introduce SSA/lower IR only as serial downstream lowering, not as a parallel AST-to-IR track.
 
 ## Milestone B Detailed Execution Plan (historical reference)
 

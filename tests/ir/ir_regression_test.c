@@ -502,6 +502,70 @@ static int test_ir_accepts_runtime_global_initializer_when_while_constant_false_
         "int b;\nint f(){while(0){return b;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
 }
 
+static int test_ir_accepts_runtime_global_initializer_when_while_constant_true_with_immediate_return_makes_following_read_unreachable(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-AFTER-WHILE-CONST-TRUE-RET",
+        "int b;\nint f(){while(1){return 1;} b; return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_for_infinite_with_immediate_return_makes_following_read_unreachable(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-AFTER-FOR-CONST-TRUE-RET",
+        "int b;\nint f(){for(;;){return 1;} b; return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_immediate_return_in_body(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-IN-FOR-STEP-UNREACHABLE",
+        "int b;\nint f(){for(;1;b){return 1;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_via_continue(void) {
+    return expect_ir_lower_fails_without_semantic("IR-GLOBAL-RUNTIME-INIT-LIVE-READ-IN-FOR-STEP-VIA-CONTINUE",
+        "int b;\nint f(){for(;1;b){continue;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n",
+        "dependency path via callee body: a -> f() -> b");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_unconditional_break(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-IN-FOR-STEP-UNREACHABLE-BREAK",
+        "int b;\nint f(){for(;1;b){break;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_in_infinite_loop(void) {
+    return expect_ir_lower_fails_without_semantic("IR-GLOBAL-RUNTIME-INIT-LIVE-READ-IN-FOR-STEP-INFINITE",
+        "int b;\nint f(){for(;1;b){} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n",
+        "dependency path via callee body: a -> f() -> b");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_break_and_dead_post_loop_read(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-AFTER-WHILE-CONST-TRUE-IF0-BREAK",
+        "int b;\nint f(){while(1){if(0) break; return 1;} b; return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_continue_and_post_loop_return_read(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-AFTER-WHILE-CONST-TRUE-IF0-CONTINUE-RET",
+        "int b;\nint f(){while(1){if(0) continue; return 1;} return b;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_rejects_runtime_global_initializer_when_while_const_true_breaks_and_post_loop_read_is_live(void) {
+    return expect_ir_lower_fails("IR-GLOBAL-RUNTIME-INIT-LIVE-READ-AFTER-WHILE-CONST-TRUE-IF1-BREAK",
+        "int b;\nint f(){while(1){if(1) break;} return b;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n",
+        "dependency path via callee body: a -> f() -> b");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_inner_loop_break_does_not_make_outer_post_loop_read_live(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-AFTER-WHILE-CONST-TRUE-INNER-BREAK",
+        "int b;\nint f(){while(1){while(1){break;} return 1;} b; return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_after_inner_break_then_outer_break(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-IN-FOR-STEP-INNER-BREAK-OUTER-BREAK",
+        "int b;\nint f(){for(;1;b){while(1){break;} break;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
+}
+
+static int test_ir_rejects_runtime_global_initializer_when_for_step_is_reachable_after_inner_break_then_outer_continue(void) {
+    return expect_ir_lower_fails_without_semantic("IR-GLOBAL-RUNTIME-INIT-LIVE-READ-IN-FOR-STEP-INNER-BREAK-OUTER-CONTINUE",
+        "int b;\nint f(){for(;1;b){while(1){break;} continue;} return 1;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n",
+        "dependency path via callee body: a -> f() -> b");
+}
+
 static int test_ir_accepts_runtime_global_initializer_when_ternary_constant_true_makes_else_read_unreachable(void) {
     return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-INIT-DEAD-READ-IN-TERNARY-CONST-TRUE",
         "int b;\nint f(){return 1 ? 1 : b;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
@@ -1623,6 +1687,42 @@ int main(void) {
         return 1;
     }
     if (!test_ir_accepts_runtime_global_initializer_when_while_constant_false_makes_read_unreachable()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_while_constant_true_with_immediate_return_makes_following_read_unreachable()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_for_infinite_with_immediate_return_makes_following_read_unreachable()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_immediate_return_in_body()) {
+        return 1;
+    }
+    if (!test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_via_continue()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_unconditional_break()) {
+        return 1;
+    }
+    if (!test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_in_infinite_loop()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_break_and_dead_post_loop_read()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_continue_and_post_loop_return_read()) {
+        return 1;
+    }
+    if (!test_ir_rejects_runtime_global_initializer_when_while_const_true_breaks_and_post_loop_read_is_live()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_inner_loop_break_does_not_make_outer_post_loop_read_live()) {
+        return 1;
+    }
+    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_after_inner_break_then_outer_break()) {
+        return 1;
+    }
+    if (!test_ir_rejects_runtime_global_initializer_when_for_step_is_reachable_after_inner_break_then_outer_continue()) {
         return 1;
     }
     if (!test_ir_accepts_runtime_global_initializer_when_ternary_constant_true_makes_else_read_unreachable()) {

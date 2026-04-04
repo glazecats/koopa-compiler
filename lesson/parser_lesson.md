@@ -27,7 +27,20 @@
 - 表达式核心：`src/parser/parser_core_expr.inc`
 - 语句/声明/TU：`src/parser/parser_stmt_decl_tu.inc`
 
-`parser.c` 负责定义 `Parser` 与聚合 include，主要实现位于 3 个 `.inc` 分片中。
+`parser.c` 现在不只是“放一个 `Parser` 再 include 进去”。
+
+它当前实际负责 4 件事：
+
+1. 定义共享状态结构：`Parser`、`ParserLocalControl`
+2. 收口跨分片共享 typedef：例如 `ParsedFunctionSignature`
+3. 集中声明跨分片 helper 原型：游标原语、AST helper、statement/decl/TU 入口
+4. 最后聚合 `parser_ast_compat.inc`、`parser_core_expr.inc`、`parser_stmt_decl_tu.inc`
+
+所以现在更准确的理解方式是：
+
+$$
+\texttt{parser.c} = \text{shared types} + \text{forward declarations} + \text{aggregator}
+$$
 
 ## 2. `include/parser.h`：对外契约
 
@@ -199,6 +212,31 @@ $$
 |T|>0 \land T_{|T|-1}=\texttt{TOKEN\_EOF}
 $$
 
+### 3.5.1 共享签名结构也已经上收：`ParsedFunctionSignature`
+
+最近这版 parser 还有一个源码组织层面的变化：函数 external 解析共用的
+`ParsedFunctionSignature` 已经从 `parser_stmt_decl_tu.inc` 上收到了 `parser.c`。
+
+这个结构当前承载的是：
+
+- `name_tok`
+- `parameter_count`
+- `parameter_names`
+- `parameter_name_lines`
+- `parameter_name_columns`
+- `has_unnamed_parameter`
+
+它之所以上收到聚合入口，是因为下面这些 helper 都会共享它：
+
+- `parse_function_external_signature`
+- `parse_function_external_definition_body`
+- `parse_function_external`
+
+这说明 parser 现在的分片边界更清晰了：
+
+- `.inc` 主要放函数体
+- 跨分片共享的状态结构和前置声明尽量收口到 `parser.c`
+
 ### 3.6 token slice 工具函数（可调用形态判定）
 
 当前 parser 里和“括号包裹表达式”相关的关键 helper 是：
@@ -247,7 +285,7 @@ parser 现在通过本地兼容层管理 AST 生命周期与 external append：
 
 ### 4.1 两条路径如何保持一致
 
-`parser.c` 同时维护：
+`parser.c` + 分片实现当前同时维护：
 
 - `int` 返回的“只验证语法”路径：`parse_*`
 - `AstExpression*` 返回的“构树”路径：`parse_expression_ast_*`
@@ -316,6 +354,33 @@ if (!(left->kind == AST_EXPR_IDENTIFIER && match_assignment_operator(...)))
 
 这属于当前项目子集策略，和完整 C lvalue 语义不同。
 
+另外这里的 `match_assignment_operator(...)` 已经覆盖了完整的 assignment family，不只是 `=`，还包括：
+
+- `+= -= *= /= %=`
+- `&= ^= |=`
+- `<<= >>=`
+
+所以 parser 这一层当前真正接受的是：
+
+$$
+\text{identifier} \; op_{assign} \; E_{assign}
+$$
+
+其中 `op_assign` 是上面整组赋值/复合赋值运算符。
+
+当前 ternary AST 的真实形状也值得单独记一下：
+
+- 根节点是 `AST_EXPR_TERNARY`
+- 三个孩子分别是 `condition / then_expr / else_expr`
+- `else` 分支继续递归吃 conditional-expression，所以天然右结合
+
+这也是为什么回归里会专门锁：
+
+- `a ? b : c ? d : e`
+- `a ? b,c : d`
+
+这两类形状的树结构。
+
 ### 4.4 前后缀 `++/--` 的 lvalue 检查
 
 非 AST 路径通过 token slice 判定“是否是（可带括号的）标识符形式”；AST 路径通过 `ast_expression_is_identifier_lvalue` 检查。
@@ -327,6 +392,11 @@ $$
 $$
 
 否则报错：`Expected identifier lvalue ...`。
+
+当前 AST 形状也已经把前后缀区分开了：
+
+- prefix `++x` / `--x`：`AST_EXPR_UNARY`
+- postfix `x++` / `x--`：`AST_EXPR_POSTFIX`
 
 ### 4.5 函数调用的语法与元数据
 
@@ -350,6 +420,13 @@ while next is '(' or postfix-op:
         require identifier-lvalue
         expr = Postfix(op, expr)
 ```
+
+这里还有一个很关键的边界：参数列表里的每一项吃的是 assignment-expression，而不是最外层 comma-expression。
+
+所以：
+
+- `f(a=1, b=2)` 是两个参数
+- `f((a=1, b=2))` 才是“一个参数，参数值是逗号表达式”
 
 ---
 
@@ -391,6 +468,13 @@ for child in block:
 
 通过 `expression_slice_is_constant_true` 识别“条件是单个非零字面量”这一类常真条件。
 
+这里的判定非常保守：当前只认 token slice 恰好是“一个非零 `TOKEN_NUMBER`”。
+
+因此：
+
+- `while(1){...}`、`for(;1;...){...}` 会被 parser 侧视为常真
+- `while(+1){...}`、`while((1)){...}`、`while(1-0){...}` 不会
+
 对于常真循环：
 
 - 若 body `may_break=0`，则 `may_fallthrough=0`。
@@ -419,7 +503,20 @@ $$
 
 这在 `parse_break_statement` 与 `parse_continue_statement` 中直接检查。
 
-### 5.5 语句 AST 的实现方案
+### 5.5 `parse_statement_with_local_control` 的默认出口值
+
+这个 dispatch 函数现在还有一张很实用的“局部控制表”：
+
+- `return`：`(may_fallthrough=0, may_break=0)`
+- `break`：`(0, 1)`
+- `continue`：`(0, 0)`
+- 普通 expression statement：`(1, 0)`
+
+所以这里的 `may_break` 不是泛指“控制流会中断”，而是更具体地表示：
+
+`当前子树里是否存在能让最近一层循环退出的 break 路径`
+
+### 5.6 语句 AST 的实现方案
 
 控制流语句会把表达式片段切成 token slice，再调用 `parser_parse_expression_ast_assignment` 生成表达式 AST，挂到 `AstStatement` 的 `expressions[]`。
 
@@ -442,6 +539,22 @@ $$
 
 - prototype 允许 unnamed parameter（如 `int f(int);`）
 - definition 不允许 unnamed parameter
+
+而且 parser 当前不只是记 `parameter_count`，还会在需要时记录：
+
+- `parameter_names`
+- `parameter_name_lines`
+- `parameter_name_columns`
+
+这些数组先暂存在 `ParsedFunctionSignature` 里，等确定 external 成功后再通过 `parser_commit_parameter_names(...)` 交给最终的 `AstExternal`。
+
+如果 parameter 没名字（只允许出现在 prototype 里），当前元数据约定是：
+
+- `parameter_names[i] = NULL`
+- `parameter_name_lines[i] = 0`
+- `parameter_name_columns[i] = 0`
+
+所以“unnamed parameter”不是直接少一个槽位，而是仍然保留参数位置，只是名字元数据为空。
 
 约束：
 
@@ -518,6 +631,19 @@ for each declarator d_i:
 
 同样规则也用于 `for(int ...; ...; ...)` 的 for-init 声明部分。
 
+另外当前 declaration initializer 的入口是 `parse_initializer_expression(...)`，它内部直接调用 `parse_assignment(...)`。
+
+这意味着：
+
+- initializer 允许 assignment / conditional / logical / arithmetic 这类常规表达式
+- 但不会把最外层逗号吞成 initializer 的一部分，从而和 declarator 分隔符冲突
+
+所以：
+
+- `int x = a = b;` 当前是合法 parser 形态
+- `int x = a, y = b;` 这里最外层逗号仍然是 declarator 分隔符
+- 如果要把逗号表达式放进 initializer，本质上需要把它包进条件分支或括号形成更内层表达式
+
 ---
 
 ## 7. 公共入口函数的关系
@@ -533,6 +659,12 @@ for each declarator d_i:
 - 语法 + AST + 函数元数据
 - 失败时会清理 `out_program`，避免半成品 AST 残留
 
+还有一个当前实现里很重要的确定性行为：
+
+- 每次进入 `parser_parse_translation_unit_ast(...)` 都会先 `parser_ast_program_free(out_program)`
+
+所以这个入口默认把 `out_program` 当“可复用容器”来处理，而不是要求调用者手动先清空旧 AST。
+
 ### 7.3 `parser_parse_expression_ast_assignment`
 
 - 入口是 comma-level 解析
@@ -543,6 +675,11 @@ for each declarator d_i:
 $$
 \text{parse\_expr\_ast}(T)=\text{success} \Rightarrow \text{current}=EOF
 $$
+
+另外这个入口当前还有两个稳定契约：
+
+1. 若 `out_expression == NULL`，解析成功后会主动释放临时 AST，而不是泄漏
+2. 成功返回前会把 `ParserError` 再清零一次，避免调用者看到旧错误残留
 
 ---
 
@@ -744,6 +881,7 @@ $$
 
 - 左结合层（`+ - * / ...`）用 `while` 循环叠树
 - 赋值层保持右结合（递归进右侧）
+- 条件层 `?:` 的 then 分支当前会吃 `comma-expression`
 
 伪代码（左结合层）：
 
@@ -756,6 +894,14 @@ while next in ops:
 return left
 ```
 
+这也是当前 parser regression 会单独锁的一条优先级边界：
+
+$$
+E_{then\ of\ ?:} = E_{comma}
+$$
+
+也就是说，`a ? b,c : d` 会把 `b,c` 作为 then 分支整体来解析，而不是把外层逗号提到更高层。
+
 ### 10.4 `parse_postfix`：为什么能识别调用链
 
 `parse_postfix` / `parse_expression_ast_postfix` 的 while 循环每吃到一个 `(`...`)`，就追加一层 postfix call。
@@ -767,6 +913,14 @@ a()()() = Call(Call(Call(a,[]),[]),[])
 $$
 
 所以 `a()()()` 会自然长成 3 层嵌套调用树；非 AST 路径只保留 `is_callable_target` 这类局部语法标志，不再维护旧的 call-site 元数据缓存。
+
+参数列表本身的形状则是：
+
+```text
+'(' [ assignment (',' assignment)* ] ')'
+```
+
+也就是“逗号分隔的 assignment-expression 列表”。
 
 ### 10.5 `parse_statement_with_local_control`：语句解析 + 局部控制信息
 
@@ -824,6 +978,8 @@ $$
 
 这正是 semantic 能按声明器顺序做可见性检查的前提。
 
+而真正吃 initializer token slice 的入口，就是上一节提到的 `parse_initializer_expression(...) -> parse_assignment(...)`。
+
 ### 10.8 `parse_for_statement_with_local_control`：for-init 的两条路
 
 `for(init; cond; step)` 的 init 有两种：
@@ -854,6 +1010,12 @@ if fail:
 
 这是 C 顶层常见模式，目的是在共享前缀（`int ident ...`）下优先识别函数，再安全回退。
 
+现在这一层也已经被收口到单个 helper：
+
+- `parse_translation_unit_external_or_declaration(...)`
+
+所以无论是 AST 入口还是 legacy 语法验证入口，顶层 external 的分派策略都是共用这一份，而不是两套逻辑各写一次。
+
 ### 10.10 对外产出（当前精简契约）
 
 顶层 external 成功落盘后，parser 对外主要写入：
@@ -866,6 +1028,12 @@ if fail:
 $$
 Output_{external} = \{AST\ body,\ params,\ return\_count,\ decl\_initializer?\}
 $$
+
+这里还有三个实现细节值得补一句：
+
+1. 对函数 prototype，parser 不会去构函数体 AST，`return_statement_count` 保持 `0`
+2. 对函数 definition，只有当 `function_body` 或 `return_statement_count` 至少一项被请求时，才会真的保留 body AST
+3. `return_statement_count` 当前是 parser 在函数体 AST 上递归调用 `count_return_statements_in_ast(...)` 现数出来的结构统计值
 
 ### 10.11 为什么 parser 仍保留非 AST 路径
 

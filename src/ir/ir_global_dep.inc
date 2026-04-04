@@ -396,6 +396,169 @@ static int ir_dependency_try_eval_condition_truthiness(const AstExpression *expr
     return 1;
 }
 
+typedef struct {
+    int may_fallthrough;
+    int may_break;
+    int may_continue;
+    int may_return;
+} IrLoopTransferInfo;
+
+static int ir_analyze_loop_transfer_from_statement(const AstStatement *stmt,
+    IrLoopTransferInfo *out_info) {
+    size_t i;
+
+    if (!out_info) {
+        return 0;
+    }
+
+    out_info->may_fallthrough = 1;
+    out_info->may_break = 0;
+    out_info->may_continue = 0;
+    out_info->may_return = 0;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_COMPOUND:
+        {
+            int may_fallthrough = 1;
+
+            out_info->may_fallthrough = 1;
+            out_info->may_break = 0;
+            out_info->may_continue = 0;
+            out_info->may_return = 0;
+
+            for (i = 0; i < stmt->child_count; ++i) {
+                IrLoopTransferInfo child_info;
+
+                if (!may_fallthrough) {
+                    break;
+                }
+                if (!ir_analyze_loop_transfer_from_statement(stmt->children[i], &child_info)) {
+                    return 0;
+                }
+
+                out_info->may_break = out_info->may_break || child_info.may_break;
+                out_info->may_continue = out_info->may_continue || child_info.may_continue;
+                out_info->may_return = out_info->may_return || child_info.may_return;
+                may_fallthrough = child_info.may_fallthrough;
+            }
+
+            out_info->may_fallthrough = may_fallthrough;
+            return 1;
+        }
+    case AST_STMT_DECLARATION:
+    case AST_STMT_EXPRESSION:
+        return 1;
+    case AST_STMT_RETURN:
+        out_info->may_fallthrough = 0;
+        out_info->may_return = 1;
+        return 1;
+    case AST_STMT_BREAK:
+        out_info->may_fallthrough = 0;
+        out_info->may_break = 1;
+        return 1;
+    case AST_STMT_CONTINUE:
+        out_info->may_fallthrough = 0;
+        out_info->may_continue = 1;
+        return 1;
+    case AST_STMT_IF:
+        {
+            IrLoopTransferInfo then_info;
+            IrLoopTransferInfo else_info;
+            int condition_known = 0;
+            int condition_truthy = 0;
+
+            then_info.may_fallthrough = 1;
+            then_info.may_break = 0;
+            then_info.may_continue = 0;
+            then_info.may_return = 0;
+            else_info = then_info;
+
+            if (stmt->has_condition_expression &&
+                stmt->condition_expression_index < stmt->expression_count &&
+                stmt->expressions && stmt->expressions[stmt->condition_expression_index] &&
+                !ir_dependency_try_eval_condition_truthiness(
+                    stmt->expressions[stmt->condition_expression_index],
+                    &condition_known,
+                    &condition_truthy)) {
+                return 0;
+            }
+
+            if (condition_known) {
+                if (condition_truthy) {
+                    if (stmt->child_count >= 1 &&
+                        !ir_analyze_loop_transfer_from_statement(stmt->children[0], out_info)) {
+                        return 0;
+                    }
+                    return 1;
+                }
+
+                if (stmt->child_count >= 2 &&
+                    !ir_analyze_loop_transfer_from_statement(stmt->children[1], out_info)) {
+                    return 0;
+                }
+                return 1;
+            }
+
+            if (stmt->child_count >= 1 &&
+                !ir_analyze_loop_transfer_from_statement(stmt->children[0], &then_info)) {
+                return 0;
+            }
+            if (stmt->child_count >= 2 &&
+                !ir_analyze_loop_transfer_from_statement(stmt->children[1], &else_info)) {
+                return 0;
+            }
+
+            out_info->may_fallthrough = then_info.may_fallthrough || else_info.may_fallthrough;
+            out_info->may_break = then_info.may_break || else_info.may_break;
+            out_info->may_continue = then_info.may_continue || else_info.may_continue;
+            out_info->may_return = then_info.may_return || else_info.may_return;
+            return 1;
+        }
+    case AST_STMT_WHILE:
+    case AST_STMT_FOR:
+        {
+            IrLoopTransferInfo body_info;
+            int condition_known = 0;
+            int condition_truthy = 0;
+            const AstStatement *body_stmt = stmt->child_count >= 1 ? stmt->children[0] : NULL;
+
+            if (stmt->kind == AST_STMT_FOR && !stmt->has_condition_expression) {
+                condition_known = 1;
+                condition_truthy = 1;
+            } else if (stmt->has_condition_expression &&
+                stmt->condition_expression_index < stmt->expression_count &&
+                stmt->expressions && stmt->expressions[stmt->condition_expression_index] &&
+                !ir_dependency_try_eval_condition_truthiness(
+                    stmt->expressions[stmt->condition_expression_index],
+                    &condition_known,
+                    &condition_truthy)) {
+                return 0;
+            }
+
+            if (!ir_analyze_loop_transfer_from_statement(body_stmt, &body_info)) {
+                return 0;
+            }
+
+            out_info->may_break = 0;
+            out_info->may_continue = 0;
+            out_info->may_return = body_info.may_return;
+
+            if (condition_known) {
+                out_info->may_fallthrough = condition_truthy ? body_info.may_break : 1;
+            } else {
+                out_info->may_fallthrough = 1;
+            }
+            return 1;
+        }
+    default:
+        return 1;
+    }
+}
+
 static int ir_trace_global_dependency_from_expr(IrGlobalDepTrace *trace,
     const AstExpression *expr,
     IrDepScopeStack *scope_stack,
@@ -704,6 +867,7 @@ static int ir_trace_global_dependency_from_statement(IrGlobalDepTrace *trace,
             int condition_known = 0;
             int condition_truthy = 0;
             int found = 0;
+            IrLoopTransferInfo body_info;
 
             if (!ir_dep_scope_push(scope_stack)) {
                 return 0;
@@ -776,26 +940,16 @@ static int ir_trace_global_dependency_from_statement(IrGlobalDepTrace *trace,
                 return 0;
             }
 
+            if (!stmt->has_condition_expression) {
+                condition_known = 1;
+                condition_truthy = 1;
+            }
+
             if (condition_known && !condition_truthy) {
                 ir_dep_scope_pop(scope_stack);
                 if (out_may_fallthrough) {
                     *out_may_fallthrough = 1;
                 }
-                return 1;
-            }
-
-            if (stmt->has_for_step_expression &&
-                stmt->for_step_expression_index < stmt->expression_count &&
-                stmt->expressions && stmt->expressions[stmt->for_step_expression_index] &&
-                !ir_trace_global_dependency_from_expr(trace,
-                    stmt->expressions[stmt->for_step_expression_index],
-                    scope_stack,
-                    &found)) {
-                ir_dep_scope_pop(scope_stack);
-                return 0;
-            }
-            if (found) {
-                *out_found = 1;
                 return 1;
             }
 
@@ -813,9 +967,36 @@ static int ir_trace_global_dependency_from_statement(IrGlobalDepTrace *trace,
                 return 1;
             }
 
+            if (!ir_analyze_loop_transfer_from_statement(
+                    stmt->child_count >= 1 ? stmt->children[0] : NULL,
+                    &body_info)) {
+                ir_dep_scope_pop(scope_stack);
+                return 0;
+            }
+
+            if ((body_info.may_fallthrough || body_info.may_continue) &&
+                stmt->has_for_step_expression &&
+                stmt->for_step_expression_index < stmt->expression_count &&
+                stmt->expressions && stmt->expressions[stmt->for_step_expression_index] &&
+                !ir_trace_global_dependency_from_expr(trace,
+                    stmt->expressions[stmt->for_step_expression_index],
+                    scope_stack,
+                    &found)) {
+                ir_dep_scope_pop(scope_stack);
+                return 0;
+            }
+            if (found) {
+                *out_found = 1;
+                return 1;
+            }
+
             ir_dep_scope_pop(scope_stack);
             if (out_may_fallthrough) {
-                *out_may_fallthrough = 1;
+                if (condition_known) {
+                    *out_may_fallthrough = condition_truthy ? body_info.may_break : 1;
+                } else {
+                    *out_may_fallthrough = 1;
+                }
             }
             return 1;
         }
@@ -927,6 +1108,7 @@ static int ir_trace_global_dependency_from_statement(IrGlobalDepTrace *trace,
             int condition_known = 0;
             int condition_truthy = 0;
             int found = 0;
+            IrLoopTransferInfo body_info;
 
             if (stmt->has_condition_expression &&
                 stmt->condition_expression_index < stmt->expression_count &&
@@ -972,8 +1154,18 @@ static int ir_trace_global_dependency_from_statement(IrGlobalDepTrace *trace,
                 return 1;
             }
 
+            if (!ir_analyze_loop_transfer_from_statement(
+                    stmt->child_count >= 1 ? stmt->children[0] : NULL,
+                    &body_info)) {
+                return 0;
+            }
+
             if (out_may_fallthrough) {
-                *out_may_fallthrough = 1;
+                if (condition_known) {
+                    *out_may_fallthrough = condition_truthy ? body_info.may_break : 1;
+                } else {
+                    *out_may_fallthrough = 1;
+                }
             }
             return 1;
         }
@@ -1457,6 +1649,7 @@ static int ir_collect_global_dependencies_from_for_statement(IrGlobalDepCollecto
     int condition_known = 0;
     int condition_truthy = 0;
     int body_may_fallthrough = 1;
+    IrLoopTransferInfo body_info;
 
     if (!stmt) {
         if (out_may_fallthrough) {
@@ -1545,26 +1738,17 @@ static int ir_collect_global_dependencies_from_for_statement(IrGlobalDepCollecto
         return 0;
     }
 
+    if (!stmt->has_condition_expression) {
+        condition_known = 1;
+        condition_truthy = 1;
+    }
+
     if (condition_known && !condition_truthy) {
         ir_dep_scope_pop(scope_stack);
         if (out_may_fallthrough) {
             *out_may_fallthrough = 1;
         }
         return 1;
-    }
-
-    if (stmt->has_for_step_expression &&
-        stmt->for_step_expression_index < stmt->expression_count &&
-        stmt->expressions && stmt->expressions[stmt->for_step_expression_index] &&
-        !ir_collect_global_dependencies_from_expr(collector,
-            stmt->expressions[stmt->for_step_expression_index],
-            scope_stack,
-            deps,
-            dep_count,
-            dep_capacity,
-            error)) {
-        ir_dep_scope_pop(scope_stack);
-        return 0;
     }
 
     if (stmt->child_count >= 1 &&
@@ -1580,10 +1764,40 @@ static int ir_collect_global_dependencies_from_for_statement(IrGlobalDepCollecto
         return 0;
     }
 
+    if (!ir_analyze_loop_transfer_from_statement(
+            stmt->child_count >= 1 ? stmt->children[0] : NULL,
+            &body_info)) {
+        ir_set_error(error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-057: failed to analyze for-loop dependency reachability");
+        ir_dep_scope_pop(scope_stack);
+        return 0;
+    }
+
+    if ((body_info.may_fallthrough || body_info.may_continue) &&
+        stmt->has_for_step_expression &&
+        stmt->for_step_expression_index < stmt->expression_count &&
+        stmt->expressions && stmt->expressions[stmt->for_step_expression_index] &&
+        !ir_collect_global_dependencies_from_expr(collector,
+            stmt->expressions[stmt->for_step_expression_index],
+            scope_stack,
+            deps,
+            dep_count,
+            dep_capacity,
+            error)) {
+        ir_dep_scope_pop(scope_stack);
+        return 0;
+    }
+
     ir_dep_scope_pop(scope_stack);
     (void)body_may_fallthrough;
     if (out_may_fallthrough) {
-        *out_may_fallthrough = 1;
+        if (condition_known) {
+            *out_may_fallthrough = condition_truthy ? body_info.may_break : 1;
+        } else {
+            *out_may_fallthrough = 1;
+        }
     }
     return 1;
 }
@@ -1765,6 +1979,7 @@ static int ir_collect_global_dependencies_from_statement(IrGlobalDepCollector *c
             int condition_known = 0;
             int condition_truthy = 0;
             int body_may_fallthrough = 1;
+            IrLoopTransferInfo body_info;
 
         if (stmt->has_condition_expression &&
             stmt->condition_expression_index < stmt->expression_count &&
@@ -1808,9 +2023,23 @@ static int ir_collect_global_dependencies_from_statement(IrGlobalDepCollector *c
                 return 0;
             }
         }
+
+        if (!ir_analyze_loop_transfer_from_statement(
+                stmt->child_count >= 1 ? stmt->children[0] : NULL,
+                &body_info)) {
+            ir_set_error(error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-058: failed to analyze while-loop dependency reachability");
+            return 0;
+        }
         (void)body_may_fallthrough;
         if (out_may_fallthrough) {
-            *out_may_fallthrough = 1;
+            if (condition_known) {
+                *out_may_fallthrough = condition_truthy ? body_info.may_break : 1;
+            } else {
+                *out_may_fallthrough = 1;
+            }
         }
         return 1;
         }
