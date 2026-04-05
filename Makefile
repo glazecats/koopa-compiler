@@ -18,6 +18,7 @@ PARSER_LEGACY_LINK_BIN := $(PARSER_BUILD_DIR)/parser_legacy_link_test
 SEMANTIC_REGRESSION_BIN := $(SEMANTIC_BUILD_DIR)/semantic_regression_test
 IR_REGRESSION_BIN := $(IR_BUILD_DIR)/ir_regression_test
 IR_VERIFIER_BIN := $(IR_BUILD_DIR)/ir_verifier_test
+IR_PASS_BIN := $(IR_BUILD_DIR)/ir_pass_test
 
 LEXER_TEST_INPUT := tests/lexer/test.c
 PARSER_TEST_INPUT := tests/parser/test.c
@@ -43,6 +44,17 @@ IR_SPLIT_INCLUDES := \
 	src/ir/ir_verify.inc \
 	src/ir/ir_dump.inc
 
+IR_PASS_SPLIT_INCLUDES := \
+	src/ir_pass/ir_pass_core.inc \
+	src/ir_pass/ir_pass_temp_analysis.inc \
+	src/ir_pass/ir_pass_fold.inc \
+	src/ir_pass/ir_pass_const.inc \
+	src/ir_pass/ir_pass_copy.inc \
+	src/ir_pass/ir_pass_cfg_analysis.inc \
+	src/ir_pass/ir_pass_cfg.inc \
+	src/ir_pass/ir_pass_dce.inc \
+	src/ir_pass/ir_pass_pipeline.inc
+
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -55,7 +67,7 @@ SEMANTIC_REGRESSION_INCLUDES := \
 	tests/semantic/semantic_regression_callable_flow.inc \
 	tests/semantic/semantic_regression_scope_cf.inc
 
-.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-fanalyzer test-asan test-strict-warnings clean
 
 all: test
 
@@ -89,6 +101,9 @@ $(IR_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/se
 
 $(IR_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c -o $@
+
+$(IR_PASS_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/ir_pass/ir_pass.c tests/ir/ir_pass_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) $(IR_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h include/ir_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/ir_pass/ir_pass.c tests/ir/ir_pass_test.c -o $@
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"
@@ -154,6 +169,14 @@ test-ir-verifier: $(IR_VERIFIER_BIN)
 	rm -f "$$tmp"; \
 	exit $$status
 
+test-ir-pass: $(IR_PASS_BIN)
+	@echo "[ir] running pass tests"
+	@tmp="./$(IR_PASS_BIN).run.$$$$"; \
+	cp "./$(IR_PASS_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
 test:
 	@$(MAKE) --no-print-directory test-lexer
 	@$(MAKE) --no-print-directory test-lexer-regression
@@ -163,6 +186,7 @@ test:
 	@$(MAKE) --no-print-directory test-semantic-regression
 	@$(MAKE) --no-print-directory test-ir-regression
 	@$(MAKE) --no-print-directory test-ir-verifier
+	@$(MAKE) --no-print-directory test-ir-pass
 
 test-fanalyzer:
 	@$(MAKE) --no-print-directory clean
