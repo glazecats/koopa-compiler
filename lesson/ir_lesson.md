@@ -314,6 +314,19 @@ int ir_lower_program(const AstProgram *ast_program,
 4. runtime-init verifier 契约  
    verifier 现在不只查普通 CFG/temps，还会单独检查 `__global.init()` / `__program.init()` 的 helper 形状、入口调用和保留名约束。
 
+### 3.1.2 最近这 4 个“机制升级点”
+
+如果把最近变化从“功能列表”翻译成“判定机制升级”，最值得单独记的是这 4 点：
+
+1. 依赖收集从“整棵语法树扫描”升级成“保守、带 reachability 信息的扫描”  
+   现在会结合 `condition truthiness`、`may_fallthrough`、短路表达式和常量条件分支，主动跳过一部分已知不可达的读取。
+2. loop 相关依赖判定开始显式看 transfer 信息  
+   `IrLoopTransferInfo` 会记录 `may_fallthrough / may_break / may_continue / may_return`，让 `for` 的 step 依赖、常量真循环的后续可达性判断不再只靠最粗粒度近似。
+3. `IR-LOWER-022` 从“只有结论”升级成“尽量附带解释链路”  
+   当前会尝试给出 `dependency path`、`dependency path via callee body`、`dependency cycle`，所以命中 runtime global initializer 依赖拒绝时，信息量明显比之前高。
+4. verifier 从“结构自洽”进一步收紧到“startup/helper 调用策略”  
+   除了 helper 形状本身，还会检查 `__global.init()` / `__program.init()` 的允许调用位置，以及 duplicate global、function/global name collision 这类 program 级符号约束。
+
 ---
 
 ### 3.2 当前明确不支持的形态

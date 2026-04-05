@@ -1,100 +1,157 @@
 # Compiler Lab Next Steps
 
-## Current Guidance (agreed)
+## Current Authority
 
-1. Milestone A is closed for implementation tracking (semantic-authority retirement complete for callable/return/statement-counter metadata).
-2. Milestone B is closed for implementation tracking (parser/AST decoupling and parser-side metadata-retention cleanup completed).
-3. Milestone C baseline validation is complete (`-fanalyzer`/ASan/strict-warning reruns are green).
-4. Milestone D front-end control-flow semantics is in maintenance mode only (reopen for concrete bug-driven findings).
-5. Milestone E canonical IR bootstrap and precision-hardening work is considered complete for current scope.
-6. Active implementation focus moves to pass-stage work on the existing canonical IR (analysis + transformation passes), not to a new peer IR layer.
-7. If a lower IR is ever needed later, it must be introduced as serial lowering (`AST -> canonical IR -> lower/target IR`), never as multiple parallel AST-to-IR pipelines.
+- [AGENTS.md](/workspaces/compiler_lab/AGENTS.md) defines startup order, role boundaries, and ownership.
+- `docs/ir-conventions.md` is working memory for current engineering facts and safety boundaries.
+- `docs/NEXT_STEPS.md` is the current roadmap and stage-status authority.
+- `docs/LOWER_IR_DESIGN.md` is the current design authority for downstream/lower-IR planning.
 
-## Why this order
+## Current Guidance
 
-- Front-end authority and decoupling work (A/B/C/D) are already stable enough to avoid roadmap re-opening.
-- Canonical IR v1 now has explicit CFG, verifier contracts, declaration/global semantics, and broad regression locks.
-- `IR-LOWER-022` dependency analysis has moved beyond syntactic scanning and now includes several rounds of reachability precision tightening, reducing false positives.
-- Highest-value next work is no longer adding IR surface area; it is controlled pass-stage evolution on top of the current IR to improve optimization readiness while preserving contracts.
-- Delaying a second IR layer avoids premature complexity and keeps diagnostics, tests, and ownership concentrated around one canonical representation.
+1. Milestones A-E are closed for active implementation tracking.
+2. Canonical IR v1 is the stable post-semantic handoff surface.
+3. Canonical-IR pass work is now maintenance-first: reopen it for confirmed bugs, concrete optimization needs, or real structural pressure, not speculative expansion.
+4. Any lower IR must be introduced as serial lowering:
+   `AST -> semantic -> canonical IR -> lower IR -> later backend/codegen`
+5. Do not build multiple parallel AST-to-IR pipelines.
+6. Lower-IR work is now checkpointed into maintenance-first mode: keep the current phase-2 boundary stable, and reopen active expansion only for confirmed bugs, new lowering features, or a concrete downstream consumer need.
 
-## Near-Term Milestone Plan
+## Current State
 
-### Milestone A: Semantic + AST expansion (closed)
+- Milestone A: closed. Semantic-authority retirement is complete.
+- Milestone B: closed. Parser/AST internal decoupling and metadata-retention cleanup are complete.
+- Milestone C: closed. `test-fanalyzer`, `test-asan`, and `test-strict-warnings` have green baselines.
+- Milestone D: maintenance-mode only. Reopen for concrete semantic bugs.
+- Milestone E: closed. Canonical IR bootstrap, verifier hardening, declaration/global/runtime-init support, and dependency precision guardrails are in place.
+- Milestone F0: complete. Pass pipeline scaffold is landed.
+- Milestone F1: effectively phase-complete. Shared analysis surfaces cover def/use, CFG, temp equivalence, and side-effect classification needed by current transforms.
+- Milestone F2: soft-closed. Low-risk canonical-IR transforms are broad enough for this phase and should now be reopened only for real missed-cleanup or correctness issues.
+- Milestone F3: soft-closed. Fixed-point, semantic guardrail, canonical-form, and stepwise verifier protections are landed.
+- Lower IR: phase 0 is frozen, phase 1 skeleton is landed, and the current phase 2 checkpoint now covers representative serial lowering, verifier hardening, and builder/API fail-fast enough to enter maintenance-first mode.
 
-- Status snapshot:
-- S1 statement AST landing is complete.
-- S2 callable/control-flow AST-primary cutover is complete.
-- S3 scope semantics and semantic-authority retirement stabilization is complete.
-- Closure objective achieved:
-- Semantic callable/return/scope behavior is AST-primary in active paths with full regression locks green.
+## Canonical IR Maintenance Stance
 
-### Milestone B: Internal decoupling (closed)
+- Keep canonical IR stable as the front-end output surface.
+- Keep existing canonical-IR passes verifier-safe and regression-locked.
+- Prefer bug fixes, correctness hardening, and contract cleanup over new speculative transforms.
+- Do not force SSA directly onto canonical IR.
+- Do not begin register allocation or machine-oriented backend modeling at this stage.
 
-- Reduce parser dependence on internal AST helpers.
-- Retire parser-side metadata retention touchpoints (`called_function_*`, `returns_on_all_paths`, statement counters) in controlled slices.
-- Preserve old API link behavior and test coverage.
-- Keep changes minimal and non-semantic.
+## Lower IR Direction
 
-### Milestone C: Static-analysis cleanup
+Current recommended direction:
 
-- Status: completed baseline and rerun verification.
-- `test-fanalyzer`, `test-asan`, and `test-strict-warnings` are green with zero warnings in current runs.
+- introduce a downstream lower-memory IR rather than mutating canonical IR in place
+- keep canonical block/basic-block/terminator CFG shape in the first lower layer
+- keep phase 1 explicit and small
+- prefer slot-specific memory operations first:
+  - `load_local`
+  - `store_local`
+  - `load_global`
+  - `store_global`
+- make lower-IR value instructions temp/immediate-only and keep locals/globals as slot-only entities
+- defer generic address-taking, SSA, and register allocation until the lower-memory layer proves its value
 
-### Milestone D: Conservative Control-Flow Semantics (stabilized)
+For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
 
-- Keep `SEMA-CF-001` focused on reliably provable must-not-return shapes.
-- Preserve strict branch requirements for `if/else` and plain `if` without turning value-dependent loops into false positives.
-- Status: stable enough for IR handoff; continue only as bug-driven semantic maintenance.
+## Near-Term Plan
 
-### Milestone E: Canonical IR v1 (closed for current scope)
+1. Maintain canonical IR and its pass layer in bug-driven mode.
+2. Keep the phase 1 lower-IR skeleton stable behind a separate module boundary:
+   - `include/lower_ir.h`
+   - `src/lower_ir/`
+   - `tests/lower_ir/`
+3. Phase 1 status:
+   complete enough for manual construction, dump, verifier, and isolated tests.
+4. Phase 2 lower-IR checkpoint:
+   keep serial lowering from canonical IR stable while preserving CFG shape and the value/slot split explicit.
+5. Current phase 2 prototype coverage:
+   - slot-valued `ret` lowered via explicit `load_*`
+   - slot-valued `br` conditions lowered via explicit `load_*`
+   - slot-valued binary operands lowered via explicit `load_*`
+   - canonical `mov` to local/global lowered as `store_*`
+   - slot-valued call arguments lowered via explicit `load_*`
+   - canonical global initializer metadata copied into lower IR
+   - lower-IR verifier now enforces the reserved startup/helper contract for runtime global initialization (`__global.init` / `__program.init`)
+   - lower-IR verifier now enforces canonical-style public call/name contracts too: known callees only, matching arg counts, duplicate-name rejection, and function/global collision rejection
+   - lower-IR verifier now also rejects malformed metadata tables explicitly instead of trusting non-NULL global/function/local/block backing arrays when the corresponding counts are nonzero
+   - lower-IR verifier now also rejects count/capacity metadata mismatches explicitly, so malformed programs cannot walk past global/function/local/block/instruction table bounds before reporting an error
+   - lower-IR verifier now also rejects unreachable body blocks, bringing CFG reachability into the lower-IR public contract instead of only checking local target validity
+   - lower-IR builder/API now fail fast on several common malformed construction paths: declaration-only functions cannot append blocks or allocate temps, parameter locals must remain a prefix, and blocks reject both post-terminator instruction appends and terminator overwrite attempts
+   - `lower_ir_lower_from_ir(...)` now self-verifies the produced lower IR before returning success, so lowering regressions trip at the production boundary instead of relying on all callers to run a separate verifier pass
+   - lower-IR verifier now also checks temp definition/availability contracts: temps must be defined somewhere, same-block duplicate temp definitions are rejected, and temp uses must be available on all incoming paths while still allowing the current mutually-exclusive join-temp lowering pattern
+   - lower-IR temp-definition checks now only honor live `has_result` temp outputs, so result-less store instructions cannot forge fake temp definitions through hidden payload fields
+   - lower-IR verifier now also enforces a minimal declaration/signature shape contract: `parameter_count` must match the parameter-prefix locals, and ordinary declaration-only functions cannot carry extra non-parameter locals or temp state
+   - exact dump regressions now lock runtime-global startup flow and no-`main` `__program.init` fallback in lowered output
+   - exact dump regressions now lock representative control-flow-heavy lowering too: `if` joins, short-circuit branch conditions, and `while` backedges
+   - exact dump regressions now also cover `while`-break exits, `for` init/step CFG, nested loop break/continue, and branch-local global writeback with join-block reload
+   - exact dump regressions now cover call-heavy CFG shapes too: declared-call `for` condition/step lowering and runtime-global startup interaction with branchy `main`
+   - exact dump regressions now cover representative value-materialization shapes too: local `&&` values, ternary value expressions, declared-call logical values, and nested logical-mix value joins
+6. Lower-IR current maintenance stance:
+   - keep the current builder/API and verifier contracts stable
+   - treat the present regression matrix as sufficient authority for the current phase
+   - reopen this slice only for concrete bugs, new lowering features, or a concrete downstream consumer need
+7. Only after that should the project decide whether value-SSA on top of lower IR is justified.
 
-- Canonical block-based non-SSA IR is established as the post-semantic handoff surface.
-- Verifier baseline/hardening, declaration-awareness, global/runtime-init semantics, and dependency diagnostics are in place.
-- Regression matrix for callable + CFG combinations and dependency precision guardrails is broad and green.
+## Current Stop Condition
 
-### Milestone F: Pass Pipeline on Canonical IR (active)
-
-- F0: minimal pass execution framework is now landed over canonical IR (deterministic ordering, pass-level fail-fast diagnostics, dedicated pass test target).
-- F1: land first low-risk analysis pass(es) to support later transforms (for example local const-value/use info or side-effect classification).
-- F2: expand low-risk transform passes with strict safety rails (safe binary simplification now covers both immediate/immediate folds and conservative single-immediate identity reductions; continue broadening from there rather than starting from zero).
-- F3: expand regression/verifier locks to keep pass outputs structurally valid and behavior-preserving.
-- F4: only after measurable pass-stage pressure, evaluate whether SSA/lower IR is justified as a serial downstream stage.
-
-### Milestone F Closure Heuristics
-
-- Prefer expanding F1 next from explicit def facts into explicit use-site facts before opening many more transform slices; the current pass layer already has enough transforms that better analysis reuse is the higher-leverage next step.
-- F1 can be considered complete for this phase once shared analysis surfaces cover: temp use-counts, definition-counts, unique def-sites, explicit unique/single use-site facts, safe temp equivalence (copy/constant), CFG reachability/predecessor counts, and instruction side-effect classification, with current transforms consuming those facts instead of bespoke rescans.
-- F2 can be considered complete for this phase once the current low-risk local transforms reach diminishing returns: fold/copy/constant/DCE plus local CFG canonicalization cover the obvious safe cases, no known soundness holes remain in the pass stack, and the default pipeline stays green through repeated full-suite runs without requiring another round of urgent conservative fixes.
+- Treat the current lower-IR Phase 2 loop as checkpoint-complete once `make test-lower-ir-regression`, `make test-lower-ir-verifier`, and `make test` stay green with the present representative matrix.
+- Do not continue adding lower-IR regression families by default once the matrix covers:
+  - straight-line slot/value lowering
+  - control-flow slot materialization
+  - loop/backedge and heavier CFG shapes
+  - call-heavy CFG shapes
+  - runtime-global startup/helper interaction
+  - value-materialization joins
+- Reopen active expansion only for bug-driven work, a newly introduced lowering feature, or a clearly missing CFG/value family that the current matrix does not represent.
+- Reopen builder/API or verifier hardening only for confirmed malformed-program holes, not by default.
 
 ## Guardrails
 
-- Do not prioritize low-risk hygiene over semantic feature progress.
-- Every functional change should come with a regression test.
+- Every functional change should come with regression coverage.
 - Keep `make test` green at each step.
-- Keep IR work behind successful semantic analysis; IR generation must not become a second semantic authority surface.
-- Do not build multiple peer IRs in parallel. If a lower IR is needed later, lower from the canonical IR rather than generating both from AST.
-- Use stable internal numeric IDs for blocks, locals, and temporaries; human-friendly names such as `bb.1`, `a.2`, and `tmp.3` belong in dumps, not core identity.
-- Pass-stage work must preserve canonical IR contracts: verifier must remain green before and after passes.
-- Optimization passes must be introduced incrementally with behavior locks (regression cases proving no semantic drift).
+- Pass-stage work must preserve canonical-IR contracts: verifier must remain green before and after passes.
+- Lower-IR work must not turn canonical IR into a mixed transitional representation.
+- Keep stable internal numeric IDs for blocks, locals, temps, and later lower-IR entities; human-readable names belong in dumps, not identity.
+- Do not introduce lower IR as a second front-end authority surface.
+- Do not treat `docs/LOWER_IR_DESIGN.md` as implementation permission by itself; roadmap and user intent still matter.
 
-## IR Design Direction
+## Current Known Limitations
 
-- IR v1 should be block-based, three-address, and non-SSA.
-- Every function should own an explicit CFG of basic blocks, and every block should end in a terminator.
-- Source-level shadowing must be resolved into distinct local entities before printing; different declarations with the same source name are not the same IR object.
-- SSA-style versioning is a later optimization/normalization concern, not a v1 requirement.
-- Optimization should first happen as passes over canonical IR; only introduce an additional lower IR if canonical-pass evolution shows clear structural limits.
-- If the project later grows optimization or backend-specific needs beyond canonical IR limits, introduce an additional lower IR as a serial stage rather than replacing or bypassing the canonical IR.
+- Front-end control-flow analysis remains a structured approximation, not a full symbolic path solver.
+- Canonical IR is intentionally non-SSA and still mixes storage-like entities (`local/global`) with value-like use sites.
+- Current canonical-IR passes are designed for canonical IR only; they are not automatically reusable on a future lower IR.
+- Lower IR is implemented as an early prototype stage with skeleton, verifier, dump, and minimal serial lowering coverage, but it is not yet a backend-facing or SSA-ready layer.
+- SSA, register allocation, and machine-oriented code generation are all out of scope for the current active implementation phase.
 
-## Document Scope Note
+## Recent Checkpoints
 
-- `Current Guidance`, `Current Milestone Focus`, `Active Implementation Plan`, and `Known Limitations` are the current authority.
-- Older milestone slices and the long execution log below are retained as historical reference, not as current policy.
+- 2026-04-05: Canonical IR pass pipeline was stabilized through F0-F3, including soundness fixes, verifier coupling, fixed-point guards, and diagnostic cleanup.
+- 2026-04-05: Canonical-IR pass work was soft-closed into maintenance-first mode unless bug-driven or need-driven.
+- 2026-04-05: Lower-IR exploration was reframed as design-first work with serial-lowering constraints.
+- 2026-04-05: The first lower-IR draft now recommends a small explicit-memory stage before SSA or backend-oriented work.
+- 2026-04-05: Lower-IR phase 0 was frozen around slot-specific memory ops, temp/immediate-only value instructions, canonical-CFG reuse, and separation between value refs and slot refs.
+- 2026-04-05: Lower-IR phase 1 started with a separate `include/lower_ir.h`, `src/lower_ir/`, and `tests/lower_ir/` skeleton for manual construction, dump, verifier, and isolated tests.
+- 2026-04-05: Lower-IR phase 2 started with a minimal `lower_ir_lower_from_ir(...)` path that preserves canonical CFG shape while rewriting slot-valued operands into explicit `load_* / store_*` operations for representative return, assignment, branch-condition, call-argument, and global-read/write shapes.
+- 2026-04-05: Lower-IR verifier now mirrors canonical runtime-global startup/helper rules: reserved helper names require runtime globals, `__global.init` / `__program.init` must keep the fixed helper shape, and startup calls to `__global.init` are only legal from `main` entry or `__program.init` entry; dedicated lower-IR verifier regressions now lock the malformed-helper and missing-startup-call cases.
+- 2026-04-05: Lower-IR verifier now also rejects malformed public call/name surfaces that canonical IR already rejects: unknown callees, call arg-count mismatches, duplicate function names, duplicate global names, and function/global symbol collisions all have dedicated lower-IR verifier coverage.
+- 2026-04-05: Lower-IR verifier is now also crash-proof against malformed metadata tables: nonzero global/function/local/block counts with NULL backing arrays are rejected explicitly, and dedicated verifier regressions lock those entry points as contract failures rather than crash surfaces.
+- 2026-04-05: Lower-IR verifier now also rejects count/capacity metadata mismatches (`global_count`, `function_count`, `local_count`, `block_count`, and `instruction_count` exceeding their capacities) before any table walk, closing another malformed-program crash/OOB surface and adding dedicated verifier regressions for each layer.
+- 2026-04-05: Lower-IR verifier now also rejects unreachable basic blocks, aligning lower-IR CFG contract expectations with canonical IR and adding a dedicated unreachable-block verifier regression.
+- 2026-04-05: Lower-IR builder/API was tightened to fail fast on common malformed construction shapes (declaration-only block/temp creation, parameter-prefix breakage, post-terminator instruction append, and terminator overwrite), with dedicated lower-IR regression coverage for each case.
+- 2026-04-05: `lower_ir_lower_from_ir(...)` now self-verifies its output before returning success, turning lower-IR verifier into an internal production guard as well as an external API contract.
+- 2026-04-05: Lower-IR verifier now also rejects malformed temp flow, not just temp-range misuse: missing temp definitions, same-block duplicate temp definitions, and use-before-availability now fail verification, while a dedicated positive verifier case keeps the current valid join-temp multi-definition lowering shape accepted.
+- 2026-04-05: Lower-IR verifier no longer lets result-less `store_*` instructions forge fake temp definitions through hidden `result` payloads, and dedicated verifier regressions now lock that hole closed.
+- 2026-04-05: Lower-IR verifier now also enforces a minimal declaration/signature shape contract: parameter-prefix locals must agree with `parameter_count`, and ordinary declaration-only functions cannot hide extra non-parameter locals or temp state.
+- 2026-04-05: Lower-IR runtime-init coverage now also includes exact dump regressions for the normal startup path and no-`main` `__program.init` fallback, locking that helper bodies use explicit `store_global`/`load_global` forms rather than only relying on verifier-side contract checks.
+- 2026-04-05: Lower-IR exact-dump regressions now also cover more control-flow-heavy slot/value cases, including single-arm and two-arm `if` joins, short-circuit branch conditions, and `while` backedges, locking that explicit `load_* / store_*` materialization composes cleanly with canonical block topology and preserved canonical temps.
+- 2026-04-05: Lower-IR exact-dump coverage now extends through heavier CFG shapes as well, including `while`-break exits, `for` init/step loops, nested loop break/continue control, and branch-local global writeback followed by join-block reload; these cases now serve as authority that serial lowering composes explicit slot materialization with preserved canonical block IDs and canonical temps across larger CFGs.
+- 2026-04-05: Lower-IR exact-dump coverage now also reaches call-heavy CFG shapes, including declared-call `for` conditions/steps and a branchy `main` that still begins with runtime-global startup helper invocation; these locks also establish the current temp-numbering authority when canonical user-expression temps and injected startup calls coexist.
+- 2026-04-05: Lower-IR exact-dump coverage now also includes representative value-materialization joins (`&&`, ternary value, declared-call logical values, nested logical mixes). With straight-line, CFG-heavy, call-heavy, runtime-init, and value-materialization families all represented, the current Phase 2 loop is considered checkpoint-complete and should now return to need-driven expansion.
 
 ## Execution Log
 
-- 2026-03-19: Milestone checkpoint committed (`b73b248`) with AST foundation, parser AST API, semantic pipeline, legacy-link test, and semantic regressions.
 - 2026-03-19: Milestone A continued: expanding AST detail by recording function parameter counts in top-level AST externals.
 - 2026-03-19: Milestone A continued: recording declaration initializer metadata (`has_initializer`) for top-level AST declaration externals.
 - 2026-03-19: Milestone A continued: parser now accepts function declarations (`int f(int);`) and AST records function declaration/definition metadata (`is_function_definition`).
@@ -319,129 +376,8 @@
 - 2026-04-05: Milestone F3 diagnostic follow-up landed: pipeline-level verifier hook diagnostics were renumbered to dedicated `IR-PASS-034/035` codes so they no longer collide with temp-copy propagation's existing `IR-PASS-015/016` error contract.
 - 2026-04-05: Milestone F3 diagnostic follow-up landed: remaining cross-pass `IR-PASS` code collisions were cleaned up too, with dead-temp elimination's temp-use-table overflow moving to `IR-PASS-017` and CFG simplify's malformed-block-table check moving to `IR-PASS-040`, leaving only one intentional same-meaning reuse (`IR-PASS-011` inside temp-analysis OOM paths).
 
-## Current Milestone Focus
+## Historical Note
 
-- Milestone A closure is complete under agreed scope: semantic-authority retirement for callable/return/counter metadata is done and verified.
-- Milestone B closure is complete under agreed scope: parser/AST internal decoupling and parser-side metadata-retention cleanup are done and verified.
-- Milestone C baseline is complete and validated (`test-fanalyzer`/`test-asan`/`test-strict-warnings` are green with zero warnings).
-- Milestone D is maintenance-mode only: reopen it for concrete semantic bugs, but do not spend roadmap budget on generalized hygiene.
-- Milestone E is closed for current scope: canonical IR v1 bootstrap + verifier hardening + dependency precision guardrails are landed and regression-locked.
-- Active implementation focus is now Milestone F: pass-stage analysis/transformation work on the existing canonical IR.
-- Large-file split follow-up for parser + semantic implementation files is completed.
-- Keep parser recursion-limit behavior as an accepted guardrail (call-depth based, not raw parenthesis-depth based) unless future work introduces a dedicated structural-depth limiter.
-- IR v1 shipped baseline remains the core handoff surface: block-based CFG, explicit terminators, unique IDs for blocks/locals/temps, non-SSA locals, broad lowering matrix, dedicated IR regressions, and verifier coverage.
-- Current roadmap emphasis is pass-stage evolution without adding a second peer IR pipeline.
-- IR v1 non-goals for this phase: SSA phi placement, register allocation, backend-specific lowering, or multiple parallel AST-to-IR families.
+The authority sections above are the current policy surface.
 
-## Milestone D Closure Snapshot
-
-- Completed: conservative branch/loop return-path policy, constant-if narrowing, stable-guard loop rejection, shadow-sensitive guard tracking, and structural semantic diagnostic unification.
-- Recent bug closure: non-constant zero-iteration loops no longer falsely satisfy all-path return just because the loop body returns when entered.
-- Regression baseline now covers constant-condition loops, stable-guard value-dependent loops, rebuilt-guard accept cases, zero-iteration return-only holes, and unreachable-return-after-break shapes.
-- Remaining D work is bug-driven only; it is no longer the roadmap's main implementation track.
-
-## Active Implementation Plan (Milestone F status)
-
-1. E-close status: canonical IR v1 implementation + hardening is complete for current roadmap scope, including lowering baseline, verifier baseline, declaration/global/runtime-init support, and dependency precision follow-ups.
-2. F0 status: pass pipeline scaffold is landed on canonical IR (`src/ir_pass/`, pass-spec interface, ordered fail-fast runner, dedicated pass test target).
-3. F1 status: shared internal analysis utilities now cover temp facts (use-counts, definition-counts, unique def-sites, explicit unique use-sites, unique-def `mov`-copy facts, unique-def recursive temp-constant facts), CFG facts (`reachable`, predecessor counts), and instruction side-effect classification for existing transforms; copy propagation already consumes the unique use-site facts for single-use rewrites, so F1 is now close to a reasonable phase stop unless another transform clearly needs a new reusable fact surface.
-4. F2 status: low-risk transform pipeline now combines safe binary folding/simplification (immediate/immediate folding, conservative single-immediate identity reductions except for shift-by-zero cases that would erase runtime validation, and safe same-operand reductions), temp-constant propagation, temp-copy propagation, CFG simplification (constant branches, same-target branches, temp-analysis-backed same-return branch folding, same-return folding through single-`mov` return successors, empty-jump threading, local `jmp -> ret` folding, and single-predecessor jump-block merge) with unreachable-block cleanup, plus a post-DCE CFG-cleanup suffix (`simplify-cfg` then dead-temp elimination again) so cleanup opportunities exposed by propagation and DCE are not stranded at the end of the pipeline; dead-temp elimination now preserves dead-result `div`/`mod`/shift ops as non-erasable runtime-validation points, and next slices should broaden useful transforms without relaxing UB/control-flow safety rails.
-5. Current preference: stay in F3 for stability tightening before adding more transforms; reopen F2 only if the new fixed-point/equivalence guards expose a concrete missed cleanup or soundness gap.
-6. Tentative phase-close expectation: F1 now looks effectively complete for this phase, and F2 looks stable enough that near-term work should bias toward regression tightening rather than another proactive transform slice.
-7. F3 status: representative default-pipeline fixed-point regressions are now landed, and the current default pipeline is green on rerun-stability checks, pipeline-level semantic guardrails for side-effecting calls plus multi-def join-temp path preservation, exact canonical-form dump locks for several stable representative cleanup shapes, per-pass verifier/invariant checks across the current default pass order, and public pipeline-API verifier guards on both input IR and each pass result.
-8. F4 planned: evaluate additional CFG cleanup/canonicalization opportunities only after F0-F3 remain stable across repeated full-suite runs and regression additions.
-9. Future reminder: if optimization or backend requirements eventually exceed canonical IR passability, introduce SSA/lower IR only as serial downstream lowering, not as a parallel AST-to-IR track.
-
-## Milestone B Detailed Execution Plan (historical reference)
-
-1. B0 checkpoint freeze (documentation + baseline)
-- Goal: lock Milestone A closure context before B-side structural edits.
-- Touchpoints: `NEXT_STEPS.md` only.
-- Validation: `make test` green baseline already captured before B edits; no functional behavior changes in this step.
-
-2. B0.5 regression-suite modularization slice (execute before metadata retirement)
-- Goal: reduce blast radius by splitting oversized regression sources into themed files before parser/semantic decoupling slices.
-- Primary touchpoints: `tests/parser/parser_regression_test.c`, `tests/semantic/semantic_regression_test.c`, `Makefile` (suite aggregation entrypoints).
-- Safety constraints: no diagnostic/rule/parse behavior changes; assertions and coverage must remain equivalent.
-- Validation gate: full `make test`, plus a suite-level count sanity check to ensure no regression groups were dropped.
-
-3. B1 callable metadata retention cleanup slice
-- Goal: remove parser-side `called_function_*` retention fields and collection plumbing that are no longer semantic-authoritative.
-- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser dump/test adapters in `tests/parser`.
-- Safety constraints: keep parser parse/semantic behavior unchanged; only remove unused retention channels.
-- Validation gate: full `make test` plus direct grep check that `called_function_*` is retired from active parser/AST interfaces or limited to explicitly documented compatibility stubs.
-
-4. B2 return metadata retention cleanup slice
-- Goal: remove parser-side `returns_on_all_paths` retention field from `AstExternal` and corresponding parser write paths.
-- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regressions/dump expectations.
-- Safety constraints: semantic return enforcement must remain AST-primary with no behavior drift.
-- Validation gate: full `make test` plus targeted return-matrix checks in semantic regressions.
-
-5. B3 statement-counter retention cleanup slice
-- Goal: remove parser-side statement counters (`loop/if/break/continue/declaration`) from external metadata and related parser accounting paths.
-- Primary touchpoints: `src/parser/parser.c`, `include/ast.h`, parser regression assertions, parser dump output.
-- Safety constraints: do not alter statement AST construction or scope/callable traversal semantics.
-- Validation gate: full `make test` plus parser smoke/regression confirmation that diagnostics and parse success behavior are unchanged.
-
-6. B4 parser/AST internal decoupling slice
-- Goal: reduce parser dependence on AST-internal helper coupling and keep only stable parser-facing contracts.
-- Primary touchpoints: parser include boundaries and AST helper visibility points.
-- Safety constraints: preserve old parser API link behavior and existing external call sites.
-- Validation gate: full `make test`, including legacy-link parser smoke.
-
-7. B5 cleanup verification and handoff record
-- Goal: close Milestone B with explicit evidence bundle and handoff notes for Milestone C static-analysis pass.
-- Evidence checklist: updated roadmap notes, `make test` green run, grep-based retirement checks for all B metadata families.
-- Exit criterion: no functional regression introduced; B changes remain structural/compatibility-focused only.
-
-8. Cross-slice operating rules (apply to B0.5-B5)
-- Rule 1: retire one metadata family per code-change slice; do not batch callable/return/counter removals together.
-- Rule 2: after each slice, run full `make test` before proceeding.
-- Rule 3: if any semantic behavior drift appears, pause and restore prior compatibility surface for that slice before continuing.
-
-## Large-File Split Schedule (historical reference)
-
-1. Phase T (immediate): split regression suites first.
-- Targets: `tests/parser/parser_regression_test.c` and `tests/semantic/semantic_regression_test.c`.
-- Reason: lowest semantic risk and highest payoff for reviewability/merge conflict reduction.
-
-2. Phase S (after B1-B3): split semantic/parser implementation files.
-- Targets: `src/semantic/semantic.c`, then `src/parser/parser.c`.
-- Status: completed for both targets.
-
-3. Phase thresholds and guardrails.
-- Soft threshold: start split planning when a C file exceeds ~1500 lines or mixes more than one major concern.
-- Hard rule: each split commit must preserve behavior (`make test` green) and avoid API drift unless explicitly planned.
-
-## Metadata Migration Schedule (anti-coupling plan)
-
-1. S1 status: complete (metadata kept as compatibility rails).
-2. S2 status: complete for active definition paths (AST-primary callable + return-flow).
-3. S3 rule: new scope semantics must be computed from statement AST traversal, not parser metadata.
-4. S3 cleanup gate: begin retirement only after scope/callable/CF matrices are simultaneously green.
-5. Retirement order (current):
-6. first retire `called_function_*` semantic authority (completed in semantic active paths),
-7. then retire `returns_on_all_paths` semantic authority (completed in semantic active paths),
-8. then retire statement counters (`loop/if/break/continue/declaration`) from semantic dependencies (semantic-authority usage verified absent in active paths).
-9. parser-side retention cleanup is Milestone B decoupling scope (compatibility/test-oriented, non-semantic-authority).
-10. Safety rule: retire one metadata family per change slice and run full `make test` before next retirement.
-11. Rollback rule: if drift appears, restore previous gate and keep parity rails until root cause is fixed.
-
-## Known Limitations (Current Behavior)
-
-- Return all-path analysis is still a structured approximation, not a full path solver.
-- Loop CF policy is intentionally false-positive-averse rather than fully symbolic: mutation-driven or call-driven exits (for example `CF-02`/`CF-03`/`CF-06`) remain accepted, while only reliably proven stable-guard dead loops are reject expectations.
-- Loop CF deliberately does not treat first-iteration implications from reusing the entry condition as proof of fallthrough. Under the current policy, shapes such as `while(a){if(a){break;}}` or `for(;a;){if(a){break;}}` remain reject expectations unless the guard is mutated or a call could plausibly mutate it.
-- Equivalent-true condition rewrites (for example `(1)`, `+1`, `(0,1)`, `for(;(1);...)`) are now treated as strict-path true in flow analysis and covered by regressions.
-- Parser `parse_*_with_flow` interfaces are explicitly syntax-local for parser constraints/AST shaping and now expose only `may_fallthrough`/`may_break`; parser return-path authority equations are removed from parser flow outputs and remain semantic-owned.
-- Current control-flow analysis remains intra-function and statement-structured (it is not a full symbolic path solver for arbitrary value-dependent loops).
-- Loop CF's current "variable changed" heuristic only tracks direct body/step mutation plus conservative function-call side effects. If future language work adds indirect writes (`&`/pointer/reference mutation) or lambda/closure-style callables with captured state, this heuristic must be redesigned before trusting D18-style dead-loop proofs.
-- Loop CF guard tracking is now scope-sensitive for direct local declaration shadowing inside loop bodies and `for` init scopes, so same-name inner declarations no longer count as mutations or exit guards for the outer loop condition. It also follows a shallow local fixpoint over per-iteration declaration initializers when a shadowed guard is rebuilt from outer state, including simple multi-hop rebuilt-guard chains (for example `int c=b; int a=c; if(a) break; b--;`). The heuristic is still intentionally shallow: it does not model aliasing, address-taken mutation, pointer/reference writes, closure-captured indirect state, or broader value reasoning beyond these local declaration-initializer dependency chains.
-- Include-fragment rebuild reliability is hardened: parser/semantic `.inc` and regression fragment edits now trigger rebuilds via explicit Makefile prerequisites.
-- Current assignment-lvalue policy is intentionally identifier-only in parser expression checks (`=` and compound assignments); parenthesized identifiers and other non-identifier lvalue forms for assignment remain rejected in this subset.
-- Increment/decrement policy currently allows identifier and parenthesized-identifier operands (e.g., `++(a)`, `(a)++`) but still rejects broader lvalue forms.
-- Low-priority accepted limitation: in translation-unit parsing, assignment-style forms rejected by identifier-only lvalue policy (e.g., `(a)=b`, `(a)+=b`) may surface syntax-oriented diagnostics such as `Expected ';'` instead of semantic-style `lvalue` wording.
-- Parser recursion-limit note: expression recursion protection is implemented on parser call-depth frames; in deeply parenthesized inputs, the guard can trigger before reaching the same numeric parenthesis depth.
-- Callable semantic limitation (current policy): minimal callable analysis only supports direct identifier callee forms. Call-result/chained forms (for example `f()(1)`, `a()()`, `((f)(1))(2)`) are explicitly rejected as `SEMA-CALL-005` with `callee_kind=call_result`.
-- Scope/callable layering note: undeclared checks intentionally skip call-callee identifier subtrees so callable diagnostics remain sourced from `SEMA-CALL-*` rules.
-- Scope note for `SEMA-CALL-006`: this code applies to the parser-accepted subset of non-identifier callees that reaches semantic callable checks (for example `(f+1)()`), reported with `callee_kind=non_identifier`. Non-parenthesized non-identifier callees outside this subset can still be rejected earlier by parser syntax checks.
+The execution log is intentionally retained below them as historical record, not as a second competing roadmap.

@@ -1620,298 +1620,108 @@ static int test_ir_lowers_for_init_step_cfg(void) {
     }
 
 int main(void) {
-    if (!test_ir_lowers_return_literal()) {
-        return 1;
-    }
-    if (!test_ir_reports_runtime_global_dependency_cycle_chain_with_callee_segments()) {
-        return 1;
-    }
-    if (!test_ir_lowers_return_parameter()) {
-        return 1;
-    }
-    if (!test_ir_lowers_arithmetic_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_bitwise_expression_family()) {
-        return 1;
-    }
-    if (!test_ir_lowers_tilde_unary()) {
-        return 1;
-    }
-    if (!test_ir_lowers_comma_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_global_compound_assignment()) {
-        return 1;
-    }
-    if (!test_ir_lowers_global_shift_and_bitwise_compound_assignment()) {
-        return 1;
-    }
-    if (!test_ir_lowers_global_prefix_and_postfix_updates()) {
-        return 1;
-    }
-    if (!test_ir_lowers_global_initializer_dependency()) {
-        return 1;
-    }
-    if (!test_ir_lowers_local_shadow_over_global()) {
-        return 1;
-    }
-    if (!test_ir_lowers_runtime_global_initializer_via_internal_init_function()) {
-        return 1;
-    }
-    if (!test_ir_exports_program_initializer_when_main_is_absent()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_global()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_indirect_dep_on_uninitialized_global()) {
-        return 1;
-    }
-    if (!test_ir_reports_runtime_global_initializer_dependency_cycle_chain()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_only_unreachable_dead_read_mentions_uninitialized_global()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_if_constant_true_makes_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_if_constant_true_minimal_shape_has_no_malformed_continuation_block()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_if_constant_false_else_return_minimal_shape_has_no_malformed_continuation_block()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_if_constant_true_else_dead_branch_minimal_shape_has_no_malformed_continuation_block()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_while_constant_false_makes_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_while_constant_true_with_immediate_return_makes_following_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_for_infinite_with_immediate_return_makes_following_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_immediate_return_in_body()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_via_continue()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_unconditional_break()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_in_infinite_loop()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_break_and_dead_post_loop_read()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_continue_and_post_loop_return_read()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_when_while_const_true_breaks_and_post_loop_read_is_live()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_inner_loop_break_does_not_make_outer_post_loop_read_live()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_after_inner_break_then_outer_break()) {
-        return 1;
-    }
-    if (!test_ir_rejects_runtime_global_initializer_when_for_step_is_reachable_after_inner_break_then_outer_continue()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_ternary_constant_true_makes_else_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_ternary_constant_false_makes_then_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_logical_and_constant_false_makes_rhs_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_accepts_runtime_global_initializer_when_logical_or_constant_true_makes_rhs_read_unreachable()) {
-        return 1;
-    }
-    if (!test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub()) {
-        return 1;
-    }
-    if (!test_ir_lowers_add_overflow_initializer_without_host_ub()) {
-        return 1;
-    }
-    if (!test_ir_rejects_division_by_zero_in_top_level_constant_initializer()) {
-        return 1;
-    }
-    if (!test_ir_rejects_modulo_by_zero_in_top_level_constant_initializer()) {
-        return 1;
-    }
-    if (!test_ir_rejects_out_of_range_shift_count_in_top_level_constant_initializer()) {
-        return 1;
-    }
-    if (!test_ir_lowers_direct_call()) {
-        return 1;
-    }
-    if (!test_ir_lowers_call_with_expression_args()) {
-        return 1;
-    }
-    if (!test_ir_lower_rejects_unknown_call_target_without_semantic_gate()) {
-        return 1;
-    }
-    if (!test_ir_lower_rejects_call_arity_mismatch_without_semantic_gate()) {
-        return 1;
-    }
-    if (!test_ir_lower_rejects_declaration_arity_mismatch_without_semantic_gate()) {
-        return 1;
-    }
-    if (!test_ir_lower_rejects_duplicate_definition_without_semantic_gate()) {
-        return 1;
-    }
-    if (!test_ir_preserves_function_declaration_signature()) {
-        return 1;
-    }
-    if (!test_ir_merges_declaration_with_definition()) {
-        return 1;
-    }
-    if (!test_ir_merges_repeated_declarations_without_definition()) {
-        return 1;
-    }
-    if (!test_ir_merges_unnamed_declaration_then_definition()) {
-        return 1;
-    }
-    if (!test_ir_merges_declaration_with_parameter_name_drift()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_if_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_while_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_condition_and_step()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_init_condition_and_step()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_for_init()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_logical_and_condition_and_step()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_logical_or_condition_and_step()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_step_comma_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_init_comma_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_calls_in_for_nested_short_circuit_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_comma_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_if_logical_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_if_logical_or_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_logical_value_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_logical_or_value_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_nested_logical_mix_value_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_nested_logical_mix_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_ternary_value_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_declared_call_in_ternary_condition_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_compound_assignment()) {
-        return 1;
-    }
-    if (!test_ir_lowers_prefix_increment()) {
-        return 1;
-    }
-    if (!test_ir_lowers_postfix_increment()) {
-        return 1;
-    }
-    if (!test_ir_lowers_prefix_decrement()) {
-        return 1;
-    }
-    if (!test_ir_lowers_postfix_decrement()) {
-        return 1;
-    }
-    if (!test_ir_lowers_ternary_value_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_ternary_condition_expression()) {
-        return 1;
-    }
-    if (!test_ir_lowers_logical_not_value()) {
-        return 1;
-    }
-    if (!test_ir_lowers_comparison_expression_family()) {
-        return 1;
-    }
-    if (!test_ir_lowers_logical_and_value()) {
-        return 1;
-    }
-    if (!test_ir_lowers_logical_or_value()) {
-        return 1;
-    }
-    if (!test_ir_lowers_shadowed_local_identity()) {
-        return 1;
-    }
-    if (!test_ir_lowers_if_without_else_join()) {
-        return 1;
-    }
-    if (!test_ir_lowers_if_else_join()) {
-        return 1;
-    }
-    if (!test_ir_lowers_if_else_return_arms()) {
-        return 1;
-    }
-    if (!test_ir_lowers_if_comparison_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_if_logical_short_circuit_condition()) {
-        return 1;
-    }
-    if (!test_ir_lowers_while_backedge()) {
-        return 1;
-    }
-    if (!test_ir_lowers_constant_true_while_return_without_malformed_exit_block()) {
-        return 1;
-    }
-    if (!test_ir_lowers_infinite_for_return_without_malformed_exit_block()) {
-        return 1;
-    }
-    if (!test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_or_step_block()) {
-        return 1;
-    }
-    if (!test_ir_lowers_while_break_exit()) {
-        return 1;
-    }
-    if (!test_ir_lowers_for_init_step_cfg()) {
-        return 1;
-    }
-    if (!test_ir_lowers_nested_loop_break_continue()) {
+    int ok = 1;
+
+    ok &= test_ir_lowers_return_literal();
+    ok &= test_ir_reports_runtime_global_dependency_cycle_chain_with_callee_segments();
+    ok &= test_ir_lowers_return_parameter();
+    ok &= test_ir_lowers_arithmetic_expression();
+    ok &= test_ir_lowers_bitwise_expression_family();
+    ok &= test_ir_lowers_tilde_unary();
+    ok &= test_ir_lowers_comma_expression();
+    ok &= test_ir_lowers_global_compound_assignment();
+    ok &= test_ir_lowers_global_shift_and_bitwise_compound_assignment();
+    ok &= test_ir_lowers_global_prefix_and_postfix_updates();
+    ok &= test_ir_lowers_global_initializer_dependency();
+    ok &= test_ir_lowers_local_shadow_over_global();
+    ok &= test_ir_lowers_runtime_global_initializer_via_internal_init_function();
+    ok &= test_ir_exports_program_initializer_when_main_is_absent();
+    ok &= test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_global();
+    ok &= test_ir_rejects_runtime_global_initializer_indirect_dep_on_uninitialized_global();
+    ok &= test_ir_reports_runtime_global_initializer_dependency_cycle_chain();
+    ok &= test_ir_accepts_runtime_global_initializer_when_only_unreachable_dead_read_mentions_uninitialized_global();
+    ok &= test_ir_accepts_runtime_global_initializer_when_if_constant_true_makes_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_if_constant_true_minimal_shape_has_no_malformed_continuation_block();
+    ok &= test_ir_accepts_runtime_global_initializer_when_if_constant_false_else_return_minimal_shape_has_no_malformed_continuation_block();
+    ok &= test_ir_accepts_runtime_global_initializer_when_if_constant_true_else_dead_branch_minimal_shape_has_no_malformed_continuation_block();
+    ok &= test_ir_accepts_runtime_global_initializer_when_while_constant_false_makes_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_while_constant_true_with_immediate_return_makes_following_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_for_infinite_with_immediate_return_makes_following_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_immediate_return_in_body();
+    ok &= test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_via_continue();
+    ok &= test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_due_to_unconditional_break();
+    ok &= test_ir_rejects_runtime_global_initializer_when_for_step_read_is_reachable_in_infinite_loop();
+    ok &= test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_break_and_dead_post_loop_read();
+    ok &= test_ir_accepts_runtime_global_initializer_when_while_const_true_has_unreachable_continue_and_post_loop_return_read();
+    ok &= test_ir_rejects_runtime_global_initializer_when_while_const_true_breaks_and_post_loop_read_is_live();
+    ok &= test_ir_accepts_runtime_global_initializer_when_inner_loop_break_does_not_make_outer_post_loop_read_live();
+    ok &= test_ir_accepts_runtime_global_initializer_when_for_step_is_unreachable_after_inner_break_then_outer_break();
+    ok &= test_ir_rejects_runtime_global_initializer_when_for_step_is_reachable_after_inner_break_then_outer_continue();
+    ok &= test_ir_accepts_runtime_global_initializer_when_ternary_constant_true_makes_else_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_ternary_constant_false_makes_then_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_logical_and_constant_false_makes_rhs_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_initializer_when_logical_or_constant_true_makes_rhs_read_unreachable();
+    ok &= test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub();
+    ok &= test_ir_lowers_add_overflow_initializer_without_host_ub();
+    ok &= test_ir_rejects_division_by_zero_in_top_level_constant_initializer();
+    ok &= test_ir_rejects_modulo_by_zero_in_top_level_constant_initializer();
+    ok &= test_ir_rejects_out_of_range_shift_count_in_top_level_constant_initializer();
+    ok &= test_ir_lowers_direct_call();
+    ok &= test_ir_lowers_call_with_expression_args();
+    ok &= test_ir_lower_rejects_unknown_call_target_without_semantic_gate();
+    ok &= test_ir_lower_rejects_call_arity_mismatch_without_semantic_gate();
+    ok &= test_ir_lower_rejects_declaration_arity_mismatch_without_semantic_gate();
+    ok &= test_ir_lower_rejects_duplicate_definition_without_semantic_gate();
+    ok &= test_ir_preserves_function_declaration_signature();
+    ok &= test_ir_merges_declaration_with_definition();
+    ok &= test_ir_merges_repeated_declarations_without_definition();
+    ok &= test_ir_merges_unnamed_declaration_then_definition();
+    ok &= test_ir_merges_declaration_with_parameter_name_drift();
+    ok &= test_ir_lowers_declared_call_in_if_condition();
+    ok &= test_ir_lowers_declared_call_in_while_condition();
+    ok &= test_ir_lowers_declared_calls_in_for_condition_and_step();
+    ok &= test_ir_lowers_declared_calls_in_for_init_condition_and_step();
+    ok &= test_ir_lowers_declared_call_in_for_init();
+    ok &= test_ir_lowers_declared_calls_in_for_logical_and_condition_and_step();
+    ok &= test_ir_lowers_declared_calls_in_for_logical_or_condition_and_step();
+    ok &= test_ir_lowers_declared_calls_in_for_step_comma_expression();
+    ok &= test_ir_lowers_declared_calls_in_for_init_comma_expression();
+    ok &= test_ir_lowers_declared_calls_in_for_nested_short_circuit_condition();
+    ok &= test_ir_lowers_declared_call_in_comma_expression();
+    ok &= test_ir_lowers_declared_call_in_if_logical_condition();
+    ok &= test_ir_lowers_declared_call_in_if_logical_or_condition();
+    ok &= test_ir_lowers_declared_call_in_logical_value_expression();
+    ok &= test_ir_lowers_declared_call_in_logical_or_value_expression();
+    ok &= test_ir_lowers_declared_call_in_nested_logical_mix_value_expression();
+    ok &= test_ir_lowers_declared_call_in_nested_logical_mix_condition();
+    ok &= test_ir_lowers_declared_call_in_ternary_value_expression();
+    ok &= test_ir_lowers_declared_call_in_ternary_condition_expression();
+    ok &= test_ir_lowers_compound_assignment();
+    ok &= test_ir_lowers_prefix_increment();
+    ok &= test_ir_lowers_postfix_increment();
+    ok &= test_ir_lowers_prefix_decrement();
+    ok &= test_ir_lowers_postfix_decrement();
+    ok &= test_ir_lowers_ternary_value_expression();
+    ok &= test_ir_lowers_ternary_condition_expression();
+    ok &= test_ir_lowers_logical_not_value();
+    ok &= test_ir_lowers_comparison_expression_family();
+    ok &= test_ir_lowers_logical_and_value();
+    ok &= test_ir_lowers_logical_or_value();
+    ok &= test_ir_lowers_shadowed_local_identity();
+    ok &= test_ir_lowers_if_without_else_join();
+    ok &= test_ir_lowers_if_else_join();
+    ok &= test_ir_lowers_if_else_return_arms();
+    ok &= test_ir_lowers_if_comparison_condition();
+    ok &= test_ir_lowers_if_logical_short_circuit_condition();
+    ok &= test_ir_lowers_while_backedge();
+    ok &= test_ir_lowers_constant_true_while_return_without_malformed_exit_block();
+    ok &= test_ir_lowers_infinite_for_return_without_malformed_exit_block();
+    ok &= test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_or_step_block();
+    ok &= test_ir_lowers_while_break_exit();
+    ok &= test_ir_lowers_for_init_step_cfg();
+    ok &= test_ir_lowers_nested_loop_break_continue();
+
+    if (!ok) {
         return 1;
     }
 

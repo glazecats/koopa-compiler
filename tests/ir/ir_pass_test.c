@@ -1577,154 +1577,60 @@ static size_t count_same_operand_binary_simplification_opportunities(const IrPro
 #include "ir_pass_test_pipeline.inc"
 
 int main(void) {
-    if (!test_ir_pass_default_pipeline_folds_safe_immediate_binary_ops()) {
-        return 1;
-    }
-    if (!test_ir_pass_fold_simplifies_safe_binary_identities()) {
-        return 1;
-    }
-    if (!test_ir_pass_fold_simplifies_safe_same_operand_binaries()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_skips_unsafe_immediate_binary_ops()) {
-        return 1;
-    }
-    if (!test_ir_pass_eliminates_dead_temp_defs_directly()) {
-        return 1;
-    }
-    if (!test_ir_pass_preserves_dead_result_calls_during_dce()) {
-        return 1;
-    }
-    if (!test_ir_pass_propagates_temp_copies_after_fold()) {
-        return 1;
-    }
-    if (!test_ir_pass_propagates_single_use_call_arg_copies()) {
-        return 1;
-    }
-    if (!test_ir_pass_copy_propagation_skips_multi_def_join_temps()) {
-        return 1;
-    }
-    if (!test_ir_pass_propagates_temp_constants_across_binary_chains()) {
-        return 1;
-    }
-    if (!test_ir_pass_constant_propagation_skips_multi_def_join_temps()) {
-        return 1;
-    }
-    if (!test_ir_pass_simplifies_constant_branches_and_removes_dead_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_threads_empty_jump_blocks_and_removes_trampolines()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_jump_to_empty_return_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_same_empty_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_same_empty_temp_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_equivalent_constant_temp_returns()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_equivalent_copy_temp_returns()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_same_local_constant_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_folds_branch_to_same_local_copy_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_merges_single_predecessor_nonempty_jump_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_cleans_folded_dead_temps()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_closes_temp_constant_chains()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_cleans_binary_identity_chains()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_cleans_same_operand_binary_chains()) {
-        return 1;
-    }
-    if (!test_ir_pass_preserves_dead_result_runtime_checked_binaries_during_dce()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_dead_result_calls()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_dead_result_division()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_division_through_zero_multiply_fold()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_dead_result_calls_through_cfg_cleanup()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_canonicalizes_dead_result_call_cfg_cleanup()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_multi_def_constant_paths()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_canonicalizes_multi_def_constant_paths()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_preserves_multi_def_copy_paths()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_canonicalizes_post_dce_cfg_cleanup()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_simplifies_constant_condition_cfg()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_threads_empty_jump_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_folds_jump_to_empty_return_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_folds_branch_to_same_empty_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_folds_branch_to_same_empty_temp_return_value()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_canonicalizes_same_temp_return_fold()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_revisits_cfg_after_dce_exposes_empty_returns()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_merges_single_predecessor_nonempty_jump_blocks()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_canonicalizes_single_predecessor_merge()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_reaches_fixed_point_on_representative_cases()) {
-        return 1;
-    }
-    if (!test_ir_pass_default_pipeline_stepwise_preserves_representative_invariants()) {
-        return 1;
-    }
-    if (!test_ir_pass_rejects_invalid_pass_spec()) {
-        return 1;
-    }
-    if (!test_ir_pass_rejects_null_pass_table_with_nonzero_count()) {
-        return 1;
-    }
-    if (!test_ir_pass_rejects_verifier_invalid_pipeline_input()) {
-        return 1;
-    }
-    if (!test_ir_pass_rejects_verifier_invalid_pass_output()) {
+    int ok = 1;
+
+    ok &= test_ir_pass_default_pipeline_folds_safe_immediate_binary_ops();
+    ok &= test_ir_pass_fold_simplifies_safe_binary_identities();
+    ok &= test_ir_pass_fold_simplifies_safe_same_operand_binaries();
+    ok &= test_ir_pass_default_pipeline_skips_unsafe_immediate_binary_ops();
+    ok &= test_ir_pass_eliminates_dead_temp_defs_directly();
+    ok &= test_ir_pass_preserves_dead_result_calls_during_dce();
+    ok &= test_ir_pass_propagates_temp_copies_after_fold();
+    ok &= test_ir_pass_propagates_single_use_call_arg_copies();
+    ok &= test_ir_pass_copy_propagation_skips_multi_def_join_temps();
+    ok &= test_ir_pass_propagates_temp_constants_across_binary_chains();
+    ok &= test_ir_pass_constant_propagation_skips_multi_def_join_temps();
+    ok &= test_ir_pass_simplifies_constant_branches_and_removes_dead_blocks();
+    ok &= test_ir_pass_threads_empty_jump_blocks_and_removes_trampolines();
+    ok &= test_ir_pass_folds_jump_to_empty_return_blocks();
+    ok &= test_ir_pass_folds_branch_to_same_empty_return_value();
+    ok &= test_ir_pass_folds_branch_to_same_empty_temp_return_value();
+    ok &= test_ir_pass_folds_branch_to_equivalent_constant_temp_returns();
+    ok &= test_ir_pass_folds_branch_to_equivalent_copy_temp_returns();
+    ok &= test_ir_pass_folds_branch_to_same_local_constant_return_value();
+    ok &= test_ir_pass_folds_branch_to_same_local_copy_return_value();
+    ok &= test_ir_pass_merges_single_predecessor_nonempty_jump_blocks();
+    ok &= test_ir_pass_default_pipeline_cleans_folded_dead_temps();
+    ok &= test_ir_pass_default_pipeline_closes_temp_constant_chains();
+    ok &= test_ir_pass_default_pipeline_cleans_binary_identity_chains();
+    ok &= test_ir_pass_default_pipeline_cleans_same_operand_binary_chains();
+    ok &= test_ir_pass_preserves_dead_result_runtime_checked_binaries_during_dce();
+    ok &= test_ir_pass_default_pipeline_preserves_dead_result_calls();
+    ok &= test_ir_pass_default_pipeline_preserves_dead_result_division();
+    ok &= test_ir_pass_default_pipeline_preserves_division_through_zero_multiply_fold();
+    ok &= test_ir_pass_default_pipeline_preserves_dead_result_calls_through_cfg_cleanup();
+    ok &= test_ir_pass_default_pipeline_canonicalizes_dead_result_call_cfg_cleanup();
+    ok &= test_ir_pass_default_pipeline_preserves_multi_def_constant_paths();
+    ok &= test_ir_pass_default_pipeline_canonicalizes_multi_def_constant_paths();
+    ok &= test_ir_pass_default_pipeline_preserves_multi_def_copy_paths();
+    ok &= test_ir_pass_default_pipeline_canonicalizes_post_dce_cfg_cleanup();
+    ok &= test_ir_pass_default_pipeline_simplifies_constant_condition_cfg();
+    ok &= test_ir_pass_default_pipeline_threads_empty_jump_blocks();
+    ok &= test_ir_pass_default_pipeline_folds_jump_to_empty_return_blocks();
+    ok &= test_ir_pass_default_pipeline_folds_branch_to_same_empty_return_value();
+    ok &= test_ir_pass_default_pipeline_folds_branch_to_same_empty_temp_return_value();
+    ok &= test_ir_pass_default_pipeline_canonicalizes_same_temp_return_fold();
+    ok &= test_ir_pass_default_pipeline_revisits_cfg_after_dce_exposes_empty_returns();
+    ok &= test_ir_pass_default_pipeline_merges_single_predecessor_nonempty_jump_blocks();
+    ok &= test_ir_pass_default_pipeline_canonicalizes_single_predecessor_merge();
+    ok &= test_ir_pass_default_pipeline_reaches_fixed_point_on_representative_cases();
+    ok &= test_ir_pass_default_pipeline_stepwise_preserves_representative_invariants();
+    ok &= test_ir_pass_rejects_invalid_pass_spec();
+    ok &= test_ir_pass_rejects_null_pass_table_with_nonzero_count();
+    ok &= test_ir_pass_rejects_verifier_invalid_pipeline_input();
+    ok &= test_ir_pass_rejects_verifier_invalid_pass_output();
+
+    if (!ok) {
         return 1;
     }
 

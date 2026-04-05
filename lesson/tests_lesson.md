@@ -18,26 +18,32 @@
 
 ## 1. 总览：`tests/` 目录怎么组织
 
-当前测试入口 C 文件（10 个）：
+当前测试入口 C 文件（13 个）：
 
 - `tests/lexer/test.c`
 - `tests/lexer/lexer_test.c`
 - `tests/lexer/lexer_regression_test.c`
 - `tests/ir/ir_regression_test.c`
+- `tests/ir/ir_pass_test.c`
 - `tests/ir/ir_verifier_test.c`
+- `tests/lower_ir/lower_ir_regression_test.c`
+- `tests/lower_ir/lower_ir_verifier_test.c`
 - `tests/parser/test.c`
 - `tests/parser/parser_test.c`
 - `tests/parser/parser_legacy_link_test.c`
 - `tests/parser/parser_regression_test.c`
 - `tests/semantic/semantic_regression_test.c`
 
-当前拆分片段（8 个 `.inc`）：
+当前拆分片段（11 个 `.inc`）：
 
+- `tests/ir/ir_pass_test_intellisense_prelude.inc`
 - `tests/parser/parser_regression_cases_core.inc`
 - `tests/parser/parser_regression_cases_expr_ast_a.inc`
 - `tests/parser/parser_regression_cases_expr_ast_b.inc`
 - `tests/parser/parser_regression_cases_ast_meta.inc`
 - `tests/parser/parser_regression_intellisense_prelude.inc`
+- `tests/ir/ir_pass_test_direct.inc`
+- `tests/ir/ir_pass_test_pipeline.inc`
 - `tests/semantic/semantic_regression_callable_flow.inc`
 - `tests/semantic/semantic_regression_scope_cf.inc`
 - `tests/semantic/semantic_regression_intellisense_prelude.inc`
@@ -46,7 +52,7 @@
 
 1. `test.c`：输入样例文件（fixture）
 2. `*_test.c`：可执行冒烟/调试程序（CLI harness）
-3. `*_regression_test.c`：回归断言（CI 主力，当前已覆盖 lexer/parser/semantic/ir）
+3. `*_regression_test.c`：回归断言（CI 主力，当前已覆盖 lexer/parser/semantic/ir/lower_ir）
 
 可抽象为测试收益函数：
 
@@ -56,11 +62,13 @@ $$
 
 当前 IR 测试也已经不只是“直线表达式”了，当前至少锁住了这些行为族：
 
-如果只按最近几轮 IR 改动来归类，新增测试重点主要也是 3 组：
+如果只按最近几轮 IR / lower-IR 改动来归类，新增测试重点主要也是几组：
 
 - global-aware lowering：`global ...`、global update、global/local shadowing
 - runtime global init：`__global.init()`、`__program.init()`、`IR-LOWER-022` 依赖顺序拒绝、`dependency path` / `dependency cycle` 诊断、依赖收集对 direct call callee body 的递归覆盖、以及 `&&/||/?:` 与常量条件 `if/while/for` 的有限裁剪
 - runtime-init verifier：`IR-VERIFY-048` 到 `IR-VERIFY-060`
+- ir-pass：`fold -> const -> copy -> fold -> const -> copy -> simplify-cfg -> dead-temp-elim` 默认管线、safe immediate folding、单边 immediate 恒等归约、temp constant propagation、temp copy propagation、CFG simplification、dead temp elimination、invalid pass spec、NULL pass table
+- lower-ir：canonical IR -> lower IR 的 source-lowered shape、显式 `load_local/store_local/load_global/store_global` dump 形状、runtime-init helper exact dump，以及 lower-IR verifier 对 value/slot 边界、runtime-init helper、call 契约、terminator、名字表与 dense table 的拒绝路径
 
 1. 表达式 family：算术、comparison、bitwise、shift、ternary、逗号表达式
 2. 更新表达式 family：compound assignment、prefix/postfix `++`、prefix/postfix `--`
@@ -78,6 +86,38 @@ $$
 14. declaration-aware IR：prototype 会保留成 `declare` 签名项，而不是直接丢掉
 15. global-aware IR：顶层声明会 lower 成 `global ...`，global bitwise/shift compound、global initializer 依赖、静态求值失败到 runtime-init 的回退、按需懒创建并复用的 `__global.init()`、没有可注入 `main` 定义时导出的 `__program.init()`、直接/间接依赖未初始化 global 的 `IR-LOWER-022`、以及 local-shadow-over-global 都有回归
 16. verifier 结构与数据流校验：缺 terminator、不可达 block、非法 binary op、binary/call 结果不是 temp、空 callee、unknown callee、NULL/非 NULL call-args payload 不匹配、undefined/use-before-def temp、同一 block 内重复 temp 定义、call arity 漂移、count-capacity/table-pointer 破坏、global table/global id/global name 破坏、duplicate global / function-global name collision、constant/runtime initializer flag 冲突、runtime-init helper 契约破坏、startup helper 非法调用、declaration-only function 被错误塞入 blocks
+
+另外现在还有单独的 `test-ir-pass`：
+
+- `tests/ir/ir_pass_test.c`：测试聚合入口和共享 helper
+- `tests/ir/ir_pass_test_direct.inc`：锁直接调用单个 pass 的行为
+- `tests/ir/ir_pass_test_pipeline.inc`：锁 default pipeline 的整体行为
+- 目前主要验证：
+  - default pipeline 会减少可 fold 的 immediate binary 指令
+  - fold pass 会吃掉安全的单边 immediate 恒等归约机会
+  - default pipeline 会跳过当前不能安全归约的 immediate/identity 形状
+  - temp constant propagation 会把可证明恒定的 temp use 压成立即数
+  - temp copy propagation 会减少可传播的 temp-copy use
+  - `ir_pass_simplify_cfg(...)` 会把常量条件 branch 收成 `jmp`，并删掉不可达 block
+  - `ir_pass_simplify_cfg(...)` 也会覆盖空 trampoline threading、`jmp -> ret` folding、same-return diamond folding、以及单前驱 jump-block merge
+  - default pipeline 会在常量条件 CFG case 和 same-return diamond case 上自动完成这类 CFG 化简和 block collapse
+  - dead-temp elimination 会删除纯 `mov/binary` 的 dead temp defs
+  - default pipeline 会把 binary identity chain 继续塌到零指令或更短 IR
+  - default pipeline 在 dead-result call 周围清纯计算、做 CFG revisit 之后，仍然必须保留 side-effecting `call`
+  - default pipeline 在 multi-def constant / multi-def copy 路径上必须保留路径区分，不能把 join 后的值误塌成单一路径事实
+  - default pipeline 连跑两次后，第一轮和第二轮 dump 必须一致，而且两轮结果都继续通过 verifier
+  - default pipeline 会减少总指令数，并在 cleanup case 结束后不再留下 dead temp defs / temp-copy propagation opportunities
+  - invalid pass spec 会报 `IR-PASS-003`
+  - `pass_count > 0 && passes == NULL` 会报 `IR-PASS-002`
+
+另外现在也有单独的 lower-IR 测试目标：
+
+- `make test-lower-ir-regression`
+  - 对应 `tests/lower_ir/lower_ir_regression_test.c`
+  - 当前主要锁 source-lowered 代表形状：`return a;`、`a=b+1; return a;`、`g=a; return g;`、`if(a)...`、`id(a)`、runtime-init helper exact dump、单臂/双臂分支 join、short-circuit 条件 materialize、`while` 回边 / `break`、`for` init-cond-step、nested-loop control、控制流里的 global write/read、call-heavy CFG slice、以及 value-materialization join
+- `make test-lower-ir-verifier`
+  - 对应 `tests/lower_ir/lower_ir_verifier_test.c`
+  - 当前主要锁 lower-IR verifier 对 value/slot 边界、store 结果形状、binary 结果 temp 约束、block terminator 必备性、runtime-init helper / startup call 契约、unknown callee / arg mismatch、duplicate-name / NULL-table 破坏、count-capacity 契约破坏，以及 temp/reachability 级不变量的拒绝
 
 ---
 

@@ -569,43 +569,23 @@ static int test_compound_assignment_boundary_token_sequence(void) {
 }
 
 int main(void) {
-    if (!test_block_comment_ending_at_eof()) {
-        return 1;
-    }
-    if (!test_reuse_token_array_without_manual_free()) {
-        return 1;
-    }
-    if (!test_invalid_token_array_state_rejected()) {
-        return 1;
-    }
-    if (!test_garbage_token_array_state_rejected()) {
-        return 1;
-    }
-    if (!test_break_continue_keywords()) {
-        return 1;
-    }
-    if (!test_bang_and_not_equal_tokens()) {
-        return 1;
-    }
-    if (!test_tilde_bang_and_not_equal_tokens()) {
-        return 1;
-    }
-    if (!test_and_and_or_or_token_sequence()) {
-        return 1;
-    }
-    if (!test_bitwise_operator_token_sequence()) {
-        return 1;
-    }
-    if (!test_shift_operator_token_sequence()) {
-        return 1;
-    }
-    if (!test_ternary_operator_token_sequence()) {
-        return 1;
-    }
-    if (!test_prefix_increment_decrement_token_sequence()) {
-        return 1;
-    }
-    if (!test_compound_assignment_boundary_token_sequence()) {
+    int ok = 1;
+
+    ok &= test_block_comment_ending_at_eof();
+    ok &= test_reuse_token_array_without_manual_free();
+    ok &= test_invalid_token_array_state_rejected();
+    ok &= test_garbage_token_array_state_rejected();
+    ok &= test_break_continue_keywords();
+    ok &= test_bang_and_not_equal_tokens();
+    ok &= test_tilde_bang_and_not_equal_tokens();
+    ok &= test_and_and_or_or_token_sequence();
+    ok &= test_bitwise_operator_token_sequence();
+    ok &= test_shift_operator_token_sequence();
+    ok &= test_ternary_operator_token_sequence();
+    ok &= test_prefix_increment_decrement_token_sequence();
+    ok &= test_compound_assignment_boundary_token_sequence();
+
+    if (!ok) {
         return 1;
     }
 

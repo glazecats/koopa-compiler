@@ -1302,142 +1302,56 @@ static int test_ir_verifier_rejects_program_null_function_table(void) {
 }
 
 int main(void) {
-    if (!test_ir_verifier_accepts_lowered_program()) {
-        return 1;
-    }
-    if (!test_ir_verifier_accepts_declaration_only_signature()) {
-        return 1;
-    }
-    if (!test_ir_verifier_accepts_runtime_global_startup_helper_flow()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_missing_terminator()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_unreachable_block()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_unknown_binary_op()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_non_temp_binary_result()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_empty_call_callee()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_non_temp_call_result()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_undefined_temp_slot()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_temp_use_before_definition()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_duplicate_temp_definition()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_internal_call_argument_mismatch()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_declared_call_argument_mismatch()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_unknown_call_target()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_null_call_args_payload()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_duplicate_function_entry_names()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_temps_on_declaration()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_non_parameter_local_on_declaration()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_local_count_exceeding_capacity()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_block_count_exceeding_capacity()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_instruction_count_exceeding_capacity()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_null_local_table()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_null_block_table()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_null_instruction_table()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_zero_arg_call_with_non_null_payload()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_blocks_on_declaration()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_program_function_count_exceeding_capacity()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_out_of_range_global_value_reference()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_program_global_count_exceeding_capacity()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_program_null_global_table()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_mismatched_global_id_slot()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_global_without_name()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_duplicate_global_names()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_function_global_symbol_name_collision()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_global_with_both_initializer_kinds()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_runtime_global_missing_helper_function()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_runtime_global_helper_nonzero_parameter_signature()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_runtime_global_helper_nonzero_entry_return()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_runtime_global_missing_startup_call()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_reserved_runtime_init_call_outside_startup_entry()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_reserved_program_init_call_from_ir_body()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_no_main_program_init_with_non_init_first_call()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_no_main_program_init_with_extra_entry_instruction()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_reserved_init_helper_name_without_runtime_globals()) {
-        return 1;
-    }
-    if (!test_ir_verifier_rejects_program_null_function_table()) {
+    int ok = 1;
+
+    ok &= test_ir_verifier_accepts_lowered_program();
+    ok &= test_ir_verifier_accepts_declaration_only_signature();
+    ok &= test_ir_verifier_accepts_runtime_global_startup_helper_flow();
+    ok &= test_ir_verifier_rejects_missing_terminator();
+    ok &= test_ir_verifier_rejects_unreachable_block();
+    ok &= test_ir_verifier_rejects_unknown_binary_op();
+    ok &= test_ir_verifier_rejects_non_temp_binary_result();
+    ok &= test_ir_verifier_rejects_empty_call_callee();
+    ok &= test_ir_verifier_rejects_non_temp_call_result();
+    ok &= test_ir_verifier_rejects_undefined_temp_slot();
+    ok &= test_ir_verifier_rejects_temp_use_before_definition();
+    ok &= test_ir_verifier_rejects_duplicate_temp_definition();
+    ok &= test_ir_verifier_rejects_internal_call_argument_mismatch();
+    ok &= test_ir_verifier_rejects_declared_call_argument_mismatch();
+    ok &= test_ir_verifier_rejects_unknown_call_target();
+    ok &= test_ir_verifier_rejects_null_call_args_payload();
+    ok &= test_ir_verifier_rejects_duplicate_function_entry_names();
+    ok &= test_ir_verifier_rejects_temps_on_declaration();
+    ok &= test_ir_verifier_rejects_non_parameter_local_on_declaration();
+    ok &= test_ir_verifier_rejects_local_count_exceeding_capacity();
+    ok &= test_ir_verifier_rejects_block_count_exceeding_capacity();
+    ok &= test_ir_verifier_rejects_instruction_count_exceeding_capacity();
+    ok &= test_ir_verifier_rejects_null_local_table();
+    ok &= test_ir_verifier_rejects_null_block_table();
+    ok &= test_ir_verifier_rejects_null_instruction_table();
+    ok &= test_ir_verifier_rejects_zero_arg_call_with_non_null_payload();
+    ok &= test_ir_verifier_rejects_blocks_on_declaration();
+    ok &= test_ir_verifier_rejects_program_function_count_exceeding_capacity();
+    ok &= test_ir_verifier_rejects_out_of_range_global_value_reference();
+    ok &= test_ir_verifier_rejects_program_global_count_exceeding_capacity();
+    ok &= test_ir_verifier_rejects_program_null_global_table();
+    ok &= test_ir_verifier_rejects_mismatched_global_id_slot();
+    ok &= test_ir_verifier_rejects_global_without_name();
+    ok &= test_ir_verifier_rejects_duplicate_global_names();
+    ok &= test_ir_verifier_rejects_function_global_symbol_name_collision();
+    ok &= test_ir_verifier_rejects_global_with_both_initializer_kinds();
+    ok &= test_ir_verifier_rejects_runtime_global_missing_helper_function();
+    ok &= test_ir_verifier_rejects_runtime_global_helper_nonzero_parameter_signature();
+    ok &= test_ir_verifier_rejects_runtime_global_helper_nonzero_entry_return();
+    ok &= test_ir_verifier_rejects_runtime_global_missing_startup_call();
+    ok &= test_ir_verifier_rejects_reserved_runtime_init_call_outside_startup_entry();
+    ok &= test_ir_verifier_rejects_reserved_program_init_call_from_ir_body();
+    ok &= test_ir_verifier_rejects_no_main_program_init_with_non_init_first_call();
+    ok &= test_ir_verifier_rejects_no_main_program_init_with_extra_entry_instruction();
+    ok &= test_ir_verifier_rejects_reserved_init_helper_name_without_runtime_globals();
+    ok &= test_ir_verifier_rejects_program_null_function_table();
+
+    if (!ok) {
         return 1;
     }
 
