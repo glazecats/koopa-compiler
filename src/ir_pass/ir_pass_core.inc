@@ -47,6 +47,18 @@ static int ir_pass_value_ref_equals(IrValueRef lhs, IrValueRef rhs) {
     return lhs.id == rhs.id;
 }
 
+static int ir_pass_binary_op_requires_runtime_validation(IrBinaryOp op) {
+    switch (op) {
+    case IR_BINARY_DIV:
+    case IR_BINARY_MOD:
+    case IR_BINARY_SHIFT_LEFT:
+    case IR_BINARY_SHIFT_RIGHT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int ir_pass_instruction_has_side_effects(const IrInstruction *instruction) {
     if (!instruction) {
         return 1;
@@ -54,8 +66,9 @@ static int ir_pass_instruction_has_side_effects(const IrInstruction *instruction
 
     switch (instruction->kind) {
     case IR_INSTR_MOV:
-    case IR_INSTR_BINARY:
         return 0;
+    case IR_INSTR_BINARY:
+        return ir_pass_binary_op_requires_runtime_validation(instruction->as.binary.op);
     case IR_INSTR_CALL:
     default:
         return 1;

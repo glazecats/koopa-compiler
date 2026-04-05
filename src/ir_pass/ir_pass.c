@@ -60,6 +60,7 @@ typedef struct {
 static void ir_pass_set_error(IrError *error, int line, int column, const char *fmt, ...);
 static IrValueRef ir_pass_value_immediate(long long value);
 static int ir_pass_value_ref_equals(IrValueRef lhs, IrValueRef rhs);
+static int ir_pass_binary_op_requires_runtime_validation(IrBinaryOp op);
 static int ir_pass_instruction_has_side_effects(const IrInstruction *instruction);
 static void ir_pass_temp_analysis_free(IrPassTempAnalysis *analysis);
 static int ir_pass_build_temp_analysis(const IrFunction *function,

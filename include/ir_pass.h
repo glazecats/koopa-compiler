@@ -12,7 +12,7 @@ typedef struct {
     IrPassRunFn run;
 } IrPassSpec;
 
-/* Runs passes in order and stops at the first failure. */
+/* Runs passes in order, rejecting verifier-invalid input and verifier-invalid pass output. */
 int ir_pass_run_pipeline(IrProgram *program,
     const IrPassSpec *passes,
     size_t pass_count,
@@ -33,7 +33,7 @@ int ir_pass_propagate_temp_copies(IrProgram *program, IrError *error);
 /* Built-in optimization pass: simplify constant CFG edges and remove dead blocks. */
 int ir_pass_simplify_cfg(IrProgram *program, IrError *error);
 
-/* Built-in optimization pass: remove dead temp defs for pure mov/binary ops. */
+/* Built-in optimization pass: remove dead temp defs for mov and non-runtime-validated binary ops. */
 int ir_pass_eliminate_dead_temp_defs(IrProgram *program, IrError *error);
 
 #endif

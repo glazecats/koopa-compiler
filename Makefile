@@ -55,6 +55,11 @@ IR_PASS_SPLIT_INCLUDES := \
 	src/ir_pass/ir_pass_dce.inc \
 	src/ir_pass/ir_pass_pipeline.inc
 
+IR_PASS_TEST_INCLUDES := \
+	tests/ir/ir_pass_test_intellisense_prelude.inc \
+	tests/ir/ir_pass_test_direct.inc \
+	tests/ir/ir_pass_test_pipeline.inc
+
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -102,7 +107,7 @@ $(IR_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/se
 $(IR_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c tests/ir/ir_verifier_test.c -o $@
 
-$(IR_PASS_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/ir_pass/ir_pass.c tests/ir/ir_pass_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) $(IR_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h include/ir_pass.h | dirs
+$(IR_PASS_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/ir_pass/ir_pass.c tests/ir/ir_pass_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) $(IR_PASS_SPLIT_INCLUDES) $(IR_PASS_TEST_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h include/ir_pass.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/ir_pass/ir_pass.c tests/ir/ir_pass_test.c -o $@
 
 test-lexer: $(LEXER_TEST_BIN)

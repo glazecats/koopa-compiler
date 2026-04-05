@@ -37,7 +37,7 @@ int ir_pass_eliminate_dead_temp_defs(IrProgram *program, IrError *error) {
             ir_pass_set_error(error,
                 0,
                 0,
-                "IR-PASS-010: function '%s' temp-use table capacity overflow",
+                "IR-PASS-017: function '%s' temp-use table capacity overflow",
                 function->name ? function->name : "<unnamed>");
             return 0;
         }

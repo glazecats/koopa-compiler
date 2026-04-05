@@ -199,10 +199,6 @@ static int ir_pass_try_simplify_binary_identity(IrBinaryOp op,
         return 0;
     case IR_BINARY_SHIFT_LEFT:
     case IR_BINARY_SHIFT_RIGHT:
-        if (ir_pass_is_immediate_value(rhs, 0)) {
-            *out_value = lhs;
-            return 1;
-        }
         return 0;
     case IR_BINARY_EQ:
         if (ir_pass_value_ref_equals(lhs, rhs)) {

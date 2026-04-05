@@ -13,6 +13,7 @@ int ir_pass_run_pipeline(IrProgram *program,
     size_t pass_count,
     IrError *error) {
     size_t i;
+    IrError verify_error;
 
     if (!program) {
         ir_pass_set_error(error, 0, 0, "IR-PASS-001: null program");
@@ -21,6 +22,15 @@ int ir_pass_run_pipeline(IrProgram *program,
 
     if (pass_count > 0 && !passes) {
         ir_pass_set_error(error, 0, 0, "IR-PASS-002: null pass table with non-zero pass_count");
+        return 0;
+    }
+
+    if (!ir_verify_program(program, &verify_error)) {
+        ir_pass_set_error(error,
+            verify_error.line,
+            verify_error.column,
+            "IR-PASS-034: verifier rejected pipeline input: %s",
+            verify_error.message);
         return 0;
     }
 
@@ -44,6 +54,16 @@ int ir_pass_run_pipeline(IrProgram *program,
                     "IR-PASS-004: pass '%s' failed",
                     pass->name);
             }
+            return 0;
+        }
+
+        if (!ir_verify_program(program, &verify_error)) {
+            ir_pass_set_error(error,
+                verify_error.line,
+                verify_error.column,
+                "IR-PASS-035: pass '%s' produced verifier-invalid IR: %s",
+                pass->name,
+                verify_error.message);
             return 0;
         }
     }

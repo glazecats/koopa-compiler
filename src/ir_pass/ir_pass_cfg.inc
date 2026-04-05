@@ -82,6 +82,56 @@ static int ir_pass_try_fold_jump_to_return(IrBasicBlock *block, const IrFunction
     return 1;
 }
 
+static int ir_pass_try_resolve_foldable_return_block_value(const IrBasicBlock *block,
+    const IrPassTempAnalysis *temp_analysis,
+    size_t temp_count,
+    const char *function_name,
+    IrError *error,
+    int *out_has_value,
+    IrValueRef *out_value) {
+    IrValueRef candidate;
+
+    if (out_has_value) {
+        *out_has_value = 0;
+    }
+
+    if (!block || !out_value || !block->has_terminator || block->terminator.kind != IR_TERM_RETURN) {
+        return 1;
+    }
+
+    if (block->instruction_count == 0) {
+        candidate = block->terminator.as.return_value;
+    } else {
+        const IrInstruction *instruction;
+
+        if (block->instruction_count != 1) {
+            return 1;
+        }
+        instruction = &block->instructions[0];
+        if (instruction->kind != IR_INSTR_MOV
+            || instruction->result.kind != IR_VALUE_TEMP
+            || !ir_pass_value_ref_equals(block->terminator.as.return_value, instruction->result)) {
+            return 1;
+        }
+
+        candidate = instruction->as.mov_value;
+    }
+
+    if (!ir_pass_resolve_equivalent_value(candidate,
+        temp_analysis,
+        temp_count,
+        function_name,
+        error,
+        out_value)) {
+        return 0;
+    }
+
+    if (out_has_value) {
+        *out_has_value = 1;
+    }
+    return 1;
+}
+
 static int ir_pass_try_fold_branch_to_same_return(IrBasicBlock *block,
     const IrFunction *function,
     const IrPassTempAnalysis *temp_analysis,
@@ -89,10 +139,10 @@ static int ir_pass_try_fold_branch_to_same_return(IrBasicBlock *block,
     int *out_changed) {
     const IrBasicBlock *then_block;
     const IrBasicBlock *else_block;
-    IrValueRef then_value;
-    IrValueRef else_value;
     IrValueRef resolved_then;
     IrValueRef resolved_else;
+    int has_resolved_then = 0;
+    int has_resolved_else = 0;
 
     if (out_changed) {
         *out_changed = 0;
@@ -108,28 +158,30 @@ static int ir_pass_try_fold_branch_to_same_return(IrBasicBlock *block,
 
     then_block = &function->blocks[block->terminator.as.branch.then_target];
     else_block = &function->blocks[block->terminator.as.branch.else_target];
-    if (then_block->instruction_count != 0 || else_block->instruction_count != 0
-        || !then_block->has_terminator || !else_block->has_terminator
+    if (!then_block->has_terminator || !else_block->has_terminator
         || then_block->terminator.kind != IR_TERM_RETURN
         || else_block->terminator.kind != IR_TERM_RETURN) {
         return 1;
     }
 
-    then_value = then_block->terminator.as.return_value;
-    else_value = else_block->terminator.as.return_value;
-    if (!ir_pass_resolve_equivalent_value(then_value,
+    if (!ir_pass_try_resolve_foldable_return_block_value(then_block,
             temp_analysis,
             function->next_temp_id,
             function->name,
             error,
+            &has_resolved_then,
             &resolved_then)
-        || !ir_pass_resolve_equivalent_value(else_value,
+        || !ir_pass_try_resolve_foldable_return_block_value(else_block,
             temp_analysis,
             function->next_temp_id,
             function->name,
             error,
+            &has_resolved_else,
             &resolved_else)) {
         return 0;
+    }
+    if (!has_resolved_then || !has_resolved_else) {
+        return 1;
     }
     if (!ir_pass_value_ref_equals(resolved_then, resolved_else)) {
         return 1;
@@ -365,7 +417,7 @@ int ir_pass_simplify_cfg(IrProgram *program, IrError *error) {
             ir_pass_set_error(error,
                 0,
                 0,
-                "IR-PASS-025: malformed function '%s' block table",
+                "IR-PASS-040: malformed function '%s' block table",
                 function->name ? function->name : "<unnamed>");
             return 0;
         }
