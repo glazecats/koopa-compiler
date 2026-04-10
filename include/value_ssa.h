@@ -1,0 +1,310 @@
+#ifndef VALUE_SSA_H
+#define VALUE_SSA_H
+
+#include <stddef.h>
+
+#include "lower_ir.h"
+
+typedef struct {
+    int line;
+    int column;
+    char message[512];
+} ValueSsaError;
+
+typedef enum {
+    VALUE_SSA_VALUE_IMMEDIATE = 0,
+    VALUE_SSA_VALUE_ID,
+} ValueSsaValueKind;
+
+typedef struct {
+    ValueSsaValueKind kind;
+    long long immediate;
+    size_t value_id;
+} ValueSsaValueRef;
+
+typedef enum {
+    VALUE_SSA_SLOT_LOCAL = 0,
+    VALUE_SSA_SLOT_GLOBAL,
+} ValueSsaSlotKind;
+
+typedef struct {
+    ValueSsaSlotKind kind;
+    size_t id;
+} ValueSsaSlotRef;
+
+typedef enum {
+    VALUE_SSA_BINARY_ADD = 0,
+    VALUE_SSA_BINARY_SUB,
+    VALUE_SSA_BINARY_MUL,
+    VALUE_SSA_BINARY_DIV,
+    VALUE_SSA_BINARY_MOD,
+    VALUE_SSA_BINARY_BIT_AND,
+    VALUE_SSA_BINARY_BIT_XOR,
+    VALUE_SSA_BINARY_BIT_OR,
+    VALUE_SSA_BINARY_SHIFT_LEFT,
+    VALUE_SSA_BINARY_SHIFT_RIGHT,
+    VALUE_SSA_BINARY_EQ,
+    VALUE_SSA_BINARY_NE,
+    VALUE_SSA_BINARY_LT,
+    VALUE_SSA_BINARY_LE,
+    VALUE_SSA_BINARY_GT,
+    VALUE_SSA_BINARY_GE,
+} ValueSsaBinaryOp;
+
+typedef enum {
+    VALUE_SSA_INSTR_MOV = 0,
+    VALUE_SSA_INSTR_BINARY,
+    VALUE_SSA_INSTR_CALL,
+    VALUE_SSA_INSTR_LOAD_LOCAL,
+    VALUE_SSA_INSTR_STORE_LOCAL,
+    VALUE_SSA_INSTR_LOAD_GLOBAL,
+    VALUE_SSA_INSTR_STORE_GLOBAL,
+} ValueSsaInstructionKind;
+
+typedef struct {
+    size_t id;
+    char *source_name;
+    int is_parameter;
+} ValueSsaLocal;
+
+typedef struct {
+    size_t id;
+    char *name;
+    int has_initializer;
+    long long initializer_value;
+    int has_runtime_initializer;
+} ValueSsaGlobal;
+
+typedef struct {
+    size_t predecessor_block_id;
+    ValueSsaValueRef value;
+} ValueSsaPhiInput;
+
+typedef struct {
+    size_t result_id;
+    ValueSsaPhiInput *inputs;
+    size_t input_count;
+    size_t input_capacity;
+} ValueSsaPhi;
+
+typedef struct {
+    ValueSsaInstructionKind kind;
+    int has_result;
+    ValueSsaValueRef result;
+    union {
+        ValueSsaValueRef mov_value;
+        struct {
+            ValueSsaBinaryOp op;
+            ValueSsaValueRef lhs;
+            ValueSsaValueRef rhs;
+        } binary;
+        struct {
+            char *callee_name;
+            ValueSsaValueRef *args;
+            size_t arg_count;
+        } call;
+        ValueSsaSlotRef load_slot;
+        struct {
+            ValueSsaSlotRef slot;
+            ValueSsaValueRef value;
+        } store;
+    } as;
+} ValueSsaInstruction;
+
+typedef enum {
+    VALUE_SSA_TERM_RETURN = 0,
+    VALUE_SSA_TERM_JUMP,
+    VALUE_SSA_TERM_BRANCH,
+} ValueSsaTerminatorKind;
+
+typedef struct {
+    ValueSsaTerminatorKind kind;
+    union {
+        ValueSsaValueRef return_value;
+        size_t jump_target;
+        struct {
+            ValueSsaValueRef condition;
+            size_t then_target;
+            size_t else_target;
+        } branch;
+    } as;
+} ValueSsaTerminator;
+
+typedef struct {
+    size_t id;
+    ValueSsaPhi *phis;
+    size_t phi_count;
+    size_t phi_capacity;
+    ValueSsaInstruction *instructions;
+    size_t instruction_count;
+    size_t instruction_capacity;
+    int has_terminator;
+    ValueSsaTerminator terminator;
+} ValueSsaBasicBlock;
+
+typedef struct {
+    char *name;
+    int has_body;
+    size_t parameter_count;
+    ValueSsaLocal *locals;
+    size_t local_count;
+    size_t local_capacity;
+    ValueSsaBasicBlock *blocks;
+    size_t block_count;
+    size_t block_capacity;
+    size_t next_value_id;
+} ValueSsaFunction;
+
+typedef struct {
+    ValueSsaGlobal *globals;
+    size_t global_count;
+    size_t global_capacity;
+    ValueSsaFunction *functions;
+    size_t function_count;
+    size_t function_capacity;
+} ValueSsaProgram;
+
+typedef struct {
+    size_t block_count;
+    unsigned char *predecessor_matrix;
+    size_t *predecessor_counts;
+    unsigned char *reachable;
+    unsigned char *dominates;
+    size_t *immediate_dominator;
+    unsigned char *dominator_tree_children;
+    size_t *dominator_tree_child_counts;
+    unsigned char *dominance_frontier;
+    size_t *dominance_frontier_counts;
+} ValueSsaCfgAnalysis;
+
+typedef int (*ValueSsaDominatorTreeWalkFn)(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    size_t block_id,
+    void *user_data,
+    ValueSsaError *error);
+
+typedef struct {
+    size_t binding_count;
+    ValueSsaValueRef *current_values;
+    unsigned char *has_current_value;
+    size_t *history_binding_ids;
+    ValueSsaValueRef *history_previous_values;
+    unsigned char *history_previous_has_value;
+    size_t history_count;
+    size_t history_capacity;
+    size_t *scope_history_starts;
+    size_t scope_count;
+    size_t scope_capacity;
+} ValueSsaRenameState;
+
+void value_ssa_program_init(ValueSsaProgram *program);
+void value_ssa_program_free(ValueSsaProgram *program);
+void value_ssa_cfg_analysis_init(ValueSsaCfgAnalysis *analysis);
+void value_ssa_cfg_analysis_free(ValueSsaCfgAnalysis *analysis);
+void value_ssa_rename_state_init(ValueSsaRenameState *state);
+void value_ssa_rename_state_free(ValueSsaRenameState *state);
+
+ValueSsaValueRef value_ssa_value_immediate(long long value);
+ValueSsaValueRef value_ssa_value_id(size_t value_id);
+ValueSsaSlotRef value_ssa_slot_local(size_t local_id);
+ValueSsaSlotRef value_ssa_slot_global(size_t global_id);
+
+int value_ssa_program_append_global(ValueSsaProgram *program,
+    const char *name,
+    ValueSsaGlobal **out_global,
+    ValueSsaError *error);
+int value_ssa_program_append_function(ValueSsaProgram *program,
+    const char *name,
+    int has_body,
+    ValueSsaFunction **out_function,
+    ValueSsaError *error);
+int value_ssa_function_append_local(ValueSsaFunction *function,
+    const char *source_name,
+    int is_parameter,
+    size_t *out_local_id,
+    ValueSsaError *error);
+int value_ssa_function_append_block(ValueSsaFunction *function,
+    size_t *out_block_id,
+    ValueSsaBasicBlock **out_block,
+    ValueSsaError *error);
+size_t value_ssa_function_allocate_value(ValueSsaFunction *function);
+int value_ssa_block_append_phi(ValueSsaBasicBlock *block,
+    size_t result_id,
+    const ValueSsaPhiInput *inputs,
+    size_t input_count,
+    ValueSsaError *error);
+int value_ssa_block_append_instruction(ValueSsaBasicBlock *block,
+    const ValueSsaInstruction *instruction,
+    ValueSsaError *error);
+int value_ssa_block_set_return(ValueSsaBasicBlock *block,
+    ValueSsaValueRef value,
+    ValueSsaError *error);
+int value_ssa_block_set_jump(ValueSsaBasicBlock *block,
+    size_t target_block_id,
+    ValueSsaError *error);
+int value_ssa_block_set_branch(ValueSsaBasicBlock *block,
+    ValueSsaValueRef condition,
+    size_t then_target,
+    size_t else_target,
+    ValueSsaError *error);
+
+int value_ssa_verify_program(const ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text);
+int value_ssa_simplify_trivial_values(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_eliminate_dead_value_defs(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_compute_cfg_analysis(const ValueSsaFunction *function,
+    ValueSsaCfgAnalysis *analysis,
+    ValueSsaError *error);
+int value_ssa_compute_phi_placement(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    const unsigned char *definition_blocks,
+    unsigned char *out_phi_blocks,
+    ValueSsaError *error);
+int value_ssa_compute_dominator_tree_preorder(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    size_t *out_order,
+    size_t *out_count,
+    ValueSsaError *error);
+int value_ssa_walk_dominator_tree(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    ValueSsaDominatorTreeWalkFn enter_block,
+    ValueSsaDominatorTreeWalkFn leave_block,
+    void *user_data,
+    ValueSsaError *error);
+int value_ssa_rename_state_prepare(ValueSsaRenameState *state, size_t binding_count, ValueSsaError *error);
+int value_ssa_rename_state_begin_scope(ValueSsaRenameState *state, ValueSsaError *error);
+int value_ssa_rename_state_end_scope(ValueSsaRenameState *state, ValueSsaError *error);
+int value_ssa_rename_state_bind(ValueSsaRenameState *state,
+    size_t binding_id,
+    ValueSsaValueRef value,
+    ValueSsaError *error);
+int value_ssa_rename_state_clear(ValueSsaRenameState *state,
+    size_t binding_id,
+    ValueSsaError *error);
+int value_ssa_rename_state_lookup(const ValueSsaRenameState *state,
+    size_t binding_id,
+    ValueSsaValueRef *out_value,
+    ValueSsaError *error);
+int value_ssa_rename_rewrite_value_ref(ValueSsaValueRef *value,
+    const ValueSsaRenameState *state,
+    ValueSsaError *error);
+int value_ssa_rename_rewrite_block_uses(ValueSsaBasicBlock *block,
+    const ValueSsaRenameState *state,
+    ValueSsaError *error);
+int value_ssa_rename_rewrite_phi_inputs_for_predecessor(ValueSsaBasicBlock *block,
+    size_t predecessor_block_id,
+    const ValueSsaRenameState *state,
+    ValueSsaError *error);
+int value_ssa_rename_function_values(ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    ValueSsaError *error);
+int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+int value_ssa_build_canonicalized_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+
+#endif

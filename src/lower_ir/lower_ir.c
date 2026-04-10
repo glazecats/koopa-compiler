@@ -756,5 +756,6 @@ int lower_ir_block_set_branch(LowerIrBasicBlock *block,
 
 #define LOWER_IR_SPLIT_AGGREGATOR
 #include "lower_from_ir.inc"
+#include "lower_ir_analysis.inc"
 #include "lower_ir_verify.inc"
 #include "lower_ir_dump.inc"

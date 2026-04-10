@@ -4,6 +4,12 @@
 
 This draft captures the next likely IR direction after the current canonical-IR pass layer.
 
+Status note:
+
+- the lower-IR phase described here is now checkpointed and in maintenance-first mode
+- active next-step planning has moved to `docs/VALUE_SSA_DESIGN.md`
+- this file remains the design authority for lower-IR boundary decisions, not the current active implementation target
+
 The current recommendation is:
 
 - keep canonical IR stable as the front-end output surface

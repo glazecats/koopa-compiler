@@ -6,6 +6,7 @@
 - Then read `docs/ir-conventions.md`.
 - Then read `docs/NEXT_STEPS.md`.
 - If the task touches lower IR / downstream IR planning or implementation, then also read `docs/LOWER_IR_DESIGN.md` before making changes.
+- If the task touches value SSA / post-lower-IR planning or implementation, then also read `docs/VALUE_SSA_DESIGN.md` before making changes.
 
 ## Shared Authority
 
@@ -13,6 +14,7 @@
 - `docs/ir-conventions.md` is working memory for current engineering facts and safety/convention notes.
 - `docs/NEXT_STEPS.md` is the roadmap, execution log, and current-plan authority.
 - `docs/LOWER_IR_DESIGN.md` is the current design authority for lower-memory / downstream IR planning unless and until `docs/NEXT_STEPS.md` supersedes part of it.
+- `docs/VALUE_SSA_DESIGN.md` is the current design authority for the next planned post-lower-IR step unless and until `docs/NEXT_STEPS.md` supersedes part of it.
 - `docs/` holds implementation-facing design notes and proposals; unless explicitly promoted by `NEXT_STEPS.md`, treat them as discussion/design authority rather than execution-log authority.
 
 ## Agent Roles
@@ -21,7 +23,7 @@
 
 - This agent is the default code-changing agent for the current workstream.
 - Owns compiler implementation work under `src/`, `include/`, `tests/`, `docs/`, and implementation-facing project notes.
-- May update `docs/NEXT_STEPS.md`, `docs/ir-conventions.md`, and implementation-facing design documents such as `docs/LOWER_IR_DESIGN.md` when implementation work changes roadmap facts, working memory, or downstream-IR design direction.
+- May update `docs/NEXT_STEPS.md`, `docs/ir-conventions.md`, and implementation-facing design documents such as `docs/LOWER_IR_DESIGN.md` and `docs/VALUE_SSA_DESIGN.md` when implementation work changes roadmap facts, working memory, or downstream-IR design direction.
 - Must not modify files under `lesson/` unless the user explicitly says otherwise.
 
 ### Lesson Agent

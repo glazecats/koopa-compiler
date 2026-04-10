@@ -149,8 +149,32 @@ typedef struct {
     size_t function_capacity;
 } LowerIrProgram;
 
+typedef struct {
+    size_t block_count;
+    unsigned char *predecessor_matrix;
+    size_t *predecessor_counts;
+    size_t *predecessors;
+    size_t *successor_counts;
+    size_t *successors;
+    unsigned char *reachable;
+    unsigned char *dominates;
+    size_t *immediate_dominator;
+    unsigned char *dominator_tree_children;
+    size_t *dominator_tree_child_counts;
+    unsigned char *dominance_frontier;
+    size_t *dominance_frontier_counts;
+} LowerIrCfgAnalysis;
+
+typedef int (*LowerIrDominatorTreeWalkFn)(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t block_id,
+    void *user_data,
+    LowerIrError *error);
+
 void lower_ir_program_init(LowerIrProgram *program);
 void lower_ir_program_free(LowerIrProgram *program);
+void lower_ir_cfg_analysis_init(LowerIrCfgAnalysis *analysis);
+void lower_ir_cfg_analysis_free(LowerIrCfgAnalysis *analysis);
 
 LowerIrValueRef lower_ir_value_immediate(long long value);
 LowerIrValueRef lower_ir_value_temp(size_t temp_id);
@@ -193,6 +217,60 @@ int lower_ir_block_set_branch(LowerIrBasicBlock *block,
 
 int lower_ir_lower_from_ir(const IrProgram *program,
     LowerIrProgram *out_program,
+    LowerIrError *error);
+int lower_ir_compute_cfg_analysis(const LowerIrFunction *function,
+    LowerIrCfgAnalysis *analysis,
+    LowerIrError *error);
+int lower_ir_collect_temp_definition_blocks(const LowerIrFunction *function,
+    size_t temp_id,
+    unsigned char *out_definition_blocks,
+    LowerIrError *error);
+int lower_ir_compute_phi_placement(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    const unsigned char *definition_blocks,
+    unsigned char *out_phi_blocks,
+    LowerIrError *error);
+int lower_ir_compute_temp_phi_candidates(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    unsigned char *out_phi_candidate_blocks,
+    LowerIrError *error);
+int lower_ir_compute_block_phi_candidate_lists(const LowerIrFunction *function,
+    const unsigned char *phi_candidate_blocks,
+    size_t *out_phi_candidate_counts,
+    size_t *out_phi_candidate_temps,
+    LowerIrError *error);
+int lower_ir_compute_temp_phi_candidate_lists(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t *out_phi_candidate_counts,
+    size_t *out_phi_candidate_temps,
+    LowerIrError *error);
+int lower_ir_collect_temp_live_in_blocks(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t temp_id,
+    unsigned char *out_live_in_blocks,
+    LowerIrError *error);
+int lower_ir_compute_pruned_temp_phi_candidate_lists(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t *out_phi_candidate_counts,
+    size_t *out_phi_candidate_temps,
+    LowerIrError *error);
+int lower_ir_compute_block_successor_phi_use_lists(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    const size_t *phi_candidate_counts,
+    const size_t *phi_candidate_temps,
+    size_t *out_successor_phi_use_counts,
+    size_t *out_successor_phi_use_temps,
+    LowerIrError *error);
+int lower_ir_compute_dominator_tree_preorder(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t *out_order,
+    size_t *out_count,
+    LowerIrError *error);
+int lower_ir_walk_dominator_tree(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    LowerIrDominatorTreeWalkFn enter_block,
+    LowerIrDominatorTreeWalkFn leave_block,
+    void *user_data,
     LowerIrError *error);
 
 int lower_ir_verify_program(const LowerIrProgram *program, LowerIrError *error);

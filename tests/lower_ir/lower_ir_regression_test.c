@@ -235,6 +235,1547 @@ static int expect_lowered_source_dump(const char *case_id,
     return ok;
 }
 
+static int build_diamond_join_temp_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *then_block = NULL;
+    LowerIrBasicBlock *else_block = NULL;
+    LowerIrBasicBlock *join = NULL;
+    size_t local_a_id;
+    size_t join_temp;
+    size_t cond_temp;
+    LowerIrInstruction instruction;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 1, &local_a_id, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &join, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    join_temp = lower_ir_function_allocate_temp(function);
+    cond_temp = lower_ir_function_allocate_temp(function);
+    if (join_temp == (size_t)-1 || cond_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(cond_temp);
+    instruction.as.load_slot = lower_ir_slot_local(local_a_id);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_branch(entry, lower_ir_value_temp(cond_temp), 1, 2, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(join_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, error) ||
+        !lower_ir_block_set_jump(then_block, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, error) ||
+        !lower_ir_block_set_jump(else_block, 3, error) ||
+        !lower_ir_block_set_return(join, lower_ir_value_temp(join_temp), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_loop_header_join_temp_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *header = NULL;
+    LowerIrBasicBlock *body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    size_t loop_temp;
+    LowerIrInstruction instruction;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &header, error) ||
+        !lower_ir_function_append_block(function, NULL, &body, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    loop_temp = lower_ir_function_allocate_temp(function);
+    if (loop_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(loop_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(header, lower_ir_value_temp(loop_temp), 2, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(body, &instruction, error) ||
+        !lower_ir_block_set_jump(body, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(loop_temp), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_multi_backedge_loop_header_join_temp_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *header = NULL;
+    LowerIrBasicBlock *split = NULL;
+    LowerIrBasicBlock *left_backedge = NULL;
+    LowerIrBasicBlock *right_backedge = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrInstruction instruction;
+    size_t join_temp;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &header, error) ||
+        !lower_ir_function_append_block(function, NULL, &split, error) ||
+        !lower_ir_function_append_block(function, NULL, &left_backedge, error) ||
+        !lower_ir_function_append_block(function, NULL, &right_backedge, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    entry = &function->blocks[0];
+    header = &function->blocks[1];
+    split = &function->blocks[2];
+    left_backedge = &function->blocks[3];
+    right_backedge = &function->blocks[4];
+    exit_block = &function->blocks[5];
+
+    join_temp = lower_ir_function_allocate_temp(function);
+    if (join_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(join_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(header, lower_ir_value_temp(join_temp), 2, 5, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(split, lower_ir_value_temp(join_temp), 3, 4, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(join_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(left_backedge, &instruction, error) ||
+        !lower_ir_block_set_jump(left_backedge, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(join_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(3);
+    if (!lower_ir_block_append_instruction(right_backedge, &instruction, error) ||
+        !lower_ir_block_set_jump(right_backedge, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(join_temp), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_two_carried_temps_loop_header_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *header = NULL;
+    LowerIrBasicBlock *body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &header, error) ||
+        !lower_ir_function_append_block(function, NULL, &body, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.mov_value = lower_ir_value_immediate(10);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(header, lower_ir_value_temp(temp0), 2, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.mov_value = lower_ir_value_immediate(11);
+    if (!lower_ir_block_append_instruction(body, &instruction, error) ||
+        !lower_ir_block_set_jump(body, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(temp1), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_nested_loop_carried_temps_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *outer_header = NULL;
+    LowerIrBasicBlock *inner_entry = NULL;
+    LowerIrBasicBlock *inner_header = NULL;
+    LowerIrBasicBlock *inner_body = NULL;
+    LowerIrBasicBlock *outer_body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_body, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_body, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    entry = &function->blocks[0];
+    outer_header = &function->blocks[1];
+    inner_entry = &function->blocks[2];
+    inner_header = &function->blocks[3];
+    inner_body = &function->blocks[4];
+    outer_body = &function->blocks[5];
+    exit_block = &function->blocks[6];
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(outer_header, lower_ir_value_temp(temp0), 2, 6, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.mov_value = lower_ir_value_immediate(10);
+    if (!lower_ir_block_append_instruction(inner_entry, &instruction, error) ||
+        !lower_ir_block_set_jump(inner_entry, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(inner_header, lower_ir_value_temp(temp1), 4, 5, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.mov_value = lower_ir_value_immediate(11);
+    if (!lower_ir_block_append_instruction(inner_body, &instruction, error) ||
+        !lower_ir_block_set_jump(inner_body, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(outer_body, &instruction, error) ||
+        !lower_ir_block_set_jump(outer_body, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_nested_same_temp_double_loop_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *outer_header = NULL;
+    LowerIrBasicBlock *inner_entry = NULL;
+    LowerIrBasicBlock *inner_header = NULL;
+    LowerIrBasicBlock *inner_body = NULL;
+    LowerIrBasicBlock *outer_body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_body, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_body, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    entry = &function->blocks[0];
+    outer_header = &function->blocks[1];
+    inner_entry = &function->blocks[2];
+    inner_header = &function->blocks[3];
+    inner_body = &function->blocks[4];
+    outer_body = &function->blocks[5];
+    exit_block = &function->blocks[6];
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(outer_header, lower_ir_value_temp(temp0), 2, 6, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_jump(inner_entry, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(inner_header, lower_ir_value_temp(temp0), 4, 5, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(inner_body, &instruction, error) ||
+        !lower_ir_block_set_jump(inner_body, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(3);
+    if (!lower_ir_block_append_instruction(outer_body, &instruction, error) ||
+        !lower_ir_block_set_jump(outer_body, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_nested_same_temp_multi_backedge_inner_loop_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *outer_header = NULL;
+    LowerIrBasicBlock *inner_entry = NULL;
+    LowerIrBasicBlock *inner_header = NULL;
+    LowerIrBasicBlock *inner_split = NULL;
+    LowerIrBasicBlock *inner_left = NULL;
+    LowerIrBasicBlock *inner_right = NULL;
+    LowerIrBasicBlock *outer_body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+
+    lower_ir_program_init(program);
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_header, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_split, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_left, error) ||
+        !lower_ir_function_append_block(function, NULL, &inner_right, error) ||
+        !lower_ir_function_append_block(function, NULL, &outer_body, error) ||
+        !lower_ir_function_append_block(function, NULL, &exit_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    entry = &function->blocks[0];
+    outer_header = &function->blocks[1];
+    inner_entry = &function->blocks[2];
+    inner_header = &function->blocks[3];
+    inner_split = &function->blocks[4];
+    inner_left = &function->blocks[5];
+    inner_right = &function->blocks[6];
+    outer_body = &function->blocks[7];
+    exit_block = &function->blocks[8];
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(outer_header, lower_ir_value_temp(temp0), 2, 8, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_jump(inner_entry, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(inner_header, lower_ir_value_temp(temp0), 4, 7, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(inner_split, lower_ir_value_temp(temp0), 5, 6, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(inner_left, &instruction, error) ||
+        !lower_ir_block_set_jump(inner_left, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.as.mov_value = lower_ir_value_immediate(4);
+    if (!lower_ir_block_append_instruction(inner_right, &instruction, error) ||
+        !lower_ir_block_set_jump(inner_right, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    instruction.as.mov_value = lower_ir_value_temp(temp0);
+    if (!lower_ir_block_append_instruction(outer_body, &instruction, error) ||
+        !lower_ir_block_set_jump(outer_body, 1, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int expect_cfg_analysis(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    int (*checker)(const LowerIrProgram *program, const LowerIrCfgAnalysis *analysis)) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    int ok;
+
+    if (!builder || !checker) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    ok = checker(&program, &analysis);
+    if (!ok) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s analysis checker failed\n", case_id);
+    }
+
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_phi_placement(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    size_t temp_id,
+    const unsigned char *expected_phi_blocks,
+    size_t expected_block_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    unsigned char *definition_blocks = NULL;
+    unsigned char *phi_blocks = NULL;
+    size_t block_index;
+    int ok = 1;
+
+    if (!builder || !expected_phi_blocks) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (analysis.block_count != expected_block_count) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s expected block_count=%zu, got %zu\n",
+            case_id,
+            expected_block_count,
+            analysis.block_count);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    definition_blocks = (unsigned char *)calloc(analysis.block_count, sizeof(unsigned char));
+    phi_blocks = (unsigned char *)calloc(analysis.block_count, sizeof(unsigned char));
+    if (!definition_blocks || !phi_blocks) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory\n", case_id);
+        free(definition_blocks);
+        free(phi_blocks);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (!lower_ir_collect_temp_definition_blocks(&program.functions[0], temp_id, definition_blocks, &error) ||
+        !lower_ir_compute_phi_placement(&program.functions[0], &analysis, definition_blocks, phi_blocks, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s phi placement failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(definition_blocks);
+        free(phi_blocks);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    for (block_index = 0; block_index < analysis.block_count; ++block_index) {
+        if (phi_blocks[block_index] != expected_phi_blocks[block_index]) {
+            ok = 0;
+            fprintf(stderr,
+                "[lower-ir-reg] FAIL: %s expected phi_blocks[%zu]=%u, got %u\n",
+                case_id,
+                block_index,
+                (unsigned)expected_phi_blocks[block_index],
+                (unsigned)phi_blocks[block_index]);
+            break;
+        }
+    }
+
+    free(definition_blocks);
+    free(phi_blocks);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_temp_phi_candidates(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const unsigned char *expected_phi_candidates,
+    size_t expected_block_count,
+    size_t expected_temp_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    unsigned char *phi_candidates = NULL;
+    int ok = 1;
+    size_t block_index;
+    size_t temp_id;
+
+    if (!builder || !expected_phi_candidates) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (analysis.block_count != expected_block_count ||
+        program.functions[0].next_temp_id != expected_temp_count) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s expected block_count=%zu temp_count=%zu, got %zu and %zu\n",
+            case_id,
+            expected_block_count,
+            expected_temp_count,
+            analysis.block_count,
+            program.functions[0].next_temp_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (expected_block_count > 0 && expected_temp_count > 0) {
+        phi_candidates = (unsigned char *)calloc(expected_block_count * expected_temp_count, sizeof(unsigned char));
+        if (!phi_candidates) {
+            fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory\n", case_id);
+            lower_ir_cfg_analysis_free(&analysis);
+            lower_ir_program_free(&program);
+            return 0;
+        }
+    }
+
+    if (!lower_ir_compute_temp_phi_candidates(&program.functions[0], &analysis, phi_candidates, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s temp phi-candidate precompute failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(phi_candidates);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    for (block_index = 0; block_index < expected_block_count; ++block_index) {
+        for (temp_id = 0; temp_id < expected_temp_count; ++temp_id) {
+            size_t flat_index = block_index * expected_temp_count + temp_id;
+
+            if (phi_candidates[flat_index] != expected_phi_candidates[flat_index]) {
+                ok = 0;
+                fprintf(stderr,
+                    "[lower-ir-reg] FAIL: %s expected phi_candidates[bb.%zu,tmp.%zu]=%u, got %u\n",
+                    case_id,
+                    block_index,
+                    temp_id,
+                    (unsigned)expected_phi_candidates[flat_index],
+                    (unsigned)phi_candidates[flat_index]);
+                goto done;
+            }
+        }
+    }
+
+done:
+    free(phi_candidates);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_block_phi_candidate_lists(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const size_t *expected_counts,
+    const size_t *expected_temps,
+    size_t expected_block_count,
+    size_t expected_temp_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    size_t *phi_counts = NULL;
+    size_t *phi_temps = NULL;
+    int ok = 1;
+    size_t block_index;
+    size_t list_index;
+
+    if (!builder || !expected_counts || !expected_temps) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (analysis.block_count != expected_block_count ||
+        program.functions[0].next_temp_id != expected_temp_count) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s expected block_count=%zu temp_count=%zu, got %zu and %zu\n",
+            case_id,
+            expected_block_count,
+            expected_temp_count,
+            analysis.block_count,
+            program.functions[0].next_temp_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (expected_block_count > 0 && expected_temp_count > 0) {
+        phi_counts = (size_t *)calloc(expected_block_count, sizeof(size_t));
+        phi_temps = (size_t *)calloc(expected_block_count * expected_temp_count, sizeof(size_t));
+        if (!phi_counts || !phi_temps) {
+            fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory\n", case_id);
+            free(phi_counts);
+            free(phi_temps);
+            lower_ir_cfg_analysis_free(&analysis);
+            lower_ir_program_free(&program);
+            return 0;
+        }
+    }
+
+    if (!lower_ir_compute_temp_phi_candidate_lists(&program.functions[0], &analysis, phi_counts, phi_temps, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s block phi-candidate list failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(phi_counts);
+        free(phi_temps);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    for (block_index = 0; block_index < expected_block_count; ++block_index) {
+        if (phi_counts[block_index] != expected_counts[block_index]) {
+            ok = 0;
+            fprintf(stderr,
+                "[lower-ir-reg] FAIL: %s expected phi_count[bb.%zu]=%zu, got %zu\n",
+                case_id,
+                block_index,
+                expected_counts[block_index],
+                phi_counts[block_index]);
+            goto done;
+        }
+        for (list_index = 0; list_index < expected_counts[block_index]; ++list_index) {
+            size_t flat_index = block_index * expected_temp_count + list_index;
+            if (phi_temps[flat_index] != expected_temps[flat_index]) {
+                ok = 0;
+                fprintf(stderr,
+                    "[lower-ir-reg] FAIL: %s expected phi_temps[bb.%zu][%zu]=tmp.%zu, got tmp.%zu\n",
+                    case_id,
+                    block_index,
+                    list_index,
+                    expected_temps[flat_index],
+                    phi_temps[flat_index]);
+                goto done;
+            }
+        }
+    }
+
+done:
+    free(phi_counts);
+    free(phi_temps);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_pruned_block_phi_candidate_lists(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const size_t *expected_counts,
+    const size_t *expected_temps,
+    size_t expected_block_count,
+    size_t expected_temp_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    size_t *phi_counts = NULL;
+    size_t *phi_temps = NULL;
+    int ok = 1;
+    size_t block_index;
+    size_t list_index;
+
+    if (!builder || !expected_counts || !expected_temps) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (analysis.block_count != expected_block_count ||
+        program.functions[0].next_temp_id != expected_temp_count) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s expected block_count=%zu temp_count=%zu, got %zu and %zu\n",
+            case_id,
+            expected_block_count,
+            expected_temp_count,
+            analysis.block_count,
+            program.functions[0].next_temp_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (expected_block_count > 0 && expected_temp_count > 0) {
+        phi_counts = (size_t *)calloc(expected_block_count, sizeof(size_t));
+        phi_temps = (size_t *)calloc(expected_block_count * expected_temp_count, sizeof(size_t));
+        if (!phi_counts || !phi_temps) {
+            fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory\n", case_id);
+            free(phi_counts);
+            free(phi_temps);
+            lower_ir_cfg_analysis_free(&analysis);
+            lower_ir_program_free(&program);
+            return 0;
+        }
+    }
+
+    if (!lower_ir_compute_pruned_temp_phi_candidate_lists(&program.functions[0], &analysis, phi_counts, phi_temps, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s pruned phi-candidate list failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(phi_counts);
+        free(phi_temps);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    for (block_index = 0; block_index < expected_block_count; ++block_index) {
+        if (phi_counts[block_index] != expected_counts[block_index]) {
+            ok = 0;
+            fprintf(stderr,
+                "[lower-ir-reg] FAIL: %s expected pruned_phi_count[bb.%zu]=%zu, got %zu\n",
+                case_id,
+                block_index,
+                expected_counts[block_index],
+                phi_counts[block_index]);
+            goto done;
+        }
+        for (list_index = 0; list_index < expected_counts[block_index]; ++list_index) {
+            size_t flat_index = block_index * expected_temp_count + list_index;
+            if (phi_temps[flat_index] != expected_temps[flat_index]) {
+                ok = 0;
+                fprintf(stderr,
+                    "[lower-ir-reg] FAIL: %s expected pruned_phi_temps[bb.%zu][%zu]=tmp.%zu, got tmp.%zu\n",
+                    case_id,
+                    block_index,
+                    list_index,
+                    expected_temps[flat_index],
+                    phi_temps[flat_index]);
+                goto done;
+            }
+        }
+    }
+
+done:
+    free(phi_counts);
+    free(phi_temps);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_block_successor_phi_use_lists(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const size_t *expected_counts,
+    const size_t *expected_temps,
+    size_t expected_block_count,
+    size_t expected_temp_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    size_t *phi_counts = NULL;
+    size_t *phi_temps = NULL;
+    size_t *successor_use_counts = NULL;
+    size_t *successor_use_temps = NULL;
+    int ok = 1;
+    size_t block_index;
+    size_t list_index;
+
+    if (!builder || !expected_counts || !expected_temps) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (analysis.block_count != expected_block_count ||
+        program.functions[0].next_temp_id != expected_temp_count) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s expected block_count=%zu temp_count=%zu, got %zu and %zu\n",
+            case_id,
+            expected_block_count,
+            expected_temp_count,
+            analysis.block_count,
+            program.functions[0].next_temp_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (expected_block_count > 0 && expected_temp_count > 0) {
+        phi_counts = (size_t *)calloc(expected_block_count, sizeof(size_t));
+        phi_temps = (size_t *)calloc(expected_block_count * expected_temp_count, sizeof(size_t));
+        successor_use_counts = (size_t *)calloc(expected_block_count, sizeof(size_t));
+        successor_use_temps = (size_t *)calloc(expected_block_count * expected_temp_count, sizeof(size_t));
+        if (!phi_counts || !phi_temps || !successor_use_counts || !successor_use_temps) {
+            fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory\n", case_id);
+            free(phi_counts);
+            free(phi_temps);
+            free(successor_use_counts);
+            free(successor_use_temps);
+            lower_ir_cfg_analysis_free(&analysis);
+            lower_ir_program_free(&program);
+            return 0;
+        }
+    }
+
+    if (!lower_ir_compute_temp_phi_candidate_lists(&program.functions[0], &analysis, phi_counts, phi_temps, &error) ||
+        !lower_ir_compute_block_successor_phi_use_lists(&program.functions[0],
+            &analysis,
+            phi_counts,
+            phi_temps,
+            successor_use_counts,
+            successor_use_temps,
+            &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s successor phi-use list failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(phi_counts);
+        free(phi_temps);
+        free(successor_use_counts);
+        free(successor_use_temps);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    for (block_index = 0; block_index < expected_block_count; ++block_index) {
+        if (successor_use_counts[block_index] != expected_counts[block_index]) {
+            ok = 0;
+            fprintf(stderr,
+                "[lower-ir-reg] FAIL: %s expected successor_phi_use_count[bb.%zu]=%zu, got %zu\n",
+                case_id,
+                block_index,
+                expected_counts[block_index],
+                successor_use_counts[block_index]);
+            goto done;
+        }
+        for (list_index = 0; list_index < expected_counts[block_index]; ++list_index) {
+            size_t flat_index = block_index * expected_temp_count + list_index;
+            if (successor_use_temps[flat_index] != expected_temps[flat_index]) {
+                ok = 0;
+                fprintf(stderr,
+                    "[lower-ir-reg] FAIL: %s expected successor_phi_use_temps[bb.%zu][%zu]=tmp.%zu, got tmp.%zu\n",
+                    case_id,
+                    block_index,
+                    list_index,
+                    expected_temps[flat_index],
+                    successor_use_temps[flat_index]);
+                goto done;
+            }
+        }
+    }
+
+done:
+    free(phi_counts);
+    free(phi_temps);
+    free(successor_use_counts);
+    free(successor_use_temps);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+typedef struct {
+    long *events;
+    size_t event_count;
+    size_t event_capacity;
+} LowerIrWalkTrace;
+
+static int lower_ir_trace_walk_enter(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t block_id,
+    void *user_data,
+    LowerIrError *error) {
+    LowerIrWalkTrace *trace = (LowerIrWalkTrace *)user_data;
+
+    (void)function;
+    (void)analysis;
+    (void)error;
+
+    if (!trace || trace->event_count >= trace->event_capacity) {
+        return 0;
+    }
+
+    trace->events[trace->event_count++] = (long)block_id + 1;
+    return 1;
+}
+
+static int lower_ir_trace_walk_leave(const LowerIrFunction *function,
+    const LowerIrCfgAnalysis *analysis,
+    size_t block_id,
+    void *user_data,
+    LowerIrError *error) {
+    LowerIrWalkTrace *trace = (LowerIrWalkTrace *)user_data;
+
+    (void)function;
+    (void)analysis;
+    (void)error;
+
+    if (!trace || trace->event_count >= trace->event_capacity) {
+        return 0;
+    }
+
+    trace->events[trace->event_count++] = -((long)block_id + 1);
+    return 1;
+}
+
+static int expect_dominator_preorder(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const size_t *expected_order,
+    size_t expected_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    size_t *order = NULL;
+    size_t actual_count = 0;
+    int ok = 1;
+    size_t index;
+
+    if (!builder || !expected_order) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s cfg analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    order = (size_t *)malloc(analysis.block_count * sizeof(size_t));
+    if (!order) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory allocating preorder buffer\n", case_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (!lower_ir_compute_dominator_tree_preorder(&program.functions[0], &analysis, order, &actual_count, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s preorder failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(order);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (actual_count != expected_count) {
+        ok = 0;
+    } else {
+        for (index = 0; index < expected_count; ++index) {
+            if (order[index] != expected_order[index]) {
+                ok = 0;
+                break;
+            }
+        }
+    }
+
+    if (!ok) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s dominator preorder mismatch\n", case_id);
+    }
+
+    free(order);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int expect_dominator_walk(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const long *expected_events,
+    size_t expected_event_count) {
+    LowerIrProgram program;
+    LowerIrCfgAnalysis analysis;
+    LowerIrError error;
+    long *events = NULL;
+    LowerIrWalkTrace trace;
+    int ok = 1;
+    size_t index;
+
+    if (!builder || !expected_events) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    lower_ir_cfg_analysis_init(&analysis);
+    if (!lower_ir_compute_cfg_analysis(&program.functions[0], &analysis, &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s cfg analysis failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    events = (long *)malloc(analysis.block_count * 2 * sizeof(long));
+    if (!events) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s out of memory allocating walk trace\n", case_id);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    trace.events = events;
+    trace.event_count = 0;
+    trace.event_capacity = analysis.block_count * 2;
+    if (!lower_ir_walk_dominator_tree(&program.functions[0],
+            &analysis,
+            lower_ir_trace_walk_enter,
+            lower_ir_trace_walk_leave,
+            &trace,
+            &error)) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: %s dominator walk failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        free(events);
+        lower_ir_cfg_analysis_free(&analysis);
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (trace.event_count != expected_event_count) {
+        ok = 0;
+    } else {
+        for (index = 0; index < expected_event_count; ++index) {
+            if (trace.events[index] != expected_events[index]) {
+                ok = 0;
+                break;
+            }
+        }
+    }
+
+    if (!ok) {
+        fprintf(stderr, "[lower-ir-reg] FAIL: %s dominator walk mismatch\n", case_id);
+    }
+
+    free(events);
+    lower_ir_cfg_analysis_free(&analysis);
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int check_diamond_cfg_analysis(const LowerIrProgram *program, const LowerIrCfgAnalysis *analysis) {
+    const LowerIrFunction *function = program ? &program->functions[0] : NULL;
+    size_t count = analysis ? analysis->block_count : 0;
+
+    if (!function || !analysis || count != 4) {
+        return 0;
+    }
+
+    return analysis->predecessor_counts[0] == 0 &&
+        analysis->predecessor_counts[1] == 1 &&
+        analysis->predecessor_counts[2] == 1 &&
+        analysis->predecessor_counts[3] == 2 &&
+        analysis->predecessors[1 * count + 0] == 0 &&
+        analysis->predecessors[2 * count + 0] == 0 &&
+        analysis->predecessors[3 * count + 0] == 1 &&
+        analysis->predecessors[3 * count + 1] == 2 &&
+        analysis->successor_counts[0] == 2 &&
+        analysis->successor_counts[1] == 1 &&
+        analysis->successor_counts[2] == 1 &&
+        analysis->successor_counts[3] == 0 &&
+        analysis->successors[0 * count + 0] == 1 &&
+        analysis->successors[0 * count + 1] == 2 &&
+        analysis->successors[1 * count + 0] == 3 &&
+        analysis->successors[2 * count + 0] == 3 &&
+        analysis->reachable[0] &&
+        analysis->reachable[1] &&
+        analysis->reachable[2] &&
+        analysis->reachable[3] &&
+        analysis->immediate_dominator[0] == (size_t)-1 &&
+        analysis->immediate_dominator[1] == 0 &&
+        analysis->immediate_dominator[2] == 0 &&
+        analysis->immediate_dominator[3] == 0 &&
+        analysis->dominator_tree_child_counts[0] == 3 &&
+        analysis->dominator_tree_child_counts[1] == 0 &&
+        analysis->dominator_tree_child_counts[2] == 0 &&
+        analysis->dominator_tree_child_counts[3] == 0 &&
+        analysis->dominance_frontier_counts[0] == 0 &&
+        analysis->dominance_frontier_counts[1] == 1 &&
+        analysis->dominance_frontier_counts[2] == 1 &&
+        analysis->dominance_frontier_counts[3] == 0 &&
+        analysis->dominance_frontier[1 * count + 3] &&
+        analysis->dominance_frontier[2 * count + 3];
+}
+
+static int check_loop_cfg_analysis(const LowerIrProgram *program, const LowerIrCfgAnalysis *analysis) {
+    const LowerIrFunction *function = program ? &program->functions[0] : NULL;
+    size_t count = analysis ? analysis->block_count : 0;
+
+    if (!function || !analysis || count != 4) {
+        return 0;
+    }
+
+    return analysis->predecessor_counts[0] == 0 &&
+        analysis->predecessor_counts[1] == 2 &&
+        analysis->predecessor_counts[2] == 1 &&
+        analysis->predecessor_counts[3] == 1 &&
+        analysis->predecessors[1 * count + 0] == 0 &&
+        analysis->predecessors[1 * count + 1] == 2 &&
+        analysis->predecessors[2 * count + 0] == 1 &&
+        analysis->predecessors[3 * count + 0] == 1 &&
+        analysis->successor_counts[0] == 1 &&
+        analysis->successor_counts[1] == 2 &&
+        analysis->successor_counts[2] == 1 &&
+        analysis->successor_counts[3] == 0 &&
+        analysis->successors[0 * count + 0] == 1 &&
+        analysis->successors[1 * count + 0] == 2 &&
+        analysis->successors[1 * count + 1] == 3 &&
+        analysis->successors[2 * count + 0] == 1 &&
+        analysis->reachable[0] &&
+        analysis->reachable[1] &&
+        analysis->reachable[2] &&
+        analysis->reachable[3] &&
+        analysis->immediate_dominator[0] == (size_t)-1 &&
+        analysis->immediate_dominator[1] == 0 &&
+        analysis->immediate_dominator[2] == 1 &&
+        analysis->immediate_dominator[3] == 1 &&
+        analysis->dominator_tree_child_counts[0] == 1 &&
+        analysis->dominator_tree_child_counts[1] == 2 &&
+        analysis->dominance_frontier_counts[0] == 0 &&
+        analysis->dominance_frontier_counts[1] == 1 &&
+        analysis->dominance_frontier_counts[2] == 1 &&
+        analysis->dominance_frontier_counts[3] == 0 &&
+        analysis->dominance_frontier[1 * count + 1] &&
+        analysis->dominance_frontier[2 * count + 1];
+}
+
+static int check_multi_backedge_loop_cfg_analysis(const LowerIrProgram *program, const LowerIrCfgAnalysis *analysis) {
+    const LowerIrFunction *function = program ? &program->functions[0] : NULL;
+    size_t count = analysis ? analysis->block_count : 0;
+
+    if (!function || !analysis || count != 6) {
+        return 0;
+    }
+
+    return analysis->predecessor_counts[0] == 0 &&
+        analysis->predecessor_counts[1] == 3 &&
+        analysis->predecessor_counts[2] == 1 &&
+        analysis->predecessor_counts[3] == 1 &&
+        analysis->predecessor_counts[4] == 1 &&
+        analysis->predecessor_counts[5] == 1 &&
+        analysis->predecessors[1 * count + 0] == 0 &&
+        analysis->predecessors[1 * count + 1] == 3 &&
+        analysis->predecessors[1 * count + 2] == 4 &&
+        analysis->predecessors[2 * count + 0] == 1 &&
+        analysis->predecessors[3 * count + 0] == 2 &&
+        analysis->predecessors[4 * count + 0] == 2 &&
+        analysis->predecessors[5 * count + 0] == 1 &&
+        analysis->successor_counts[0] == 1 &&
+        analysis->successor_counts[1] == 2 &&
+        analysis->successor_counts[2] == 2 &&
+        analysis->successor_counts[3] == 1 &&
+        analysis->successor_counts[4] == 1 &&
+        analysis->successor_counts[5] == 0 &&
+        analysis->successors[0 * count + 0] == 1 &&
+        analysis->successors[1 * count + 0] == 2 &&
+        analysis->successors[1 * count + 1] == 5 &&
+        analysis->successors[2 * count + 0] == 3 &&
+        analysis->successors[2 * count + 1] == 4 &&
+        analysis->successors[3 * count + 0] == 1 &&
+        analysis->successors[4 * count + 0] == 1 &&
+        analysis->reachable[0] &&
+        analysis->reachable[1] &&
+        analysis->reachable[2] &&
+        analysis->reachable[3] &&
+        analysis->reachable[4] &&
+        analysis->reachable[5] &&
+        analysis->immediate_dominator[0] == (size_t)-1 &&
+        analysis->immediate_dominator[1] == 0 &&
+        analysis->immediate_dominator[2] == 1 &&
+        analysis->immediate_dominator[3] == 2 &&
+        analysis->immediate_dominator[4] == 2 &&
+        analysis->immediate_dominator[5] == 1 &&
+        analysis->dominator_tree_child_counts[0] == 1 &&
+        analysis->dominator_tree_child_counts[1] == 2 &&
+        analysis->dominator_tree_child_counts[2] == 2 &&
+        analysis->dominator_tree_child_counts[3] == 0 &&
+        analysis->dominator_tree_child_counts[4] == 0 &&
+        analysis->dominator_tree_child_counts[5] == 0 &&
+        analysis->dominance_frontier_counts[0] == 0 &&
+        analysis->dominance_frontier_counts[1] == 1 &&
+        analysis->dominance_frontier_counts[2] == 1 &&
+        analysis->dominance_frontier_counts[3] == 1 &&
+        analysis->dominance_frontier_counts[4] == 1 &&
+        analysis->dominance_frontier_counts[5] == 0 &&
+        analysis->dominance_frontier[1 * count + 1] &&
+        analysis->dominance_frontier[2 * count + 1] &&
+        analysis->dominance_frontier[3 * count + 1] &&
+        analysis->dominance_frontier[4 * count + 1];
+}
+
 static int test_lower_ir_builder_rejects_declaration_block_append(void) {
     LowerIrProgram program;
     LowerIrError error;
@@ -257,6 +1798,352 @@ static int test_lower_ir_builder_rejects_declaration_block_append(void) {
 
     lower_ir_program_free(&program);
     return 1;
+}
+
+static int test_lower_ir_cfg_analysis_diamond_join_temp(void) {
+    return expect_cfg_analysis("LOWER-IR-ANALYSIS-DIAMOND",
+        build_diamond_join_temp_program,
+        check_diamond_cfg_analysis);
+}
+
+static int test_lower_ir_phi_placement_diamond_join_temp(void) {
+    static const unsigned char expected_phi_blocks[] = {0, 0, 0, 1};
+
+    return expect_phi_placement("LOWER-IR-PHI-PLACEMENT-DIAMOND",
+        build_diamond_join_temp_program,
+        0,
+        expected_phi_blocks,
+        sizeof(expected_phi_blocks) / sizeof(expected_phi_blocks[0]));
+}
+
+static int test_lower_ir_temp_phi_candidates_diamond_join_temp(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0, 0,
+        0, 0,
+        0, 0,
+        1, 0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-DIAMOND",
+        build_diamond_join_temp_program,
+        expected_phi_candidates,
+        4,
+        2);
+}
+
+static int test_lower_ir_block_phi_candidate_lists_diamond_join_temp(void) {
+    static const size_t expected_counts[] = {0, 0, 0, 1};
+    static const size_t expected_temps[] = {
+        0, 0,
+        0, 0,
+        0, 0,
+        0, 0,
+    };
+
+    return expect_block_phi_candidate_lists("LOWER-IR-BLOCK-PHI-CANDIDATE-LISTS-DIAMOND",
+        build_diamond_join_temp_program,
+        expected_counts,
+        expected_temps,
+        4,
+        2);
+}
+
+static int test_lower_ir_block_successor_phi_use_lists_diamond_join_temp(void) {
+    static const size_t expected_counts[] = {0, 1, 1, 0};
+    static const size_t expected_temps[] = {
+        0, 0,
+        0, 0,
+        0, 0,
+        0, 0,
+    };
+
+    return expect_block_successor_phi_use_lists("LOWER-IR-BLOCK-SUCCESSOR-PHI-USE-LISTS-DIAMOND",
+        build_diamond_join_temp_program,
+        expected_counts,
+        expected_temps,
+        4,
+        2);
+}
+
+static int test_lower_ir_dominator_preorder_diamond_join_temp(void) {
+    static const size_t expected_order[] = {0, 1, 2, 3};
+
+    return expect_dominator_preorder("LOWER-IR-DOM-PREORDER-DIAMOND",
+        build_diamond_join_temp_program,
+        expected_order,
+        sizeof(expected_order) / sizeof(expected_order[0]));
+}
+
+static int test_lower_ir_dominator_walk_diamond_join_temp(void) {
+    static const long expected_events[] = {1, 2, -2, 3, -3, 4, -4, -1};
+
+    return expect_dominator_walk("LOWER-IR-DOM-WALK-DIAMOND",
+        build_diamond_join_temp_program,
+        expected_events,
+        sizeof(expected_events) / sizeof(expected_events[0]));
+}
+
+static int test_lower_ir_cfg_analysis_loop_header_join_temp(void) {
+    return expect_cfg_analysis("LOWER-IR-ANALYSIS-LOOP",
+        build_loop_header_join_temp_program,
+        check_loop_cfg_analysis);
+}
+
+static int test_lower_ir_phi_placement_loop_header_join_temp(void) {
+    static const unsigned char expected_phi_blocks[] = {0, 1, 0, 0};
+
+    return expect_phi_placement("LOWER-IR-PHI-PLACEMENT-LOOP",
+        build_loop_header_join_temp_program,
+        0,
+        expected_phi_blocks,
+        sizeof(expected_phi_blocks) / sizeof(expected_phi_blocks[0]));
+}
+
+static int test_lower_ir_temp_phi_candidates_loop_header_join_temp(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0,
+        1,
+        0,
+        0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-LOOP",
+        build_loop_header_join_temp_program,
+        expected_phi_candidates,
+        4,
+        1);
+}
+
+static int test_lower_ir_block_phi_candidate_lists_loop_header_join_temp(void) {
+    static const size_t expected_counts[] = {0, 1, 0, 0};
+    static const size_t expected_temps[] = {
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_block_phi_candidate_lists("LOWER-IR-BLOCK-PHI-CANDIDATE-LISTS-LOOP",
+        build_loop_header_join_temp_program,
+        expected_counts,
+        expected_temps,
+        4,
+        1);
+}
+
+static int test_lower_ir_block_successor_phi_use_lists_loop_header_join_temp(void) {
+    static const size_t expected_counts[] = {1, 0, 1, 0};
+    static const size_t expected_temps[] = {
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_block_successor_phi_use_lists("LOWER-IR-BLOCK-SUCCESSOR-PHI-USE-LISTS-LOOP",
+        build_loop_header_join_temp_program,
+        expected_counts,
+        expected_temps,
+        4,
+        1);
+}
+
+static int test_lower_ir_temp_phi_candidates_two_carried_temps_loop_header(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0, 0,
+        1, 1,
+        0, 0,
+        0, 0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-TWO-CARRIED-TEMPS-LOOP",
+        build_two_carried_temps_loop_header_program,
+        expected_phi_candidates,
+        4,
+        2);
+}
+
+static int test_lower_ir_temp_phi_candidates_nested_loop_carried_temps(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0, 0,
+        1, 1,
+        0, 0,
+        0, 1,
+        0, 0,
+        0, 0,
+        0, 0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-NESTED-LOOP-CARRIED-TEMPS",
+        build_nested_loop_carried_temps_program,
+        expected_phi_candidates,
+        7,
+        2);
+}
+
+static int test_lower_ir_pruned_block_phi_candidate_lists_nested_loop_carried_temps(void) {
+    static const size_t expected_counts[] = {0, 1, 0, 1, 0, 0, 0};
+    static const size_t expected_temps[] = {
+        0, 0,
+        0, 0,
+        0, 0,
+        1, 0,
+        0, 0,
+        0, 0,
+        0, 0,
+    };
+
+    return expect_pruned_block_phi_candidate_lists("LOWER-IR-PRUNED-BLOCK-PHI-CANDIDATE-LISTS-NESTED-LOOP-CARRIED-TEMPS",
+        build_nested_loop_carried_temps_program,
+        expected_counts,
+        expected_temps,
+        7,
+        2);
+}
+
+static int test_lower_ir_temp_phi_candidates_nested_same_temp_double_loop(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+        0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-NESTED-SAME-TEMP-DOUBLE-LOOP",
+        build_nested_same_temp_double_loop_program,
+        expected_phi_candidates,
+        7,
+        1);
+}
+
+static int test_lower_ir_temp_phi_candidates_nested_same_temp_multi_backedge_inner_loop(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-NESTED-SAME-TEMP-MULTI-BACKEDGE-INNER-LOOP",
+        build_nested_same_temp_multi_backedge_inner_loop_program,
+        expected_phi_candidates,
+        9,
+        1);
+}
+
+static int test_lower_ir_dominator_preorder_loop_header_join_temp(void) {
+    static const size_t expected_order[] = {0, 1, 2, 3};
+
+    return expect_dominator_preorder("LOWER-IR-DOM-PREORDER-LOOP",
+        build_loop_header_join_temp_program,
+        expected_order,
+        sizeof(expected_order) / sizeof(expected_order[0]));
+}
+
+static int test_lower_ir_dominator_walk_loop_header_join_temp(void) {
+    static const long expected_events[] = {1, 2, 3, -3, 4, -4, -2, -1};
+
+    return expect_dominator_walk("LOWER-IR-DOM-WALK-LOOP",
+        build_loop_header_join_temp_program,
+        expected_events,
+        sizeof(expected_events) / sizeof(expected_events[0]));
+}
+
+static int test_lower_ir_cfg_analysis_multi_backedge_loop_header_join_temp(void) {
+    return expect_cfg_analysis("LOWER-IR-ANALYSIS-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        check_multi_backedge_loop_cfg_analysis);
+}
+
+static int test_lower_ir_phi_placement_multi_backedge_loop_header_join_temp(void) {
+    static const unsigned char expected_phi_blocks[] = {0, 1, 0, 0, 0, 0};
+
+    return expect_phi_placement("LOWER-IR-PHI-PLACEMENT-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        0,
+        expected_phi_blocks,
+        sizeof(expected_phi_blocks) / sizeof(expected_phi_blocks[0]));
+}
+
+static int test_lower_ir_temp_phi_candidates_multi_backedge_loop_header_join_temp(void) {
+    static const unsigned char expected_phi_candidates[] = {
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_temp_phi_candidates("LOWER-IR-TEMP-PHI-CANDIDATES-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        expected_phi_candidates,
+        6,
+        1);
+}
+
+static int test_lower_ir_block_phi_candidate_lists_multi_backedge_loop_header_join_temp(void) {
+    static const size_t expected_counts[] = {0, 1, 0, 0, 0, 0};
+    static const size_t expected_temps[] = {
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_block_phi_candidate_lists("LOWER-IR-BLOCK-PHI-CANDIDATE-LISTS-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        expected_counts,
+        expected_temps,
+        6,
+        1);
+}
+
+static int test_lower_ir_block_successor_phi_use_lists_multi_backedge_loop_header_join_temp(void) {
+    static const size_t expected_counts[] = {1, 0, 0, 1, 1, 0};
+    static const size_t expected_temps[] = {
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    };
+
+    return expect_block_successor_phi_use_lists("LOWER-IR-BLOCK-SUCCESSOR-PHI-USE-LISTS-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        expected_counts,
+        expected_temps,
+        6,
+        1);
+}
+
+static int test_lower_ir_dominator_preorder_multi_backedge_loop_header_join_temp(void) {
+    static const size_t expected_order[] = {0, 1, 2, 3, 4, 5};
+
+    return expect_dominator_preorder("LOWER-IR-DOM-PREORDER-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        expected_order,
+        sizeof(expected_order) / sizeof(expected_order[0]));
+}
+
+static int test_lower_ir_dominator_walk_multi_backedge_loop_header_join_temp(void) {
+    static const long expected_events[] = {1, 2, 3, 4, -4, 5, -5, -3, 6, -6, -2, -1};
+
+    return expect_dominator_walk("LOWER-IR-DOM-WALK-MULTI-BACKEDGE-LOOP",
+        build_multi_backedge_loop_header_join_temp_program,
+        expected_events,
+        sizeof(expected_events) / sizeof(expected_events[0]));
 }
 
 static int test_lower_ir_builder_rejects_temp_allocation_on_declaration(void) {
@@ -913,6 +2800,32 @@ int main(void) {
     ok &= test_lower_ir_builder_rejects_parameter_after_nonparameter_local();
     ok &= test_lower_ir_builder_rejects_instruction_append_after_terminator();
     ok &= test_lower_ir_builder_rejects_terminator_overwrite();
+    ok &= test_lower_ir_cfg_analysis_diamond_join_temp();
+    ok &= test_lower_ir_phi_placement_diamond_join_temp();
+    ok &= test_lower_ir_temp_phi_candidates_diamond_join_temp();
+    ok &= test_lower_ir_block_phi_candidate_lists_diamond_join_temp();
+    ok &= test_lower_ir_block_successor_phi_use_lists_diamond_join_temp();
+    ok &= test_lower_ir_dominator_preorder_diamond_join_temp();
+    ok &= test_lower_ir_dominator_walk_diamond_join_temp();
+    ok &= test_lower_ir_cfg_analysis_loop_header_join_temp();
+    ok &= test_lower_ir_phi_placement_loop_header_join_temp();
+    ok &= test_lower_ir_temp_phi_candidates_loop_header_join_temp();
+    ok &= test_lower_ir_block_phi_candidate_lists_loop_header_join_temp();
+    ok &= test_lower_ir_block_successor_phi_use_lists_loop_header_join_temp();
+    ok &= test_lower_ir_temp_phi_candidates_two_carried_temps_loop_header();
+    ok &= test_lower_ir_temp_phi_candidates_nested_loop_carried_temps();
+    ok &= test_lower_ir_pruned_block_phi_candidate_lists_nested_loop_carried_temps();
+    ok &= test_lower_ir_temp_phi_candidates_nested_same_temp_double_loop();
+    ok &= test_lower_ir_temp_phi_candidates_nested_same_temp_multi_backedge_inner_loop();
+    ok &= test_lower_ir_dominator_preorder_loop_header_join_temp();
+    ok &= test_lower_ir_dominator_walk_loop_header_join_temp();
+    ok &= test_lower_ir_cfg_analysis_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_phi_placement_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_temp_phi_candidates_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_block_phi_candidate_lists_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_block_successor_phi_use_lists_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_dominator_preorder_multi_backedge_loop_header_join_temp();
+    ok &= test_lower_ir_dominator_walk_multi_backedge_loop_header_join_temp();
     ok &= test_lower_ir_dump_explicit_memory_flow();
     ok &= test_lower_ir_lowers_return_parameter_to_explicit_load();
     ok &= test_lower_ir_lowers_assignment_and_return_via_store_and_load();
