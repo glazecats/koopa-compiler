@@ -23,6 +23,50 @@ Current status:
 - a first predecessor-specific phi-input rewrite helper is also landed, so later rename work can update successor-edge phi operands independently from block-local instruction/terminator rewriting
 - a first real function-level alpha-renaming orchestration is also landed for existing SSA functions, composing dominator walk, scoped bindings, local use rewriting, local def renaming, and successor-edge phi-input rewriting into one verifier-safe pass
 - a first program-level canonicalization entrypoint is also landed, composing trivial SSA cleanup plus alpha-renaming into one small “stabilize the result layer” pipeline
+- strict dominator-tree construction from lower IR is now landed and should be treated as the stable construction baseline for the next stage
+
+## Immediate Next Step
+
+Now that strict construction is landed, the next implementation target should move above conversion:
+
+- shared SSA def/use facts
+- explicit use-list facts
+- the first truly SSA-native cleanup/optimization passes that consume those facts
+- the next passes should stay narrow and value-only, but it is now reasonable to grow beyond pure immediate/immediate folding into safe algebraic identities that still do not require memory SSA
+
+This next slice should stay value-only:
+
+- no memory SSA yet
+- no backend/register work yet
+- no reopening conversion unless a new correctness bug appears
+
+The first concrete shared-analysis target above conversion should be:
+
+- per-value def-site facts
+- explicit use-site lists
+
+That surface is a better foundation for early SSA-native passes than continuing to hide use-count or use-scan logic inside individual transforms.
+
+The first concrete consumer should be small and mechanical rather than ambitious. The current direction is:
+
+- move existing trivial SSA cleanup to the shared def/use surface first
+- move existing SSA dead-def cleanup onto the same surface as well
+- then add new SSA-native passes on top of the same substrate
+
+The first new pass above that substrate should stay deliberately narrow. The current implementation direction is:
+
+- immediate/immediate constant folding for safe value operations
+- safe algebraic identity reduction for value-only binaries (`x+0`, `x*1`, `x&-1`, `x/1`, `x%1`, reflexive compares, ...)
+- narrow operand normalization for value-only binaries so later cleanup sees a stable shape (`1 < x` -> `x > 1`, commutative immediates on the RHS, ...)
+- narrow dominator-aware redundant-binary cleanup for safe value-only binaries, so repeated dominated recomputation can collapse before later trivial-value cleanup and DCE
+- narrow local-slot load forwarding when a same-block `store_local` or earlier same-block `load_local` already determines the slot value
+- narrow global-slot load forwarding when an earlier straight-chain `store_global` or earlier forwarded `load_global` already determines the slot value, with `call` treated as a conservative global kill and joins still treated as stop points
+- narrow redundant-store cleanup when a same-block or straight-chain known slot value already equals the value being written, with joins still treated as stop points and `call` still killing known globals
+- narrow dead store elimination: `store_local` / `store_global` can be dropped when later overwritten before any intervening read/observation in the same block, and that overwritten-store cleanup may also cross a straight `jmp` chain with a unique idom successor; joins, branch exits, and `call` should still stop the analysis
+- local-slot forwarding can now also cross straight dominator-chain block boundaries when there is a single idom predecessor, but it still intentionally stops at join points
+- narrow return-oriented CFG cleanup after value cleanup/DCE has exposed empty jump chains, jumps to empty returns, or same-return diamonds
+- no memory-sensitive folding yet
+- no dangerous `div`/`mod`/shift folding yet
 
 ## Why This Is Next
 
@@ -240,12 +284,16 @@ If this work starts, the smallest clean layout is:
 
 ```text
 include/value_ssa.h
+include/value_ssa_pass.h
 src/value_ssa/value_ssa.c
 src/value_ssa/value_ssa_dump.inc
 src/value_ssa/value_ssa_verify.inc
 src/value_ssa/value_ssa_from_lower_ir.inc
+src/value_ssa_pass/value_ssa_pass.c
+src/value_ssa_pass/
 tests/value_ssa/value_ssa_regression_test.c
 tests/value_ssa/value_ssa_verifier_test.c
+```
 
 Current bridge status:
 - `value_ssa_build_from_lower_ir(...)` remains the raw conversion entrypoint.

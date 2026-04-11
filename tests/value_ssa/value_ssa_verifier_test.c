@@ -1,4 +1,5 @@
 #include "value_ssa.h"
+#include "value_ssa_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>

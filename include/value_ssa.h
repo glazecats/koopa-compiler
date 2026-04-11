@@ -177,6 +177,43 @@ typedef struct {
     size_t *dominance_frontier_counts;
 } ValueSsaCfgAnalysis;
 
+typedef enum {
+    VALUE_SSA_USE_PHI = 0,
+    VALUE_SSA_USE_INSTR,
+    VALUE_SSA_USE_TERM,
+} ValueSsaUseKind;
+
+typedef enum {
+    VALUE_SSA_USE_ROLE_PHI_INPUT = 0,
+    VALUE_SSA_USE_ROLE_MOV_VALUE,
+    VALUE_SSA_USE_ROLE_BINARY_LHS,
+    VALUE_SSA_USE_ROLE_BINARY_RHS,
+    VALUE_SSA_USE_ROLE_CALL_ARG,
+    VALUE_SSA_USE_ROLE_STORE_VALUE,
+    VALUE_SSA_USE_ROLE_RETURN_VALUE,
+    VALUE_SSA_USE_ROLE_BRANCH_CONDITION,
+} ValueSsaUseRole;
+
+typedef struct {
+    ValueSsaUseKind kind;
+    ValueSsaUseRole role;
+    size_t block_id;
+    size_t phi_index;
+    size_t instruction_index;
+    size_t operand_index;
+} ValueSsaUseSite;
+
+typedef struct {
+    size_t value_count;
+    size_t *def_block_ids;
+    size_t *def_phi_indices;
+    size_t *def_instruction_indices;
+    unsigned char *has_def;
+    size_t *use_counts;
+    size_t *use_offsets;
+    ValueSsaUseSite *use_sites;
+} ValueSsaDefUseAnalysis;
+
 typedef int (*ValueSsaDominatorTreeWalkFn)(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t block_id,
@@ -201,6 +238,8 @@ void value_ssa_program_init(ValueSsaProgram *program);
 void value_ssa_program_free(ValueSsaProgram *program);
 void value_ssa_cfg_analysis_init(ValueSsaCfgAnalysis *analysis);
 void value_ssa_cfg_analysis_free(ValueSsaCfgAnalysis *analysis);
+void value_ssa_def_use_analysis_init(ValueSsaDefUseAnalysis *analysis);
+void value_ssa_def_use_analysis_free(ValueSsaDefUseAnalysis *analysis);
 void value_ssa_rename_state_init(ValueSsaRenameState *state);
 void value_ssa_rename_state_free(ValueSsaRenameState *state);
 
@@ -250,11 +289,11 @@ int value_ssa_block_set_branch(ValueSsaBasicBlock *block,
 
 int value_ssa_verify_program(const ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text);
-int value_ssa_simplify_trivial_values(ValueSsaProgram *program, ValueSsaError *error);
-int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error);
-int value_ssa_eliminate_dead_value_defs(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_compute_cfg_analysis(const ValueSsaFunction *function,
     ValueSsaCfgAnalysis *analysis,
+    ValueSsaError *error);
+int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
+    ValueSsaDefUseAnalysis *analysis,
     ValueSsaError *error);
 int value_ssa_compute_phi_placement(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
@@ -299,11 +338,7 @@ int value_ssa_rename_rewrite_phi_inputs_for_predecessor(ValueSsaBasicBlock *bloc
 int value_ssa_rename_function_values(ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     ValueSsaError *error);
-int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
-    ValueSsaProgram *out_program,
-    ValueSsaError *error);
-int value_ssa_build_canonicalized_from_lower_ir(const LowerIrProgram *program,
     ValueSsaProgram *out_program,
     ValueSsaError *error);
 

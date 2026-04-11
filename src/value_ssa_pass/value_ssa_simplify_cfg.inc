@@ -1,7 +1,7 @@
 #if defined(__INTELLISENSE__) && !defined(VALUE_SSA_SPLIT_INTELLISENSE_CONTEXT) && \
     !defined(VALUE_SSA_SPLIT_AGGREGATOR)
 #define VALUE_SSA_SPLIT_INTELLISENSE_CONTEXT
-#include "value_ssa.c"
+#include "value_ssa_pass.c"
 #else
 
 static void value_ssa_remove_phi_predecessor_from_block(ValueSsaBasicBlock *block, size_t predecessor_block_id) {
@@ -39,6 +39,106 @@ static void value_ssa_remap_value_ref(ValueSsaValueRef *value, const size_t *old
     value->value_id = old_to_new_value[value->value_id];
 }
 
+static int value_ssa_block_is_empty_return(const ValueSsaBasicBlock *block, ValueSsaValueRef *out_value) {
+    if (!block || !out_value ||
+        block->phi_count != 0 ||
+        block->instruction_count != 0 ||
+        !block->has_terminator ||
+        block->terminator.kind != VALUE_SSA_TERM_RETURN) {
+        return 0;
+    }
+
+    *out_value = block->terminator.as.return_value;
+    return 1;
+}
+
+static int value_ssa_block_is_empty_jump(const ValueSsaBasicBlock *block, size_t *out_target) {
+    if (!block || !out_target ||
+        block->phi_count != 0 ||
+        block->instruction_count != 0 ||
+        !block->has_terminator ||
+        block->terminator.kind != VALUE_SSA_TERM_JUMP) {
+        return 0;
+    }
+
+    *out_target = block->terminator.as.jump_target;
+    return 1;
+}
+
+static int value_ssa_resolve_empty_jump_target(const ValueSsaFunction *function,
+    size_t source_block_id,
+    size_t target_block_id,
+    size_t *out_target) {
+    size_t steps = 0;
+    size_t current = target_block_id;
+
+    if (!function || !out_target || target_block_id >= function->block_count) {
+        return 0;
+    }
+
+    while (steps < function->block_count) {
+        size_t next;
+
+        if (!value_ssa_block_is_empty_jump(&function->blocks[current], &next) ||
+            next >= function->block_count ||
+            next == current ||
+            next == source_block_id ||
+            function->blocks[next].phi_count != 0) {
+            break;
+        }
+
+        current = next;
+        ++steps;
+    }
+
+    *out_target = current;
+    return current != target_block_id;
+}
+
+static int value_ssa_rewrite_empty_jump_targets(ValueSsaFunction *function, ValueSsaError *error) {
+    size_t block_index;
+
+    if (!function) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-124: invalid CFG simplify contract");
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t rewritten_target;
+
+        switch (block->terminator.kind) {
+        case VALUE_SSA_TERM_JUMP:
+            if (value_ssa_resolve_empty_jump_target(function,
+                    block->id,
+                    block->terminator.as.jump_target,
+                    &rewritten_target)) {
+                block->terminator.as.jump_target = rewritten_target;
+            }
+            break;
+        case VALUE_SSA_TERM_BRANCH:
+            if (value_ssa_resolve_empty_jump_target(function,
+                    block->id,
+                    block->terminator.as.branch.then_target,
+                    &rewritten_target)) {
+                block->terminator.as.branch.then_target = rewritten_target;
+            }
+            if (value_ssa_resolve_empty_jump_target(function,
+                    block->id,
+                    block->terminator.as.branch.else_target,
+                    &rewritten_target)) {
+                block->terminator.as.branch.else_target = rewritten_target;
+            }
+            break;
+        case VALUE_SSA_TERM_RETURN:
+        default:
+            break;
+        }
+    }
+
+    return 1;
+}
+
 static int value_ssa_rewrite_trivial_branches(ValueSsaFunction *function, ValueSsaError *error) {
     size_t block_index;
 
@@ -74,7 +174,48 @@ static int value_ssa_rewrite_trivial_branches(ValueSsaFunction *function, ValueS
 
             block->terminator.kind = VALUE_SSA_TERM_JUMP;
             block->terminator.as.jump_target = taken_target;
+            continue;
         }
+
+        if (block->terminator.as.branch.then_target < function->block_count &&
+            block->terminator.as.branch.else_target < function->block_count) {
+            ValueSsaValueRef then_value;
+            ValueSsaValueRef else_value;
+            const ValueSsaBasicBlock *then_block = &function->blocks[block->terminator.as.branch.then_target];
+            const ValueSsaBasicBlock *else_block = &function->blocks[block->terminator.as.branch.else_target];
+
+            if (value_ssa_block_is_empty_return(then_block, &then_value) &&
+                value_ssa_block_is_empty_return(else_block, &else_value) &&
+                value_ssa_value_refs_equal(then_value, else_value)) {
+                block->terminator.kind = VALUE_SSA_TERM_RETURN;
+                block->terminator.as.return_value = then_value;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int value_ssa_rewrite_trivial_jumps(ValueSsaFunction *function, ValueSsaError *error) {
+    size_t block_index;
+
+    if (!function) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-124: invalid CFG simplify contract");
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        ValueSsaBasicBlock *block = &function->blocks[block_index];
+        ValueSsaValueRef return_value;
+
+        if (block->terminator.kind != VALUE_SSA_TERM_JUMP ||
+            block->terminator.as.jump_target >= function->block_count ||
+            !value_ssa_block_is_empty_return(&function->blocks[block->terminator.as.jump_target], &return_value)) {
+            continue;
+        }
+
+        block->terminator.kind = VALUE_SSA_TERM_RETURN;
+        block->terminator.as.return_value = return_value;
     }
 
     return 1;
@@ -352,7 +493,9 @@ int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error) {
             continue;
         }
 
-        if (!value_ssa_rewrite_trivial_branches(function, error) ||
+        if (!value_ssa_rewrite_empty_jump_targets(function, error) ||
+            !value_ssa_rewrite_trivial_branches(function, error) ||
+            !value_ssa_rewrite_trivial_jumps(function, error) ||
             !value_ssa_compact_reachable_blocks(function, error) ||
             !value_ssa_compact_value_ids(function, error)) {
             return 0;

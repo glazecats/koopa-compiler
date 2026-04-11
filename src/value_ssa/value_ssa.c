@@ -27,14 +27,10 @@ static const ValueSsaGlobal *value_ssa_program_get_global(const ValueSsaProgram 
 static int value_ssa_instruction_copy(ValueSsaInstruction *destination,
     const ValueSsaInstruction *source,
     ValueSsaError *error);
-static int value_ssa_binary_op_is_removable_dead_def(ValueSsaBinaryOp op);
-static int value_ssa_instruction_has_side_effects(ValueSsaInstructionKind kind);
-static int value_ssa_instruction_is_removable_dead_def(const ValueSsaInstruction *instruction);
 
 static int value_ssa_append_string(ValueSsaStringBuilder *builder, const char *text);
 static int value_ssa_append_format(ValueSsaStringBuilder *builder, const char *fmt, ...);
 static int value_ssa_append_value_name(ValueSsaStringBuilder *builder, ValueSsaValueRef value);
-static int value_ssa_value_refs_equal(ValueSsaValueRef lhs, ValueSsaValueRef rhs);
 static int value_ssa_append_slot_name(ValueSsaStringBuilder *builder,
     const ValueSsaProgram *program,
     const ValueSsaFunction *function,
@@ -247,62 +243,6 @@ static int value_ssa_instruction_copy(ValueSsaInstruction *destination,
     return 1;
 }
 
-static int value_ssa_binary_op_is_removable_dead_def(ValueSsaBinaryOp op) {
-    /* Keep dangerous arithmetic/shift ops conservatively non-removable for now.
-     * This intentionally preserves even obviously safe constant cases such as
-     * `div 1, 1`; if we want to recover those later, do it by refining this
-     * helper into a value-sensitive dangerous-binary check instead of reopening
-     * "all binary ops are dead-def removable". */
-    switch (op) {
-    case VALUE_SSA_BINARY_DIV:
-    case VALUE_SSA_BINARY_MOD:
-    case VALUE_SSA_BINARY_SHIFT_LEFT:
-    case VALUE_SSA_BINARY_SHIFT_RIGHT:
-        return 0;
-    case VALUE_SSA_BINARY_ADD:
-    case VALUE_SSA_BINARY_SUB:
-    case VALUE_SSA_BINARY_MUL:
-    case VALUE_SSA_BINARY_BIT_AND:
-    case VALUE_SSA_BINARY_BIT_XOR:
-    case VALUE_SSA_BINARY_BIT_OR:
-    case VALUE_SSA_BINARY_EQ:
-    case VALUE_SSA_BINARY_NE:
-    case VALUE_SSA_BINARY_LT:
-    case VALUE_SSA_BINARY_LE:
-    case VALUE_SSA_BINARY_GT:
-    case VALUE_SSA_BINARY_GE:
-    default:
-        return 1;
-    }
-}
-
-static int value_ssa_instruction_has_side_effects(ValueSsaInstructionKind kind) {
-    switch (kind) {
-    case VALUE_SSA_INSTR_CALL:
-    case VALUE_SSA_INSTR_STORE_LOCAL:
-    case VALUE_SSA_INSTR_STORE_GLOBAL:
-        return 1;
-    case VALUE_SSA_INSTR_MOV:
-    case VALUE_SSA_INSTR_BINARY:
-    case VALUE_SSA_INSTR_LOAD_LOCAL:
-    case VALUE_SSA_INSTR_LOAD_GLOBAL:
-    default:
-        return 0;
-    }
-}
-
-static int value_ssa_instruction_is_removable_dead_def(const ValueSsaInstruction *instruction) {
-    if (!instruction || !instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
-        return 0;
-    }
-
-    if (instruction->kind == VALUE_SSA_INSTR_BINARY) {
-        return value_ssa_binary_op_is_removable_dead_def(instruction->as.binary.op);
-    }
-
-    return !value_ssa_instruction_has_side_effects(instruction->kind);
-}
-
 static int value_ssa_append_string(ValueSsaStringBuilder *builder, const char *text) {
     char *new_data;
     size_t text_length;
@@ -390,21 +330,6 @@ static int value_ssa_append_value_name(ValueSsaStringBuilder *builder, ValueSsaV
         return value_ssa_append_format(builder, "%lld", value.immediate);
     case VALUE_SSA_VALUE_ID:
         return value_ssa_append_format(builder, "ssa.%zu", value.value_id);
-    default:
-        return 0;
-    }
-}
-
-static int value_ssa_value_refs_equal(ValueSsaValueRef lhs, ValueSsaValueRef rhs) {
-    if (lhs.kind != rhs.kind) {
-        return 0;
-    }
-
-    switch (lhs.kind) {
-    case VALUE_SSA_VALUE_IMMEDIATE:
-        return lhs.immediate == rhs.immediate;
-    case VALUE_SSA_VALUE_ID:
-        return lhs.value_id == rhs.value_id;
     default:
         return 0;
     }
@@ -899,7 +824,4 @@ int value_ssa_block_set_branch(ValueSsaBasicBlock *block,
 #include "value_ssa_dump.inc"
 #include "value_ssa_analysis.inc"
 #include "value_ssa_rename.inc"
-#include "value_ssa_simplify.inc"
-#include "value_ssa_simplify_cfg.inc"
-#include "value_ssa_dce.inc"
 #include "value_ssa_from_lower_ir.inc"

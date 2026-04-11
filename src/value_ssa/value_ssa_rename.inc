@@ -587,44 +587,6 @@ int value_ssa_rename_function_values(ValueSsaFunction *function,
     return 1;
 }
 
-int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error) {
-    size_t function_index;
-
-    if (!program) {
-        value_ssa_set_error(error, 0, 0, "VALUE-SSA-172: invalid canonicalize contract");
-        return 0;
-    }
-    if (!value_ssa_verify_program(program, error)) {
-        return 0;
-    }
-
-    if (!value_ssa_simplify_trivial_values(program, error) ||
-        !value_ssa_simplify_cfg(program, error) ||
-        !value_ssa_eliminate_dead_value_defs(program, error)) {
-        return 0;
-    }
-
-    for (function_index = 0; function_index < program->function_count; ++function_index) {
-        ValueSsaFunction *function = &program->functions[function_index];
-        ValueSsaCfgAnalysis analysis;
-        int ok;
-
-        if (!function->has_body) {
-            continue;
-        }
-
-        value_ssa_cfg_analysis_init(&analysis);
-        ok = value_ssa_compute_cfg_analysis(function, &analysis, error) &&
-            value_ssa_rename_function_values(function, &analysis, error);
-        value_ssa_cfg_analysis_free(&analysis);
-        if (!ok) {
-            return 0;
-        }
-    }
-
-    return value_ssa_verify_program(program, error);
-}
-
 static int value_ssa_walk_dominator_tree_from(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t block_id,

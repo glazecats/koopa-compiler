@@ -76,10 +76,20 @@ VALUE_SSA_SPLIT_INCLUDES := \
 	src/value_ssa/value_ssa_verify.inc \
 	src/value_ssa/value_ssa_dump.inc \
 	src/value_ssa/value_ssa_analysis.inc \
-	src/value_ssa/value_ssa_simplify.inc \
-	src/value_ssa/value_ssa_simplify_cfg.inc \
-	src/value_ssa/value_ssa_dce.inc \
+	src/value_ssa/value_ssa_rename.inc \
 	src/value_ssa/value_ssa_from_lower_ir.inc
+
+VALUE_SSA_PASS_SPLIT_INCLUDES := \
+	src/value_ssa_pass/value_ssa_simplify.inc \
+	src/value_ssa_pass/value_ssa_load_forward.inc \
+	src/value_ssa_pass/value_ssa_store_dce.inc \
+	src/value_ssa_pass/value_ssa_normalize.inc \
+	src/value_ssa_pass/value_ssa_identity.inc \
+	src/value_ssa_pass/value_ssa_fold.inc \
+	src/value_ssa_pass/value_ssa_cse.inc \
+	src/value_ssa_pass/value_ssa_simplify_cfg.inc \
+	src/value_ssa_pass/value_ssa_dce.inc \
+	src/value_ssa_pass/value_ssa_pass_pipeline.inc
 
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
@@ -137,11 +147,11 @@ $(LOWER_IR_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c 
 $(LOWER_IR_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/lower_ir/lower_ir.c tests/lower_ir/lower_ir_verifier_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h include/lower_ir.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/lower_ir/lower_ir.c tests/lower_ir/lower_ir_verifier_test.c -o $@
 
-$(VALUE_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h | dirs
-	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c -o $@
+$(VALUE_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c -o $@
 
-$(VALUE_SSA_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h | dirs
-	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c -o $@
+$(VALUE_SSA_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c -o $@
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"

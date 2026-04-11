@@ -17,8 +17,8 @@
    `AST -> semantic -> canonical IR -> lower IR -> later backend/codegen`
 5. Do not build multiple parallel AST-to-IR pipelines.
 6. Lower-IR work is now checkpointed into maintenance-first mode: keep the current phase-2 boundary stable, and reopen active expansion only for confirmed bugs, new lowering features, or a concrete downstream consumer need.
-7. The next active implementation target is value-SSA phase 2 on top of lower IR: keep the new skeleton stable, then grow the newly landed minimal conversion slice carefully rather than reopening speculative cleanup of earlier front-end/mid-end infrastructure.
-8. The current value-SSA result-layer hardening slice is no longer blocked on waiting for reviewer feedback: the recent reviewer-driven contract fixes are in, the reviewer has cleared continued forward progress, and implementation may continue from the current bridge/canonicalization checkpoint instead of pausing for more result-layer-only review by default.
+7. The strict `lower_ir -> value_ssa` conversion stage is now checkpointed. Treat conversion itself as maintenance-first unless a new correctness bug appears.
+8. The next active implementation target is SSA shared analysis and the first true SSA-side optimization surfaces, not more conversion churn.
 
 ## Current State
 
@@ -32,7 +32,7 @@
 - Milestone F2: soft-closed. Low-risk canonical-IR transforms are broad enough for this phase and should now be reopened only for real missed-cleanup or correctness issues.
 - Milestone F3: soft-closed. Fixed-point, semantic guardrail, canonical-form, and stepwise verifier protections are landed.
 - Lower IR: phase 0 is frozen, phase 1 skeleton is landed, and the current phase 2 checkpoint now covers representative serial lowering, verifier hardening, and builder/API fail-fast enough to enter maintenance-first mode.
-- Value SSA: phase S1 skeleton is landed as a separate module with manual-construction builder helpers, dump, verifier, and isolated regression/verifier tests; phase S2 now has an initial lower-IR conversion slice for straight-line, single-join diamond, simple slot-carried loops, and a first representative loop-header phi shape for loop-carried temps. Separate narrow cleanup layers are now landed for local mov/phi use-site cleanup, trivial CFG cleanup (`same-target br`, immediate-condition `br`, dead-block/value-id compaction), and dead pure value-definition cleanup (`phi`, `mov`, `binary`, `load_*`) while preserving effectful `call/store_*`. A first shared CFG analysis/helper layer is also landed for predecessor/reachability/dominator-tree/frontier facts, iterated phi-placement closure, dominator-tree preorder, a split dominator-tree enter/leave walk scaffold, a first scoped rename-state stack, a first block-local use-site rewrite helper, a first predecessor-specific phi-input rewrite helper, a first verifier-safe function-level alpha-renaming orchestration, and a first small program-level canonicalization entrypoint on verifier-legal SSA programs.
+- Value SSA: phase S1 skeleton is landed as a separate module with manual-construction builder helpers, dump, verifier, and isolated regression/verifier tests; phase S2 now has an initial lower-IR conversion slice for straight-line, single-join diamond, simple slot-carried loops, and a first representative loop-header phi shape for loop-carried temps. Separate narrow cleanup layers are now landed for local mov/phi use-site cleanup, trivial CFG cleanup (`same-target br`, immediate-condition `br`, dead-block/value-id compaction), dead pure value-definition cleanup (`phi`, `mov`, `binary`, `load_*`) while preserving effectful `call/store_*`, and conservative slot-side cleanup/forwarding around straight-chain known local/global values. A first shared CFG analysis/helper layer is also landed for predecessor/reachability/dominator-tree/frontier facts, iterated phi-placement closure, dominator-tree preorder, a split dominator-tree enter/leave walk scaffold, a first scoped rename-state stack, a first block-local use-site rewrite helper, a first predecessor-specific phi-input rewrite helper, a first verifier-safe function-level alpha-renaming orchestration, and a first small program-level canonicalization entrypoint on verifier-legal SSA programs.
 - Value SSA: the recent result-layer hardening slice is considered reviewer-cleared for continued implementation. Current bridge/canonicalization authority is strong enough that progress no longer needs to pause for more result-layer-only review unless a new concrete bug appears.
 - Lower IR: a first CFG/def-site analysis slice is now landed for the real conversion mainline. The input layer can now compute predecessor counts, reachability, dominators, immediate dominators, dominator-tree children, dominance frontiers, temp definition blocks, and iterated phi placement directly on verifier-legal lower-IR functions.
 - Lower IR: the current conversion mainline can now also source formal dominator-tree traversal from the input layer and drive block conversion directly from it, so future rename/construction work no longer needs to keep an ad hoc CFG-ordering fallback alive once lower-IR analysis is present.
@@ -103,24 +103,21 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
    - reopen this slice only for concrete bugs, new lowering features, or a concrete downstream consumer need
 7. The next active design/execution target is now value-SSA phase S2 on top of lower IR; follow `docs/VALUE_SSA_DESIGN.md`, not ad hoc SSA experiments directly on lower IR.
 8. Near-term value-SSA implementation goal:
-   - keep the new skeleton boundary stable:
-     - `include/value_ssa.h`
-     - `src/value_ssa/`
-     - `tests/value_ssa/`
-   - keep lower IR as the stable input and current dump/verifier authority
-   - keep phase S2 narrow for now:
-     - straight-line lower-IR conversion
-     - single-join diamond conversion with explicit phi materialization
-     - support simple slot-carried loop CFGs where the carried state remains in explicit `load_* / store_*`
-     - support at least one representative loop-carried temp join through loop-header phi materialization
-     - keep trivial local simplification separate from conversion:
-       - trivial `mov` chains may resolve uses to the underlying value
-       - trivial `phi` nodes may resolve uses to a common incoming value
-       - do not turn this into full SSA DCE/renumbering yet
-     - keep broader loop families and more exotic cyclic CFGs out of scope until a later slice proves they are needed
-   - do not broaden straight into SSA optimization or memory-SSA work
-   - avoid reopening broad lower-IR hardening or unrelated infrastructure cleanup unless it blocks value-SSA work directly
-9. Only after a small conversion slice is stable should the project decide whether value-SSA on top of lower IR is justified as a long-lived optimization authority.
+   - keep the strict conversion boundary stable:
+      - `include/value_ssa.h`
+      - `src/value_ssa/`
+      - `include/value_ssa_pass.h`
+      - `src/value_ssa_pass/`
+      - `tests/value_ssa/`
+   - keep new SSA-native optimization/cleanup passes grouped under sibling module `src/value_ssa_pass/` so core representation/analysis/conversion files do not turn into another mixed grab-bag
+   - keep pass aggregation in `src/value_ssa_pass/value_ssa_pass.c` rather than folding those transforms back into `value_ssa.c`
+   - treat `lower_ir` as the stable construction input and `value_ssa` as the first downstream optimization authority
+   - the next code-facing work should now move above conversion:
+     - shared SSA def/use and use-list facts
+     - first narrow SSA-side simplification/optimization passes
+     - keep these value-only and do not drift into memory-SSA work yet
+   - do not reopen broad lower-IR hardening or unrelated infrastructure cleanup unless it blocks SSA-side analysis/pass work directly
+9. The current stage question is no longer "can lower_ir convert into value_ssa correctly?" but "what is the smallest stable shared SSA analysis surface the first real SSA passes should consume?"
 
 ## Current Stop Condition
 
@@ -225,6 +222,20 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
 - 2026-04-09: Precision note on that strict-construction setup: the long-lived bridge state now consumes only the compact pruned phi list, but setup still materializes a temporary `raw_phi_candidate_temps` scratch buffer before compacting. So the persistent-state shrink is complete, while the setup scratch path is not yet fully compact.
 - 2026-04-09: Value-SSA conversion has now been switched to the strict dominator-tree construction path. The bridge precreates all pruned candidate phis before traversal, binds those phi results on block entry, rewrites block-local lower-ir temp uses/defs only through the dominator-scope rename state, and fills successor phi incoming edges directly on predecessor leave.
 - 2026-04-09: Value-SSA conversion no longer depends on deferred successor-phi snapshots or post-hoc backfill to build the normal SSA graph. The remaining finalize step is only a completeness check over the already-materialized phi inputs, and bridge output is alpha-renamed after construction so raw dumps stay dense and stable in dominator order.
+- 2026-04-10: The first post-conversion SSA shared-analysis surface is now underway. `value_ssa_compute_def_use_analysis(...)` materializes per-value def-site metadata plus explicit use-site lists, providing the intended substrate for first real SSA-side optimization passes instead of one-off scans embedded inside each transform.
+- 2026-04-10: The first SSA-native pass now also consumes that surface. `value_ssa_simplify_trivial_values(...)` has been moved off its private full-function def/use scan and onto the shared def/use/use-list analysis, establishing the intended layering for future SSA-side passes.
+- 2026-04-10: `value_ssa_eliminate_dead_value_defs(...)` now also consumes the same shared def/use surface instead of rebuilding private use-count tables, so the first two SSA-side cleanup passes already share one analysis substrate.
+- 2026-04-10: A first genuinely new SSA-native optimization pass is now landed above that shared surface: `value_ssa_fold_constants(...)` performs safe immediate/immediate binary folding while intentionally leaving dangerous/division/mod/shift cases untouched. The default Value-SSA canonicalization pipeline now includes this fold stage between trivial-value cleanup and CFG/DCE cleanup.
+- 2026-04-10: A second narrow SSA-native optimization pass is now landed too: `value_ssa_simplify_algebraic_identities(...)` rewrites only safe binary identities/same-operand simplifications (for example `x+0`, `x*1`, `x&-1`, `x/1`, `x%1`, `x==x`) into `mov` form without touching dangerous div/mod/shift behavior outside those explicitly safe cases.
+- 2026-04-10: A narrow SSA-side binary canonicalization pass is now landed too: `value_ssa_normalize_binary_operands(...)` pushes immediates to the RHS when safe and flips ordered comparisons as needed, so identity/fold stages and future SSA analyses see a more stable binary form.
+- 2026-04-10: A narrow SSA-side dominator-aware redundant-binary cleanup pass is now landed too: `value_ssa_eliminate_redundant_binaries(...)` rewrites later dominated safe binaries to `mov` of an earlier equivalent result while continuing to preserve dangerous/trapping `div`/`mod`/shift ops.
+- 2026-04-10: A narrow SSA-side local-slot forwarding pass is now landed too: `value_ssa_forward_local_loads(...)` rewrites same-block `load_local` instructions to `mov` when an earlier `store_local` or earlier same-block `load_local` already determines the slot's value. This stays explicitly local-slot-only rather than drifting into memory SSA.
+- 2026-04-10: That same local-slot forwarding pass now also carries known local values across straight dominator-chain blocks when a block has a single predecessor equal to its immediate dominator. It still intentionally drops knowledge at joins rather than pretending to solve full memory flow.
+- 2026-04-10: A matching narrow SSA-side global-slot forwarding pass is now landed too: `value_ssa_forward_global_loads(...)` rewrites `load_global` instructions to `mov` across same-block or straight dominator-chain regions when an earlier `store_global` or earlier forwarded `load_global` already determines the slot's value, while conservatively treating `call` as a kill point for known globals and still dropping knowledge at joins.
+- 2026-04-10: A narrow SSA-side dead-store cleanup pass is now landed too: `value_ssa_eliminate_dead_stores(...)` removes same-block dead `store_local` / `store_global` instructions that are overwritten before any later read/observation of the same slot, and now also carries that overwritten-store cleanup across straight `jmp` chains when the successor has the current block as its unique idom predecessor. The pass stays conservative at joins and branch exits, and `call` still blocks global-store removal.
+- 2026-04-11: A narrow SSA-side redundant-store cleanup pass is now landed too: `value_ssa_eliminate_redundant_stores(...)` removes a `store_local` or `store_global` when the current straight-chain known slot value already equals the stored value. This stays deliberately conservative: knowledge crosses only same-block or single-idom straight chains, joins still clear the slot state, and `call` still kills known globals.
+- 2026-04-10: Value-SSA CFG cleanup now also threads through empty jump-only blocks, folds jumps to empty return blocks, and folds branch diamonds whose two empty successors return the same value. The canonicalization pipeline now runs DCE before CFG cleanup as well so value cleanup can expose those empty-return shapes before they are folded.
+- 2026-04-10: The Value-SSA canonicalization pipeline now intentionally reruns trivial-value simplification after the identity/fold/CSE stages, so new `mov` results created by those value-only passes can collapse before CFG cleanup and dead-def elimination.
 - 2026-04-08: Value-SSA conversion coverage now also includes a representative multi-carried-temp loop shape. The current bridge can materialize parallel loop-header phis for multiple independent carried temps in the same loop without changing the existing raw bridge authority style.
 - 2026-04-08: Lower-IR input-layer analysis now also locks the same multi-carried-temp loop family at the phi-candidate level. `lower_ir_compute_temp_phi_candidates(...)` is now regression-checked on a loop header that simultaneously carries two independent temps, so conversion coverage and input-layer authority stay aligned on that shape.
 - 2026-04-08: Value-SSA conversion now also covers a representative nested-loop carried-temp family. The bridge no longer fails early on inner headers that inherit an outer carried temp without needing a phi there: if lower-IR analysis marks no phi candidate and the already-processed predecessors agree on the inherited value, conversion now keeps that value live through the nested loop while still materializing the true inner-loop phi separately.

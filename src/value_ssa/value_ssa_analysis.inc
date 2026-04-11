@@ -21,6 +21,21 @@ void value_ssa_cfg_analysis_init(ValueSsaCfgAnalysis *analysis) {
     analysis->dominance_frontier_counts = NULL;
 }
 
+void value_ssa_def_use_analysis_init(ValueSsaDefUseAnalysis *analysis) {
+    if (!analysis) {
+        return;
+    }
+
+    analysis->value_count = 0;
+    analysis->def_block_ids = NULL;
+    analysis->def_phi_indices = NULL;
+    analysis->def_instruction_indices = NULL;
+    analysis->has_def = NULL;
+    analysis->use_counts = NULL;
+    analysis->use_offsets = NULL;
+    analysis->use_sites = NULL;
+}
+
 void value_ssa_cfg_analysis_free(ValueSsaCfgAnalysis *analysis) {
     if (!analysis) {
         return;
@@ -36,6 +51,59 @@ void value_ssa_cfg_analysis_free(ValueSsaCfgAnalysis *analysis) {
     free(analysis->dominance_frontier);
     free(analysis->dominance_frontier_counts);
     value_ssa_cfg_analysis_init(analysis);
+}
+
+void value_ssa_def_use_analysis_free(ValueSsaDefUseAnalysis *analysis) {
+    if (!analysis) {
+        return;
+    }
+
+    free(analysis->def_block_ids);
+    free(analysis->def_phi_indices);
+    free(analysis->def_instruction_indices);
+    free(analysis->has_def);
+    free(analysis->use_counts);
+    free(analysis->use_offsets);
+    free(analysis->use_sites);
+    value_ssa_def_use_analysis_init(analysis);
+}
+
+static void value_ssa_record_use_count(ValueSsaValueRef value, size_t *use_counts) {
+    if (!use_counts || value.kind != VALUE_SSA_VALUE_ID) {
+        return;
+    }
+
+    ++use_counts[value.value_id];
+}
+
+static int value_ssa_write_use_site(ValueSsaValueRef value,
+    ValueSsaUseKind kind,
+    ValueSsaUseRole role,
+    size_t block_id,
+    size_t phi_index,
+    size_t instruction_index,
+    size_t operand_index,
+    size_t *cursor,
+    size_t *use_offsets,
+    ValueSsaUseSite *use_sites) {
+    size_t slot;
+
+    if (value.kind != VALUE_SSA_VALUE_ID) {
+        return 1;
+    }
+    if (!cursor || !use_offsets || !use_sites) {
+        return 0;
+    }
+
+    slot = use_offsets[value.value_id] + cursor[value.value_id];
+    use_sites[slot].kind = kind;
+    use_sites[slot].role = role;
+    use_sites[slot].block_id = block_id;
+    use_sites[slot].phi_index = phi_index;
+    use_sites[slot].instruction_index = instruction_index;
+    use_sites[slot].operand_index = operand_index;
+    ++cursor[value.value_id];
+    return 1;
 }
 
 static int value_ssa_analysis_build_predecessor_matrix(const ValueSsaFunction *function,
@@ -432,6 +500,299 @@ int value_ssa_compute_cfg_analysis(const ValueSsaFunction *function,
         analysis->dominates,
         analysis->dominance_frontier,
         analysis->dominance_frontier_counts);
+    return 1;
+}
+
+int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
+    ValueSsaDefUseAnalysis *analysis,
+    ValueSsaError *error) {
+    size_t block_index;
+    size_t total_use_count = 0;
+    size_t *cursor = NULL;
+
+    if (!function || !analysis) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-189: invalid def-use analysis contract");
+        return 0;
+    }
+    if (!function->has_body) {
+        value_ssa_set_error(error,
+            0,
+            0,
+            "VALUE-SSA-190: cannot compute def-use analysis for declaration '%s'",
+            function->name ? function->name : "<anon>");
+        return 0;
+    }
+
+    value_ssa_def_use_analysis_free(analysis);
+    analysis->value_count = function->next_value_id;
+    if (function->next_value_id == 0) {
+        return 1;
+    }
+
+    analysis->def_block_ids = (size_t *)malloc(function->next_value_id * sizeof(size_t));
+    analysis->def_phi_indices = (size_t *)malloc(function->next_value_id * sizeof(size_t));
+    analysis->def_instruction_indices = (size_t *)malloc(function->next_value_id * sizeof(size_t));
+    analysis->has_def = (unsigned char *)calloc(function->next_value_id, sizeof(unsigned char));
+    analysis->use_counts = (size_t *)calloc(function->next_value_id, sizeof(size_t));
+    analysis->use_offsets = (size_t *)calloc(function->next_value_id, sizeof(size_t));
+    if (!analysis->def_block_ids || !analysis->def_phi_indices || !analysis->def_instruction_indices ||
+        !analysis->has_def || !analysis->use_counts || !analysis->use_offsets) {
+        value_ssa_def_use_analysis_free(analysis);
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-191: out of memory while preparing def-use analysis");
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t phi_index;
+        size_t instruction_index;
+
+        for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+            const ValueSsaPhi *phi = &block->phis[phi_index];
+            size_t input_index;
+
+            analysis->def_block_ids[phi->result_id] = block_index;
+            analysis->def_phi_indices[phi->result_id] = phi_index;
+            analysis->def_instruction_indices[phi->result_id] = (size_t)-1;
+            analysis->has_def[phi->result_id] = 1;
+            for (input_index = 0; input_index < phi->input_count; ++input_index) {
+                value_ssa_record_use_count(phi->inputs[input_index].value, analysis->use_counts);
+            }
+        }
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+            size_t arg_index;
+
+            if (instruction->has_result && instruction->result.kind == VALUE_SSA_VALUE_ID) {
+                analysis->def_block_ids[instruction->result.value_id] = block_index;
+                analysis->def_phi_indices[instruction->result.value_id] = (size_t)-1;
+                analysis->def_instruction_indices[instruction->result.value_id] = instruction_index;
+                analysis->has_def[instruction->result.value_id] = 1;
+            }
+
+            switch (instruction->kind) {
+            case VALUE_SSA_INSTR_MOV:
+                value_ssa_record_use_count(instruction->as.mov_value, analysis->use_counts);
+                break;
+            case VALUE_SSA_INSTR_BINARY:
+                value_ssa_record_use_count(instruction->as.binary.lhs, analysis->use_counts);
+                value_ssa_record_use_count(instruction->as.binary.rhs, analysis->use_counts);
+                break;
+            case VALUE_SSA_INSTR_CALL:
+                for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
+                    value_ssa_record_use_count(instruction->as.call.args[arg_index], analysis->use_counts);
+                }
+                break;
+            case VALUE_SSA_INSTR_STORE_LOCAL:
+            case VALUE_SSA_INSTR_STORE_GLOBAL:
+                value_ssa_record_use_count(instruction->as.store.value, analysis->use_counts);
+                break;
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                break;
+            default:
+                break;
+            }
+        }
+
+        switch (block->terminator.kind) {
+        case VALUE_SSA_TERM_RETURN:
+            value_ssa_record_use_count(block->terminator.as.return_value, analysis->use_counts);
+            break;
+        case VALUE_SSA_TERM_BRANCH:
+            value_ssa_record_use_count(block->terminator.as.branch.condition, analysis->use_counts);
+            break;
+        case VALUE_SSA_TERM_JUMP:
+            break;
+        default:
+            break;
+        }
+    }
+
+    for (block_index = 0; block_index < function->next_value_id; ++block_index) {
+        analysis->use_offsets[block_index] = total_use_count;
+        total_use_count += analysis->use_counts[block_index];
+    }
+
+    if (total_use_count == 0) {
+        return 1;
+    }
+
+    analysis->use_sites = (ValueSsaUseSite *)calloc(total_use_count, sizeof(ValueSsaUseSite));
+    cursor = (size_t *)calloc(function->next_value_id, sizeof(size_t));
+    if (!analysis->use_sites || !cursor) {
+        free(cursor);
+        value_ssa_def_use_analysis_free(analysis);
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-192: out of memory while materializing def-use use-sites");
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t phi_index;
+        size_t instruction_index;
+
+        for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+            const ValueSsaPhi *phi = &block->phis[phi_index];
+            size_t input_index;
+
+            for (input_index = 0; input_index < phi->input_count; ++input_index) {
+                if (!value_ssa_write_use_site(phi->inputs[input_index].value,
+                        VALUE_SSA_USE_PHI,
+                        VALUE_SSA_USE_ROLE_PHI_INPUT,
+                        block_index,
+                        phi_index,
+                        (size_t)-1,
+                        input_index,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-193: failed to record phi use-site");
+                    return 0;
+                }
+            }
+        }
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+            size_t arg_index;
+
+            switch (instruction->kind) {
+            case VALUE_SSA_INSTR_MOV:
+                if (!value_ssa_write_use_site(instruction->as.mov_value,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_MOV_VALUE,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-194: failed to record mov use-site");
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_BINARY:
+                if (!value_ssa_write_use_site(instruction->as.binary.lhs,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_BINARY_LHS,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites) ||
+                    !value_ssa_write_use_site(instruction->as.binary.rhs,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_BINARY_RHS,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        1,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-195: failed to record binary use-site");
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_CALL:
+                for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
+                    if (!value_ssa_write_use_site(instruction->as.call.args[arg_index],
+                            VALUE_SSA_USE_INSTR,
+                            VALUE_SSA_USE_ROLE_CALL_ARG,
+                            block_index,
+                            (size_t)-1,
+                            instruction_index,
+                            arg_index,
+                            cursor,
+                            analysis->use_offsets,
+                            analysis->use_sites)) {
+                        free(cursor);
+                        value_ssa_def_use_analysis_free(analysis);
+                        value_ssa_set_error(error, 0, 0, "VALUE-SSA-196: failed to record call use-site");
+                        return 0;
+                    }
+                }
+                break;
+            case VALUE_SSA_INSTR_STORE_LOCAL:
+            case VALUE_SSA_INSTR_STORE_GLOBAL:
+                if (!value_ssa_write_use_site(instruction->as.store.value,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_STORE_VALUE,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-197: failed to record store use-site");
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                break;
+            default:
+                break;
+            }
+        }
+
+        switch (block->terminator.kind) {
+        case VALUE_SSA_TERM_RETURN:
+            if (!value_ssa_write_use_site(block->terminator.as.return_value,
+                    VALUE_SSA_USE_TERM,
+                    VALUE_SSA_USE_ROLE_RETURN_VALUE,
+                    block_index,
+                    (size_t)-1,
+                    (size_t)-1,
+                    0,
+                    cursor,
+                    analysis->use_offsets,
+                    analysis->use_sites)) {
+                free(cursor);
+                value_ssa_def_use_analysis_free(analysis);
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-198: failed to record return use-site");
+                return 0;
+            }
+            break;
+        case VALUE_SSA_TERM_BRANCH:
+            if (!value_ssa_write_use_site(block->terminator.as.branch.condition,
+                    VALUE_SSA_USE_TERM,
+                    VALUE_SSA_USE_ROLE_BRANCH_CONDITION,
+                    block_index,
+                    (size_t)-1,
+                    (size_t)-1,
+                    0,
+                    cursor,
+                    analysis->use_offsets,
+                    analysis->use_sites)) {
+                free(cursor);
+                value_ssa_def_use_analysis_free(analysis);
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-199: failed to record branch use-site");
+                return 0;
+            }
+            break;
+        case VALUE_SSA_TERM_JUMP:
+            break;
+        default:
+            break;
+        }
+    }
+
+    free(cursor);
     return 1;
 }
 

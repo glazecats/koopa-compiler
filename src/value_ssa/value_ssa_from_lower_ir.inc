@@ -1024,32 +1024,4 @@ int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
     return 1;
 }
 
-int value_ssa_build_canonicalized_from_lower_ir(const LowerIrProgram *program,
-    ValueSsaProgram *out_program,
-    ValueSsaError *error) {
-    if (!program || !out_program) {
-        value_ssa_set_error(error,
-            0,
-            0,
-            "VALUE-SSA-122: invalid lower-ir canonicalized conversion entry contract");
-        return 0;
-    }
-
-    if (!value_ssa_build_from_lower_ir(program, out_program, error)) {
-        return 0;
-    }
-
-    if (!value_ssa_canonicalize_program(out_program, error)) {
-        value_ssa_program_free(out_program);
-        return 0;
-    }
-
-    if (!value_ssa_canonicalize_program(out_program, error)) {
-        value_ssa_program_free(out_program);
-        return 0;
-    }
-
-    return 1;
-}
-
 #endif
