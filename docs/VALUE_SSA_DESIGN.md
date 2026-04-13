@@ -16,13 +16,20 @@ Current status:
 - a separate narrow trivial-values simplify pass is also landed for local use-site cleanup after construction/conversion
 - a separate narrow CFG simplify pass is also landed for trivial branch folding plus dead-block/value-id compaction after CFG rewrites
 - a separate narrow dead-def cleanup pass is also landed for removing unused pure value definitions after the earlier cleanup stages
-- a first shared CFG analysis/helper layer is also landed for predecessor/reachability/dominator-tree/frontier facts, iterated phi-placement closure, and dominator-tree preorder that later rename-oriented work can consume directly
+- a first shared CFG analysis/helper layer is also landed for predecessor/reachability/dominator-tree/frontier facts, iterated phi-placement closure, dominator-tree preorder, and block-level liveness that later rename-oriented work and dataflow-driven passes can consume directly
+- that shared analysis layer now also has a first real consumer: a conservative interference-graph builder can consume Value-SSA liveness directly, which is useful for future live-range / backend preparation without committing this stage to register allocation yet
+- that interference layer now also has a first small consumer above itself: a copy-affinity graph can record non-interfering `mov` relationships as coalescing/allocator-prep hints without starting actual register allocation
+- those allocation-oriented facts can now also be bundled into one summary surface, so future backend-prep/live-range experiments can consume per-value def/use, live-block coverage, degree/affinity, and candidate data directly instead of restitching the underlying analyses by hand
+- that summary can now also be organized into a stable allocation worklist, so future live-range/coalescing experiments can start from shared value classes plus a deterministic priority order instead of inventing a new queue shape each time
+- that allocator-prep layer is now also easy to inspect directly through dump helpers for the summary and worklist, which makes this stage more debuggable without promoting it into a real allocator yet
+- a few narrow query helpers on top of that debug surface are also reasonable at this stage, because they let later allocator-prep experiments ask focused questions without turning every caller into a hand-written array decoder
 - a separate dominator-tree walk scaffold is also landed for rename-oriented enter/leave traversal, so later stack-based renaming can stay split from raw tree-walk plumbing
 - a first scoped rename-state stack is also landed, so later rename work can thread current bindings through dominator-tree enter/leave without reimplementing shadowing and rollback
 - a first block-local use-site rewrite helper is also landed, so later rename work can separate “what is currently bound” from “rewrite this block’s uses under those bindings”
 - a first predecessor-specific phi-input rewrite helper is also landed, so later rename work can update successor-edge phi operands independently from block-local instruction/terminator rewriting
 - a first real function-level alpha-renaming orchestration is also landed for existing SSA functions, composing dominator walk, scoped bindings, local use rewriting, local def renaming, and successor-edge phi-input rewriting into one verifier-safe pass
 - a first program-level canonicalization entrypoint is also landed, composing trivial SSA cleanup plus alpha-renaming into one small “stabilize the result layer” pipeline
+- a first direct execution-oriented sibling module is also landed for SSA-level testing/oracle use, without changing the representation or optimization boundaries
 - strict dominator-tree construction from lower IR is now landed and should be treated as the stable construction baseline for the next stage
 
 ## Immediate Next Step
@@ -64,7 +71,7 @@ The first new pass above that substrate should stay deliberately narrow. The cur
 - narrow redundant-store cleanup when a same-block or straight-chain known slot value already equals the value being written, with joins still treated as stop points and `call` still killing known globals
 - narrow dead store elimination: `store_local` / `store_global` can be dropped when later overwritten before any intervening read/observation in the same block, and that overwritten-store cleanup may also cross a straight `jmp` chain with a unique idom successor; joins, branch exits, and `call` should still stop the analysis
 - local-slot forwarding can now also cross straight dominator-chain block boundaries when there is a single idom predecessor, but it still intentionally stops at join points
-- narrow return-oriented CFG cleanup after value cleanup/DCE has exposed empty jump chains, jumps to empty returns, or same-return diamonds
+- narrow CFG cleanup after value cleanup/DCE has exposed empty jump chains, jumps to empty returns, same-return diamonds, or a non-phi successor block with exactly one predecessor that can be merged into its jumping predecessor
 - no memory-sensitive folding yet
 - no dangerous `div`/`mod`/shift folding yet
 
@@ -132,6 +139,21 @@ That keeps the layer boundary clean in the same way lower IR accepts any verifie
 - phi insertion at value joins
 - use rewriting from temp ids to SSA values
 - dominance-based value availability
+
+### Execution Support Can Live Beside Value SSA
+
+Execution support for this layer should stay a sibling module, not be folded into optimization code:
+
+- keep direct SSA interpretation under `src/value_ssa_interp/`
+- keep optimizer code under `src/value_ssa_pass/`
+- keep representation / verifier / analysis under `src/value_ssa/`
+
+The first interpreter slice should stay narrow:
+
+- execute verifier-legal `value_ssa` directly
+- support `mov`, `binary`, `load_*`, `store_*`, `jmp`, `br`, `ret`
+- support internal calls plus optional external-call callbacks for declaration-only callees
+- reject unsupported/uninitialized runtime states instead of inventing new IR semantics
 
 ## First-Version SSA Model
 

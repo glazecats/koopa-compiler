@@ -18,7 +18,7 @@
 
 ## 1. 总览：`tests/` 目录怎么组织
 
-当前测试入口 C 文件（13 个）：
+当前测试入口 C 文件（18 个）：
 
 - `tests/lexer/test.c`
 - `tests/lexer/lexer_test.c`
@@ -33,6 +33,11 @@
 - `tests/parser/parser_legacy_link_test.c`
 - `tests/parser/parser_regression_test.c`
 - `tests/semantic/semantic_regression_test.c`
+- `tests/value_ssa/value_ssa_analysis_test.c`
+- `tests/value_ssa/value_ssa_interp_test.c`
+- `tests/value_ssa/value_ssa_oracle_test.c`
+- `tests/value_ssa/value_ssa_regression_test.c`
+- `tests/value_ssa/value_ssa_verifier_test.c`
 
 当前拆分片段（11 个 `.inc`）：
 
@@ -52,7 +57,7 @@
 
 1. `test.c`：输入样例文件（fixture）
 2. `*_test.c`：可执行冒烟/调试程序（CLI harness）
-3. `*_regression_test.c`：回归断言（CI 主力，当前已覆盖 lexer/parser/semantic/ir/lower_ir）
+3. `*_regression_test.c`：回归断言（CI 主力，当前已覆盖 lexer/parser/semantic/ir/lower_ir/value_ssa）
 
 可抽象为测试收益函数：
 
@@ -68,7 +73,8 @@ $$
 - runtime global init：`__global.init()`、`__program.init()`、`IR-LOWER-022` 依赖顺序拒绝、`dependency path` / `dependency cycle` 诊断、依赖收集对 direct call callee body 的递归覆盖、以及 `&&/||/?:` 与常量条件 `if/while/for` 的有限裁剪
 - runtime-init verifier：`IR-VERIFY-048` 到 `IR-VERIFY-060`
 - ir-pass：`fold -> const -> copy -> fold -> const -> copy -> simplify-cfg -> dead-temp-elim` 默认管线、safe immediate folding、单边 immediate 恒等归约、temp constant propagation、temp copy propagation、CFG simplification、dead temp elimination、invalid pass spec、NULL pass table
-- lower-ir：canonical IR -> lower IR 的 source-lowered shape、显式 `load_local/store_local/load_global/store_global` dump 形状、runtime-init helper exact dump，以及 lower-IR verifier 对 value/slot 边界、runtime-init helper、call 契约、terminator、名字表与 dense table 的拒绝路径
+- lower-ir：canonical IR -> lower IR 的 source-lowered shape、显式 `load_local/store_local/load_global/store_global` dump 形状、runtime-init helper exact dump、shared CFG/dominator/frontier/temp-def/phi-placement analysis，以及 lower-IR verifier 对 value/slot 边界、runtime-init helper、call 契约、terminator、名字表与 dense table 的拒绝路径
+- value-ssa：独立 SSA 数据模型、`phi` exact dump、builder fail-fast、strict `lower_ir -> value_ssa` converted dump、shared SSA-side CFG / def-use / liveness / interference / copy-affinity / allocation-prep / allocation-worklist analysis、function-level alpha-renaming、program-level canonicalization、one-shot canonicalized bridge、已经拆到独立 `value_ssa_pass` 模块里的 SSA-native load-forward / store-cleanup / normalize / identity / fold / redundant-binary / CFG-simplify / DCE pass，以及独立 `value_ssa_interp` 模块里的 SSA 执行/oracle 测试
 
 1. 表达式 family：算术、comparison、bitwise、shift、ternary、逗号表达式
 2. 更新表达式 family：compound assignment、prefix/postfix `++`、prefix/postfix `--`
@@ -114,10 +120,30 @@ $$
 
 - `make test-lower-ir-regression`
   - 对应 `tests/lower_ir/lower_ir_regression_test.c`
-  - 当前主要锁 source-lowered 代表形状：`return a;`、`a=b+1; return a;`、`g=a; return g;`、`if(a)...`、`id(a)`、runtime-init helper exact dump、单臂/双臂分支 join、short-circuit 条件 materialize、`while` 回边 / `break`、`for` init-cond-step、nested-loop control、控制流里的 global write/read、call-heavy CFG slice、以及 value-materialization join
+  - 当前主要锁 source-lowered 代表形状：`return a;`、`a=b+1; return a;`、`g=a; return g;`、`if(a)...`、`id(a)`、runtime-init helper exact dump、单臂/双臂分支 join、short-circuit 条件 materialize、`while` 回边 / `break`、`for` init-cond-step、nested-loop control、控制流里的 global write/read、call-heavy CFG slice、以及 value-materialization join；同时也锁 lower-IR-side CFG analysis、phi placement、temp-phi-candidate 预计算、block-local phi lists、temp live-in、pruned phi-candidate lists、successor-phi-use lists、dominator preorder / walk 在 diamond、loop-header、multi-backedge loop-header、nested-loop、same-temp-double-loop 等 family 上的 authority
 - `make test-lower-ir-verifier`
   - 对应 `tests/lower_ir/lower_ir_verifier_test.c`
   - 当前主要锁 lower-IR verifier 对 value/slot 边界、store 结果形状、binary 结果 temp 约束、block terminator 必备性、runtime-init helper / startup call 契约、unknown callee / arg mismatch、duplicate-name / NULL-table 破坏、count-capacity 契约破坏，以及 temp/reachability 级不变量的拒绝
+
+另外现在也有单独的 value-SSA 测试目标：
+
+- `make test-value-ssa-regression`
+  - 对应 `tests/value_ssa/value_ssa_regression_test.c`
+  - 当前主要锁 straight-line dump、diamond + phi dump、straight-line / diamond / simple slot-carried loop / 代表性 loop-carried temp join / multi-backedge loop-carried temp / multi-carried-temp loop / nested-loop carried-temp family 的 `lower_ir -> value_ssa` exact dump、diamond / loop 的 CFG analysis、diamond / loop 的 phi-placement、diamond / loop 的 dominator-walk enter/leave 顺序、rename-state scope/bind/restore、block-local use rewrite、predecessor-specific phi-input rewrite、shared def-use analysis、scrambled SSA function 的 alpha-renaming、program-level canonicalize dump、dead-result call / dangerous binary 在 canonicalization / one-shot bridge 下仍保留、canonicalization fixed-point、one-shot canonicalized conversion bridge、canonicalize 对 malformed SSA 输入的拒绝、以及新拆分 `value_ssa_pass` 模块里的 normalize / identity / fold / redundant-binary、local/global load-forward、redundant-store / dead-store cleanup、same-return CFG fold、`jmp -> empty ret` fold、empty-jump threading、single-predecessor non-phi jump-block merge 等 pass 行为
+  - 当前口径已经不是“conversion 只开始消费 lower-IR-side facts”，而是“strict conversion 已经吃 pruned phi lists、在 DFS 前预创建 phi、在 dominator walk 中用 rename state 处理 use/def、在 predecessor leave 直接填 successor phi incoming；finalize 只做 completeness check，而 SSA-native cleanup/optimization pass 已经拆到 `value_ssa_pass`”
+- `make test-value-ssa-verifier`
+  - 对应 `tests/value_ssa/value_ssa_verifier_test.c`
+  - 当前主要锁 verifier 对 valid phi、phi input count、duplicate SSA definition、unavailable use、unreachable block 的接受/拒绝路径
+- `make test-value-ssa-analysis`
+  - 对应 `tests/value_ssa/value_ssa_analysis_test.c`
+  - 当前主要锁 shared analysis surface：liveness、interference、copy affinity、allocation prep、allocation worklist；代表 authority 包括 phi/loop liveness、interference 对称性、copy case 的 move-hint ordering、two-block range summary、loop case 下 constrained values 排前，以及 worklist 分类/priority 边界
+  - 最近这组测试还开始锁 allocator-prep 的工具面，不只是底层分析数组：work-class 名字、allocation-prep dump、allocation-worklist dump、class-specific worklist dump、live-block query、affinity-weight query、top-neighbor query、以及 worklist item/class-range lookup 都已经进入回归 authority
+- `make test-value-ssa-interp`
+  - 对应 `tests/value_ssa/value_ssa_interp_test.c`
+  - 当前主要锁第一版解释器边界：straight-line execution、phi/branch execution、internal-call execution、external-call callback execution、以及 uninitialized local load 的拒绝路径
+- `make test-value-ssa-oracle`
+  - 对应 `tests/value_ssa/value_ssa_oracle_test.c`
+  - 当前主要锁解释器作为 oracle/consumer 的组合边界：SSA 执行结果可用于对照 conversion / canonicalization / pass 之后的程序行为，而不需要把“运行结果”重新硬编码进每组 IR 断言
 
 ---
 

@@ -62,6 +62,7 @@ $$
 
 ```c
 #include "lower_from_ir.inc"
+#include "lower_ir_analysis.inc"
 #include "lower_ir_verify.inc"
 #include "lower_ir_dump.inc"
 ```
@@ -71,8 +72,9 @@ $$
 1. 生命周期与 builder helper
 2. 容量增长与字符串 builder 小工具
 3. canonical IR -> lower IR 的 serial lowering
-4. 指令复制/释放
-5. 聚合 verifier 和 dump 分片
+4. 输入层 CFG / dominator / phi-placement analysis
+5. 指令复制/释放
+6. 聚合 verifier 和 dump 分片
 
 所以 lower IR 当前已经不只是 phase-1 skeleton，而是进入了 phase 2 的最小闭环：
 
@@ -299,7 +301,118 @@ ret tmp.2
 
 ---
 
-### 4.5 `ir` 输出和 `lower_ir` 输出具体差在哪
+### 4.5 lower IR 现在也有一层正式 analysis
+
+最近这条线最重要的新变化，不是再补一类 lowering case，而是：
+
+`lower_ir` 现在已经有了 conversion 主线真正可以消费的输入层 analysis`
+
+公开 API 在 `include/lower_ir.h`：
+
+- `lower_ir_compute_cfg_analysis(...)`
+- `lower_ir_collect_temp_definition_blocks(...)`
+- `lower_ir_compute_phi_placement(...)`
+- `lower_ir_compute_temp_phi_candidates(...)`
+- `lower_ir_compute_block_phi_candidate_lists(...)`
+- `lower_ir_compute_temp_phi_candidate_lists(...)`
+- `lower_ir_collect_temp_live_in_blocks(...)`
+- `lower_ir_compute_pruned_temp_phi_candidate_lists(...)`
+- `lower_ir_compute_block_successor_phi_use_lists(...)`
+- `lower_ir_compute_dominator_tree_preorder(...)`
+- `lower_ir_walk_dominator_tree(...)`
+
+它们当前直接在 verifier-legal `LowerIrFunction` 上计算：
+
+1. predecessor matrix / predecessor counts
+2. reachable blocks
+3. dominator relation
+4. immediate dominators
+5. explicit dominator-tree children
+6. dominance frontier
+7. temp definition blocks
+8. iterated phi placement
+9. batch temp -> phi-candidate 矩阵
+10. block-local phi-temp lists
+11. temp live-in blocks
+12. pruned phi-candidate lists
+13. block-successor phi-use lists
+14. dominator preorder / dominator walk
+
+所以现在更像：
+
+`lower_ir -> analysis -> conversion -> value_ssa`
+
+而不是继续让 `value_ssa` 侧自己重建 predecessor / phi 候选 / block 顺序那套近似逻辑。
+
+### 4.6 phi placement 现在已经是 worklist + 闭包
+
+当前 `lower_ir_compute_phi_placement(...)` 已经不是“只看一层 frontier”的近似规则，而是标准 worklist 闭包形态：
+
+1. 先把原始定义块放进 worklist
+2. 扫这些块的 dominance frontier
+3. 在 frontier 上标出 phi block
+4. 如果一个新 phi block 原来不是定义块，就把它再塞回 worklist
+5. 继续迭代，直到没有新块加入
+
+所以它现在已经能处理：
+
+- diamond 上的一层 phi
+- loop header phi
+- 需要“phi of phi”继续往外推的情况
+
+不过这里还要记一个工程边界：
+
+`temp phi candidates` 仍然是一个保守上界，不是 pruned SSA 之后的最终精化结果。
+
+也就是说，对某个 temp 来说：
+
+- inner loop header 当然可能是真正需要 phi 的地方
+- outer loop header 也可能因为 iterated dominance frontier 的闭包，被保守地标成 candidate
+
+原因是当前算法只根据：
+
+- 定义块
+- dominance frontier
+- worklist 闭包
+
+去算“哪里可能需要 phi”，还不会额外做：
+
+- live-in 过滤
+- pruned SSA
+- 更细的 availability / liveness 收缩
+
+所以准确说法是：
+
+- `phi placement` 现在已经是正规的闭包算法
+- `temp phi candidates` 仍然可能“多标一格”，因为它先给 conversion 一个安全上界
+- `pruned temp phi candidate lists` 才是更适合 strict SSA construction 的输入层 surface
+
+### 4.7 现在也有 live-in / pruned / successor-phi-use 这几层更细的输入事实
+
+最近 input analysis 又往前推了三层：
+
+1. `lower_ir_collect_temp_live_in_blocks(...)`
+   - 计算某个 temp 在哪些 block 是 live-in
+2. `lower_ir_compute_pruned_temp_phi_candidate_lists(...)`
+   - 用 live-in 去收紧 conservative phi candidates
+3. `lower_ir_compute_block_successor_phi_use_lists(...)`
+   - 直接给出“某个 predecessor block 需要为哪些 temp 保留 successor-facing phi use”
+
+所以现在 lower-IR 输入层不再只提供：
+
+- CFG 结构
+- dominator / frontier
+- 保守 phi candidates
+
+而是已经开始提供：
+
+- strict conversion 真正需要消费的更细粒度输入事实
+
+这也是为什么最近 `value_ssa` conversion 能从“半过渡态”继续往“更严格的 dominator-tree construction”收口。
+
+---
+
+### 4.8 `ir` 输出和 `lower_ir` 输出具体差在哪
 
 最容易理解的方式，是直接对比同一段程序在两层 IR 里的文本形状。
 

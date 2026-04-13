@@ -1736,6 +1736,58 @@ static int build_local_join_no_forward_program(ValueSsaProgram *program, ValueSs
     return 1;
 }
 
+static int build_single_predecessor_nonempty_jump_merge_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *body = NULL;
+    ValueSsaInstruction instruction;
+    size_t local_a_id;
+    size_t value0;
+    size_t value1;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "a", 1, &local_a_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &body, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_local(local_a_id);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) || !value_ssa_block_set_jump(entry, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error) ||
+        !value_ssa_block_set_return(body, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_dead_call_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *decl = NULL;
     ValueSsaFunction *main_function = NULL;
@@ -6308,13 +6360,23 @@ static int test_value_ssa_simplify_cfg_immediate_branch_compacts_blocks(void) {
         "func main() {\n"
         "  bb.0:\n"
         "    ssa.0 = mov 1\n"
+        "    ssa.1 = mov 1\n"
         "    jmp bb.1\n"
         "  bb.1:\n"
-        "    ssa.1 = mov 1\n"
-        "    jmp bb.2\n"
-        "  bb.2:\n"
-        "    ssa.2 = phi [bb.1: 1]\n"
+        "    ssa.2 = phi [bb.0: 1]\n"
         "    ret 1\n"
+        "}\n");
+}
+
+static int test_value_ssa_simplify_cfg_single_predecessor_nonempty_merge(void) {
+    return expect_cfg_simplified_dump("VALUE-SSA-SIMPLIFY-CFG-SINGLE-PREDECESSOR-NONEMPTY-MERGE",
+        0,
+        build_single_predecessor_nonempty_jump_merge_program,
+        "func main(a.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local a.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    ret ssa.1\n"
         "}\n");
 }
 
@@ -6327,8 +6389,6 @@ static int test_value_ssa_eliminate_dead_value_defs_after_cfg_cleanup(void) {
         "  bb.0:\n"
         "    jmp bb.1\n"
         "  bb.1:\n"
-        "    jmp bb.2\n"
-        "  bb.2:\n"
         "    ret 1\n"
         "}\n");
 }
@@ -6984,8 +7044,6 @@ static int test_value_ssa_canonicalize_program_dead_global_store_across_straight
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    store_global g.0, 2\n"
         "    ret 0\n"
         "}\n");
@@ -6999,8 +7057,6 @@ static int test_value_ssa_canonicalize_program_dead_global_store_across_straight
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    store_global g.0, 2\n"
         "    ret 0\n"
         "}\n");
@@ -7047,8 +7103,6 @@ static int test_value_ssa_canonicalize_program_cross_block_global_call_barrier(v
         "func main() {\n"
         "  bb.0:\n"
         "    store_global g.0, 9\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    call touch()\n"
         "    ssa.0 = load_global g.0\n"
         "    ret ssa.0\n"
@@ -7066,8 +7120,6 @@ static int test_value_ssa_canonicalize_program_cross_block_global_call_barrier_f
         "func main() {\n"
         "  bb.0:\n"
         "    store_global g.0, 9\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    call touch()\n"
         "    ssa.0 = load_global g.0\n"
         "    ret ssa.0\n"
@@ -7102,11 +7154,7 @@ static int test_value_ssa_canonicalize_program_complex_global_call_chain(void) {
         "func main() {\n"
         "  bb.0:\n"
         "    store_global g.0, 1\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    call touch()\n"
-        "    jmp bb.2\n"
-        "  bb.2:\n"
         "    store_global g.0, 2\n"
         "    ret 2\n"
         "}\n");
@@ -7123,11 +7171,7 @@ static int test_value_ssa_canonicalize_program_complex_global_call_chain_fixed_p
         "func main() {\n"
         "  bb.0:\n"
         "    store_global g.0, 1\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
         "    call touch()\n"
-        "    jmp bb.2\n"
-        "  bb.2:\n"
         "    store_global g.0, 2\n"
         "    ret 2\n"
         "}\n");
@@ -7485,6 +7529,7 @@ int main(void) {
     ok &= test_value_ssa_simplify_cfg_empty_jump_thread();
     ok &= test_value_ssa_simplify_cfg_branch_empty_jump_same_target();
     ok &= test_value_ssa_simplify_cfg_immediate_branch_compacts_blocks();
+    ok &= test_value_ssa_simplify_cfg_single_predecessor_nonempty_merge();
     ok &= test_value_ssa_eliminate_dead_value_defs_after_cfg_cleanup();
     ok &= test_value_ssa_eliminate_dead_value_defs_preserves_dead_result_call();
     ok &= test_value_ssa_eliminate_dead_value_defs_preserves_dangerous_dead_binary();

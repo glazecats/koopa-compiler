@@ -31,6 +31,27 @@ static void value_ssa_remove_phi_predecessor_from_block(ValueSsaBasicBlock *bloc
     }
 }
 
+static void value_ssa_replace_phi_predecessor_in_block(ValueSsaBasicBlock *block,
+    size_t old_predecessor_block_id,
+    size_t new_predecessor_block_id) {
+    size_t phi_index;
+
+    if (!block) {
+        return;
+    }
+
+    for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+        ValueSsaPhi *phi = &block->phis[phi_index];
+        size_t input_index;
+
+        for (input_index = 0; input_index < phi->input_count; ++input_index) {
+            if (phi->inputs[input_index].predecessor_block_id == old_predecessor_block_id) {
+                phi->inputs[input_index].predecessor_block_id = new_predecessor_block_id;
+            }
+        }
+    }
+}
+
 static void value_ssa_remap_value_ref(ValueSsaValueRef *value, const size_t *old_to_new_value) {
     if (!value || !old_to_new_value || value->kind != VALUE_SSA_VALUE_ID) {
         return;
@@ -216,6 +237,107 @@ static int value_ssa_rewrite_trivial_jumps(ValueSsaFunction *function, ValueSsaE
 
         block->terminator.kind = VALUE_SSA_TERM_RETURN;
         block->terminator.as.return_value = return_value;
+    }
+
+    return 1;
+}
+
+static int value_ssa_merge_single_predecessor_jump_blocks(ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    int *out_changed,
+    ValueSsaError *error) {
+    size_t block_index;
+
+    if (!function || !analysis || !out_changed) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-124: invalid CFG simplify contract");
+        return 0;
+    }
+
+    *out_changed = 0;
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t target_id;
+        ValueSsaBasicBlock *target;
+        size_t needed_capacity;
+
+        if (block->terminator.kind != VALUE_SSA_TERM_JUMP) {
+            continue;
+        }
+
+        target_id = block->terminator.as.jump_target;
+        if (target_id >= function->block_count || target_id == block->id ||
+            analysis->predecessor_counts[target_id] != 1) {
+            continue;
+        }
+
+        target = &function->blocks[target_id];
+        if (target->phi_count != 0) {
+            continue;
+        }
+
+        needed_capacity = block->instruction_count + target->instruction_count;
+        if (needed_capacity > block->instruction_capacity) {
+            ValueSsaInstruction *grown =
+                (ValueSsaInstruction *)realloc(block->instructions, needed_capacity * sizeof(ValueSsaInstruction));
+
+            if (!grown) {
+                value_ssa_set_error(error,
+                    0,
+                    0,
+                    "VALUE-SSA-130: out of memory while merging bb.%zu into bb.%zu in function '%s'",
+                    target->id,
+                    block->id,
+                    function->name ? function->name : "<anon>");
+                return 0;
+            }
+
+            block->instructions = grown;
+            block->instruction_capacity = needed_capacity;
+        }
+
+        if (target->instruction_count > 0) {
+            memcpy(&block->instructions[block->instruction_count],
+                target->instructions,
+                target->instruction_count * sizeof(ValueSsaInstruction));
+            block->instruction_count += target->instruction_count;
+        }
+
+        switch (target->terminator.kind) {
+        case VALUE_SSA_TERM_JUMP:
+            if (target->terminator.as.jump_target < function->block_count) {
+                value_ssa_replace_phi_predecessor_in_block(&function->blocks[target->terminator.as.jump_target],
+                    target->id,
+                    block->id);
+            }
+            break;
+        case VALUE_SSA_TERM_BRANCH:
+            if (target->terminator.as.branch.then_target < function->block_count) {
+                value_ssa_replace_phi_predecessor_in_block(&function->blocks[target->terminator.as.branch.then_target],
+                    target->id,
+                    block->id);
+            }
+            if (target->terminator.as.branch.else_target < function->block_count &&
+                target->terminator.as.branch.else_target != target->terminator.as.branch.then_target) {
+                value_ssa_replace_phi_predecessor_in_block(&function->blocks[target->terminator.as.branch.else_target],
+                    target->id,
+                    block->id);
+            }
+            break;
+        case VALUE_SSA_TERM_RETURN:
+        default:
+            break;
+        }
+
+        block->terminator = target->terminator;
+
+        target->instruction_count = 0;
+        target->phi_count = 0;
+        target->has_terminator = 0;
+        target->terminator.kind = VALUE_SSA_TERM_RETURN;
+        target->terminator.as.return_value = value_ssa_value_immediate(0);
+
+        *out_changed = 1;
+        return 1;
     }
 
     return 1;
@@ -488,16 +610,32 @@ int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error) {
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
+        int changed = 0;
 
         if (!function->has_body || function->block_count == 0) {
             continue;
         }
 
-        if (!value_ssa_rewrite_empty_jump_targets(function, error) ||
-            !value_ssa_rewrite_trivial_branches(function, error) ||
-            !value_ssa_rewrite_trivial_jumps(function, error) ||
-            !value_ssa_compact_reachable_blocks(function, error) ||
-            !value_ssa_compact_value_ids(function, error)) {
+        do {
+            ValueSsaCfgAnalysis analysis;
+
+            changed = 0;
+            if (!value_ssa_rewrite_empty_jump_targets(function, error) ||
+                !value_ssa_rewrite_trivial_branches(function, error) ||
+                !value_ssa_rewrite_trivial_jumps(function, error)) {
+                return 0;
+            }
+
+            value_ssa_cfg_analysis_init(&analysis);
+            if (!value_ssa_compute_cfg_analysis(function, &analysis, error) ||
+                !value_ssa_merge_single_predecessor_jump_blocks(function, &analysis, &changed, error)) {
+                value_ssa_cfg_analysis_free(&analysis);
+                return 0;
+            }
+            value_ssa_cfg_analysis_free(&analysis);
+        } while (changed);
+
+        if (!value_ssa_compact_reachable_blocks(function, error) || !value_ssa_compact_value_ids(function, error)) {
             return 0;
         }
     }

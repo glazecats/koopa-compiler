@@ -4,8 +4,18 @@
   "runArgs": [
     "--security-opt", "seccomp=unconfined",
     "--security-opt", "apparmor=unconfined",
-    "--cap-add=SYS_ADMIN"
+    "--cap-add=SYS_ADMIN",
+    "-e", "IKUN",
+    "-e", "ikun"
   ],
+  "containerEnv": {
+    "IKUN": "${localEnv:IKUN}",
+    "ikun": "${localEnv:IKUN}"
+  },
+  "remoteEnv": {
+    "IKUN": "${localEnv:IKUN}",
+    "ikun": "${localEnv:IKUN}"
+  },
   "customizations": {
     "vscode": {
       "settings": {},

@@ -823,5 +823,8 @@ int value_ssa_block_set_branch(ValueSsaBasicBlock *block,
 #include "value_ssa_verify.inc"
 #include "value_ssa_dump.inc"
 #include "value_ssa_analysis.inc"
+#include "value_ssa_alloc_prep.inc"
+#include "value_ssa_alloc_worklist.inc"
+#include "value_ssa_alloc_dump.inc"
 #include "value_ssa_rename.inc"
 #include "value_ssa_from_lower_ir.inc"

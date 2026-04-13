@@ -214,6 +214,65 @@ typedef struct {
     ValueSsaUseSite *use_sites;
 } ValueSsaDefUseAnalysis;
 
+typedef struct {
+    size_t block_count;
+    size_t value_count;
+    unsigned char *live_in;
+    unsigned char *live_out;
+} ValueSsaLivenessAnalysis;
+
+typedef struct {
+    size_t value_count;
+    unsigned char *interferes;
+} ValueSsaInterferenceGraph;
+
+typedef struct {
+    size_t value_count;
+    size_t *weights;
+} ValueSsaCopyAffinityGraph;
+
+typedef struct {
+    size_t lhs;
+    size_t rhs;
+    size_t weight;
+} ValueSsaCopyAffinityCandidate;
+
+typedef struct {
+    size_t value_count;
+    size_t *def_block_ids;
+    size_t *use_counts;
+    size_t *live_block_counts;
+    unsigned char *single_block_live_ranges;
+    size_t *live_block_offsets;
+    size_t *live_blocks;
+    size_t live_blocks_count;
+    size_t *interference_degrees;
+    size_t *affinity_sums;
+    unsigned char *move_related;
+    ValueSsaCopyAffinityCandidate *candidates;
+    size_t candidate_count;
+} ValueSsaAllocationPrep;
+
+typedef enum {
+    VALUE_SSA_ALLOC_WORK_MOVE_HINT = 0,
+    VALUE_SSA_ALLOC_WORK_CONSTRAINED,
+    VALUE_SSA_ALLOC_WORK_SINGLE_BLOCK,
+    VALUE_SSA_ALLOC_WORK_GLOBAL,
+    VALUE_SSA_ALLOC_WORK_ISOLATED,
+} ValueSsaAllocationWorkClass;
+
+typedef struct {
+    size_t value_id;
+    ValueSsaAllocationWorkClass work_class;
+    size_t priority;
+} ValueSsaAllocationWorkItem;
+
+typedef struct {
+    size_t value_count;
+    size_t item_count;
+    ValueSsaAllocationWorkItem *items;
+} ValueSsaAllocationWorklist;
+
 typedef int (*ValueSsaDominatorTreeWalkFn)(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t block_id,
@@ -240,6 +299,16 @@ void value_ssa_cfg_analysis_init(ValueSsaCfgAnalysis *analysis);
 void value_ssa_cfg_analysis_free(ValueSsaCfgAnalysis *analysis);
 void value_ssa_def_use_analysis_init(ValueSsaDefUseAnalysis *analysis);
 void value_ssa_def_use_analysis_free(ValueSsaDefUseAnalysis *analysis);
+void value_ssa_liveness_analysis_init(ValueSsaLivenessAnalysis *analysis);
+void value_ssa_liveness_analysis_free(ValueSsaLivenessAnalysis *analysis);
+void value_ssa_interference_graph_init(ValueSsaInterferenceGraph *graph);
+void value_ssa_interference_graph_free(ValueSsaInterferenceGraph *graph);
+void value_ssa_copy_affinity_graph_init(ValueSsaCopyAffinityGraph *graph);
+void value_ssa_copy_affinity_graph_free(ValueSsaCopyAffinityGraph *graph);
+void value_ssa_allocation_prep_init(ValueSsaAllocationPrep *prep);
+void value_ssa_allocation_prep_free(ValueSsaAllocationPrep *prep);
+void value_ssa_allocation_worklist_init(ValueSsaAllocationWorklist *worklist);
+void value_ssa_allocation_worklist_free(ValueSsaAllocationWorklist *worklist);
 void value_ssa_rename_state_init(ValueSsaRenameState *state);
 void value_ssa_rename_state_free(ValueSsaRenameState *state);
 
@@ -289,11 +358,77 @@ int value_ssa_block_set_branch(ValueSsaBasicBlock *block,
 
 int value_ssa_verify_program(const ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text);
+const char *value_ssa_allocation_work_class_name(ValueSsaAllocationWorkClass work_class);
+int value_ssa_allocation_prep_get_live_blocks(const ValueSsaAllocationPrep *allocation_prep,
+    size_t value_id,
+    const size_t **out_blocks,
+    size_t *out_count);
+int value_ssa_allocation_prep_find_affinity_candidate(const ValueSsaAllocationPrep *allocation_prep,
+    size_t lhs,
+    size_t rhs,
+    size_t *out_index,
+    const ValueSsaCopyAffinityCandidate **out_candidate);
+size_t value_ssa_allocation_prep_get_affinity_weight(const ValueSsaAllocationPrep *allocation_prep,
+    size_t lhs,
+    size_t rhs);
+int value_ssa_allocation_prep_get_top_affinity_neighbors(const ValueSsaAllocationPrep *allocation_prep,
+    size_t value_id,
+    size_t max_count,
+    size_t *out_neighbor_value_ids,
+    size_t *out_weights,
+    size_t *out_count);
+int value_ssa_allocation_worklist_find_value(const ValueSsaAllocationWorklist *worklist,
+    size_t value_id,
+    size_t *out_index,
+    const ValueSsaAllocationWorkItem **out_item);
+int value_ssa_allocation_worklist_get_class_range(const ValueSsaAllocationWorklist *worklist,
+    ValueSsaAllocationWorkClass work_class,
+    size_t *out_begin,
+    size_t *out_end);
+int value_ssa_dump_allocation_prep(const ValueSsaFunction *function,
+    const ValueSsaAllocationPrep *allocation_prep,
+    char **out_text,
+    ValueSsaError *error);
+int value_ssa_dump_allocation_worklist(const ValueSsaFunction *function,
+    const ValueSsaAllocationPrep *allocation_prep,
+    const ValueSsaAllocationWorklist *worklist,
+    char **out_text,
+    ValueSsaError *error);
+int value_ssa_dump_allocation_worklist_for_class(const ValueSsaFunction *function,
+    const ValueSsaAllocationPrep *allocation_prep,
+    const ValueSsaAllocationWorklist *worklist,
+    ValueSsaAllocationWorkClass work_class,
+    char **out_text,
+    ValueSsaError *error);
 int value_ssa_compute_cfg_analysis(const ValueSsaFunction *function,
     ValueSsaCfgAnalysis *analysis,
     ValueSsaError *error);
 int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
     ValueSsaDefUseAnalysis *analysis,
+    ValueSsaError *error);
+int value_ssa_compute_liveness_analysis(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *cfg_analysis,
+    ValueSsaLivenessAnalysis *analysis,
+    ValueSsaError *error);
+int value_ssa_compute_interference_graph(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *cfg_analysis,
+    const ValueSsaLivenessAnalysis *liveness_analysis,
+    ValueSsaInterferenceGraph *graph,
+    ValueSsaError *error);
+int value_ssa_compute_copy_affinity_graph(const ValueSsaFunction *function,
+    const ValueSsaInterferenceGraph *interference_graph,
+    ValueSsaCopyAffinityGraph *graph,
+    ValueSsaError *error);
+int value_ssa_compute_allocation_prep(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *def_use_analysis,
+    const ValueSsaLivenessAnalysis *liveness_analysis,
+    const ValueSsaInterferenceGraph *interference_graph,
+    const ValueSsaCopyAffinityGraph *copy_affinity_graph,
+    ValueSsaAllocationPrep *prep,
+    ValueSsaError *error);
+int value_ssa_compute_allocation_worklist(const ValueSsaFunction *function,
+    const ValueSsaAllocationPrep *allocation_prep,
+    ValueSsaAllocationWorklist *worklist,
     ValueSsaError *error);
 int value_ssa_compute_phi_placement(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
