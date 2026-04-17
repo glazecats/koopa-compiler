@@ -70,6 +70,8 @@ $$
 - pass 实现：`src/value_ssa_pass/`
 - interp 接口：`include/value_ssa_interp.h`
 - interp 实现：`src/value_ssa_interp/`
+- memory 层：`include/memory_ssa.h` / `src/memory_ssa/`
+- memory-backed pass：`include/memory_ssa_pass.h` / `src/memory_ssa_pass/`
 
 相关测试：
 
@@ -300,6 +302,33 @@ verifier 当前会检查：
 
 `这个 SSA value 在这里用的时候，值流上到底可不可用`
 
+### 4.2.1 verifier 的直觉伪代码
+
+如果把 verifier 压成 lesson 级伪代码，最值得记的是下面这层顺序：
+
+```text
+verify_function(function):
+    check table counts / capacities / block structure
+    check every block is reachable from entry
+
+    for each phi:
+        check predecessor count matches CFG
+        check every phi input refers to a real predecessor
+        check phi result id is unique
+
+    walk blocks in dominance-aware availability order:
+        check every instruction/terminator use is available here
+        check every result id is defined once
+        check load/store/call/branch operand kinds are legal
+```
+
+这里最重要的 lesson 点是：
+
+- verifier 不只是“结构检查器”
+- 它已经带了第一层 value-availability 语义检查
+
+所以如果一个 `ssa.7` 在它真正可达/可用之前就被拿来 `ret` 或 `br`，当前 verifier 是会拒绝的。
+
 ---
 
 ## 5. Strict Conversion
@@ -338,6 +367,46 @@ int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
 9. finalize 只做 completeness check
 10. 最后 alpha-rename 成 dense/stable dump
 11. verify 输出 SSA
+
+### 5.2.1 strict conversion 的伪代码
+
+如果把当前 conversion 主线写成更像实现的伪代码，可以记成：
+
+```text
+build_from_lower_ir(program):
+    verify lower_ir input
+    clone globals / functions / locals / block shells
+
+    for each function:
+        cfg = compute lower-ir cfg / dominator / phi facts
+        pre-create candidate phis for temps that need join values
+        init rename state
+
+        dominator_walk(entry):
+            on enter block:
+                bind block-entry phis into current rename state
+                rewrite and emit block-local instructions using current bindings
+                create fresh SSA ids for new defs
+
+            on leave block:
+                for each successor:
+                    fill successor phi input from current rename state
+
+        finalize phi completeness
+        alpha-rename function to dense stable ids
+
+    verify final value_ssa output
+```
+
+这段伪代码里最该抓住的，是当前 strict conversion 的三根主骨架：
+
+1. **phi 先预创建**
+2. **use/def 全靠 rename state 走**
+3. **predecessor leave 时直接填 phi incoming**
+
+所以它不是“先转一遍，再回头到处修补”，而是：
+
+`带着 dominator/rename 骨架，一次构造出 verifier-legal SSA`
 
 ### 5.3 当前支持边界
 
@@ -515,6 +584,22 @@ func main() {
 1. 外层 loop-carried temp 和内层 loop-carried temp 可以各自 materialize 自己的 phi
 2. nested-loop 当前已经不是设计草图，而是有 exact dump authority 的真实支持面
 
+### 5.5.3 conversion 现在和 memory-aware one-shot 的关系
+
+虽然严格来说 memory-aware bridge API 落在 `value_ssa_pass` / `memory_ssa_pass`，但 lesson 里这里顺手记一句很有用：
+
+- raw core conversion 入口仍然是 `value_ssa_build_from_lower_ir(...)`
+- 更高一层的 one-shot canonicalized bridge 则已经分成：
+  - classic
+  - memory-value
+  - memory-full
+
+也就是说，当前 `value_ssa` core 的职责仍然是：
+
+`把 lower_ir 严格转成 verifier-legal SSA`
+
+而不是自己同时承担所有后续 canonicalization policy。
+
 ### 5.5.1 当前 conversion 支持 / 不支持什么
 
 把 strict conversion 本身列成对照表，会更好记：
@@ -607,6 +692,34 @@ $$
 
 - interference 不是凭空来的
 - worklist 也不是“又多了一个表”，而是 summary 之上的组织层
+
+### 6.2.2 用伪代码看这条分析链
+
+把这条链再压成一版伪代码，会更容易把各层关系记牢：
+
+```text
+compute_shared_analysis(function):
+    cfg = compute predecessors / reachability / dominators
+    def_use = record every SSA def and every use site
+    liveness = solve backward live-in/live-out on blocks
+    interference = for each def, connect it with values live at that point
+    copy_affinity = for each mov x <- y:
+        if x and y do not interfere:
+            add affinity weight between them
+    allocation_prep = summarize counts / live blocks / degrees / affinity
+    allocation_worklist = bucket + sort summarized values
+```
+
+这段伪代码有一个教学上的好处：
+
+- `copy_affinity` 的输入不是“所有值对”
+- 而是已经经过 interference 过滤过的 `mov` 关系
+
+所以它天然更像：
+
+`coalescing hint`
+
+而不是“又一张冲突图”。
 
 ### 6.3 `allocation_prep`
 
@@ -819,6 +932,42 @@ interference_degrees[value] >= 2
 
 `allocator-prep 已经不只是能算出来，还开始能被别的实验代码和调试工具直接消费`
 
+### 6.10 interference / copy-affinity 最小伪代码
+
+如果你前面问过 “interference graph 是不是通过 def/use 做出来的”，lesson 里最适合落成下面这版直觉：
+
+```text
+for each block from end to beginning:
+    live = live_out(block)
+
+    for each instruction in reverse:
+        kill values defined here from live
+        for each value defined here:
+            add interference edges(def, every value currently in live)
+        add values used here into live
+```
+
+这也是为什么你会觉得“是不是 def 的时候看 live 就行”。
+
+当前这条线确实可以这么理解：
+
+- `def/use` 提供基本事实
+- liveness 算出“某点之后哪些值还活着”
+- interference 则在 def 点把“新定义值”和当时 live 的值连边
+
+然后 copy-affinity 再在这上面多加一层：
+
+```text
+for each mov dst <- src:
+    if dst does not interfere with src:
+        affinity[dst, src] += weight
+```
+
+所以：
+
+- interference 说“不能放一起”
+- copy affinity 说“如果不冲突，最好尽量靠一起”
+
 ### 6.9 一个“工具面”视角的最小例子
 
 以前如果后续 experiment 想回答：
@@ -917,6 +1066,44 @@ bb.3:
 - dominator-order-friendly 命名
 - 更稳定的对照输出
 
+### 7.1 alpha-renaming 的伪代码
+
+这层也很适合补一段伪代码，因为它能把“rename”和“重建 SSA”区别开：
+
+```text
+alpha_rename(function):
+    init empty mapping old_id -> new_id
+    next_id = 0
+
+    dominator_walk(entry):
+        on enter block:
+            assign fresh ids to block phis
+            rewrite phi results in mapping
+            rewrite block-local uses through current mapping
+            assign fresh ids to block-local defs
+
+        on edge to successor:
+            rewrite successor phi inputs with current mapping
+
+        on leave block:
+            pop mappings introduced in this scope
+```
+
+这说明 alpha-renaming 当前做的不是：
+
+- 再算一次 phi placement
+- 再建一次 SSA
+
+而是：
+
+`在已有 verifier-legal SSA 上，把名字重新收稳`
+
+这也是为什么它特别适合放在：
+
+- DCE 之后
+- CFG simplify 之后
+- dump/export 之前
+
 ---
 
 ## 8. 这份课接下来去哪读
@@ -968,6 +1155,18 @@ bb.3:
 - loop case 下 constrained values 排前
 - worklist 分类和 priority 边界
 
+另外最近这一组测试也已经不只是“底层数组对不对”，而是把分析工具面一起锁进 authority 了，包括：
+
+- allocation-prep dump
+- allocation-worklist dump
+- class-specific worklist dump
+- live-block query
+- affinity-weight query
+- top-neighbor query
+- worklist item/class-range lookup
+
+这点很值得写进 lesson，因为它说明 `value_ssa` analysis 现在已经有一层真正给后续实验代码复用的“公共表面”。
+
 ---
 
 ## 10. 一句话总结
@@ -979,3 +1178,15 @@ $$
 $$
 
 而 pass 和 interpreter 现在已经不再糊在一起，而是分别去了各自的 sibling module。
+
+还有一点这次也该记住：
+
+当前 `value_ssa` 面向 lower-ir 的 one-shot bridge 已经不再只有 classic canonicalize 这一档了。
+
+现在实际有三档：
+
+1. classic canonicalized Value-SSA
+2. memory-value canonicalized Value-SSA
+3. full memory-aware canonicalized Value-SSA
+
+也就是说，`value_ssa` 现在不只是通往自己的 classic cleanup 层，也已经开始正式对接 `memory_ssa_pass` 这条 sibling bridge。

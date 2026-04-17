@@ -33,6 +33,7 @@ typedef int (*ValueSsaOracleBuilderFn)(const ValueSsaOracleCase *spec,
     ValueSsaError *error);
 
 typedef int (*ValueSsaOracleRawBuilderFn)(ValueSsaProgram *program, ValueSsaError *error);
+typedef int (*ValueSsaOracleLowerBuilderFn)(LowerIrProgram *program, LowerIrError *error);
 
 static int value_ssa_oracle_append_blocks(ValueSsaFunction *function,
     size_t block_count,
@@ -270,6 +271,117 @@ cleanup:
     }
     free(block_ids);
     return ok;
+}
+
+static int build_lower_ir_join_preserved_local_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *then_block = NULL;
+    LowerIrBasicBlock *else_block = NULL;
+    LowerIrBasicBlock *join_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &join_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_branch(entry, lower_ir_value_immediate(1), 1, 2, error) ||
+        !lower_ir_block_set_jump(then_block, 3, error) ||
+        !lower_ir_block_set_jump(else_block, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_local(0);
+    if (!lower_ir_block_append_instruction(join_block, &instruction, error) ||
+        !lower_ir_block_set_return(join_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_memory_fold_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_local(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(temp0);
+    instruction.as.binary.rhs = lower_ir_value_immediate(5);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp1), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
 }
 
 static int build_local_diamond_program(const ValueSsaOracleCase *spec,
@@ -1283,6 +1395,195 @@ cleanup:
     return ok;
 }
 
+static int value_ssa_oracle_compare_lower_before_after_mode(const char *case_id,
+    ValueSsaOracleLowerBuilderFn builder,
+    ValueSsaLowerIrCanonicalizeMode mode,
+    const long long *args,
+    size_t arg_count,
+    const ValueSsaInterpOptions *options) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram before_program;
+    ValueSsaProgram after_program;
+    ValueSsaError convert_error;
+    ValueSsaInterpResult before_result;
+    ValueSsaInterpResult after_result;
+    ValueSsaInterpError interp_error;
+    size_t global_index;
+    int ok = 1;
+
+    if (!case_id || !builder) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_from_lower_ir(&lower_program, &before_program, &convert_error) ||
+        !value_ssa_build_from_lower_ir_with_canonicalization(&lower_program, mode, &after_program, &convert_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s lower-ir mode conversion failed at %d:%d: %s\n",
+            case_id,
+            convert_error.line,
+            convert_error.column,
+            convert_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    value_ssa_interp_result_init(&before_result);
+    value_ssa_interp_result_init(&after_result);
+
+    if (!value_ssa_interp_execute_main(&before_program, args, arg_count, options, &before_result, &interp_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s pre-mode interpretation failed: %s\n",
+            case_id,
+            interp_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!value_ssa_interp_execute_main(&after_program, args, arg_count, options, &after_result, &interp_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s post-mode interpretation failed: %s\n",
+            case_id,
+            interp_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (before_result.return_value != after_result.return_value ||
+        before_result.global_count != after_result.global_count) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s return/global-count mismatch before/after lower-ir mode\n",
+            case_id);
+        ok = 0;
+        goto cleanup;
+    }
+
+    for (global_index = 0; global_index < before_result.global_count; ++global_index) {
+        if (before_result.global_values[global_index] != after_result.global_values[global_index]) {
+            fprintf(stderr,
+                "[value-ssa-oracle] FAIL: %s g.%zu mismatch before/after lower-ir mode (%lld vs %lld)\n",
+                case_id,
+                global_index,
+                before_result.global_values[global_index],
+                after_result.global_values[global_index]);
+            ok = 0;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    value_ssa_interp_result_free(&before_result);
+    value_ssa_interp_result_free(&after_result);
+    value_ssa_program_free(&before_program);
+    value_ssa_program_free(&after_program);
+    lower_ir_program_free(&lower_program);
+    return ok;
+}
+
+static int value_ssa_oracle_compare_lower_before_after_default(const char *case_id,
+    ValueSsaOracleLowerBuilderFn builder,
+    const long long *args,
+    size_t arg_count,
+    const ValueSsaInterpOptions *options) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram before_program;
+    ValueSsaProgram after_program;
+    ValueSsaError convert_error;
+    ValueSsaInterpResult before_result;
+    ValueSsaInterpResult after_result;
+    ValueSsaInterpError interp_error;
+    size_t global_index;
+    int ok = 1;
+
+    if (!case_id || !builder) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_from_lower_ir(&lower_program, &before_program, &convert_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, &after_program, &convert_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s lower-ir default conversion failed at %d:%d: %s\n",
+            case_id,
+            convert_error.line,
+            convert_error.column,
+            convert_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    value_ssa_interp_result_init(&before_result);
+    value_ssa_interp_result_init(&after_result);
+
+    if (!value_ssa_interp_execute_main(&before_program, args, arg_count, options, &before_result, &interp_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s pre-default interpretation failed: %s\n",
+            case_id,
+            interp_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!value_ssa_interp_execute_main(&after_program, args, arg_count, options, &after_result, &interp_error)) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s post-default interpretation failed: %s\n",
+            case_id,
+            interp_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (before_result.return_value != after_result.return_value ||
+        before_result.global_count != after_result.global_count) {
+        fprintf(stderr,
+            "[value-ssa-oracle] FAIL: %s return/global-count mismatch before/after lower-ir default\n",
+            case_id);
+        ok = 0;
+        goto cleanup;
+    }
+
+    for (global_index = 0; global_index < before_result.global_count; ++global_index) {
+        if (before_result.global_values[global_index] != after_result.global_values[global_index]) {
+            fprintf(stderr,
+                "[value-ssa-oracle] FAIL: %s g.%zu mismatch before/after lower-ir default (%lld vs %lld)\n",
+                case_id,
+                global_index,
+                before_result.global_values[global_index],
+                after_result.global_values[global_index]);
+            ok = 0;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    value_ssa_interp_result_free(&before_result);
+    value_ssa_interp_result_free(&after_result);
+    value_ssa_program_free(&before_program);
+    value_ssa_program_free(&after_program);
+    lower_ir_program_free(&lower_program);
+    return ok;
+}
+
 static int test_value_ssa_oracle_local_chain_matrix(void) {
     size_t chain_length;
     int repeated_seed_store;
@@ -1782,6 +2083,41 @@ static int test_value_ssa_oracle_handcrafted_semantics(void) {
     return ok;
 }
 
+static int test_value_ssa_oracle_lower_ir_memory_bridges(void) {
+    int ok = 1;
+
+    ok &= value_ssa_oracle_compare_lower_before_after_mode("ORACLE-LOWER-MEMORY-VALUE-FOLD",
+        build_lower_ir_memory_fold_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_VALUE,
+        NULL,
+        0,
+        NULL);
+
+    ok &= value_ssa_oracle_compare_lower_before_after_mode("ORACLE-LOWER-MEMORY-FOLD",
+        build_lower_ir_memory_fold_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL,
+        NULL,
+        0,
+        NULL);
+
+    ok &= value_ssa_oracle_compare_lower_before_after_mode("ORACLE-LOWER-MEMORY-LOCAL-JOIN",
+        build_lower_ir_join_preserved_local_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL,
+        NULL,
+        0,
+        NULL);
+
+    return ok;
+}
+
+static int test_value_ssa_oracle_lower_ir_default_bridge(void) {
+    return value_ssa_oracle_compare_lower_before_after_default("ORACLE-LOWER-DEFAULT-FOLD",
+        build_lower_ir_memory_fold_program,
+        NULL,
+        0,
+        NULL);
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1792,6 +2128,8 @@ int main(void) {
     ok &= test_value_ssa_oracle_mixed_hybrid_matrix();
     ok &= test_value_ssa_oracle_randomized_stress();
     ok &= test_value_ssa_oracle_handcrafted_semantics();
+    ok &= test_value_ssa_oracle_lower_ir_memory_bridges();
+    ok &= test_value_ssa_oracle_lower_ir_default_bridge();
 
     if (!ok) {
         return 1;

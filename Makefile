@@ -98,9 +98,15 @@ MEMORY_SSA_SPLIT_INCLUDES := \
 
 MEMORY_SSA_PASS_SPLIT_INCLUDES := \
 	src/memory_ssa_pass/memory_ssa_pass_core.inc \
+	src/memory_ssa_pass/memory_ssa_pass_slot_promotion.inc \
 	src/memory_ssa_pass/memory_ssa_pass_load_forward.inc \
 	src/memory_ssa_pass/memory_ssa_pass_store_cleanup.inc \
+	src/memory_ssa_pass/memory_ssa_pass_local_scalar_replace.inc \
+	src/memory_ssa_pass/memory_ssa_pass_global_scalar_replace.inc \
+	src/memory_ssa_pass/memory_ssa_pass_scalar_replace.inc \
+	src/memory_ssa_pass/memory_ssa_pass_memory_cse.inc \
 	src/memory_ssa_pass/memory_ssa_pass_memory_value.inc \
+	src/memory_ssa_pass/memory_ssa_pass_bridge.inc \
 	src/memory_ssa_pass/memory_ssa_pass_pipeline.inc
 
 VALUE_SSA_PASS_SPLIT_INCLUDES := \
@@ -113,6 +119,7 @@ VALUE_SSA_PASS_SPLIT_INCLUDES := \
 	src/value_ssa_pass/value_ssa_cse.inc \
 	src/value_ssa_pass/value_ssa_simplify_cfg.inc \
 	src/value_ssa_pass/value_ssa_dce.inc \
+	src/value_ssa_pass/value_ssa_pass_bridge.inc \
 	src/value_ssa_pass/value_ssa_pass_pipeline.inc
 
 VALUE_SSA_INTERP_SPLIT_INCLUDES := \
@@ -175,11 +182,11 @@ $(LOWER_IR_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c 
 $(LOWER_IR_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/lower_ir/lower_ir.c tests/lower_ir/lower_ir_verifier_test.c $(PARSER_SPLIT_INCLUDES) $(SEMANTIC_SPLIT_INCLUDES) $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/parser.h include/semantic.h include/ir.h include/lower_ir.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/semantic/semantic.c src/ir/ir.c src/lower_ir/lower_ir.c tests/lower_ir/lower_ir_verifier_test.c -o $@
 
-$(VALUE_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_interp.h | dirs
-	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c -o $@
+$(VALUE_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_interp.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_regression_test.c -o $@
 
-$(VALUE_SSA_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h | dirs
-	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c -o $@
+$(VALUE_SSA_VERIFIER_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_verifier_test.c -o $@
 
 $(VALUE_SSA_ANALYSIS_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_analysis_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_analysis_test.c -o $@
@@ -187,8 +194,8 @@ $(VALUE_SSA_ANALYSIS_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value
 $(VALUE_SSA_INTERP_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_interp_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_interp.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_interp_test.c -o $@
 
-$(VALUE_SSA_ORACLE_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_interp.h | dirs
-	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c -o $@
+$(VALUE_SSA_ORACLE_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_interp.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c -o $@
 
 $(MEMORY_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/memory_ssa/memory_ssa.c src/lower_ir/lower_ir.c tests/memory_ssa/memory_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/memory_ssa.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/memory_ssa/memory_ssa.c src/lower_ir/lower_ir.c tests/memory_ssa/memory_ssa_regression_test.c -o $@

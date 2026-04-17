@@ -18,7 +18,7 @@
 
 ## 1. 总览：`tests/` 目录怎么组织
 
-当前测试入口 C 文件（18 个）：
+当前测试入口 C 文件（22 个）：
 
 - `tests/lexer/test.c`
 - `tests/lexer/lexer_test.c`
@@ -33,6 +33,10 @@
 - `tests/parser/parser_legacy_link_test.c`
 - `tests/parser/parser_regression_test.c`
 - `tests/semantic/semantic_regression_test.c`
+- `tests/memory_ssa/memory_ssa_analysis_test.c`
+- `tests/memory_ssa/memory_ssa_pass_test.c`
+- `tests/memory_ssa/memory_ssa_regression_test.c`
+- `tests/memory_ssa/memory_ssa_verifier_test.c`
 - `tests/value_ssa/value_ssa_analysis_test.c`
 - `tests/value_ssa/value_ssa_interp_test.c`
 - `tests/value_ssa/value_ssa_oracle_test.c`
@@ -74,7 +78,8 @@ $$
 - runtime-init verifier：`IR-VERIFY-048` 到 `IR-VERIFY-060`
 - ir-pass：`fold -> const -> copy -> fold -> const -> copy -> simplify-cfg -> dead-temp-elim` 默认管线、safe immediate folding、单边 immediate 恒等归约、temp constant propagation、temp copy propagation、CFG simplification、dead temp elimination、invalid pass spec、NULL pass table
 - lower-ir：canonical IR -> lower IR 的 source-lowered shape、显式 `load_local/store_local/load_global/store_global` dump 形状、runtime-init helper exact dump、shared CFG/dominator/frontier/temp-def/phi-placement analysis，以及 lower-IR verifier 对 value/slot 边界、runtime-init helper、call 契约、terminator、名字表与 dense table 的拒绝路径
-- value-ssa：独立 SSA 数据模型、`phi` exact dump、builder fail-fast、strict `lower_ir -> value_ssa` converted dump、shared SSA-side CFG / def-use / liveness / interference / copy-affinity / allocation-prep / allocation-worklist analysis、function-level alpha-renaming、program-level canonicalization、one-shot canonicalized bridge、已经拆到独立 `value_ssa_pass` 模块里的 SSA-native load-forward / store-cleanup / normalize / identity / fold / redundant-binary / CFG-simplify / DCE pass，以及独立 `value_ssa_interp` 模块里的 SSA 执行/oracle 测试
+- value-ssa：独立 SSA 数据模型、`phi` exact dump、builder fail-fast、strict `lower_ir -> value_ssa` converted dump、shared SSA-side CFG / def-use / liveness / interference / copy-affinity / allocation-prep / allocation-worklist analysis、function-level alpha-renaming、program-level canonicalization、classic one-shot bridge、memory-aware bridge tier、已经拆到独立 `value_ssa_pass` 模块里的 SSA-native load-forward / store-cleanup / normalize / identity / fold / redundant-binary / CFG-simplify / DCE pass，以及独立 `value_ssa_interp` 模块里的 SSA 执行/oracle 测试
+- memory-ssa：独立 tracked-slot memory-version 层、block-entry memory phi、instruction-local access 注记、dump/verifier、`value_ssa -> memory_ssa` bridge、version def/use analysis、load/store resolution query，以及独立 `memory_ssa_pass` 模块里的 forwarding / store-cleanup / memory-only canonicalize / full pipeline / lower-ir bridge
 
 1. 表达式 family：算术、comparison、bitwise、shift、ternary、逗号表达式
 2. 更新表达式 family：compound assignment、prefix/postfix `++`、prefix/postfix `--`
@@ -131,6 +136,11 @@ $$
   - 对应 `tests/value_ssa/value_ssa_regression_test.c`
   - 当前主要锁 straight-line dump、diamond + phi dump、straight-line / diamond / simple slot-carried loop / 代表性 loop-carried temp join / multi-backedge loop-carried temp / multi-carried-temp loop / nested-loop carried-temp family 的 `lower_ir -> value_ssa` exact dump、diamond / loop 的 CFG analysis、diamond / loop 的 phi-placement、diamond / loop 的 dominator-walk enter/leave 顺序、rename-state scope/bind/restore、block-local use rewrite、predecessor-specific phi-input rewrite、shared def-use analysis、scrambled SSA function 的 alpha-renaming、program-level canonicalize dump、dead-result call / dangerous binary 在 canonicalization / one-shot bridge 下仍保留、canonicalization fixed-point、one-shot canonicalized conversion bridge、canonicalize 对 malformed SSA 输入的拒绝、以及新拆分 `value_ssa_pass` 模块里的 normalize / identity / fold / redundant-binary、local/global load-forward、redundant-store / dead-store cleanup、same-return CFG fold、`jmp -> empty ret` fold、empty-jump threading、single-predecessor non-phi jump-block merge 等 pass 行为
   - 当前口径已经不是“conversion 只开始消费 lower-IR-side facts”，而是“strict conversion 已经吃 pruned phi lists、在 DFS 前预创建 phi、在 dominator walk 中用 rename state 处理 use/def、在 predecessor leave 直接填 successor phi incoming；finalize 只做 completeness check，而 SSA-native cleanup/optimization pass 已经拆到 `value_ssa_pass`”
+  - 另外这组测试现在也明确把 lower-ir one-shot bridge 的三档都锁住了：
+    - classic
+    - memory-value
+    - memory-full
+    以及 mode-based 入口、default 入口和 invalid mode 的拒绝路径
 - `make test-value-ssa-verifier`
   - 对应 `tests/value_ssa/value_ssa_verifier_test.c`
   - 当前主要锁 verifier 对 valid phi、phi input count、duplicate SSA definition、unavailable use、unreachable block 的接受/拒绝路径
@@ -144,6 +154,28 @@ $$
 - `make test-value-ssa-oracle`
   - 对应 `tests/value_ssa/value_ssa_oracle_test.c`
   - 当前主要锁解释器作为 oracle/consumer 的组合边界：SSA 执行结果可用于对照 conversion / canonicalization / pass 之后的程序行为，而不需要把“运行结果”重新硬编码进每组 IR 断言
+
+另外现在也有单独的 memory-SSA 测试目标：
+
+- `make test-memory-ssa-regression`
+  - 对应 `tests/memory_ssa/memory_ssa_regression_test.c`
+  - 当前主要锁 memory-SSA skeleton/bridge 的 exact dump authority：tracked slot、entry version、memory phi、instruction-local access 注记，以及 representative local/global straight-line / join / loop family 的 memory-version 形状
+- `make test-memory-ssa-verifier`
+  - 对应 `tests/memory_ssa/memory_ssa_verifier_test.c`
+  - 当前主要锁 duplicate version definition、load without access、phi input count mismatch 等 memory-SSA structural contract
+- `make test-memory-ssa-analysis`
+  - 对应 `tests/memory_ssa/memory_ssa_analysis_test.c`
+  - 当前主要锁 version def/use、load/store resolution、same-value phi resolution、call barrier、entry seed / differing-value phi 保守停下，以及 slot-version/value equivalence query
+- `make test-memory-ssa-pass`
+  - 对应 `tests/memory_ssa/memory_ssa_pass_test.c`
+  - 当前主要锁 local/global forwarding、redundant/dead store cleanup、same-value join/loop forwarding、parameter-local / post-call global reuse、acyclic partial PRE、scrambled / multi-pred / ancestor-value-preferred join family、memory-phi 到 value-phi 的 slot promotion、local/global/mixed scalar replacement、memory-aware binary CSE / join-local GVN-like rewrite、phi-overwrite / loop-overwrite deadness、memory-only canonicalization fixed point、full memory-aware pipeline fixed point，以及 lower-ir one-shot memory bridge dump authority
+  - 这组测试最近特别有价值的一点是：它已经不只锁“能不能把已知 immediate forward 掉”，还锁：
+    - unknown parameter-local 在 join 处能不能通过 value phi 复用
+    - internal call 对不同 global 的 barrier 是否足够精细
+    - memory-value tier 和 memory-full tier 的最终 dump 是否按预期分开
+    - partial PRE 是否已经脱离 block-id 运气，真能覆盖 scrambled CFG
+    - slot promotion / scalar replacement 是否已经把一部分 slot-carried 值真正收成 SSA-carried value
+    - memory-aware CSE 是否已经能把 `add(phi, phi)` 收成 edge-result phi，并在必要时保守 materialize predecessor-side binary
 
 ---
 

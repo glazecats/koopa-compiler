@@ -1,5 +1,6 @@
 #include "value_ssa.h"
 #include "value_ssa_pass.h"
+#include "memory_ssa_pass.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -292,4 +293,5 @@ static int value_ssa_mark_reachable_blocks(const ValueSsaFunction *function,
 #include "value_ssa_cse.inc"
 #include "value_ssa_simplify_cfg.inc"
 #include "value_ssa_dce.inc"
+#include "value_ssa_pass_bridge.inc"
 #include "value_ssa_pass_pipeline.inc"

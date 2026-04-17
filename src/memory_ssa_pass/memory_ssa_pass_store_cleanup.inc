@@ -14,7 +14,7 @@ static int memory_ssa_pass_store_matches_previous_loaded_value(const ValueSsaFun
     ValueSsaError *error) {
     const ValueSsaInstruction *store_instruction;
     const MemorySsaInstruction *memory_store_instruction;
-    unsigned char *visit_state = NULL;
+    MemorySsaError memory_error;
     int ok = 1;
 
     if (!value_function || !memory_function || !memory_def_use || !value_def_use || !out_matches) {
@@ -43,36 +43,36 @@ static int memory_ssa_pass_store_matches_previous_loaded_value(const ValueSsaFun
         return 1;
     }
 
-    visit_state = (unsigned char *)calloc(value_def_use->value_count, sizeof(unsigned char));
-    if (!visit_state) {
-        memory_ssa_pass_set_error(error,
-            0,
-            0,
-            "MEMORY-SSA-PASS-027: out of memory while matching redundant store to prior load");
-        return 0;
-    }
-
-    ok = memory_ssa_pass_value_matches_slot_version(value_function,
+    ok = memory_ssa_value_matches_slot_version(value_function,
         memory_function,
         memory_def_use,
         value_def_use,
         store_instruction->as.store.value,
         store_instruction->as.store.slot,
         memory_store_instruction->accesses[0].use_version_id,
-        visit_state,
         out_matches,
-        error);
-    free(visit_state);
+        &memory_error);
+    if (!ok) {
+        memory_ssa_pass_copy_memory_error(error, &memory_error);
+    }
     return ok;
 }
 
-int memory_ssa_pass_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError *error) {
+static int memory_ssa_pass_eliminate_redundant_stores_impl(ValueSsaProgram *program,
+    int include_locals,
+    int include_globals,
+    ValueSsaError *error) {
     MemorySsaProgram memory_program;
     MemorySsaError memory_error;
     size_t function_index;
 
     if (!program) {
-        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-010: invalid redundant-store contract");
+        memory_ssa_pass_set_error(error,
+            0,
+            0,
+            (include_locals && include_globals)  ? "MEMORY-SSA-PASS-010: invalid redundant-store contract"
+            : (include_locals && !include_globals) ? "MEMORY-SSA-PASS-059: invalid redundant-local-store contract"
+                                                  : "MEMORY-SSA-PASS-062: invalid redundant-global-store contract");
         return 0;
     }
 
@@ -161,6 +161,10 @@ int memory_ssa_pass_eliminate_redundant_stores(ValueSsaProgram *program, ValueSs
                     instruction->kind != VALUE_SSA_INSTR_STORE_GLOBAL) {
                     continue;
                 }
+                if ((instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL && !include_locals) ||
+                    (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL && !include_globals)) {
+                    continue;
+                }
 
                 ok = memory_ssa_resolve_store_previous_value(memory_function,
                     &def_use,
@@ -231,7 +235,20 @@ int memory_ssa_pass_eliminate_redundant_stores(ValueSsaProgram *program, ValueSs
     return value_ssa_verify_program(program, error);
 }
 
+int memory_ssa_pass_eliminate_redundant_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    return memory_ssa_pass_eliminate_redundant_stores_impl(program, 1, 0, error);
+}
+
+int memory_ssa_pass_eliminate_redundant_global_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    return memory_ssa_pass_eliminate_redundant_stores_impl(program, 0, 1, error);
+}
+
+int memory_ssa_pass_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    return memory_ssa_pass_eliminate_redundant_stores_impl(program, 1, 1, error);
+}
+
 static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
+    int include_locals,
     int include_globals,
     ValueSsaError *error) {
     MemorySsaProgram memory_program;
@@ -242,8 +259,9 @@ static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
         memory_ssa_pass_set_error(error,
             0,
             0,
-            include_globals ? "MEMORY-SSA-PASS-013: invalid dead-store contract"
-                            : "MEMORY-SSA-PASS-006: invalid dead-local-store contract");
+            (include_locals && include_globals)  ? "MEMORY-SSA-PASS-013: invalid dead-store contract"
+            : (include_locals && !include_globals) ? "MEMORY-SSA-PASS-006: invalid dead-local-store contract"
+                                                  : "MEMORY-SSA-PASS-063: invalid dead-global-store contract");
         return 0;
     }
 
@@ -322,7 +340,8 @@ static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
                     instruction->kind != VALUE_SSA_INSTR_STORE_GLOBAL) {
                     continue;
                 }
-                if (!include_globals && instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL) {
+                if ((instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL && !include_locals) ||
+                    (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL && !include_globals)) {
                     continue;
                 }
 
@@ -371,11 +390,15 @@ static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
 }
 
 int memory_ssa_pass_eliminate_dead_stores(ValueSsaProgram *program, ValueSsaError *error) {
-    return memory_ssa_pass_eliminate_dead_stores_impl(program, 1, error);
+    return memory_ssa_pass_eliminate_dead_stores_impl(program, 1, 1, error);
 }
 
 int memory_ssa_pass_eliminate_dead_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
-    return memory_ssa_pass_eliminate_dead_stores_impl(program, 0, error);
+    return memory_ssa_pass_eliminate_dead_stores_impl(program, 1, 0, error);
+}
+
+int memory_ssa_pass_eliminate_dead_global_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    return memory_ssa_pass_eliminate_dead_stores_impl(program, 0, 1, error);
 }
 
 #endif

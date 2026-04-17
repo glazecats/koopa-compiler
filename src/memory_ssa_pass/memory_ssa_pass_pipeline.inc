@@ -36,17 +36,10 @@ int memory_ssa_pass_run_pipeline(ValueSsaProgram *program, ValueSsaError *error)
 
         if (!memory_ssa_pass_dump_program_copy(program, &before_text, error) ||
             !memory_ssa_pass_run_one_step(
-                "canonicalize-memory-values", memory_ssa_pass_canonicalize_memory_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-pre-fold", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "normalize-binary-operands", value_ssa_normalize_binary_operands, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-mid-fold", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step("fold-constants", value_ssa_fold_constants, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-algebraic-identities", value_ssa_simplify_algebraic_identities, program, error) ||
-            !memory_ssa_pass_run_one_step("simplify-trivial-values", value_ssa_simplify_trivial_values, program, error) ||
+                "eliminate-redundant-memory-binaries",
+                memory_ssa_pass_eliminate_redundant_memory_binaries,
+                program,
+                error) ||
             !memory_ssa_pass_run_one_step(
                 "eliminate-dead-value-defs", value_ssa_eliminate_dead_value_defs, program, error) ||
             !memory_ssa_pass_run_one_step("simplify-cfg", value_ssa_simplify_cfg, program, error) ||

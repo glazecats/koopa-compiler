@@ -179,6 +179,12 @@ int memory_ssa_find_version_use_sites(const MemorySsaDefUseAnalysis *analysis,
     size_t version_id,
     const MemorySsaVersionUseSite **out_sites,
     size_t *out_count);
+int memory_ssa_resolve_version_value(const MemorySsaFunction *function,
+    const MemorySsaDefUseAnalysis *analysis,
+    size_t version_id,
+    int *out_has_value,
+    ValueSsaValueRef *out_value,
+    MemorySsaError *error);
 int memory_ssa_resolve_load_store_value(const MemorySsaFunction *function,
     const MemorySsaDefUseAnalysis *analysis,
     size_t block_id,
@@ -198,6 +204,25 @@ int memory_ssa_is_trivially_dead_store(const MemorySsaFunction *function,
     size_t block_id,
     size_t instruction_index,
     int *out_is_dead,
+    MemorySsaError *error);
+int memory_ssa_value_matches_slot_version(const ValueSsaFunction *value_function,
+    const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    const ValueSsaDefUseAnalysis *value_def_use,
+    ValueSsaValueRef value,
+    ValueSsaSlotRef expected_slot,
+    size_t expected_version_id,
+    int *out_matches,
+    MemorySsaError *error);
+int memory_ssa_find_block_equivalent_value(const ValueSsaFunction *value_function,
+    const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    const ValueSsaDefUseAnalysis *value_def_use,
+    size_t block_id,
+    ValueSsaSlotRef expected_slot,
+    size_t expected_version_id,
+    int *out_has_value,
+    ValueSsaValueRef *out_value,
     MemorySsaError *error);
 
 #endif

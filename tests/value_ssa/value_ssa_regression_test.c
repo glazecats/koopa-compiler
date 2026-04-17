@@ -264,6 +264,117 @@ static int build_lower_ir_scrambled_diamond_program(LowerIrProgram *program, Low
     return 1;
 }
 
+static int build_lower_ir_join_preserved_local_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *then_block = NULL;
+    LowerIrBasicBlock *else_block = NULL;
+    LowerIrBasicBlock *join_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &join_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_branch(entry, lower_ir_value_immediate(1), 1, 2, error) ||
+        !lower_ir_block_set_jump(then_block, 3, error) ||
+        !lower_ir_block_set_jump(else_block, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_local(0);
+    if (!lower_ir_block_append_instruction(join_block, &instruction, error) ||
+        !lower_ir_block_set_return(join_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_memory_fold_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_local(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(temp0);
+    instruction.as.binary.rhs = lower_ir_value_immediate(5);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp1), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_lower_ir_loop_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrBasicBlock *entry = NULL;
@@ -4590,6 +4701,298 @@ static int expect_canonicalized_converted_fixed_point_dump(const char *case_id,
     return ok;
 }
 
+static int expect_memory_value_canonicalized_converted_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const char *expected_text) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram ssa_program;
+    ValueSsaError ssa_error;
+    char *actual_text = NULL;
+    int ok;
+
+    if (!builder || !expected_text) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_memory_value_canonicalized_from_lower_ir(&lower_program, &ssa_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s memory-value canonicalized conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&ssa_program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        lower_ir_program_free(&lower_program);
+        value_ssa_program_free(&ssa_program);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s memory-value canonicalized converted dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&ssa_program);
+    return ok;
+}
+
+static int expect_memory_canonicalized_converted_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const char *expected_text) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram ssa_program;
+    ValueSsaError ssa_error;
+    char *actual_text = NULL;
+    int ok;
+
+    if (!builder || !expected_text) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_memory_canonicalized_from_lower_ir(&lower_program, &ssa_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s memory canonicalized conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&ssa_program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        lower_ir_program_free(&lower_program);
+        value_ssa_program_free(&ssa_program);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s memory canonicalized converted dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&ssa_program);
+    return ok;
+}
+
+static int expect_mode_converted_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    ValueSsaLowerIrCanonicalizeMode mode,
+    const char *expected_text) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram ssa_program;
+    ValueSsaError ssa_error;
+    char *actual_text = NULL;
+    int ok;
+
+    if (!builder || !expected_text) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_from_lower_ir_with_canonicalization(&lower_program, mode, &ssa_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s mode conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&ssa_program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        lower_ir_program_free(&lower_program);
+        value_ssa_program_free(&ssa_program);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s mode converted dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&ssa_program);
+    return ok;
+}
+
+static int expect_default_converted_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    const char *expected_text) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram ssa_program;
+    ValueSsaError ssa_error;
+    char *actual_text = NULL;
+    int ok;
+
+    if (!builder || !expected_text) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_default_from_lower_ir(&lower_program, &ssa_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&ssa_program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        lower_ir_program_free(&lower_program);
+        value_ssa_program_free(&ssa_program);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default converted dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&ssa_program);
+    return ok;
+}
+
+static int expect_default_matches_mode_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error),
+    ValueSsaLowerIrCanonicalizeMode mode) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram default_program;
+    ValueSsaProgram mode_program;
+    ValueSsaError ssa_error;
+    char *default_text = NULL;
+    char *mode_text = NULL;
+    int ok = 1;
+
+    if (!builder) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_default_from_lower_ir(&lower_program, &default_program, &ssa_error) ||
+        !value_ssa_build_from_lower_ir_with_canonicalization(&lower_program, mode, &mode_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default/mode conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&default_program, &default_text) ||
+        !value_ssa_dump_program(&mode_program, &mode_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strcmp(default_text, mode_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default/mode dump mismatch\ndefault:\n%s\nmode:\n%s\n",
+            case_id,
+            default_text,
+            mode_text);
+        ok = 0;
+    }
+
+cleanup:
+    free(default_text);
+    free(mode_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&default_program);
+    value_ssa_program_free(&mode_program);
+    return ok;
+}
+
 static int expect_cfg_analysis(const char *case_id,
     int (*builder)(ValueSsaProgram *program, ValueSsaError *error),
     int (*checker)(const ValueSsaProgram *program, const ValueSsaCfgAnalysis *analysis)) {
@@ -7328,6 +7731,118 @@ static int test_value_ssa_canonicalized_conversion_preserves_dangerous_dead_bina
         "}\n");
 }
 
+static int test_value_ssa_memory_canonicalized_conversion_local_join(void) {
+    return expect_memory_canonicalized_converted_dump("VALUE-SSA-CONVERT-MEMORY-CANONICALIZE-LOCAL-JOIN",
+        build_lower_ir_join_preserved_local_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 7\n"
+        "}\n");
+}
+
+static int test_value_ssa_memory_value_canonicalized_conversion_fold_program(void) {
+    return expect_memory_value_canonicalized_converted_dump(
+        "VALUE-SSA-CONVERT-MEMORY-VALUE-CANONICALIZE-FOLD",
+        build_lower_ir_memory_fold_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = add 7, 5\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_memory_canonicalized_conversion_fold_program(void) {
+    return expect_memory_canonicalized_converted_dump("VALUE-SSA-CONVERT-MEMORY-CANONICALIZE-FOLD",
+        build_lower_ir_memory_fold_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 12\n"
+        "}\n");
+}
+
+static int test_value_ssa_mode_conversion_classic_diamond(void) {
+    return expect_mode_converted_dump("VALUE-SSA-CONVERT-MODE-CLASSIC-DIAMOND",
+        build_lower_ir_diamond_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC,
+        "func main(a.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local a.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.1 = phi [bb.1: 1], [bb.2: 2]\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_mode_conversion_memory_value_fold(void) {
+    return expect_mode_converted_dump("VALUE-SSA-CONVERT-MODE-MEMORY-VALUE-FOLD",
+        build_lower_ir_memory_fold_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_VALUE,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = add 7, 5\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_mode_conversion_memory_full_fold(void) {
+    return expect_mode_converted_dump("VALUE-SSA-CONVERT-MODE-MEMORY-FULL-FOLD",
+        build_lower_ir_memory_fold_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 12\n"
+        "}\n");
+}
+
+static int test_value_ssa_mode_conversion_rejects_unknown_mode(void) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram ssa_program;
+    ValueSsaError ssa_error;
+    int ok;
+
+    if (!build_lower_ir_memory_fold_program(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-MODE-INVALID setup failed at %d:%d: %s\n",
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    ok = !value_ssa_build_from_lower_ir_with_canonicalization(
+             &lower_program, (ValueSsaLowerIrCanonicalizeMode)99, &ssa_program, &ssa_error) &&
+        strstr(ssa_error.message, "VALUE-SSA-177") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-MODE-INVALID expected VALUE-SSA-177, got: %s\n",
+            ssa_error.message);
+    }
+
+    lower_ir_program_free(&lower_program);
+    return ok;
+}
+
+static int test_value_ssa_default_conversion_fold_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-FOLD",
+        build_lower_ir_memory_fold_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 12\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_matches_memory_full_mode(void) {
+    return expect_default_matches_mode_dump("VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL",
+        build_lower_ir_join_preserved_local_program,
+        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL);
+}
+
 static int test_value_ssa_canonicalize_program_rejects_invalid_input(void) {
     return expect_canonicalize_rejected("VALUE-SSA-CANONICALIZE-REJECT-INVALID",
         build_invalid_undefined_value_program,
@@ -7582,6 +8097,15 @@ int main(void) {
     ok &= test_value_ssa_canonicalized_conversion_diamond_fixed_point();
     ok &= test_value_ssa_canonicalized_conversion_preserves_dead_result_call();
     ok &= test_value_ssa_canonicalized_conversion_preserves_dangerous_dead_binary();
+    ok &= test_value_ssa_memory_canonicalized_conversion_local_join();
+    ok &= test_value_ssa_memory_value_canonicalized_conversion_fold_program();
+    ok &= test_value_ssa_memory_canonicalized_conversion_fold_program();
+    ok &= test_value_ssa_mode_conversion_classic_diamond();
+    ok &= test_value_ssa_mode_conversion_memory_value_fold();
+    ok &= test_value_ssa_mode_conversion_memory_full_fold();
+    ok &= test_value_ssa_mode_conversion_rejects_unknown_mode();
+    ok &= test_value_ssa_default_conversion_fold_program();
+    ok &= test_value_ssa_default_matches_memory_full_mode();
     ok &= test_value_ssa_canonicalize_program_rejects_invalid_input();
     ok &= test_value_ssa_builder_rejects_declaration_block_append();
     ok &= test_value_ssa_builder_rejects_declaration_allocate_value();

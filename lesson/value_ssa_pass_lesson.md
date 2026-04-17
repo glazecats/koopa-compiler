@@ -10,6 +10,10 @@
 2. pass：`value_ssa_pass`
 3. execution：`value_ssa_interp`
 
+而 lower-ir one-shot 这一侧，现在还多了一层 memory-aware sibling：
+
+4. memory-backed pass/bridge：`memory_ssa_pass`
+
 这份讲义只讲第二层。
 
 ---
@@ -60,7 +64,22 @@
 - `value_ssa_simplify_cfg(...)`
 - `value_ssa_eliminate_dead_value_defs(...)`
 - `value_ssa_canonicalize_program(...)`
+- `value_ssa_build_from_lower_ir_with_canonicalization(...)`
+- `value_ssa_build_default_from_lower_ir(...)`
+- `value_ssa_build_memory_value_canonicalized_from_lower_ir(...)`
+- `value_ssa_build_memory_canonicalized_from_lower_ir(...)`
 - `value_ssa_build_canonicalized_from_lower_ir(...)`
+
+对应的 mode enum 现在也已经是公开 API：
+
+```c
+typedef enum {
+    VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC = 0,
+    VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_VALUE,
+    VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL,
+    VALUE_SSA_LOWER_IR_CANONICALIZE_DEFAULT = VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL,
+} ValueSsaLowerIrCanonicalizeMode;
+```
 
 ---
 
@@ -348,10 +367,189 @@ bb.0:
 
 ```c
 int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_build_memory_value_canonicalized_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+int value_ssa_build_memory_canonicalized_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
 int value_ssa_build_canonicalized_from_lower_ir(const LowerIrProgram *program,
     ValueSsaProgram *out_program,
     ValueSsaError *error);
 ```
+
+### 5.1.1 现在 lower-ir one-shot bridge 已经分三档
+
+这一点最近也变了，所以 lesson 里不该再只写一条旧入口。
+
+当前 lower-ir one-shot 实际已经分成：
+
+1. `value_ssa_build_canonicalized_from_lower_ir(...)`
+   - classic Value-SSA canonicalize
+2. `value_ssa_build_memory_value_canonicalized_from_lower_ir(...)`
+   - 委托给 `memory_ssa_pass` 的 memory-value canonicalize
+3. `value_ssa_build_memory_canonicalized_from_lower_ir(...)`
+   - 委托给 `memory_ssa_pass` 的 full memory-aware pipeline
+
+所以现在 `value_ssa_pass` 这一层不只是有自己 classic canonicalize，也开始承担“Value-SSA-facing memory-aware bridge facade”。
+
+### 5.1.2 mode-based 入口现在是更完整的 caller surface
+
+如果调用方不是“永远只走某一档”，而是想把策略显式做成参数，那么现在更完整的入口其实是：
+
+```c
+int value_ssa_build_from_lower_ir_with_canonicalization(const LowerIrProgram *program,
+    ValueSsaLowerIrCanonicalizeMode mode,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+```
+
+这条 API 的 lesson 重点不在“又多了个 wrapper”，而在：
+
+- 策略选择现在有正式 enum
+- caller 不用再手写 if/else 分发三条不同 build 函数
+- `value_ssa_pass` 对外提供了一个稳定的高层入口
+
+可以把它记成：
+
+`build policy` 已经从“调用点习惯”提升成了 “API contract”
+
+### 5.1.3 这三个 mode 到底差在哪
+
+最容易讲清楚的例子，就是：
+
+```text
+store_local a.0, 7
+ssa.0 = load_local a.0
+ssa.1 = add ssa.0, 5
+ret ssa.1
+```
+
+如果 lower IR 是这个形状，那么三档 one-shot 结果现在应该这样理解：
+
+#### classic
+
+classic 只走：
+
+`lower_ir -> value_ssa -> classic value_ssa pipeline`
+
+它能做的主要是原来那条 Value-SSA 侧的保守清理。
+
+#### memory-value
+
+memory-value 走：
+
+`lower_ir -> value_ssa -> memory_ssa_pass_canonicalize_memory_values`
+
+这时会先把 memory 相关机会吃掉，所以 `load_local a.0` 可以先塌成 `mov 7`。  
+但它**不会继续**把 `add 7, 5` 折成 `12`。
+
+所以代表结果会更像：
+
+```text
+func main() {
+  bb.0:
+    ssa.0 = add 7, 5
+    ret ssa.0
+}
+```
+
+#### memory-full
+
+memory-full 则继续往后接 value-only cleanup tail，所以：
+
+- 先 memory cleanup
+- 再 normalize / fold / identity / DCE / CFG cleanup
+
+最后可以继续收成：
+
+```text
+func main() {
+  bb.0:
+    ret 12
+}
+```
+
+这也是当前三档最值得记的区别：
+
+1. classic：只走 old Value-SSA canonicalize
+2. memory-value：把 memory 形状先收稳，但不强行继续折 arithmetic
+3. memory-full：当前最强的默认 one-shot 结果
+
+### 5.1.4 这条 mode dispatch 的伪代码
+
+当前 `value_ssa_pass_bridge.inc` 的结构其实很直白，lesson 里可以直接记成：
+
+```text
+build_from_lower_ir_with_canonicalization(program, mode):
+    switch mode:
+        case CLASSIC:
+            build raw value_ssa from lower_ir
+            canonicalize once
+            canonicalize second time
+            return stable classic result
+
+        case MEMORY_VALUE:
+            delegate to memory_ssa_pass_build_memory_canonicalized_from_lower_ir(...)
+
+        case MEMORY_FULL:
+            delegate to memory_ssa_pass_build_canonicalized_from_lower_ir(...)
+
+        default:
+            reject unknown mode
+```
+
+这里有两个课上很值得强调的小点：
+
+1. classic 分支现在会主动 canonicalize 两次，目的就是把 classic one-shot 也收成稳定 fixed point
+2. memory 两个分支并不在 `value_ssa_pass` 里重写一遍逻辑，而是直接委托给 `memory_ssa_pass`
+
+所以这层 bridge 的职责非常清楚：
+
+`统一 Value-SSA-facing 入口，不重复发明 memory pipeline`
+
+### 5.1.5 default 入口现在意味着什么
+
+现在还有一条更高一层的 helper：
+
+```c
+int value_ssa_build_default_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+```
+
+它当前不是“随便挑一个默认”，而是已经被 enum 明确锁成：
+
+```c
+VALUE_SSA_LOWER_IR_CANONICALIZE_DEFAULT = VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL
+```
+
+也就是说，当前默认策略等于：
+
+`memory-full`
+
+这很值得写进 lesson，因为它意味着：
+
+- 普通 caller 如果不想自己选策略，应该优先走 default helper
+- 仓库当前对“最推荐的 lower_ir -> value_ssa one-shot 入口”已经有明确态度
+- 如果以后默认策略变了，改 enum 就够，不必去搜一堆 call site
+
+### 5.1.6 当前 bridge tier 的支持 / 不支持
+
+**当前已经讲得稳的：**
+
+- classic / memory-value / memory-full 三档都存在
+- mode-based API 存在
+- default helper 存在
+- invalid mode 会拒绝，而不是 silently fallback
+- `memory-value` 与 `memory-full` 的差异已经有回归 authority
+
+**当前不要讲成已有的：**
+
+- 动态 profile-guided mode 选择
+- auto-tuning bridge policy
+- alias-aware lower-ir bridge mode
+- per-function 自适应切换不同 memory pipeline
 
 ### 5.2 pipeline 现在怎么排
 

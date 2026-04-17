@@ -475,6 +475,7 @@ static int memory_ssa_resolve_version_value_recursive(const MemorySsaFunction *f
         const MemorySsaPhi *phi;
         size_t input_index;
         int has_candidate = 0;
+        int has_non_cycle_input = 0;
         ValueSsaValueRef candidate = value_ssa_value_immediate(0);
 
         def_block_id = analysis->def_block_ids[version_id];
@@ -488,10 +489,11 @@ static int memory_ssa_resolve_version_value_recursive(const MemorySsaFunction *f
         for (input_index = 0; input_index < phi->input_count; ++input_index) {
             int input_has_value = 0;
             ValueSsaValueRef input_value;
+            size_t input_version_id = phi->inputs[input_index].version_id;
 
             if (!memory_ssa_resolve_version_value_recursive(function,
                     analysis,
-                    phi->inputs[input_index].version_id,
+                    input_version_id,
                     visit_state,
                     resolved_has_value,
                     resolved_values,
@@ -501,11 +503,15 @@ static int memory_ssa_resolve_version_value_recursive(const MemorySsaFunction *f
                 return 0;
             }
             if (!input_has_value) {
+                if (visit_state[input_version_id] == 1) {
+                    continue;
+                }
                 has_candidate = 0;
                 *out_has_value = 0;
                 *out_value = value_ssa_value_immediate(0);
                 goto finish;
             }
+            has_non_cycle_input = 1;
             if (!has_candidate) {
                 candidate = input_value;
                 has_candidate = 1;
@@ -519,7 +525,7 @@ static int memory_ssa_resolve_version_value_recursive(const MemorySsaFunction *f
             }
         }
 
-        if (has_candidate) {
+        if (has_candidate && has_non_cycle_input) {
             *out_has_value = 1;
             *out_value = candidate;
         }
@@ -535,6 +541,107 @@ finish:
     resolved_has_value[version_id] = *out_has_value;
     resolved_values[version_id] = *out_value;
     return 1;
+}
+
+/*
+ * Iterative wrapper around memory_ssa_resolve_version_value_recursive.
+ *
+ * The recursive resolver handles direct self-cycles (phiA's input traces back
+ * to phiA) by skipping cycle inputs.  However, indirect cycles (phiA -> phiB
+ * -> phiA) can still fail: phiB resolves first, fails because its only non-
+ * cycle input is phiA (still in-progress), gets marked visit_state=2 with
+ * has_value=0.  When phiA later sees phiB's result, it treats it as a genuine
+ * failure rather than a cycle artifact.
+ *
+ * Fix: after the first pass, reset any PHI-defined versions that resolved to
+ * has_value=0 back to unvisited, then re-run.  On the second pass, versions
+ * that did resolve on pass 1 are cached (visit_state=2), so the cycle members
+ * can now see their sibling phis' resolved values.  At most 2 iterations
+ * suffice because the resolver is monotonic: each pass can only add new
+ * resolved values, never revoke them.
+ */
+static int memory_ssa_resolve_version_value_iterative(const MemorySsaFunction *function,
+    const MemorySsaDefUseAnalysis *analysis,
+    size_t version_id,
+    int *out_has_value,
+    ValueSsaValueRef *out_value,
+    MemorySsaError *error) {
+    unsigned char *visit_state = NULL;
+    int *resolved_has_value = NULL;
+    ValueSsaValueRef *resolved_values = NULL;
+    int ok;
+    int pass;
+
+    if (!analysis || analysis->version_count == 0) {
+        *out_has_value = 0;
+        *out_value = value_ssa_value_immediate(0);
+        return 1;
+    }
+
+    visit_state = (unsigned char *)calloc(analysis->version_count, sizeof(unsigned char));
+    resolved_has_value = (int *)calloc(analysis->version_count, sizeof(int));
+    resolved_values = (ValueSsaValueRef *)calloc(analysis->version_count, sizeof(ValueSsaValueRef));
+    if (!visit_state || !resolved_has_value || !resolved_values) {
+        free(visit_state);
+        free(resolved_has_value);
+        free(resolved_values);
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-086: out of memory while resolving memory version value");
+        return 0;
+    }
+
+    for (pass = 0; pass < 2; ++pass) {
+        ok = memory_ssa_resolve_version_value_recursive(function,
+            analysis,
+            version_id,
+            visit_state,
+            resolved_has_value,
+            resolved_values,
+            out_has_value,
+            out_value,
+            error);
+        if (!ok) {
+            break;
+        }
+        if (*out_has_value || pass == 1) {
+            break;
+        }
+        {
+            size_t v;
+
+            for (v = 0; v < analysis->version_count; ++v) {
+                if (visit_state[v] == 2 && !resolved_has_value[v] &&
+                    analysis->def_kinds[v] == MEMORY_SSA_VERSION_DEF_PHI) {
+                    visit_state[v] = 0;
+                }
+            }
+        }
+    }
+
+    free(visit_state);
+    free(resolved_has_value);
+    free(resolved_values);
+    return ok;
+}
+
+int memory_ssa_resolve_version_value(const MemorySsaFunction *function,
+    const MemorySsaDefUseAnalysis *analysis,
+    size_t version_id,
+    int *out_has_value,
+    ValueSsaValueRef *out_value,
+    MemorySsaError *error) {
+    if (!function || !analysis || !out_has_value || !out_value) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-105: invalid version-value resolution contract");
+        return 0;
+    }
+
+    *out_has_value = 0;
+    *out_value = value_ssa_value_immediate(0);
+    if (version_id >= analysis->version_count || !analysis->has_def || !analysis->has_def[version_id]) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-106: mem.%zu is not a defined version", version_id);
+        return 0;
+    }
+
+    return memory_ssa_resolve_version_value_iterative(function, analysis, version_id, out_has_value, out_value, error);
 }
 
 static int memory_ssa_version_is_observed_recursive(const MemorySsaFunction *function,
@@ -624,10 +731,6 @@ int memory_ssa_resolve_load_store_value(const MemorySsaFunction *function,
     MemorySsaError *error) {
     const MemorySsaInstruction *instruction;
     size_t version_id;
-    unsigned char *visit_state = NULL;
-    int *resolved_has_value = NULL;
-    ValueSsaValueRef *resolved_values = NULL;
-    int ok;
 
     if (!function || !analysis || !out_has_value || !out_value) {
         memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-093: invalid load-resolution contract");
@@ -658,30 +761,7 @@ int memory_ssa_resolve_load_store_value(const MemorySsaFunction *function,
         return 0;
     }
 
-    visit_state = (unsigned char *)calloc(analysis->version_count, sizeof(unsigned char));
-    resolved_has_value = (int *)calloc(analysis->version_count, sizeof(int));
-    resolved_values = (ValueSsaValueRef *)calloc(analysis->version_count, sizeof(ValueSsaValueRef));
-    if (!visit_state || !resolved_has_value || !resolved_values) {
-        free(visit_state);
-        free(resolved_has_value);
-        free(resolved_values);
-        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-086: out of memory while resolving memory version value");
-        return 0;
-    }
-
-    ok = memory_ssa_resolve_version_value_recursive(function,
-        analysis,
-        version_id,
-        visit_state,
-        resolved_has_value,
-        resolved_values,
-        out_has_value,
-        out_value,
-        error);
-    free(visit_state);
-    free(resolved_has_value);
-    free(resolved_values);
-    return ok;
+    return memory_ssa_resolve_version_value_iterative(function, analysis, version_id, out_has_value, out_value, error);
 }
 
 int memory_ssa_resolve_store_previous_value(const MemorySsaFunction *function,
@@ -693,10 +773,6 @@ int memory_ssa_resolve_store_previous_value(const MemorySsaFunction *function,
     MemorySsaError *error) {
     const MemorySsaInstruction *instruction;
     size_t version_id;
-    unsigned char *visit_state = NULL;
-    int *resolved_has_value = NULL;
-    ValueSsaValueRef *resolved_values = NULL;
-    int ok;
 
     if (!function || !analysis || !out_has_value || !out_value) {
         memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-101: invalid store-previous-value contract");
@@ -730,30 +806,7 @@ int memory_ssa_resolve_store_previous_value(const MemorySsaFunction *function,
         return 0;
     }
 
-    visit_state = (unsigned char *)calloc(analysis->version_count, sizeof(unsigned char));
-    resolved_has_value = (int *)calloc(analysis->version_count, sizeof(int));
-    resolved_values = (ValueSsaValueRef *)calloc(analysis->version_count, sizeof(ValueSsaValueRef));
-    if (!visit_state || !resolved_has_value || !resolved_values) {
-        free(visit_state);
-        free(resolved_has_value);
-        free(resolved_values);
-        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-086: out of memory while resolving store previous value");
-        return 0;
-    }
-
-    ok = memory_ssa_resolve_version_value_recursive(function,
-        analysis,
-        version_id,
-        visit_state,
-        resolved_has_value,
-        resolved_values,
-        out_has_value,
-        out_value,
-        error);
-    free(visit_state);
-    free(resolved_has_value);
-    free(resolved_values);
-    return ok;
+    return memory_ssa_resolve_version_value_iterative(function, analysis, version_id, out_has_value, out_value, error);
 }
 
 int memory_ssa_is_trivially_dead_store(const MemorySsaFunction *function,
@@ -814,6 +867,292 @@ int memory_ssa_is_trivially_dead_store(const MemorySsaFunction *function,
     free(visit_state);
     free(memo_observed);
     *out_is_dead = !observed;
+    return 1;
+}
+
+static int memory_ssa_slot_refs_equal(ValueSsaSlotRef lhs, ValueSsaSlotRef rhs) {
+    return lhs.kind == rhs.kind && lhs.id == rhs.id;
+}
+
+static int memory_ssa_value_matches_slot_version_recursive(const ValueSsaFunction *value_function,
+    const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    const ValueSsaDefUseAnalysis *value_def_use,
+    ValueSsaValueRef value,
+    ValueSsaSlotRef expected_slot,
+    size_t expected_version_id,
+    unsigned char *visit_state,
+    int *out_matches,
+    MemorySsaError *error) {
+    size_t def_block_id;
+    size_t def_phi_index;
+    size_t def_instruction_index;
+    const ValueSsaInstruction *def_instruction;
+    const MemorySsaInstruction *memory_instruction;
+
+    if (!value_function || !memory_function || !memory_def_use || !value_def_use || !visit_state || !out_matches) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-107: invalid slot-version value match contract");
+        return 0;
+    }
+
+    *out_matches = 0;
+    if (value.kind != VALUE_SSA_VALUE_ID || value.value_id >= value_def_use->value_count ||
+        !value_def_use->has_def || !value_def_use->has_def[value.value_id]) {
+        return 1;
+    }
+    if (visit_state[value.value_id] == 1) {
+        *out_matches = 1;
+        return 1;
+    }
+
+    visit_state[value.value_id] = 1;
+    def_block_id = value_def_use->def_block_ids[value.value_id];
+    def_phi_index = value_def_use->def_phi_indices[value.value_id];
+    def_instruction_index = value_def_use->def_instruction_indices[value.value_id];
+
+    if (def_phi_index != (size_t)-1) {
+        const ValueSsaPhi *phi;
+        size_t input_index;
+        const MemorySsaPhi *expected_phi = NULL;
+        size_t expected_phi_block_id = 0;
+        size_t expected_phi_index = 0;
+        int expected_is_phi = 0;
+
+        if (def_block_id >= value_function->block_count || def_phi_index >= value_function->blocks[def_block_id].phi_count) {
+            visit_state[value.value_id] = 2;
+            return 1;
+        }
+        if (expected_version_id < memory_def_use->version_count &&
+            memory_def_use->has_def &&
+            memory_def_use->has_def[expected_version_id] &&
+            memory_def_use->def_kinds &&
+            memory_def_use->def_kinds[expected_version_id] == MEMORY_SSA_VERSION_DEF_PHI) {
+            expected_phi_block_id = memory_def_use->def_block_ids[expected_version_id];
+            expected_phi_index = memory_def_use->def_phi_indices[expected_version_id];
+            if (expected_phi_block_id < memory_function->block_count &&
+                expected_phi_index < memory_function->blocks[expected_phi_block_id].phi_count) {
+                expected_phi = &memory_function->blocks[expected_phi_block_id].phis[expected_phi_index];
+                expected_is_phi = 1;
+            }
+        }
+
+        phi = &value_function->blocks[def_block_id].phis[def_phi_index];
+        for (input_index = 0; input_index < phi->input_count; ++input_index) {
+            int input_matches = 0;
+            size_t input_expected_version_id = expected_version_id;
+
+            if (expected_is_phi) {
+                size_t expected_input_index;
+                int found_expected_input = 0;
+
+                for (expected_input_index = 0; expected_input_index < expected_phi->input_count; ++expected_input_index) {
+                    if (expected_phi->inputs[expected_input_index].predecessor_block_id ==
+                        phi->inputs[input_index].predecessor_block_id) {
+                        input_expected_version_id = expected_phi->inputs[expected_input_index].version_id;
+                        found_expected_input = 1;
+                        break;
+                    }
+                }
+                if (!found_expected_input) {
+                    visit_state[value.value_id] = 2;
+                    return 1;
+                }
+            }
+
+            if (!memory_ssa_value_matches_slot_version_recursive(value_function,
+                    memory_function,
+                    memory_def_use,
+                    value_def_use,
+                    phi->inputs[input_index].value,
+                    expected_slot,
+                    input_expected_version_id,
+                    visit_state,
+                    &input_matches,
+                    error)) {
+                visit_state[value.value_id] = 2;
+                return 0;
+            }
+            if (!input_matches) {
+                visit_state[value.value_id] = 2;
+                return 1;
+            }
+        }
+
+        *out_matches = 1;
+        visit_state[value.value_id] = 2;
+        return 1;
+    }
+
+    if (def_instruction_index == (size_t)-1 || def_block_id >= value_function->block_count ||
+        def_instruction_index >= value_function->blocks[def_block_id].instruction_count ||
+        def_block_id >= memory_function->block_count ||
+        def_instruction_index >= memory_function->blocks[def_block_id].instruction_count) {
+        visit_state[value.value_id] = 2;
+        return 1;
+    }
+
+    def_instruction = &value_function->blocks[def_block_id].instructions[def_instruction_index];
+    memory_instruction = &memory_function->blocks[def_block_id].instructions[def_instruction_index];
+    switch (def_instruction->kind) {
+    case VALUE_SSA_INSTR_MOV:
+        if (!memory_ssa_value_matches_slot_version_recursive(value_function,
+                memory_function,
+                memory_def_use,
+                value_def_use,
+                def_instruction->as.mov_value,
+                expected_slot,
+                expected_version_id,
+                visit_state,
+                out_matches,
+                error)) {
+            visit_state[value.value_id] = 2;
+            return 0;
+        }
+        break;
+    case VALUE_SSA_INSTR_LOAD_LOCAL:
+    case VALUE_SSA_INSTR_LOAD_GLOBAL:
+        if (memory_instruction->access_count > 0 && memory_instruction->accesses[0].has_use_version &&
+            memory_instruction->accesses[0].use_version_id == expected_version_id &&
+            memory_ssa_slot_refs_equal(def_instruction->as.load_slot, expected_slot)) {
+            *out_matches = 1;
+        }
+        break;
+    default:
+        break;
+    }
+
+    visit_state[value.value_id] = 2;
+    return 1;
+}
+
+int memory_ssa_value_matches_slot_version(const ValueSsaFunction *value_function,
+    const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    const ValueSsaDefUseAnalysis *value_def_use,
+    ValueSsaValueRef value,
+    ValueSsaSlotRef expected_slot,
+    size_t expected_version_id,
+    int *out_matches,
+    MemorySsaError *error) {
+    unsigned char *visit_state;
+
+    if (!value_function || !value_def_use || !out_matches) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-107: invalid slot-version value match contract");
+        return 0;
+    }
+
+    *out_matches = 0;
+    visit_state = (unsigned char *)calloc(value_def_use->value_count ? value_def_use->value_count : 1, sizeof(unsigned char));
+    if (!visit_state) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-108: out of memory while matching slot-version value");
+        return 0;
+    }
+
+    if (!memory_ssa_value_matches_slot_version_recursive(value_function,
+            memory_function,
+            memory_def_use,
+            value_def_use,
+            value,
+            expected_slot,
+            expected_version_id,
+            visit_state,
+            out_matches,
+            error)) {
+        free(visit_state);
+        return 0;
+    }
+
+    free(visit_state);
+    return 1;
+}
+
+int memory_ssa_find_block_equivalent_value(const ValueSsaFunction *value_function,
+    const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    const ValueSsaDefUseAnalysis *value_def_use,
+    size_t block_id,
+    ValueSsaSlotRef expected_slot,
+    size_t expected_version_id,
+    int *out_has_value,
+    ValueSsaValueRef *out_value,
+    MemorySsaError *error) {
+    unsigned char *visit_state = NULL;
+    const ValueSsaBasicBlock *block;
+    size_t instruction_index;
+    size_t alloc_size;
+
+    if (!value_function || !memory_function || !memory_def_use || !value_def_use || !out_has_value || !out_value ||
+        block_id >= value_function->block_count || block_id >= memory_function->block_count) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-109: invalid block-equivalent value lookup contract");
+        return 0;
+    }
+
+    *out_has_value = 0;
+    *out_value = value_ssa_value_immediate(0);
+    alloc_size = value_def_use->value_count ? value_def_use->value_count : 1;
+    visit_state = (unsigned char *)calloc(alloc_size, sizeof(unsigned char));
+    if (!visit_state) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-110: out of memory while searching block equivalent value");
+        return 0;
+    }
+
+    block = &value_function->blocks[block_id];
+    for (instruction_index = block->instruction_count; instruction_index > 0; --instruction_index) {
+        const ValueSsaInstruction *instruction = &block->instructions[instruction_index - 1];
+        int matches = 0;
+
+        if (!instruction->has_result) {
+            continue;
+        }
+        memset(visit_state, 0, alloc_size * sizeof(unsigned char));
+        if (!memory_ssa_value_matches_slot_version_recursive(value_function,
+                memory_function,
+                memory_def_use,
+                value_def_use,
+                instruction->result,
+                expected_slot,
+                expected_version_id,
+                visit_state,
+                &matches,
+                error)) {
+            free(visit_state);
+            return 0;
+        }
+        if (matches) {
+            *out_has_value = 1;
+            *out_value = instruction->result;
+            free(visit_state);
+            return 1;
+        }
+    }
+
+    for (instruction_index = block->phi_count; instruction_index > 0; --instruction_index) {
+        ValueSsaValueRef phi_value = value_ssa_value_id(block->phis[instruction_index - 1].result_id);
+        int matches = 0;
+
+        memset(visit_state, 0, alloc_size * sizeof(unsigned char));
+        if (!memory_ssa_value_matches_slot_version_recursive(value_function,
+                memory_function,
+                memory_def_use,
+                value_def_use,
+                phi_value,
+                expected_slot,
+                expected_version_id,
+                visit_state,
+                &matches,
+                error)) {
+            free(visit_state);
+            return 0;
+        }
+        if (matches) {
+            *out_has_value = 1;
+            *out_value = phi_value;
+            free(visit_state);
+            return 1;
+        }
+    }
+
+    free(visit_state);
     return 1;
 }
 

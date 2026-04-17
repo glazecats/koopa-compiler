@@ -127,6 +127,23 @@ Make 目标：
 - simple internal-call case
 - 一部分带 extern stub 的 case
 
+### 4.0.1 interpreter 的执行入口应该怎么理解
+
+当前对外最值得记的入口其实有两类：
+
+1. 执行某个函数
+2. 执行 `main`
+
+lesson 里的理解方式最好是：
+
+- `execute_function(...)` 更像测试/局部 oracle 入口
+- `execute_main(...)` 更像“把整个程序当一个可执行单元跑起来”
+
+这能帮助你区分：
+
+- 是想验证某个 helper function 的语义
+- 还是想验证 canonicalize / pass 之后整程序的行为
+
 ### 4.1 一个 straight-line 执行例子
 
 当前最小 straight-line case 可以长成：
@@ -208,6 +225,34 @@ func main() {
 
 这说明它已经不只是“单函数 evaluator”，而是维护了一层真实的调用语义。
 
+### 4.4 一个 extern-call callback 例子
+
+extern callback 也值得单独举一个最小例子：
+
+```text
+declare ext(x.0)
+
+func main() {
+  bb.0:
+    ssa.0 = call ext(9)
+    ret ssa.0
+}
+```
+
+如果 callback 约定：
+
+- 收到 `callee_name = "ext"`
+- 参数 `9`
+- 返回 `18`
+
+那么当前解释器就会得到：
+
+- `return_value = 18`
+
+这个例子很有代表性，因为它说明 extern 不是“跳过不执行”，而是：
+
+`把 SSA 调用语义显式转交给宿主 callback`
+
 ---
 
 ## 5. 当前不支持什么
@@ -270,6 +315,133 @@ while current frame exists:
 - pass 改程序
 - interp 跑程序
 
+### 6.0.1 更完整的主执行循环伪代码
+
+如果想把第一版解释器讲得更像“你真的能自己写一个”，最好补成下面这种结构：
+
+```text
+execute(program, entry_function, args):
+    init global slots
+    push first frame(entry_function, args)
+
+    while call stack not empty:
+        frame = top frame
+
+        if frame is entering a block:
+            apply block-entry phis using predecessor block id
+
+        if pc points at a normal instruction:
+            execute instruction
+            pc += 1
+            continue
+
+        execute terminator
+        if terminator jumps/branches:
+            switch current block / predecessor info / pc
+            continue
+
+        if terminator returns:
+            pop frame
+            if caller exists:
+                write return value into caller result slot
+            else:
+                finish program and report return/global state
+```
+
+这个伪代码里有三个最重要的解释器概念：
+
+1. frame 内同时维护 slot state 和 SSA value state
+2. phi 不是普通 instruction，它发生在 block-entry
+3. return 不是“结束当前 block”，而是“把结果交回上一帧”
+
+### 6.0.2 frame 里到底要存什么
+
+课上其实可以把 frame 粗略压成下面这些字段：
+
+```text
+Frame:
+    current function
+    current block id
+    predecessor block id
+    next instruction index
+    local slot values
+    SSA value table
+    optional call result destination in caller
+```
+
+这组字段解释了为什么当前解释器能同时处理：
+
+- `load_local` / `store_local`
+- `phi`
+- internal call 返回值
+
+因为它既记：
+
+- 当前函数的 slot 状态
+- 也记当前函数的 SSA def 结果
+- 还记“回去以后把返回值写到 caller 哪里”
+
+### 6.0.3 phi 在解释器里怎么选边
+
+很多人第一次看 interpreter 会下意识把 phi 当普通 instruction。  
+但当前 lesson 最该强调的是：
+
+`phi 是 block-entry 语义`
+
+也就是：
+
+```text
+enter_block(block, predecessor):
+    for each phi in block:
+        choose the input whose predecessor_block_id == predecessor
+        read that incoming value
+        write result into current frame's SSA value table
+```
+
+这也是为什么前面 branch 例子里，解释器能正确区分：
+
+- 从 `bb.1` 进 `bb.3` 时取 `ssa.1`
+- 从 `bb.2` 进 `bb.3` 时取 `ssa.2`
+
+不是因为它“看懂了代码含义”，而是因为它明确保存了：
+
+- 当前 block 是谁
+- 我是从哪个 predecessor 进来的
+
+### 6.0.4 指令执行的最小伪代码
+
+把常见 instruction 压成 lesson 伪代码，可以写成：
+
+```text
+execute_instruction(instr):
+    case MOV:
+        result = eval(value)
+
+    case BINARY:
+        lhs = eval(lhs)
+        rhs = eval(rhs)
+        result = apply_binary(op, lhs, rhs)
+
+    case LOAD_LOCAL / LOAD_GLOBAL:
+        result = read slot value
+        if slot uninitialized:
+            runtime error
+
+    case STORE_LOCAL / STORE_GLOBAL:
+        write eval(value) into slot
+
+    case CALL:
+        if internal function:
+            push callee frame
+        else:
+            invoke extern callback
+```
+
+这里也顺便说明了为什么当前解释器和 `memory_ssa` 还是两回事：
+
+- 它维护的是“当前 slot 里放着什么值”
+- 不是“当前 slot 属于哪个 memory version”
+
 ### 6.1 执行时最容易出错的边界
 
 这一层课上最好顺手提醒三类 runtime boundary：
@@ -281,6 +453,30 @@ while current frame exists:
 当前策略不是“尽量容错”，而是：
 
 `一旦越过当前第一版解释器边界，就直接报运行时错误`
+
+### 6.2 一个“未初始化 local load”为什么要报错
+
+这一点特别适合在 lesson 里讲清楚，因为它能反映解释器的态度：
+
+```text
+func main() {
+  bb.0:
+    ssa.0 = load_local a.0
+    ret ssa.0
+}
+```
+
+如果 `a.0` 不是 parameter local，也没有先前 `store_local`，那当前解释器不会：
+
+- 默认给它补 `0`
+- 随便猜一个值
+- 悄悄继续执行
+
+而是应该直接报运行时错误。
+
+这背后的 lesson 点是：
+
+`解释器是语义 oracle，不是容错执行器`
 
 ---
 
@@ -365,6 +561,13 @@ ret ssa.0
 
 `解释器自己能不能正确执行 SSA`
 
+这些测试合起来，实际上也把解释器的“最小支持面”锁得很清楚：
+
+- 不是只会跑直线块
+- 不是只会跑无副作用值语义
+- 不是只会跑单函数
+- 也不是遇到 extern 就停
+
 ### 8.2 `value_ssa_oracle_test.c`
 
 这份测试更像组合边界测试。
@@ -397,6 +600,24 @@ ret ssa.0
 
 - dump 锁的是形状
 - oracle 还能锁行为
+
+### 8.2.1 oracle test 的最小伪代码
+
+把这类测试压成模板，lesson 里最适合记成：
+
+```text
+before_result = interpret(before_program)
+after_program = canonicalize_or_rewrite(copy_of(before_program))
+after_result = interpret(after_program)
+
+assert before_result.return_value == after_result.return_value
+assert before_result.global_values == after_result.global_values
+```
+
+这也是为什么 `value_ssa_interp` 对整个 lesson 体系很重要：
+
+- 没有它，很多 pass 只能锁 dump
+- 有了它，pass 还能锁行为不变
 
 ### 8.3 一个 before/after oracle authority 例子
 
