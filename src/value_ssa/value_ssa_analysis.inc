@@ -852,6 +852,11 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-191: out of memory while preparing def-use analysis");
         return 0;
     }
+    for (block_index = 0; block_index < function->next_value_id; ++block_index) {
+        analysis->def_block_ids[block_index] = (size_t)-1;
+        analysis->def_phi_indices[block_index] = (size_t)-1;
+        analysis->def_instruction_indices[block_index] = (size_t)-1;
+    }
 
     for (block_index = 0; block_index < function->block_count; ++block_index) {
         const ValueSsaBasicBlock *block = &function->blocks[block_index];

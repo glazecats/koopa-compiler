@@ -279,8 +279,13 @@ int value_ssa_dump_allocation_prep(const ValueSsaFunction *function,
                     active_prep->use_counts[value_id]) ||
                 !value_ssa_append_allocation_live_blocks(&builder, active_prep, value_id) ||
                 !value_ssa_append_format(&builder,
-                    " single_block=%s degree=%zu affinity=%zu move_related=%s\n",
+                    " single_block=%s use_loops=%zu use_calls=%zu loops=%zu calls=%zu call_cross=%zu degree=%zu affinity=%zu move_related=%s\n",
                     active_prep->single_block_live_ranges[value_id] ? "yes" : "no",
+                    active_prep->use_loop_depth_sums ? active_prep->use_loop_depth_sums[value_id] : 0,
+                    active_prep->use_call_density_sums ? active_prep->use_call_density_sums[value_id] : 0,
+                    active_prep->loop_depth_sums ? active_prep->loop_depth_sums[value_id] : 0,
+                    active_prep->call_density_sums ? active_prep->call_density_sums[value_id] : 0,
+                    active_prep->call_crossing_counts ? active_prep->call_crossing_counts[value_id] : 0,
                     active_prep->interference_degrees[value_id],
                     active_prep->affinity_sums[value_id],
                     active_prep->move_related[value_id] ? "yes" : "no")) {
@@ -407,12 +412,18 @@ int value_ssa_dump_allocation_worklist_for_class(const ValueSsaFunction *functio
             }
 
             if (!value_ssa_append_format(&builder,
-                    "  %zu: ssa.%zu class=%s priority=%zu blocks=%zu degree=%zu affinity=%zu\n",
+                    "  %zu: ssa.%zu class=%s priority=%zu blocks=%zu use_loops=%zu use_calls=%zu loops=%zu calls=%zu call_cross=%zu single_block=%s degree=%zu affinity=%zu\n",
                     item_index,
                     item->value_id,
                     value_ssa_allocation_work_class_name(item->work_class),
                     item->priority,
                     active_prep->live_block_counts[item->value_id],
+                    active_prep->use_loop_depth_sums ? active_prep->use_loop_depth_sums[item->value_id] : 0,
+                    active_prep->use_call_density_sums ? active_prep->use_call_density_sums[item->value_id] : 0,
+                    active_prep->loop_depth_sums ? active_prep->loop_depth_sums[item->value_id] : 0,
+                    active_prep->call_density_sums ? active_prep->call_density_sums[item->value_id] : 0,
+                    active_prep->call_crossing_counts ? active_prep->call_crossing_counts[item->value_id] : 0,
+                    active_prep->single_block_live_ranges[item->value_id] ? "yes" : "no",
                     active_prep->interference_degrees[item->value_id],
                     active_prep->affinity_sums[item->value_id])) {
                 goto cleanup;

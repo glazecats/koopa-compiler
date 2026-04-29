@@ -41,9 +41,21 @@ static ValueSsaAllocationWorkClass value_ssa_classify_allocation_work_item(const
 }
 
 static size_t value_ssa_compute_allocation_work_priority(const ValueSsaAllocationPrep *prep, size_t value_id) {
+    size_t cross_block_penalty = 0;
+
+    if (prep->single_block_live_ranges && !prep->single_block_live_ranges[value_id]) {
+        cross_block_penalty = 1;
+    }
+
     return (prep->affinity_sums[value_id] * 8u) +
         (prep->interference_degrees[value_id] * 4u) +
         (prep->live_block_counts[value_id] * 2u) +
+        (prep->use_loop_depth_sums ? prep->use_loop_depth_sums[value_id] : 0u) +
+        (prep->use_call_density_sums ? prep->use_call_density_sums[value_id] : 0u) +
+        (prep->loop_depth_sums ? prep->loop_depth_sums[value_id] : 0u) +
+        (prep->call_density_sums ? prep->call_density_sums[value_id] : 0u) +
+        (prep->call_crossing_counts ? prep->call_crossing_counts[value_id] : 0u) +
+        cross_block_penalty +
         prep->use_counts[value_id];
 }
 
