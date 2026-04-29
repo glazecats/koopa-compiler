@@ -241,7 +241,12 @@ typedef struct {
     size_t value_count;
     size_t *def_block_ids;
     size_t *use_counts;
+    size_t *use_loop_depth_sums;
+    size_t *use_call_density_sums;
     size_t *live_block_counts;
+    size_t *loop_depth_sums;
+    size_t *call_density_sums;
+    size_t *call_crossing_counts;
     unsigned char *single_block_live_ranges;
     size_t *live_block_offsets;
     size_t *live_blocks;
@@ -249,6 +254,11 @@ typedef struct {
     size_t *interference_degrees;
     size_t *affinity_sums;
     unsigned char *move_related;
+    unsigned char *rematerializable;
+    unsigned char *split_child_values;
+    size_t *split_child_depths;
+    size_t *split_parent_value_ids;
+    size_t *split_family_root_value_ids;
     ValueSsaCopyAffinityCandidate *candidates;
     size_t candidate_count;
 } ValueSsaAllocationPrep;

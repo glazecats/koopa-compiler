@@ -38,6 +38,7 @@
 - `tests/memory_ssa/memory_ssa_regression_test.c`
 - `tests/memory_ssa/memory_ssa_verifier_test.c`
 - `tests/value_ssa/value_ssa_analysis_test.c`
+- `tests/value_ssa/value_ssa_alloc_test.c`
 - `tests/value_ssa/value_ssa_interp_test.c`
 - `tests/value_ssa/value_ssa_oracle_test.c`
 - `tests/value_ssa/value_ssa_regression_test.c`
@@ -148,6 +149,24 @@ $$
   - 对应 `tests/value_ssa/value_ssa_analysis_test.c`
   - 当前主要锁 shared analysis surface：liveness、interference、copy affinity、allocation prep、allocation worklist；代表 authority 包括 phi/loop liveness、interference 对称性、copy case 的 move-hint ordering、two-block range summary、loop case 下 constrained values 排前，以及 worklist 分类/priority 边界
   - 最近这组测试还开始锁 allocator-prep 的工具面，不只是底层分析数组：work-class 名字、allocation-prep dump、allocation-worklist dump、class-specific worklist dump、live-block query、affinity-weight query、top-neighbor query、以及 worklist item/class-range lookup 都已经进入回归 authority
+- `make test-value-ssa-alloc`
+  - 对应 `tests/value_ssa/value_ssa_alloc_test.c`
+  - 当前主要锁 allocator 这一整条新主线：allocator plan dump、`simplify/freeze/spill` phase、`remove kind`、raw/effective `degree=initial->active`、raw/effective `move_related=yes->no`、coalesced representative/class、family-aware move-work class / next-class、reverse-select coloring、affinity / coalesce-direct / coalesce-class preferred color、targeted preferred-color eviction、spill priority / spill slot query、move-family analysis、move-worklist、move-transition trace、program-level allocation dump，以及 allocate/rewrite/canonicalize/reallocate driver 的统计和结果对齐
+  - 最近这组测试尤其锁住了：
+    - freeze 驱动下 move-related 值真正 thaw 到 simplify
+    - active degree 随 remove 过程真实下降
+    - coalesced family 不再被类内 move 无意义拖去 freeze
+    - family 外部 move 压力会按整组传播，而不是只挂在某个单点上
+    - move-family state 会区分 `internal / released / frozen`
+    - move-worklist 会区分 `coalesce-ready / freeze-pending / released / internal`
+    - move-transition trace 会显式记录 `freeze` / `remove` 和 family state before/after
+    - coalesce-opportunity agenda 会把“能不能并”再往前收成“先并谁”的 family-pair 待办表
+    - retry-family agenda / retry-phase trace 已经把 optimistic retry 从“后处理扫描”推进成了显式 family field / phase protocol
+    - select trace 会显式记录 preferred-color source/partner、targeted-evict、retry-evict
+    - `spill-intended / spill-confirmed / spill-recovered` 已经不是隐藏内部状态，而是稳定公共结果面
+    - `value_ssa_allocate_function_from_plan(...)` 这条 artifact-driven 入口已经被用来直接锁 targeted eviction、retry recovery、以及 rematerializable / spill-intended tie-break
+    - spill 结果不只是 flag，而是稳定 spill slot
+    - spill rewrite 能把一部分 spilled SSA value 真正改写回 `store_local/load_local`
 - `make test-value-ssa-interp`
   - 对应 `tests/value_ssa/value_ssa_interp_test.c`
   - 当前主要锁第一版解释器边界：straight-line execution、phi/branch execution、internal-call execution、external-call callback execution、以及 uninitialized local load 的拒绝路径

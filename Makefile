@@ -29,6 +29,8 @@ VALUE_SSA_VERIFIER_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_verifier_test
 VALUE_SSA_ANALYSIS_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_analysis_test
 VALUE_SSA_INTERP_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_interp_test
 VALUE_SSA_ORACLE_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_oracle_test
+VALUE_SSA_ALLOC_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_alloc_test
+VALUE_SSA_MACHINE_BIN := $(VALUE_SSA_BUILD_DIR)/value_ssa_machine_test
 MEMORY_SSA_REGRESSION_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_regression_test
 MEMORY_SSA_VERIFIER_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_verifier_test
 MEMORY_SSA_ANALYSIS_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_analysis_test
@@ -126,6 +128,27 @@ VALUE_SSA_INTERP_SPLIT_INCLUDES := \
 	src/value_ssa_interp/value_ssa_interp_state.inc \
 	src/value_ssa_interp/value_ssa_interp_exec.inc
 
+VALUE_SSA_ALLOC_SPLIT_INCLUDES := \
+	src/value_ssa_alloc/value_ssa_alloc_core.inc \
+	src/value_ssa_alloc/value_ssa_alloc_spill.inc \
+	src/value_ssa_alloc/value_ssa_alloc_spill_cost.inc \
+	src/value_ssa_alloc/value_ssa_alloc_coalesce.inc \
+	src/value_ssa_alloc/value_ssa_alloc_move.inc \
+	src/value_ssa_alloc/value_ssa_alloc_move_worklist.inc \
+	src/value_ssa_alloc/value_ssa_alloc_plan.inc \
+	src/value_ssa_alloc/value_ssa_alloc_move_engine.inc \
+	src/value_ssa_alloc/value_ssa_alloc_move_transition.inc \
+	src/value_ssa_alloc/value_ssa_alloc_select.inc \
+	src/value_ssa_alloc/value_ssa_alloc_color.inc \
+	src/value_ssa_alloc/value_ssa_alloc_rewrite.inc \
+	src/value_ssa_alloc/value_ssa_alloc_layout.inc \
+	src/value_ssa_alloc/value_ssa_alloc_layout_dump.inc \
+	src/value_ssa_alloc/value_ssa_alloc_dump.inc
+
+VALUE_SSA_MACHINE_SPLIT_INCLUDES := \
+	src/value_ssa_machine/value_ssa_machine_core.inc \
+	src/value_ssa_machine/value_ssa_machine_dump.inc
+
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -138,7 +161,7 @@ SEMANTIC_REGRESSION_INCLUDES := \
 	tests/semantic/semantic_regression_callable_flow.inc \
 	tests/semantic/semantic_regression_scope_cf.inc
 
-.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
 
 all: test
 
@@ -196,6 +219,12 @@ $(VALUE_SSA_INTERP_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_s
 
 $(VALUE_SSA_ORACLE_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_INTERP_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_interp.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_interp/value_ssa_interp.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_oracle_test.c -o $@
+
+$(VALUE_SSA_ALLOC_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_alloc/value_ssa_alloc.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_alloc_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_ALLOC_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_alloc.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_alloc/value_ssa_alloc.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_alloc_test.c -o $@
+
+$(VALUE_SSA_MACHINE_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_alloc/value_ssa_alloc.c src/value_ssa_machine/value_ssa_machine.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_machine_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(VALUE_SSA_ALLOC_SPLIT_INCLUDES) $(VALUE_SSA_MACHINE_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/value_ssa_alloc.h include/value_ssa_machine.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/value_ssa_alloc/value_ssa_alloc.c src/value_ssa_machine/value_ssa_machine.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/value_ssa/value_ssa_machine_test.c -o $@
 
 $(MEMORY_SSA_REGRESSION_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/memory_ssa/memory_ssa.c src/lower_ir/lower_ir.c tests/memory_ssa/memory_ssa_regression_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/memory_ssa.h | dirs
 	$(CC) $(CFLAGS) src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/memory_ssa/memory_ssa.c src/lower_ir/lower_ir.c tests/memory_ssa/memory_ssa_regression_test.c -o $@
@@ -337,6 +366,22 @@ test-value-ssa-oracle: $(VALUE_SSA_ORACLE_BIN)
 	rm -f "$$tmp"; \
 	exit $$status
 
+test-value-ssa-alloc: $(VALUE_SSA_ALLOC_BIN)
+	@echo "[value-ssa] running allocator tests"
+	@tmp="./$(VALUE_SSA_ALLOC_BIN).run.$$$$"; \
+	cp "./$(VALUE_SSA_ALLOC_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
+test-value-ssa-machine: $(VALUE_SSA_MACHINE_BIN)
+	@echo "[value-ssa] running machine-model tests"
+	@tmp="./$(VALUE_SSA_MACHINE_BIN).run.$$$$"; \
+	cp "./$(VALUE_SSA_MACHINE_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
 test-memory-ssa-regression: $(MEMORY_SSA_REGRESSION_BIN)
 	@echo "[memory-ssa] running regression tests"
 	@tmp="./$(MEMORY_SSA_REGRESSION_BIN).run.$$$$"; \
@@ -386,6 +431,8 @@ test:
 	@$(MAKE) --no-print-directory test-value-ssa-analysis
 	@$(MAKE) --no-print-directory test-value-ssa-interp
 	@$(MAKE) --no-print-directory test-value-ssa-oracle
+	@$(MAKE) --no-print-directory test-value-ssa-alloc
+	@$(MAKE) --no-print-directory test-value-ssa-machine
 	@$(MAKE) --no-print-directory test-memory-ssa-regression
 	@$(MAKE) --no-print-directory test-memory-ssa-verifier
 	@$(MAKE) --no-print-directory test-memory-ssa-analysis

@@ -10,7 +10,9 @@
    - 讲 core representation / verifier / conversion / shared analysis
 2. `value_ssa_pass_lesson.md`
    - 讲 SSA-side cleanup / canonicalization / pass pipeline
-3. `value_ssa_interp_lesson.md`
+3. `value_ssa_alloc_lesson.md`
+   - 讲 allocator plan / coloring / spill / rewrite
+4. `value_ssa_interp_lesson.md`
    - 讲 SSA 解释器、执行状态、oracle/test 用法
 
 这份是第一份，也就是 **core lesson**。
@@ -70,6 +72,8 @@ $$
 - pass 实现：`src/value_ssa_pass/`
 - interp 接口：`include/value_ssa_interp.h`
 - interp 实现：`src/value_ssa_interp/`
+- alloc 接口：`include/value_ssa_alloc.h`
+- alloc 实现：`src/value_ssa_alloc/`
 - memory 层：`include/memory_ssa.h` / `src/memory_ssa/`
 - memory-backed pass：`include/memory_ssa_pass.h` / `src/memory_ssa_pass/`
 
@@ -78,6 +82,7 @@ $$
 - `tests/value_ssa/value_ssa_regression_test.c`
 - `tests/value_ssa/value_ssa_verifier_test.c`
 - `tests/value_ssa/value_ssa_analysis_test.c`
+- `tests/value_ssa/value_ssa_alloc_test.c`
 
 ---
 
@@ -968,6 +973,27 @@ for each mov dst <- src:
 - interference 说“不能放一起”
 - copy affinity 说“如果不冲突，最好尽量靠一起”
 
+### 6.11 allocator 这一层现在已经是独立 sibling 了
+
+前面 shared analysis 讲的是：
+
+`怎么为未来 allocator 准备事实`
+
+而最近这条线已经不再只停在 prep/worklist 了，`value_ssa` 旁边现在已经有一个真正的 sibling allocator 模块：
+
+- `include/value_ssa_alloc.h`
+- `src/value_ssa_alloc/`
+
+但 lesson 边界上，它不该继续塞在 core 这一份里讲细了。更合适的方式是：
+
+- 这里知道它已经存在
+- 知道 shared analysis 已经成为 allocator 的输入
+- 具体 allocator 语义、策略、spill/rewrite，移到独立 lesson
+
+一句话说：
+
+`allocation_prep / allocation_worklist` 现在已经不是孤立调试层，而是真的被 allocator 消费了。
+
 ### 6.9 一个“工具面”视角的最小例子
 
 以前如果后续 experiment 想回答：
@@ -1112,9 +1138,11 @@ alpha_rename(function):
 
 1. [value_ssa_pass_lesson.md](/workspaces/compiler_lab/lesson/value_ssa_pass_lesson.md)
    - 看 pass layer、canonicalization、SSA-side cleanup
-2. [value_ssa_interp_lesson.md](/workspaces/compiler_lab/lesson/value_ssa_interp_lesson.md)
+2. [value_ssa_alloc_lesson.md](/workspaces/compiler_lab/lesson/value_ssa_alloc_lesson.md)
+   - 看 allocator plan、coloring、spill、rewrite
+3. [value_ssa_interp_lesson.md](/workspaces/compiler_lab/lesson/value_ssa_interp_lesson.md)
    - 看解释器、执行状态、oracle/test 用法
-3. [tests_lesson.md](/workspaces/compiler_lab/lesson/tests_lesson.md)
+4. [tests_lesson.md](/workspaces/compiler_lab/lesson/tests_lesson.md)
    - 对照测试目标和 authority
 
 ---

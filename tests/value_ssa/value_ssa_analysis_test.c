@@ -167,6 +167,106 @@ static int expect_allocation_live_blocks(const char *case_id,
     return 1;
 }
 
+static int expect_allocation_loop_depth_sum(const char *case_id,
+    const ValueSsaAllocationPrep *prep,
+    size_t value_id,
+    size_t expected_sum) {
+    size_t actual_sum;
+
+    if (!prep || !prep->loop_depth_sums || value_id >= prep->value_count) {
+        fprintf(stderr, "[value-ssa-analysis] FAIL: %s invalid allocation loop-depth query\n", case_id);
+        return 0;
+    }
+
+    actual_sum = prep->loop_depth_sums[value_id];
+    if (actual_sum != expected_sum) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: %s expected loop_depth_sum(ssa.%zu) = %zu, got %zu\n",
+            case_id,
+            value_id,
+            expected_sum,
+            actual_sum);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int expect_allocation_use_loop_depth_sum(const char *case_id,
+    const ValueSsaAllocationPrep *prep,
+    size_t value_id,
+    size_t expected_sum) {
+    size_t actual_sum;
+
+    if (!prep || !prep->use_loop_depth_sums || value_id >= prep->value_count) {
+        fprintf(stderr, "[value-ssa-analysis] FAIL: %s invalid allocation use-loop-depth query\n", case_id);
+        return 0;
+    }
+
+    actual_sum = prep->use_loop_depth_sums[value_id];
+    if (actual_sum != expected_sum) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: %s expected use_loop_depth_sum(ssa.%zu) = %zu, got %zu\n",
+            case_id,
+            value_id,
+            expected_sum,
+            actual_sum);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int expect_allocation_use_call_density_sum(const char *case_id,
+    const ValueSsaAllocationPrep *prep,
+    size_t value_id,
+    size_t expected_sum) {
+    size_t actual_sum;
+
+    if (!prep || !prep->use_call_density_sums || value_id >= prep->value_count) {
+        fprintf(stderr, "[value-ssa-analysis] FAIL: %s invalid allocation use-call-density query\n", case_id);
+        return 0;
+    }
+
+    actual_sum = prep->use_call_density_sums[value_id];
+    if (actual_sum != expected_sum) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: %s expected use_call_density_sum(ssa.%zu) = %zu, got %zu\n",
+            case_id,
+            value_id,
+            expected_sum,
+            actual_sum);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int expect_allocation_rematerializable(const char *case_id,
+    const ValueSsaAllocationPrep *prep,
+    size_t value_id,
+    int expected) {
+    int actual;
+
+    if (!prep || !prep->rematerializable || value_id >= prep->value_count) {
+        fprintf(stderr, "[value-ssa-analysis] FAIL: %s invalid allocation rematerializable query\n", case_id);
+        return 0;
+    }
+
+    actual = (int)prep->rematerializable[value_id];
+    if (actual != expected) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: %s expected rematerializable(ssa.%zu) = %d, got %d\n",
+            case_id,
+            value_id,
+            expected,
+            actual);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int expect_worklist_item(const char *case_id,
     const ValueSsaAllocationWorklist *worklist,
     size_t item_index,
@@ -667,6 +767,67 @@ static int build_two_block_range_program(ValueSsaProgram *program,
     }
 
     *out_value = value_id;
+    return 1;
+}
+
+static int build_rematerializable_prep_program(ValueSsaProgram *program,
+    size_t *out_immediate_value,
+    size_t *out_binary_value,
+    ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaInstruction instruction;
+    size_t immediate_value;
+    size_t other_value;
+    size_t binary_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    immediate_value = value_ssa_function_allocate_value(function);
+    other_value = value_ssa_function_allocate_value(function);
+    binary_value = value_ssa_function_allocate_value(function);
+    if (immediate_value == (size_t)-1 || other_value == (size_t)-1 || binary_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(immediate_value);
+    instruction.as.mov_value = value_ssa_value_immediate(7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(other_value);
+    instruction.as.mov_value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(binary_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(immediate_value);
+    instruction.as.binary.rhs = value_ssa_value_id(other_value);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_return(entry, value_ssa_value_id(binary_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    *out_immediate_value = immediate_value;
+    *out_binary_value = binary_value;
     return 1;
 }
 
@@ -1212,6 +1373,107 @@ cleanup:
     return ok;
 }
 
+static int test_value_ssa_allocation_prep_loop_depth_weight(void) {
+    ValueSsaProgram program;
+    ValueSsaDefUseAnalysis def_use;
+    ValueSsaLivenessAnalysis liveness;
+    ValueSsaInterferenceGraph interference;
+    ValueSsaCopyAffinityGraph affinity;
+    ValueSsaAllocationPrep prep;
+    ValueSsaError error;
+    size_t init_value;
+    size_t phi_value;
+    size_t step_value;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    value_ssa_def_use_analysis_init(&def_use);
+    value_ssa_liveness_analysis_init(&liveness);
+    value_ssa_interference_graph_init(&interference);
+    value_ssa_copy_affinity_graph_init(&affinity);
+    value_ssa_allocation_prep_init(&prep);
+    if (!build_loop_program(&program, &init_value, &phi_value, &step_value, &error)) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: loop-depth allocation prep setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_compute_def_use_analysis(&program.functions[0], &def_use, &error) ||
+        !value_ssa_compute_liveness_analysis(&program.functions[0], NULL, &liveness, &error) ||
+        !value_ssa_compute_interference_graph(&program.functions[0], NULL, &liveness, &interference, &error) ||
+        !value_ssa_compute_copy_affinity_graph(&program.functions[0], &interference, &affinity, &error) ||
+        !value_ssa_compute_allocation_prep(
+            &program.functions[0], &def_use, &liveness, &interference, &affinity, &prep, &error)) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: loop-depth allocation prep failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    ok &= expect_allocation_loop_depth_sum("ALLOC-PREP-loop-depth-init", &prep, init_value, 0);
+    ok &= expect_allocation_loop_depth_sum("ALLOC-PREP-loop-depth-phi", &prep, phi_value, 2);
+    ok &= expect_allocation_loop_depth_sum("ALLOC-PREP-loop-depth-step", &prep, step_value, 1);
+    ok &= expect_allocation_use_loop_depth_sum("ALLOC-PREP-use-loop-depth-init", &prep, init_value, 1);
+    ok &= expect_allocation_use_loop_depth_sum("ALLOC-PREP-use-loop-depth-phi", &prep, phi_value, 1);
+    ok &= expect_allocation_use_loop_depth_sum("ALLOC-PREP-use-loop-depth-step", &prep, step_value, 1);
+    ok &= expect_allocation_use_call_density_sum("ALLOC-PREP-use-call-density-init", &prep, init_value, 0);
+    ok &= expect_allocation_use_call_density_sum("ALLOC-PREP-use-call-density-phi", &prep, phi_value, 0);
+    ok &= expect_allocation_use_call_density_sum("ALLOC-PREP-use-call-density-step", &prep, step_value, 0);
+
+cleanup:
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_copy_affinity_graph_free(&affinity);
+    value_ssa_interference_graph_free(&interference);
+    value_ssa_liveness_analysis_free(&liveness);
+    value_ssa_def_use_analysis_free(&def_use);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_allocation_prep_rematerializable_flag(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaError error;
+    size_t immediate_value;
+    size_t binary_value;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    value_ssa_allocation_prep_init(&prep);
+    if (!build_rematerializable_prep_program(&program, &immediate_value, &binary_value, &error)) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: rematerializable allocation prep setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_compute_allocation_prep(&program.functions[0], NULL, NULL, NULL, NULL, &prep, &error)) {
+        fprintf(stderr,
+            "[value-ssa-analysis] FAIL: rematerializable allocation prep failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    ok &= expect_allocation_rematerializable("ALLOC-PREP-remat-immediate", &prep, immediate_value, 1);
+    ok &= expect_allocation_rematerializable("ALLOC-PREP-remat-binary", &prep, binary_value, 0);
+
+cleanup:
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_allocation_worklist(void) {
     ValueSsaProgram copy_program;
     ValueSsaProgram loop_program;
@@ -1367,14 +1629,14 @@ static int test_value_ssa_allocation_dump_helpers(void) {
     int ok = 1;
     const char *expected_prep =
         "alloc-prep main:\n"
-        "  ssa.0: def=bb.0 uses=1 live_blocks=[bb.0] single_block=yes degree=0 affinity=1 move_related=yes\n"
-        "  ssa.1: def=bb.0 uses=1 live_blocks=[bb.0] single_block=yes degree=0 affinity=1 move_related=yes\n"
+        "  ssa.0: def=bb.0 uses=1 live_blocks=[bb.0] single_block=yes use_loops=0 use_calls=0 loops=0 calls=0 call_cross=0 degree=0 affinity=1 move_related=yes\n"
+        "  ssa.1: def=bb.0 uses=1 live_blocks=[bb.0] single_block=yes use_loops=0 use_calls=0 loops=0 calls=0 call_cross=0 degree=0 affinity=1 move_related=yes\n"
         "  candidates:\n"
         "    ssa.0 <-> ssa.1 weight=1\n";
     const char *expected_worklist =
         "alloc-worklist main:\n"
-        "  0: ssa.0 class=move-hint priority=11 blocks=1 degree=0 affinity=1\n"
-        "  1: ssa.1 class=move-hint priority=11 blocks=1 degree=0 affinity=1\n";
+        "  0: ssa.0 class=move-hint priority=11 blocks=1 use_loops=0 use_calls=0 loops=0 calls=0 call_cross=0 single_block=yes degree=0 affinity=1\n"
+        "  1: ssa.1 class=move-hint priority=11 blocks=1 use_loops=0 use_calls=0 loops=0 calls=0 call_cross=0 single_block=yes degree=0 affinity=1\n";
     const char *expected_constrained =
         "alloc-worklist main:\n";
 
@@ -1518,6 +1780,8 @@ int main(void) {
     ok &= test_value_ssa_copy_affinity_graph();
     ok &= test_value_ssa_allocation_prep();
     ok &= test_value_ssa_allocation_prep_two_block_range();
+    ok &= test_value_ssa_allocation_prep_loop_depth_weight();
+    ok &= test_value_ssa_allocation_prep_rematerializable_flag();
     ok &= test_value_ssa_allocation_worklist();
     ok &= test_value_ssa_allocation_dump_helpers();
     if (!ok) {
