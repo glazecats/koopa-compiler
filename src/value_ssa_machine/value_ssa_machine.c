@@ -97,4 +97,8 @@ static int value_ssa_machine_append_format(ValueSsaMachineStringBuilder *builder
 
 #define VALUE_SSA_MACHINE_SPLIT_AGGREGATOR
 #include "value_ssa_machine_core.inc"
+#include "value_ssa_machine_query.inc"
 #include "value_ssa_machine_dump.inc"
+#include "value_ssa_machine_call_clobber.inc"
+#include "value_ssa_machine_protection.inc"
+#include "value_ssa_machine_report.inc"

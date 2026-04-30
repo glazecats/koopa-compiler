@@ -22,21 +22,26 @@
 
 ## Current Active Slice
 
-- The repository's current active downstream implementation slice is the
-  Value-SSA allocator roadmap in
-  [docs/VALUE_SSA_ALLOCATOR_PLAN.md](/workspaces/compiler_lab/docs/VALUE_SSA_ALLOCATOR_PLAN.md).
-- When asking "现在做到哪了", prefer the staged percentages recorded there,
-  especially:
-  - `explicit coalescing mainline`: near-closed, roughly `93-95%`
-  - `B2 more formal optimistic coloring retry`: near-closed, roughly `99%`
-  - `Phase C Briggs/Chaitin-style mainline consolidation`: near-closed checkpoint, roughly `96-99%`
-  - `live-range splitting`: checkpointed near-closed, roughly `99%`
-  - `allocator-result shaping for later backend consumers`: near-closed checkpoint, roughly `99%`
-  - `machine register model`: current active line, roughly `25-30%`
-  - overall `allocator-mainline strengthening`: roughly `99%`
-- Keep that snapshot updated there when the active allocator mainline shifts,
-  rather than trying to restate the same evolving percentages only in the
-  execution log below.
+- The repository's current active backend-facing implementation slice is now
+  the Machine-IR roadmap in
+  [docs/MACHINE_IR_PLAN.md](/workspaces/compiler_lab/docs/MACHINE_IR_PLAN.md).
+- The allocator-mainline authority in
+  [docs/VALUE_SSA_ALLOCATOR_PLAN.md](/workspaces/compiler_lab/docs/VALUE_SSA_ALLOCATOR_PLAN.md)
+  should now be treated as near-closed / checkpointed unless a concrete
+  allocator bug reopens it.
+- The machine-register-model authority in
+  [docs/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md](/workspaces/compiler_lab/docs/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md)
+  should now be treated as stage-close / maintenance-first unless a concrete
+  `machine_ir` gap reopens it.
+- When asking "现在做到哪了", prefer the staged percentages recorded in
+  `docs/MACHINE_IR_PLAN.md`, especially:
+  - `Stage MIR1 representation skeleton`
+  - `Stage MIR2 first Value-SSA bridge`
+  - `Stage MIR3 first consumer migration`
+  - `Stage MIR4 machine cleanup pressure`
+- Keep that snapshot updated there when the active machine/backend mainline
+  shifts, rather than trying to restate the same evolving percentages only in
+  the execution log below.
 
 ## Current State
 

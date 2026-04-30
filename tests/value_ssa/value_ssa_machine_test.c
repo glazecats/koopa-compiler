@@ -29,6 +29,35 @@ static int expect_machine_register_bank_dump(const char *case_id,
     return ok;
 }
 
+static int build_caller_callee_machine_register_bank(ValueSsaMachineRegisterBank *bank) {
+    if (!bank) {
+        return 0;
+    }
+
+    value_ssa_machine_register_bank_free(bank);
+    bank->register_count = 2;
+    bank->registers = (ValueSsaMachineRegisterDesc *)calloc(2, sizeof(ValueSsaMachineRegisterDesc));
+    if (!bank->registers) {
+        value_ssa_machine_register_bank_free(bank);
+        return 0;
+    }
+
+    bank->registers[0].register_id = 0;
+    bank->registers[0].name = "r0";
+    bank->registers[0].register_class = VALUE_SSA_MACHINE_REGISTER_CLASS_GENERAL;
+    bank->registers[0].allocatable = 1u;
+    bank->registers[0].caller_clobbered = 1u;
+    bank->registers[0].callee_preserved = 0u;
+
+    bank->registers[1].register_id = 1;
+    bank->registers[1].name = "r1";
+    bank->registers[1].register_class = VALUE_SSA_MACHINE_REGISTER_CLASS_GENERAL;
+    bank->registers[1].allocatable = 1u;
+    bank->registers[1].caller_clobbered = 0u;
+    bank->registers[1].callee_preserved = 1u;
+    return 1;
+}
+
 static int expect_function_machine_allocation_view_dump(const char *case_id,
     const ValueSsaFunctionMachineAllocationView *view,
     const char *expected_text) {
@@ -67,6 +96,33 @@ static int expect_program_machine_allocation_view_dump(const char *case_id,
     if (strcmp(actual_text, expected_text) != 0) {
         fprintf(stderr,
             "[value-ssa-machine] FAIL: %s program machine allocation dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int expect_allocate_rewrite_machine_report_dump(const char *case_id,
+    const ValueSsaAllocateRewriteMachineReport *report,
+    const char *expected_text) {
+    char *actual_text = NULL;
+    ValueSsaError error;
+    int ok = 1;
+
+    if (!value_ssa_dump_allocate_rewrite_machine_report_artifact(report, &actual_text, &error)) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: %s allocate+rewrite machine report dump failed: %s\n",
+            case_id,
+            error.message);
+        return 0;
+    }
+    if (strcmp(actual_text, expected_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: %s allocate+rewrite machine report dump mismatch\nexpected:\n%s\nactual:\n%s\n",
             case_id,
             expected_text,
             actual_text);
@@ -211,6 +267,227 @@ static int build_alloc_two_function_program(ValueSsaProgram *program, ValueSsaEr
     return 1;
 }
 
+static int build_alloc_call_density_prep_program(ValueSsaProgram *program,
+    size_t *out_call_live_value,
+    size_t *out_post_call_value,
+    ValueSsaError *error) {
+    ValueSsaFunction *decl = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *call_block = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaValueRef *call_args = NULL;
+    size_t call_live_value;
+    size_t post_call_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_function(program, "sink", 1, &decl, error) ||
+        !value_ssa_program_append_function(program, "call_density", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &call_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    call_live_value = value_ssa_function_allocate_value(function);
+    post_call_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (call_live_value == (size_t)-1 || post_call_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    call_args = (ValueSsaValueRef *)malloc(sizeof(ValueSsaValueRef));
+    if (!call_args) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    call_args[0] = value_ssa_value_id(call_live_value);
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(call_live_value);
+    instruction.as.mov_value = value_ssa_value_immediate(7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, call_block->id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 0;
+    instruction.as.call.callee_name = "sink";
+    instruction.as.call.args = call_args;
+    instruction.as.call.arg_count = 1;
+    if (!value_ssa_block_append_instruction(call_block, &instruction, error) ||
+        !value_ssa_block_set_jump(call_block, exit_block->id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(post_call_value);
+    instruction.as.mov_value = value_ssa_value_immediate(11);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(call_live_value);
+    instruction.as.binary.rhs = value_ssa_value_id(post_call_value);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (out_call_live_value) {
+        *out_call_live_value = call_live_value;
+    }
+    if (out_post_call_value) {
+        *out_post_call_value = post_call_value;
+    }
+    return 1;
+}
+
+static int build_alloc_call_density_pressure_program(ValueSsaProgram *program,
+    size_t *out_call_live_value,
+    ValueSsaError *error) {
+    ValueSsaFunction *decl = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *call_block = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaValueRef *call_args = NULL;
+    size_t call_live_value;
+    size_t helper0;
+    size_t helper1;
+    size_t helper2;
+    size_t helper3;
+    size_t post_call_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_function(program, "sink", 1, &decl, error) ||
+        !value_ssa_program_append_function(program, "call_pressure", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &call_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    call_live_value = value_ssa_function_allocate_value(function);
+    helper0 = value_ssa_function_allocate_value(function);
+    helper1 = value_ssa_function_allocate_value(function);
+    helper2 = value_ssa_function_allocate_value(function);
+    helper3 = value_ssa_function_allocate_value(function);
+    post_call_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (call_live_value == (size_t)-1 || helper0 == (size_t)-1 || helper1 == (size_t)-1 ||
+        helper2 == (size_t)-1 || helper3 == (size_t)-1 || post_call_value == (size_t)-1 ||
+        sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    call_args = (ValueSsaValueRef *)malloc(sizeof(ValueSsaValueRef));
+    if (!call_args) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    call_args[0] = value_ssa_value_id(call_live_value);
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+
+    instruction.result = value_ssa_value_id(call_live_value);
+    instruction.as.mov_value = value_ssa_value_immediate(7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(helper0);
+    instruction.as.mov_value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.result = value_ssa_value_id(helper1);
+    instruction.as.mov_value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.result = value_ssa_value_id(helper2);
+    instruction.as.mov_value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.result = value_ssa_value_id(helper3);
+    instruction.as.mov_value = value_ssa_value_immediate(4);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, call_block->id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 0;
+    instruction.as.call.callee_name = "sink";
+    instruction.as.call.args = call_args;
+    instruction.as.call.arg_count = 1;
+    if (!value_ssa_block_append_instruction(call_block, &instruction, error) ||
+        !value_ssa_block_set_jump(call_block, exit_block->id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(post_call_value);
+    instruction.as.mov_value = value_ssa_value_immediate(11);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(call_live_value);
+    instruction.as.binary.rhs = value_ssa_value_id(post_call_value);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (out_call_live_value) {
+        *out_call_live_value = call_live_value;
+    }
+    return 1;
+}
+
 static int prepare_manual_two_function_program_result(ValueSsaProgramAllocationResult *result,
     const ValueSsaProgram *program) {
     size_t function_index;
@@ -304,6 +581,79 @@ static int prepare_manual_two_function_program_result(ValueSsaProgramAllocationR
     return 1;
 }
 
+static int prepare_manual_call_pressure_result(ValueSsaProgramAllocationResult *result,
+    const ValueSsaProgram *program) {
+    size_t value_count;
+    size_t value_index;
+
+    if (!result || !program || program->function_count < 2) {
+        return 0;
+    }
+
+    value_ssa_program_allocation_result_free(result);
+    result->function_count = 2;
+    result->function_results = (ValueSsaAllocationResult *)calloc(2, sizeof(ValueSsaAllocationResult));
+    if (!result->function_results) {
+        return 0;
+    }
+
+    value_ssa_allocation_result_init(&result->function_results[0]);
+    value_ssa_allocation_result_init(&result->function_results[1]);
+
+    value_count = program->functions[1].next_value_id;
+    result->function_results[1].value_count = value_count;
+    result->function_results[1].color_budget = 3;
+    result->function_results[1].spill_slot_count = 0;
+    result->function_results[1].colors = (size_t *)malloc(value_count * sizeof(size_t));
+    result->function_results[1].has_color = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    result->function_results[1].spill_flags = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    result->function_results[1].spill_intended_flags = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    result->function_results[1].spill_confirmed_flags = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    result->function_results[1].spill_recovered_flags = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    result->function_results[1].spill_recovery_orders = (size_t *)malloc(value_count * sizeof(size_t));
+    result->function_results[1].spill_recovery_phase_ids = (size_t *)malloc(value_count * sizeof(size_t));
+    result->function_results[1].spill_recovery_phase_member_orders = (size_t *)malloc(value_count * sizeof(size_t));
+    result->function_results[1].spill_recovery_phase_member_counts = (size_t *)malloc(value_count * sizeof(size_t));
+    result->function_results[1].spill_recovery_phase_entries =
+        (ValueSsaAllocatorRetryFamilyAgendaItem *)calloc(value_count, sizeof(ValueSsaAllocatorRetryFamilyAgendaItem));
+    result->function_results[1].spill_priorities = (size_t *)calloc(value_count, sizeof(size_t));
+    result->function_results[1].spill_slots = (size_t *)malloc(value_count * sizeof(size_t));
+    if (!result->function_results[1].colors ||
+        !result->function_results[1].has_color ||
+        !result->function_results[1].spill_flags ||
+        !result->function_results[1].spill_intended_flags ||
+        !result->function_results[1].spill_confirmed_flags ||
+        !result->function_results[1].spill_recovered_flags ||
+        !result->function_results[1].spill_recovery_orders ||
+        !result->function_results[1].spill_recovery_phase_ids ||
+        !result->function_results[1].spill_recovery_phase_member_orders ||
+        !result->function_results[1].spill_recovery_phase_member_counts ||
+        !result->function_results[1].spill_recovery_phase_entries ||
+        !result->function_results[1].spill_priorities ||
+        !result->function_results[1].spill_slots) {
+        value_ssa_program_allocation_result_free(result);
+        return 0;
+    }
+
+    for (value_index = 0; value_index < value_count; ++value_index) {
+        result->function_results[1].colors[value_index] = (size_t)-1;
+        result->function_results[1].spill_recovery_orders[value_index] = (size_t)-1;
+        result->function_results[1].spill_recovery_phase_ids[value_index] = (size_t)-1;
+        result->function_results[1].spill_recovery_phase_member_orders[value_index] = (size_t)-1;
+        result->function_results[1].spill_recovery_phase_member_counts[value_index] = (size_t)-1;
+        result->function_results[1].spill_slots[value_index] = (size_t)-1;
+    }
+
+    result->function_results[1].has_color[0] = 1; result->function_results[1].colors[0] = 0;
+    result->function_results[1].has_color[1] = 1; result->function_results[1].colors[1] = 1;
+    result->function_results[1].has_color[2] = 1; result->function_results[1].colors[2] = 1;
+    result->function_results[1].has_color[3] = 1; result->function_results[1].colors[3] = 1;
+    result->function_results[1].has_color[4] = 1; result->function_results[1].colors[4] = 2;
+    result->function_results[1].has_color[5] = 1; result->function_results[1].colors[5] = 0;
+    result->function_results[1].has_color[6] = 1; result->function_results[1].colors[6] = 0;
+    return 1;
+}
+
 static int test_value_ssa_build_flat_machine_register_bank(void) {
     ValueSsaMachineRegisterBank bank;
     int ok = 1;
@@ -354,12 +704,16 @@ static int test_value_ssa_build_function_machine_allocation_view(void) {
 
     ok &= expect_function_machine_allocation_view_dump("VALUE-SSA-MACHINE-FUNCTION-VIEW",
         &view,
-        "machine-allocation func spill regs=2 values=5 colored=4 spilled=1 spill_slots=1\n"
+        "machine-allocation func spill regs=2 values=5 colored=4 spilled=1 spill_slots=1 caller_clobbered=4 callee_preserved=0 used_regs=2 reg_groups=2\n"
+        "used-registers: r0 r1\n"
+        "caller-clobbered-values: ssa.1 ssa.2 ssa.3 ssa.4\n"
         "ssa.0 spill=0 spill-confirmed\n"
         "ssa.1 reg=r0\n"
         "ssa.2 reg=r1 spill-intended\n"
         "ssa.3 reg=r0\n"
-        "ssa.4 reg=r0\n");
+        "ssa.4 reg=r0\n"
+        "register-group r0: ssa.1 ssa.3 ssa.4\n"
+        "register-group r1: ssa.2\n");
 
     value_ssa_function_machine_allocation_view_free(&view);
     value_ssa_machine_register_bank_free(&bank);
@@ -401,25 +755,1510 @@ static int test_value_ssa_build_program_machine_allocation_view(void) {
 
     ok &= expect_program_machine_allocation_view_dump("VALUE-SSA-MACHINE-PROGRAM-VIEW",
         &view,
-        "machine-allocation program functions=2 values=10 colored=9 spilled=1\n"
-        "machine-allocation func main regs=2 values=5 colored=5 spilled=0 spill_slots=0\n"
+        "machine-allocation program functions=2 values=10 colored=9 spilled=1 caller_clobbered=9 callee_preserved=0 colored_funcs=2 spilled_funcs=1 caller_clobbered_funcs=2 callee_preserved_funcs=0\n"
+        "functions-with-machine-colors: 0 1\n"
+        "functions-with-spills: 1\n"
+        "functions-with-caller-clobbered-values: 0 1\n"
+        "machine-allocation func main regs=2 values=5 colored=5 spilled=0 spill_slots=0 caller_clobbered=5 callee_preserved=0 used_regs=1 reg_groups=1\n"
+        "used-registers: r0\n"
+        "caller-clobbered-values: ssa.0 ssa.1 ssa.2 ssa.3 ssa.4\n"
         "ssa.0 reg=r0\n"
         "ssa.1 reg=r0\n"
         "ssa.2 reg=r0\n"
         "ssa.3 reg=r0\n"
         "ssa.4 reg=r0\n"
+        "register-group r0: ssa.0 ssa.1 ssa.2 ssa.3 ssa.4\n"
         "\n"
-        "machine-allocation func spill regs=2 values=5 colored=4 spilled=1 spill_slots=1\n"
+        "machine-allocation func spill regs=2 values=5 colored=4 spilled=1 spill_slots=1 caller_clobbered=4 callee_preserved=0 used_regs=2 reg_groups=2\n"
+        "used-registers: r0 r1\n"
+        "caller-clobbered-values: ssa.1 ssa.2 ssa.3 ssa.4\n"
         "ssa.0 spill=0 spill-confirmed\n"
         "ssa.1 reg=r0\n"
         "ssa.2 reg=r1 spill-intended\n"
         "ssa.3 reg=r0\n"
-        "ssa.4 reg=r0 spill-intended spill-recovered\n");
+        "ssa.4 reg=r0 spill-intended spill-recovered\n"
+        "register-group r0: ssa.1 ssa.3 ssa.4\n"
+        "register-group r1: ssa.2\n");
 
     value_ssa_program_machine_allocation_view_free(&view);
     value_ssa_machine_register_bank_free(&bank);
     value_ssa_program_allocation_layout_free(&layout);
     value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_machine_register_bank_query_surface(void) {
+    ValueSsaMachineRegisterBank bank;
+    const ValueSsaMachineRegisterDesc *desc = NULL;
+    size_t register_count = 0;
+    size_t allocatable_count = 0;
+    size_t caller_clobbered_count = 0;
+    size_t callee_preserved_count = 0;
+    size_t register_index = (size_t)-1;
+    int ok = 1;
+
+    value_ssa_machine_register_bank_init(&bank);
+    if (!value_ssa_build_flat_machine_register_bank(3, &bank, NULL)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: bank-query setup failed\n");
+        return 0;
+    }
+
+    if (!value_ssa_machine_register_bank_get_summary(
+            &bank, &register_count, &allocatable_count, &caller_clobbered_count, &callee_preserved_count) ||
+        register_count != 3 || allocatable_count != 3 || caller_clobbered_count != 3 || callee_preserved_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: bank-query summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_machine_register_bank_get_register(&bank, 1, &desc) || !desc || !desc->name ||
+        strcmp(desc->name, "r1") != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: bank-query direct register lookup mismatch\n");
+        ok = 0;
+    }
+    desc = NULL;
+    if (!value_ssa_machine_register_bank_find_register_by_name(&bank, "r2", &register_index, &desc) ||
+        register_index != 2 || !desc || desc->register_id != 2) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: bank-query name lookup mismatch\n");
+        ok = 0;
+    }
+
+    value_ssa_machine_register_bank_free(&bank);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_allocation_view_query_surface(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaProgramAllocationLayout layout;
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaProgramMachineAllocationView view;
+    const ValueSsaFunctionMachineAllocationView *function_view = NULL;
+    const ValueSsaMachineAllocatedValuePlacement *placement = NULL;
+    const ValueSsaMachineRegisterValueGroup *register_group = NULL;
+    const char *function_name = NULL;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_machine_colored_count = 0;
+    size_t total_spilled_count = 0;
+    size_t total_caller_clobbered_value_count = 0;
+    size_t total_callee_preserved_value_count = 0;
+    size_t function_index = (size_t)-1;
+    size_t value_count = 0;
+    size_t machine_register_count = 0;
+    size_t spill_slot_count = 0;
+    size_t machine_colored_count = 0;
+    size_t spilled_count = 0;
+    size_t caller_clobbered_value_count = 0;
+    size_t callee_preserved_value_count = 0;
+    size_t used_machine_register_count = 0;
+    size_t machine_register_group_count = 0;
+    size_t filtered_count = 0;
+    const size_t *filtered_ids = NULL;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, NULL)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query setup failed\n");
+        return 0;
+    }
+
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_program_allocation_layout_init(&layout);
+    value_ssa_machine_register_bank_init(&bank);
+    value_ssa_program_machine_allocation_view_init(&view);
+    if (!prepare_manual_two_function_program_result(&result, &program) ||
+        !value_ssa_build_program_allocation_layout(&result, &layout, NULL) ||
+        !value_ssa_program_allocation_layout_attach_program_context(&layout, &program, NULL) ||
+        !value_ssa_build_flat_machine_register_bank(2, &bank, NULL) ||
+        !value_ssa_build_program_machine_allocation_view(&layout, &bank, &view, NULL)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query build failed\n");
+        value_ssa_program_machine_allocation_view_free(&view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_program_allocation_layout_free(&layout);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!value_ssa_program_machine_allocation_view_get_summary(
+            &view,
+            &function_count,
+            &total_value_count,
+            &total_machine_colored_count,
+            &total_spilled_count,
+            &total_caller_clobbered_value_count,
+            &total_callee_preserved_value_count) ||
+        function_count != 2 || total_value_count != 10 || total_machine_colored_count != 9 || total_spilled_count != 1 ||
+        total_caller_clobbered_value_count != 9 || total_callee_preserved_value_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_allocation_view_get_function_view_by_name(
+            &view, "spill", &function_index, &function_view) ||
+        function_index != 1 || !function_view) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query function lookup mismatch\n");
+        ok = 0;
+    } else if (!value_ssa_function_machine_allocation_view_get_summary(function_view,
+                   &function_name,
+                   &value_count,
+                   &machine_register_count,
+                   &spill_slot_count,
+                   &machine_colored_count,
+                   &spilled_count,
+                   &caller_clobbered_value_count,
+                   &callee_preserved_value_count,
+                   &used_machine_register_count,
+                   &machine_register_group_count) ||
+        !function_name || strcmp(function_name, "spill") != 0 ||
+        value_count != 5 || machine_register_count != 2 || spill_slot_count != 1 ||
+        machine_colored_count != 4 || spilled_count != 1 ||
+        caller_clobbered_value_count != 4 || callee_preserved_value_count != 0 ||
+        used_machine_register_count != 2 || machine_register_group_count != 2) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query function summary mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_placement(function_view, 2, &placement) ||
+        !placement || placement->kind != VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR ||
+        !placement->machine_register_name || strcmp(placement->machine_register_name, "r1") != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query placement lookup mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_machine_colored_values(function_view, &filtered_count, &filtered_ids) ||
+        filtered_count != 4 || !filtered_ids || filtered_ids[0] != 1 || filtered_ids[1] != 2) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query colored-values mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_spilled_values(function_view, &filtered_count, &filtered_ids) ||
+        filtered_count != 1 || !filtered_ids || filtered_ids[0] != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query spilled-values mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_caller_clobbered_values(function_view, &filtered_count, &filtered_ids) ||
+        filtered_count != 4 || !filtered_ids || filtered_ids[0] != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query caller-clobbered mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_used_machine_registers(function_view, &filtered_count, &filtered_ids) ||
+        filtered_count != 2 || !filtered_ids || filtered_ids[0] != 0 || filtered_ids[1] != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query used-registers mismatch\n");
+        ok = 0;
+    }
+    if (!function_view ||
+        !value_ssa_function_machine_allocation_view_get_machine_register_group(function_view, 0, &register_group) ||
+        !register_group || register_group->value_count != 3 || !register_group->value_ids ||
+        register_group->value_ids[0] != 1 || register_group->value_ids[1] != 3 || register_group->value_ids[2] != 4) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query register-group mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_allocation_view_get_functions_with_machine_colors(&view, &filtered_count, &filtered_ids) ||
+        filtered_count != 2 || !filtered_ids || filtered_ids[0] != 0 || filtered_ids[1] != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query functions-with-colors mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_allocation_view_get_functions_with_spills(&view, &filtered_count, &filtered_ids) ||
+        filtered_count != 1 || !filtered_ids || filtered_ids[0] != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query functions-with-spills mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_allocation_view_get_functions_with_caller_clobbered_values(
+            &view, &filtered_count, &filtered_ids) ||
+        filtered_count != 2 || !filtered_ids || filtered_ids[0] != 0 || filtered_ids[1] != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query functions-with-caller-clobbered mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_allocation_view_get_functions_with_callee_preserved_values(
+            &view, &filtered_count, &filtered_ids) ||
+        filtered_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-machine-query functions-with-callee-preserved mismatch\n");
+        ok = 0;
+    }
+
+    value_ssa_program_machine_allocation_view_free(&view);
+    value_ssa_machine_register_bank_free(&bank);
+    value_ssa_program_allocation_layout_free(&layout);
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_allocate_rewrite_machine_report_artifact_dump(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaAllocateRewriteLayoutReport layout_report;
+    ValueSsaAllocateRewriteMachineReport machine_report;
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaError error;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-report setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_allocate_rewrite_layout_report_init(&layout_report);
+    value_ssa_allocate_rewrite_machine_report_init(&machine_report);
+    value_ssa_machine_register_bank_init(&bank);
+    if (!prepare_manual_two_function_program_result(&result, &program) ||
+        !value_ssa_build_allocate_rewrite_layout_report(&result, &(ValueSsaAllocateRewriteStats){2, 1}, &layout_report, &error) ||
+        !value_ssa_allocate_rewrite_layout_report_attach_program_context(&layout_report, &program, &error) ||
+        !value_ssa_build_flat_machine_register_bank(2, &bank, &error) ||
+        !value_ssa_build_allocate_rewrite_machine_report(&layout_report, &bank, &machine_report, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-report build failed: %s\n", error.message);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_allocate_rewrite_machine_report_free(&machine_report);
+        value_ssa_allocate_rewrite_layout_report_free(&layout_report);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok &= expect_allocate_rewrite_machine_report_dump("VALUE-SSA-MACHINE-REPORT",
+        &machine_report,
+        "allocate+rewrite machine-report allocation_rounds=2 rewrite_rounds=1\n"
+        "machine-allocation program functions=2 values=10 colored=9 spilled=1 caller_clobbered=9 callee_preserved=0 colored_funcs=2 spilled_funcs=1 caller_clobbered_funcs=2 callee_preserved_funcs=0\n"
+        "functions-with-machine-colors: 0 1\n"
+        "functions-with-spills: 1\n"
+        "functions-with-caller-clobbered-values: 0 1\n"
+        "machine-allocation func main regs=2 values=5 colored=5 spilled=0 spill_slots=0 caller_clobbered=5 callee_preserved=0 used_regs=1 reg_groups=1\n"
+        "used-registers: r0\n"
+        "caller-clobbered-values: ssa.0 ssa.1 ssa.2 ssa.3 ssa.4\n"
+        "ssa.0 reg=r0\n"
+        "ssa.1 reg=r0\n"
+        "ssa.2 reg=r0\n"
+        "ssa.3 reg=r0\n"
+        "ssa.4 reg=r0\n"
+        "register-group r0: ssa.0 ssa.1 ssa.2 ssa.3 ssa.4\n"
+        "\n"
+        "machine-allocation func spill regs=2 values=5 colored=4 spilled=1 spill_slots=1 caller_clobbered=4 callee_preserved=0 used_regs=2 reg_groups=2\n"
+        "used-registers: r0 r1\n"
+        "caller-clobbered-values: ssa.1 ssa.2 ssa.3 ssa.4\n"
+        "ssa.0 spill=0 spill-confirmed\n"
+        "ssa.1 reg=r0\n"
+        "ssa.2 reg=r1 spill-intended\n"
+        "ssa.3 reg=r0\n"
+        "ssa.4 reg=r0 spill-intended spill-recovered\n"
+        "register-group r0: ssa.1 ssa.3 ssa.4\n"
+        "register-group r1: ssa.2\n");
+
+    {
+        const ValueSsaProgramMachineAllocationView *program_view = NULL;
+        const ValueSsaFunctionMachineAllocationView *function_view = NULL;
+        size_t allocation_rounds = 0;
+        size_t rewrite_rounds = 0;
+        size_t function_count = 0;
+        size_t total_value_count = 0;
+        size_t total_machine_colored_count = 0;
+        size_t total_spilled_count = 0;
+        size_t function_index = (size_t)-1;
+
+        if (!value_ssa_allocate_rewrite_machine_report_get_summary(
+                &machine_report,
+                &allocation_rounds,
+                &rewrite_rounds,
+                &function_count,
+                &total_value_count,
+                &total_machine_colored_count,
+                &total_spilled_count) ||
+            allocation_rounds != 2 || rewrite_rounds != 1 ||
+            function_count != 2 || total_value_count != 10 ||
+            total_machine_colored_count != 9 || total_spilled_count != 1) {
+            fprintf(stderr, "[value-ssa-machine] FAIL: machine-report summary mismatch\n");
+            ok = 0;
+        }
+        if (!value_ssa_allocate_rewrite_machine_report_get_program_view(&machine_report, &program_view) ||
+            !program_view) {
+            fprintf(stderr, "[value-ssa-machine] FAIL: machine-report program-view query failed\n");
+            ok = 0;
+        }
+        if (!value_ssa_allocate_rewrite_machine_report_get_function_view_by_name(
+                &machine_report, "spill", &function_index, &function_view) ||
+            function_index != 1 || !function_view) {
+            fprintf(stderr, "[value-ssa-machine] FAIL: machine-report function lookup mismatch\n");
+            ok = 0;
+        }
+    }
+
+    value_ssa_machine_register_bank_free(&bank);
+    value_ssa_allocate_rewrite_machine_report_free(&machine_report);
+    value_ssa_allocate_rewrite_layout_report_free(&layout_report);
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_allocate_and_rewrite_machine_report_entrypoints(void) {
+    ValueSsaProgram program_a;
+    ValueSsaProgram program_b;
+    ValueSsaProgram program_c;
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaAllocateRewriteMachineReport direct_report;
+    ValueSsaAllocateRewriteLayoutReport layout_report;
+    ValueSsaAllocateRewriteMachineReport rebuilt_report;
+    ValueSsaAllocateRewriteMachineReport flat_report;
+    ValueSsaError error;
+    char *direct_text = NULL;
+    char *dump_text = NULL;
+    char *flat_dump_text = NULL;
+    int ok = 1;
+
+    if (!build_alloc_spill_program(&program_a, &error) ||
+        !build_alloc_spill_program(&program_b, &error) ||
+        !build_alloc_spill_program(&program_c, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-entry setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_machine_register_bank_init(&bank);
+    value_ssa_allocate_rewrite_machine_report_init(&direct_report);
+    value_ssa_allocate_rewrite_layout_report_init(&layout_report);
+    value_ssa_allocate_rewrite_machine_report_init(&rebuilt_report);
+    value_ssa_allocate_rewrite_machine_report_init(&flat_report);
+    if (!value_ssa_build_flat_machine_register_bank(2, &bank, &error) ||
+        !value_ssa_allocate_and_rewrite_program_single_block_spills_machine_report(
+            &program_a, 2, &bank, &direct_report, &error) ||
+        !value_ssa_allocate_and_rewrite_program_single_block_spills_layout_report(
+            &program_b, 2, &layout_report, &error) ||
+        !value_ssa_build_allocate_rewrite_machine_report(&layout_report, &bank, &rebuilt_report, &error) ||
+        !value_ssa_allocate_and_rewrite_program_single_block_spills_flat_machine_report(
+            &program_c, 2, 2, &flat_report, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-entry build failed: %s\n", error.message);
+        value_ssa_allocate_rewrite_machine_report_free(&flat_report);
+        value_ssa_allocate_rewrite_machine_report_free(&rebuilt_report);
+        value_ssa_allocate_rewrite_layout_report_free(&layout_report);
+        value_ssa_allocate_rewrite_machine_report_free(&direct_report);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_program_free(&program_c);
+        value_ssa_program_free(&program_b);
+        value_ssa_program_free(&program_a);
+        return 0;
+    }
+
+    if (!value_ssa_dump_allocate_rewrite_machine_report_artifact(&direct_report, &direct_text, &error) ||
+        !value_ssa_dump_allocate_rewrite_machine_report_artifact(&rebuilt_report, &dump_text, &error) ||
+        !value_ssa_dump_allocate_rewrite_machine_report_artifact(&flat_report, &flat_dump_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-entry dump failed: %s\n", error.message);
+        free(flat_dump_text);
+        free(dump_text);
+        free(direct_text);
+        value_ssa_allocate_rewrite_machine_report_free(&flat_report);
+        value_ssa_allocate_rewrite_machine_report_free(&rebuilt_report);
+        value_ssa_allocate_rewrite_layout_report_free(&layout_report);
+        value_ssa_allocate_rewrite_machine_report_free(&direct_report);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_program_free(&program_c);
+        value_ssa_program_free(&program_b);
+        value_ssa_program_free(&program_a);
+        return 0;
+    }
+
+    if (strcmp(direct_text, dump_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: machine-entry reports differ\nlhs:\n%s\nrhs:\n%s\n",
+            direct_text,
+            dump_text);
+        ok = 0;
+    }
+    if (strcmp(direct_text, flat_dump_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: machine-entry flat report differs\nlhs:\n%s\nrhs:\n%s\n",
+            direct_text,
+            flat_dump_text);
+        ok = 0;
+    }
+
+    free(flat_dump_text);
+    free(dump_text);
+    free(direct_text);
+    value_ssa_allocate_rewrite_machine_report_free(&flat_report);
+    value_ssa_allocate_rewrite_machine_report_free(&rebuilt_report);
+    value_ssa_allocate_rewrite_layout_report_free(&layout_report);
+    value_ssa_allocate_rewrite_machine_report_free(&direct_report);
+    value_ssa_machine_register_bank_free(&bank);
+    value_ssa_program_free(&program_c);
+    value_ssa_program_free(&program_b);
+    value_ssa_program_free(&program_a);
+    return ok;
+}
+
+static int test_value_ssa_machine_view_entrypoints(void) {
+    ValueSsaProgram program_a;
+    ValueSsaProgram program_b;
+    ValueSsaProgram program_c;
+    ValueSsaProgram program_d;
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaFunctionMachineAllocationView direct_function_view;
+    ValueSsaFunctionMachineAllocationView flat_function_view;
+    ValueSsaProgramMachineAllocationView direct_program_view;
+    ValueSsaProgramMachineAllocationView flat_program_view;
+    char *direct_text = NULL;
+    char *flat_text = NULL;
+    char *direct_program_text = NULL;
+    char *flat_program_text = NULL;
+    char *direct_function_dump_text = NULL;
+    char *flat_function_dump_text = NULL;
+    char *direct_program_dump_text = NULL;
+    char *flat_program_dump_text = NULL;
+    ValueSsaError error;
+    int ok = 1;
+
+    if (!build_alloc_spill_program(&program_a, &error) ||
+        !build_alloc_spill_program(&program_b, &error) ||
+        !build_alloc_two_function_program(&program_c, &error) ||
+        !build_alloc_two_function_program(&program_d, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-view entry setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_machine_register_bank_init(&bank);
+    value_ssa_function_machine_allocation_view_init(&direct_function_view);
+    value_ssa_function_machine_allocation_view_init(&flat_function_view);
+    value_ssa_program_machine_allocation_view_init(&direct_program_view);
+    value_ssa_program_machine_allocation_view_init(&flat_program_view);
+    if (!value_ssa_build_flat_machine_register_bank(2, &bank, &error) ||
+        !value_ssa_allocate_function_machine_view(&program_a.functions[0], 2, &bank, &direct_function_view, &error) ||
+        !value_ssa_allocate_function_flat_machine_view(&program_b.functions[0], 2, 2, &flat_function_view, &error) ||
+        !value_ssa_allocate_program_machine_view(&program_c, 2, &bank, &direct_program_view, &error) ||
+        !value_ssa_allocate_program_flat_machine_view(&program_c, 2, 2, &flat_program_view, &error) ||
+        !value_ssa_allocate_function_machine_view_dump(
+            &program_a.functions[0], 2, &bank, &direct_function_dump_text, &error) ||
+        !value_ssa_allocate_function_flat_machine_view_dump(
+            &program_b.functions[0], 2, 2, &flat_function_dump_text, &error) ||
+        !value_ssa_allocate_program_machine_view_dump(&program_d, 2, &bank, &direct_program_dump_text, &error) ||
+        !value_ssa_allocate_program_flat_machine_view_dump(&program_d, 2, 2, &flat_program_dump_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-view entry build failed: %s\n", error.message);
+        free(flat_program_dump_text);
+        free(direct_program_dump_text);
+        free(flat_function_dump_text);
+        free(direct_function_dump_text);
+        value_ssa_program_machine_allocation_view_free(&flat_program_view);
+        value_ssa_program_machine_allocation_view_free(&direct_program_view);
+        value_ssa_function_machine_allocation_view_free(&flat_function_view);
+        value_ssa_function_machine_allocation_view_free(&direct_function_view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_program_free(&program_d);
+        value_ssa_program_free(&program_c);
+        value_ssa_program_free(&program_b);
+        value_ssa_program_free(&program_a);
+        return 0;
+    }
+
+    if (!value_ssa_dump_function_machine_allocation_view(&direct_function_view, &direct_text, &error) ||
+        !value_ssa_dump_function_machine_allocation_view(&flat_function_view, &flat_text, &error) ||
+        !value_ssa_dump_program_machine_allocation_view(&direct_program_view, &direct_program_text, &error) ||
+        !value_ssa_dump_program_machine_allocation_view(&flat_program_view, &flat_program_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: machine-view entry dump failed: %s\n", error.message);
+        free(flat_program_text);
+        free(direct_program_text);
+        free(flat_text);
+        free(direct_text);
+        value_ssa_program_machine_allocation_view_free(&flat_program_view);
+        value_ssa_program_machine_allocation_view_free(&direct_program_view);
+        value_ssa_function_machine_allocation_view_free(&flat_function_view);
+        value_ssa_function_machine_allocation_view_free(&direct_function_view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_program_free(&program_c);
+        value_ssa_program_free(&program_b);
+        value_ssa_program_free(&program_a);
+        return 0;
+    }
+
+    if (strcmp(direct_text, flat_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: function machine-view entrypoints differ\nlhs:\n%s\nrhs:\n%s\n",
+            direct_text,
+            flat_text);
+        ok = 0;
+    }
+    if (strcmp(direct_program_text, flat_program_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program machine-view entrypoints differ\nlhs:\n%s\nrhs:\n%s\n",
+            direct_program_text,
+            flat_program_text);
+        ok = 0;
+    }
+    if (strcmp(direct_text, direct_function_dump_text) != 0 || strcmp(direct_text, flat_function_dump_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: function machine-view dump entrypoints differ\nview:\n%s\ndirect_dump:\n%s\nflat_dump:\n%s\n",
+            direct_text,
+            direct_function_dump_text,
+            flat_function_dump_text);
+        ok = 0;
+    }
+    if (strcmp(direct_program_text, direct_program_dump_text) != 0 ||
+        strcmp(direct_program_text, flat_program_dump_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program machine-view dump entrypoints differ\nview:\n%s\ndirect_dump:\n%s\nflat_dump:\n%s\n",
+            direct_program_text,
+            direct_program_dump_text,
+            flat_program_dump_text);
+        ok = 0;
+    }
+
+    free(flat_program_dump_text);
+    free(direct_program_dump_text);
+    free(flat_function_dump_text);
+    free(direct_function_dump_text);
+    free(flat_program_text);
+    free(direct_program_text);
+    free(flat_text);
+    free(direct_text);
+    value_ssa_program_machine_allocation_view_free(&flat_program_view);
+    value_ssa_program_machine_allocation_view_free(&direct_program_view);
+    value_ssa_function_machine_allocation_view_free(&flat_function_view);
+    value_ssa_function_machine_allocation_view_free(&direct_function_view);
+    value_ssa_machine_register_bank_free(&bank);
+    value_ssa_program_free(&program_d);
+    value_ssa_program_free(&program_c);
+    value_ssa_program_free(&program_b);
+    value_ssa_program_free(&program_a);
+    return ok;
+}
+
+static int test_value_ssa_machine_call_clobber_risk_report(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaMachineCallClobberRiskReport report;
+    const ValueSsaMachineCallClobberRiskItem *item = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t call_live_value = (size_t)-1;
+    size_t post_call_value = (size_t)-1;
+    size_t value_count = 0;
+    size_t risky_value_count = 0;
+    size_t crossing_count = 0;
+    size_t repeated_count = 0;
+    size_t hot_count = 0;
+    int ok = 1;
+
+    if (!build_alloc_call_density_prep_program(&program, &call_live_value, &post_call_value, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    value_ssa_machine_call_clobber_risk_report_init(&report);
+    if (!value_ssa_compute_allocation_prep(&program.functions[1], NULL, NULL, NULL, NULL, &prep, &error) ||
+        !value_ssa_compute_function_flat_machine_call_clobber_risk(
+            &program.functions[1], 1, 1, &prep, &report, &error) ||
+        !value_ssa_dump_machine_call_clobber_risk_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_machine_call_clobber_risk_report_free(&report);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "machine-call-clobber-risk values=3 risky=1 crossing=0 repeated=1 hot=0\n"
+            "ssa.0 reg=r0 class=repeated call_cross=1 calls=1 use_calls=1\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: call-clobber-risk dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_machine_call_clobber_risk_report_get_summary(&report, &value_count, &risky_value_count) ||
+        value_count != 3 || risky_value_count != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_CROSSING, &crossing_count) ||
+        !value_ssa_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &repeated_count) ||
+        !value_ssa_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_HOT, &hot_count) ||
+        crossing_count != 0 || repeated_count != 1 || hot_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk class counts mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_machine_call_clobber_risk_report_find_value(&report, call_live_value, NULL, &item) ||
+        !item || item->call_crossing_count != 1 || !item->machine_register_name ||
+        strcmp(item->machine_register_name, "r0") != 0 ||
+        item->risk_class != VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk item lookup mismatch\n");
+        ok = 0;
+    }
+    if (value_ssa_machine_call_clobber_risk_report_find_value(&report, post_call_value, NULL, &item)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: call-clobber-risk should not include non-crossing value\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_machine_call_clobber_risk_report_free(&report);
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_call_clobber_risk_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachineCallClobberRiskReport report;
+    const ValueSsaFunctionMachineCallClobberRiskView *function_view = NULL;
+    const ValueSsaMachineCallClobberRiskItem *item = NULL;
+    const size_t *risky_function_indices = NULL;
+    const size_t *class_function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_risky_value_count = 0;
+    size_t risky_function_count = 0;
+    size_t crossing_count = 0;
+    size_t repeated_count = 0;
+    size_t hot_count = 0;
+    size_t class_function_count = 0;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_call_clobber_risk_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_call_clobber_risk(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_call_clobber_risk_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_call_clobber_risk_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-call-clobber-risk functions=2 values=10 risky=0 risky_funcs=0 crossing=0 repeated=0 hot=0\n"
+            "function main risky=0 values=5 crossing=0 repeated=0 hot=0\n"
+            "machine-call-clobber-risk values=5 risky=0 crossing=0 repeated=0 hot=0\n"
+            "function spill risky=0 values=5 crossing=0 repeated=0 hot=0\n"
+            "machine-call-clobber-risk values=5 risky=0 crossing=0 repeated=0 hot=0\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-call-clobber-risk dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    if (!value_ssa_program_machine_call_clobber_risk_report_get_summary(
+            &report, &function_count, &total_value_count, &total_risky_value_count) ||
+        function_count != 2 || total_value_count != 10 || total_risky_value_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_CROSSING, &crossing_count) ||
+        !value_ssa_program_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &repeated_count) ||
+        !value_ssa_program_machine_call_clobber_risk_report_get_class_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_HOT, &hot_count) ||
+        crossing_count != 0 || repeated_count != 0 || hot_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk class summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_call_clobber_risk_report_get_functions_with_risky_values(
+            &report, &risky_function_count, &risky_function_indices) ||
+        risky_function_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_call_clobber_risk_report_get_functions_with_risk_class(
+            &report,
+            VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED,
+            &class_function_count,
+            &class_function_indices) ||
+        class_function_count != 0 || class_function_indices != NULL) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-call-clobber-risk class filter mismatch count=%zu ptr=%p\n",
+            class_function_count,
+            (const void *)class_function_indices);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_call_clobber_risk_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view ||
+        function_view->risk_report.item_count != 0 || function_view->risk_report.value_count != 5) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk function lookup mismatch\n");
+        ok = 0;
+    }
+    if (value_ssa_machine_call_clobber_risk_report_find_value(&function_view->risk_report, 0, NULL, &item)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-call-clobber-risk unexpected risky value in main\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_call_clobber_risk_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_machine_protection_agenda(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaMachineProtectionAgenda agenda;
+    const ValueSsaMachineProtectionAgendaItem *item = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t call_live_value = (size_t)-1;
+    size_t post_call_value = (size_t)-1;
+    size_t value_count = 0;
+    size_t item_count = 0;
+    size_t crossing_count = 0;
+    size_t repeated_count = 0;
+    size_t hot_count = 0;
+    int ok = 1;
+
+    if (!build_alloc_call_density_prep_program(&program, &call_live_value, &post_call_value, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: protection-agenda setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    value_ssa_machine_protection_agenda_init(&agenda);
+    if (!value_ssa_compute_allocation_prep(&program.functions[1], NULL, NULL, NULL, NULL, &prep, &error) ||
+        !value_ssa_compute_function_flat_machine_protection_agenda(
+            &program.functions[1], 1, 1, &prep, &agenda, &error) ||
+        !value_ssa_dump_machine_protection_agenda(&agenda, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: protection-agenda build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_machine_protection_agenda_free(&agenda);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "machine-protection-agenda values=3 items=1 crossing=0 repeated=1 hot=0\n"
+            "ssa.0 reg=r0 class=repeated priority=114 call_cross=1 calls=1 use_calls=1 loops=0 use_loops=0 xblock=0 remat=1\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: protection-agenda dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_machine_protection_agenda_get_summary(
+            &agenda, &value_count, &item_count, &crossing_count, &repeated_count, &hot_count) ||
+        value_count != 3 || item_count != 1 || crossing_count != 0 || repeated_count != 1 || hot_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: protection-agenda summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_machine_protection_agenda_find_value(&agenda, call_live_value, NULL, &item) ||
+        !item || item->risk_class != VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED ||
+        item->protection_priority != 114 || item->single_block_live_range != 0 || item->rematerializable != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: protection-agenda item lookup mismatch\n");
+        ok = 0;
+    }
+    if (value_ssa_machine_protection_agenda_find_value(&agenda, post_call_value, NULL, &item)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: protection-agenda should not include non-crossing value\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_machine_protection_agenda_free(&agenda);
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_protection_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachineProtectionReport report;
+    const ValueSsaFunctionMachineProtectionView *function_view = NULL;
+    const size_t *function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_item_count = 0;
+    size_t filtered_count = 0;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_protection_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_protection_report(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_protection_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_protection_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-protection-report functions=2 values=10 items=0 functions_with_items=0 crossing=0 repeated=0 hot=0\n"
+            "function main items=0 values=5 crossing=0 repeated=0 hot=0\n"
+            "machine-protection-agenda values=5 items=0 crossing=0 repeated=0 hot=0\n"
+            "function spill items=0 values=5 crossing=0 repeated=0 hot=0\n"
+            "machine-protection-agenda values=5 items=0 crossing=0 repeated=0 hot=0\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-protection dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_protection_report_get_summary(
+            &report, &function_count, &total_value_count, &total_item_count) ||
+        function_count != 2 || total_value_count != 10 || total_item_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_protection_report_get_functions_with_items(&report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection item filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_protection_report_get_functions_with_risk_class(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection class filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_protection_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view || function_view->agenda.item_count != 0 || function_view->agenda.value_count != 5) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-protection function lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_protection_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_machine_register_protection_pressure_view(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaMachineRegisterProtectionPressureView view;
+    const ValueSsaMachineRegisterProtectionPressureItem *item = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t call_live_value = (size_t)-1;
+    size_t post_call_value = (size_t)-1;
+    size_t machine_register_count = 0;
+    size_t pressured_register_count = 0;
+    size_t total_value_count = 0;
+    size_t total_item_count = 0;
+    size_t total_priority = 0;
+    size_t crossing_count = 0;
+    size_t repeated_count = 0;
+    size_t hot_count = 0;
+    int ok = 1;
+
+    if (!build_alloc_call_density_prep_program(&program, &call_live_value, &post_call_value, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: register-pressure setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    value_ssa_machine_register_protection_pressure_view_init(&view);
+    if (!value_ssa_compute_allocation_prep(&program.functions[1], NULL, NULL, NULL, NULL, &prep, &error) ||
+        !value_ssa_compute_function_flat_machine_register_protection_pressure_view(
+            &program.functions[1], 1, 1, &prep, &view, &error) ||
+        !value_ssa_dump_machine_register_protection_pressure_view(&view, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: register-pressure build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_machine_register_protection_pressure_view_free(&view);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "machine-register-protection-pressure regs=1 pressured=1 values=3 items=1 total_priority=114 crossing=0 repeated=1 hot=0\n"
+            "reg r0 items=1 total_priority=114 max_priority=114 crossing=0 repeated=1 hot=0 values: ssa.0\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: register-pressure dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_machine_register_protection_pressure_view_get_summary(
+            &view,
+            &machine_register_count,
+            &pressured_register_count,
+            &total_value_count,
+            &total_item_count,
+            &total_priority,
+            &crossing_count,
+            &repeated_count,
+            &hot_count) ||
+        machine_register_count != 1 || pressured_register_count != 1 || total_value_count != 3 ||
+        total_item_count != 1 || total_priority != 114 || crossing_count != 0 || repeated_count != 1 || hot_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: register-pressure summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_machine_register_protection_pressure_view_get_register_item(&view, 0, &item) ||
+        !item || !item->machine_register_name || strcmp(item->machine_register_name, "r0") != 0 ||
+        item->item_count != 1 || item->total_protection_priority != 114 ||
+        item->max_protection_priority != 114 || !item->value_ids || item->value_ids[0] != call_live_value) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: register-pressure item lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_machine_register_protection_pressure_view_free(&view);
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_register_protection_pressure_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachineRegisterProtectionPressureReport report;
+    const ValueSsaFunctionMachineRegisterProtectionPressureView *function_view = NULL;
+    const size_t *function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_item_count = 0;
+    size_t total_priority = 0;
+    size_t total_pressured_register_count = 0;
+    size_t filtered_count = 0;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_register_protection_pressure_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_register_protection_pressure_report(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_register_protection_pressure_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_register_protection_pressure_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-register-protection-pressure functions=2 values=10 items=0 total_priority=0 pressured_regs=0 pressure_funcs=0 crossing=0 repeated=0 hot=0\n"
+            "function main pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n"
+            "machine-register-protection-pressure regs=2 pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n"
+            "function spill pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n"
+            "machine-register-protection-pressure regs=2 pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-register-pressure dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_pressure_report_get_summary(
+            &report,
+            &function_count,
+            &total_value_count,
+            &total_item_count,
+            &total_priority,
+            &total_pressured_register_count) ||
+        function_count != 2 || total_value_count != 10 || total_item_count != 0 ||
+        total_priority != 0 || total_pressured_register_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_pressure_report_get_functions_with_pressure(
+            &report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_pressure_report_get_functions_with_risk_class(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure class filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_pressure_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view ||
+        function_view->pressure_view.pressured_register_count != 0 || function_view->pressure_view.total_value_count != 5) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-register-pressure function lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_register_protection_pressure_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_function_machine_register_protection_hotspot_view(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaFunctionMachineRegisterProtectionHotspotView view;
+    const ValueSsaMachineRegisterProtectionHotspotItem *hotspot = NULL;
+    const char *function_name = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t call_live_value = (size_t)-1;
+    size_t post_call_value = (size_t)-1;
+    size_t total_item_count = 0;
+    size_t total_value_count = 0;
+    int has_hotspot = 0;
+    int ok = 1;
+
+    if (!build_alloc_call_density_prep_program(&program, &call_live_value, &post_call_value, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: hotspot-view setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    value_ssa_function_machine_register_protection_hotspot_view_init(&view);
+    if (!value_ssa_compute_allocation_prep(&program.functions[1], NULL, NULL, NULL, NULL, &prep, &error) ||
+        !value_ssa_compute_function_flat_machine_register_protection_hotspot_view(
+            &program.functions[1], 1, 1, &prep, &view, &error) ||
+        !value_ssa_dump_function_machine_register_protection_hotspot_view(&view, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: hotspot-view build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_function_machine_register_protection_hotspot_view_free(&view);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "function-register-protection-hotspot call_density reg=r0 items=1 total_priority=114 max_priority=114 crossing=0 repeated=1 hot=0\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: hotspot-view dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_function_machine_register_protection_hotspot_view_get_summary(
+            &view, &function_name, &has_hotspot, &total_item_count, &total_value_count, &hotspot) ||
+        !function_name || strcmp(function_name, "call_density") != 0 ||
+        !has_hotspot || total_item_count != 1 || total_value_count != 1 ||
+        !hotspot || !hotspot->machine_register_name || strcmp(hotspot->machine_register_name, "r0") != 0 ||
+        hotspot->total_protection_priority != 114 || hotspot->item_count != 1) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: hotspot-view summary mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_function_machine_register_protection_hotspot_view_free(&view);
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_register_protection_hotspot_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachineRegisterProtectionHotspotReport report;
+    const ValueSsaFunctionMachineRegisterProtectionHotspotView *function_view = NULL;
+    const size_t *function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_item_count = 0;
+    size_t total_hotspot_priority = 0;
+    size_t total_hotspot_item_count = 0;
+    size_t filtered_count = 0;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-hotspot setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_register_protection_hotspot_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_register_protection_hotspot_report(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_register_protection_hotspot_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-hotspot build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_register_protection_hotspot_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-register-protection-hotspot functions=2 values=10 items=0 hotspot_priority=0 hotspot_items=0 hotspot_funcs=0\n"
+            "function-register-protection-hotspot main hotspot=none\n"
+            "function-register-protection-hotspot spill hotspot=none\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-hotspot dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_hotspot_report_get_summary(
+            &report,
+            &function_count,
+            &total_value_count,
+            &total_item_count,
+            &total_hotspot_priority,
+            &total_hotspot_item_count) ||
+        function_count != 2 || total_value_count != 10 || total_item_count != 0 ||
+        total_hotspot_priority != 0 || total_hotspot_item_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-hotspot summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_hotspot_report_get_functions_with_hotspots(
+            &report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-hotspot filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_register_protection_hotspot_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view || function_view->has_hotspot != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-hotspot function lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_register_protection_hotspot_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_function_machine_preservation_hint_view(void) {
+    ValueSsaProgram program;
+    ValueSsaAllocationPrep prep;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaProgramAllocationLayout layout;
+    ValueSsaFunctionMachineAllocationView machine_view;
+    ValueSsaMachineRegisterProtectionPressureView pressure_view;
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaMachineRegisterDesc *grown_registers = NULL;
+    ValueSsaFunctionMachinePreservationHintView view;
+    const ValueSsaMachinePreservationHintCandidate *candidate = NULL;
+    const char *function_name = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t call_live_value = (size_t)-1;
+    size_t protected_item_count = 0;
+    size_t total_value_count = 0;
+    size_t total_hint_priority = 0;
+    int has_hint = 0;
+    int ok = 1;
+
+    if (!build_alloc_call_density_pressure_program(&program, &call_live_value, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_program_allocation_layout_init(&layout);
+    value_ssa_function_machine_allocation_view_init(&machine_view);
+    value_ssa_machine_register_protection_pressure_view_init(&pressure_view);
+    value_ssa_machine_register_bank_init(&bank);
+    value_ssa_function_machine_preservation_hint_view_init(&view);
+    if (!build_caller_callee_machine_register_bank(&bank)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint bank setup failed\n");
+        value_ssa_function_machine_preservation_hint_view_free(&view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_machine_register_protection_pressure_view_free(&pressure_view);
+        value_ssa_function_machine_allocation_view_free(&machine_view);
+        value_ssa_program_allocation_layout_free(&layout);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    grown_registers = (ValueSsaMachineRegisterDesc *)realloc(bank.registers, 3 * sizeof(ValueSsaMachineRegisterDesc));
+    if (!grown_registers) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint bank growth failed\n");
+        value_ssa_function_machine_preservation_hint_view_free(&view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_machine_register_protection_pressure_view_free(&pressure_view);
+        value_ssa_function_machine_allocation_view_free(&machine_view);
+        value_ssa_program_allocation_layout_free(&layout);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    bank.registers = grown_registers;
+    bank.register_count = 3;
+    bank.registers[2].register_id = 2;
+    bank.registers[2].name = "r2";
+    bank.registers[2].register_class = VALUE_SSA_MACHINE_REGISTER_CLASS_GENERAL;
+    bank.registers[2].allocatable = 1u;
+    bank.registers[2].caller_clobbered = 0u;
+    bank.registers[2].callee_preserved = 1u;
+
+    if (!value_ssa_compute_allocation_prep(&program.functions[1], NULL, NULL, NULL, NULL, &prep, &error) ||
+        !prepare_manual_call_pressure_result(&result, &program) ||
+        !value_ssa_build_program_allocation_layout(&result, &layout, &error) ||
+        !value_ssa_program_allocation_layout_attach_program_context(&layout, &program, &error) ||
+        !value_ssa_build_function_machine_allocation_view(&layout.function_layouts[1], &bank, &machine_view, &error) ||
+        !value_ssa_build_machine_register_protection_pressure_view(&machine_view, &prep, &pressure_view, &error) ||
+        !value_ssa_build_function_machine_preservation_hint_view(
+            "call_pressure", &machine_view, &pressure_view, &bank, &view, &error) ||
+        !value_ssa_dump_function_machine_preservation_hint_view(&view, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_function_machine_preservation_hint_view_free(&view);
+        value_ssa_machine_register_bank_free(&bank);
+        value_ssa_machine_register_protection_pressure_view_free(&pressure_view);
+        value_ssa_function_machine_allocation_view_free(&machine_view);
+        value_ssa_program_allocation_layout_free(&layout);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_allocation_prep_free(&prep);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "function-machine-preservation-hint call_pressure move=r0->r2 candidates=2 items=1 total_priority=114 max_priority=114 crossing=0 repeated=1 hot=0\n"
+            "candidate 0 move=r0->r2 reason=target-less-occupied target_items=1 target_priority=0 target_max=0 items=1 total_priority=114 max_priority=114\n"
+            "candidate 1 move=r0->r1 reason=target-less-occupied target_items=3 target_priority=0 target_max=0 items=1 total_priority=114 max_priority=114\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: preservation-hint dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_function_machine_preservation_hint_view_get_summary(
+            &view,
+            &function_name,
+            &has_hint,
+            &protected_item_count,
+            &total_value_count,
+            &total_hint_priority) ||
+        !function_name || strcmp(function_name, "call_pressure") != 0 ||
+        !has_hint || protected_item_count != 1 || total_value_count != 1 || total_hint_priority != 114 ||
+        !view.source_machine_register_name || strcmp(view.source_machine_register_name, "r0") != 0 ||
+        !view.suggested_machine_register_name || strcmp(view.suggested_machine_register_name, "r2") != 0 ||
+        view.candidate_count != 2) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_function_machine_preservation_hint_view_get_candidate_at(&view, 1, &candidate) ||
+        !candidate || !candidate->suggested_machine_register_name ||
+        strcmp(candidate->suggested_machine_register_name, "r1") != 0 ||
+        candidate->protected_total_priority != 114 ||
+        !candidate->primary_reason || strcmp(candidate->primary_reason, "target-less-occupied") != 0 ||
+        candidate->suggested_register_item_count != 3 ||
+        candidate->suggested_register_total_priority != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: preservation-hint candidate lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_function_machine_preservation_hint_view_free(&view);
+    value_ssa_machine_register_bank_free(&bank);
+    value_ssa_machine_register_protection_pressure_view_free(&pressure_view);
+    value_ssa_function_machine_allocation_view_free(&machine_view);
+    value_ssa_program_allocation_layout_free(&layout);
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_allocation_prep_free(&prep);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_preservation_hint_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachinePreservationHintReport report;
+    const ValueSsaFunctionMachinePreservationHintView *function_view = NULL;
+    const size_t *function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_item_count = 0;
+    size_t total_hint_priority = 0;
+    size_t reason_count = 0;
+    size_t filtered_count = 0;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_preservation_hint_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_preservation_hint_report(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_preservation_hint_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_preservation_hint_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-preservation-hint functions=2 values=10 items=0 hint_priority=0 hint_funcs=0\n"
+            "function-machine-preservation-hint main hint=none\n"
+            "function-machine-preservation-hint spill hint=none\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: program-preservation-hint dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_preservation_hint_report_get_summary(
+            &report,
+            &function_count,
+            &total_value_count,
+            &total_item_count,
+            &total_hint_priority) ||
+        function_count != 2 || total_value_count != 10 || total_item_count != 0 || total_hint_priority != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_preservation_hint_report_get_functions_with_hints(
+            &report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_preservation_hint_report_get_reason_count(
+            &report, VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED, &reason_count) ||
+        reason_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint reason summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_preservation_hint_report_get_functions_with_reason(
+            &report, VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint reason filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_preservation_hint_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view || function_view->has_hint != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: program-preservation-hint function lookup mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_preservation_hint_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_program_machine_planning_report(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramMachinePlanningReport report;
+    const ValueSsaFunctionMachinePlanningView *function_view = NULL;
+    const size_t *function_indices = NULL;
+    char *actual_text = NULL;
+    ValueSsaError error;
+    size_t function_count = 0;
+    size_t total_value_count = 0;
+    size_t total_pressure_item_count = 0;
+    size_t total_pressure_priority = 0;
+    size_t total_hotspot_priority = 0;
+    size_t total_hint_priority = 0;
+    size_t reason_count = 0;
+    size_t filtered_count = 0;
+    size_t function_index = (size_t)-1;
+    const char *function_name = NULL;
+    size_t pressure_item_count = 0;
+    size_t pressure_priority = 0;
+    int has_hotspot = 0;
+    int has_hint = 0;
+    int ok = 1;
+
+    if (!build_alloc_two_function_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_machine_planning_report_init(&report);
+    if (!value_ssa_compute_program_flat_machine_planning_report(&program, 2, 2, &report, &error) ||
+        !value_ssa_dump_program_machine_planning_report(&report, &actual_text, &error)) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report build failed: %s\n", error.message);
+        free(actual_text);
+        value_ssa_program_machine_planning_report_free(&report);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text,
+            "program-machine-planning functions=2 values=10 pressure_items=0 pressure_priority=0 hotspot_priority=0 hint_priority=0 pressure_funcs=0 hotspot_funcs=0 hint_funcs=0\n"
+            "function-machine-planning main\n"
+            "machine-register-protection-pressure regs=2 pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n"
+            "function-register-protection-hotspot main hotspot=none\n"
+            "function-machine-preservation-hint main hint=none\n"
+            "function-machine-planning spill\n"
+            "machine-register-protection-pressure regs=2 pressured=0 values=5 items=0 total_priority=0 crossing=0 repeated=0 hot=0\n"
+            "function-register-protection-hotspot spill hotspot=none\n"
+            "function-machine-preservation-hint spill hint=none\n") != 0) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: planning-report dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_summary(
+            &report,
+            &function_count,
+            &total_value_count,
+            &total_pressure_item_count,
+            &total_pressure_priority,
+            &total_hotspot_priority,
+            &total_hint_priority) ||
+        function_count != 2 || total_value_count != 10 || total_pressure_item_count != 0 ||
+        total_pressure_priority != 0 || total_hotspot_priority != 0 || total_hint_priority != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report summary mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_functions_with_pressure(&report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report pressure filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_pressure_reason_count(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &reason_count) ||
+        reason_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report pressure reason mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_functions_with_pressure_reason(
+            &report, VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_REPEATED, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report pressure reason filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_functions_with_hotspots(&report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report hotspot filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_functions_with_hints(&report, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report hint filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_hint_reason_count(
+            &report, VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED, &reason_count) ||
+        reason_count != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report hint reason mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_functions_with_hint_reason(
+            &report, VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED, &filtered_count, &function_indices) ||
+        filtered_count != 0 || function_indices != NULL) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report hint reason filter mismatch\n");
+        ok = 0;
+    }
+    if (!value_ssa_program_machine_planning_report_get_function_view_by_name(
+            &report, "main", &function_index, &function_view) ||
+        function_index != 0 || !function_view ||
+        !value_ssa_function_machine_planning_view_get_summary(
+            function_view,
+            &function_name,
+            &total_value_count,
+            &pressure_item_count,
+            &pressure_priority,
+            &has_hotspot,
+            &has_hint) ||
+        !function_name || strcmp(function_name, "main") != 0 ||
+        total_value_count != 5 || pressure_item_count != 0 || pressure_priority != 0 ||
+        has_hotspot != 0 || has_hint != 0) {
+        fprintf(stderr, "[value-ssa-machine] FAIL: planning-report function summary mismatch\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_machine_planning_report_free(&report);
     value_ssa_program_free(&program);
     return ok;
 }
@@ -430,6 +2269,22 @@ int main(void) {
     ok &= test_value_ssa_build_flat_machine_register_bank();
     ok &= test_value_ssa_build_function_machine_allocation_view();
     ok &= test_value_ssa_build_program_machine_allocation_view();
+    ok &= test_value_ssa_machine_register_bank_query_surface();
+    ok &= test_value_ssa_program_machine_allocation_view_query_surface();
+    ok &= test_value_ssa_allocate_rewrite_machine_report_artifact_dump();
+    ok &= test_value_ssa_allocate_and_rewrite_machine_report_entrypoints();
+    ok &= test_value_ssa_machine_view_entrypoints();
+    ok &= test_value_ssa_machine_call_clobber_risk_report();
+    ok &= test_value_ssa_program_machine_call_clobber_risk_report();
+    ok &= test_value_ssa_machine_protection_agenda();
+    ok &= test_value_ssa_program_machine_protection_report();
+    ok &= test_value_ssa_machine_register_protection_pressure_view();
+    ok &= test_value_ssa_program_machine_register_protection_pressure_report();
+    ok &= test_value_ssa_function_machine_register_protection_hotspot_view();
+    ok &= test_value_ssa_program_machine_register_protection_hotspot_report();
+    ok &= test_value_ssa_function_machine_preservation_hint_view();
+    ok &= test_value_ssa_program_machine_preservation_hint_report();
+    ok &= test_value_ssa_program_machine_planning_report();
     if (!ok) {
         return 1;
     }
