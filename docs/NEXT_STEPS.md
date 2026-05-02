@@ -5,8 +5,33 @@
 - [AGENTS.md](/workspaces/compiler_lab/AGENTS.md) defines startup order, role boundaries, and ownership.
 - `docs/ir-conventions.md` is working memory for current engineering facts and safety boundaries.
 - `docs/NEXT_STEPS.md` is the current roadmap and stage-status authority.
-- `docs/LOWER_IR_DESIGN.md` is the current design authority for downstream/lower-IR planning.
-- `docs/VALUE_SSA_DESIGN.md` is the current design authority for the next likely post-lower-IR step.
+- `docs/ir/LOWER_IR_DESIGN.md` is the current design authority for downstream/lower-IR planning.
+- `docs/ssa/VALUE_SSA_DESIGN.md` is the current design authority for the next likely post-lower-IR step.
+- `docs/backend/MACHINE_RUNTIME_PLAN.md` is the current design/staging authority for the checkpointed post-load backend sibling.
+- `docs/backend/MACHINE_LAUNCH_PLAN.md` is the current design/staging authority for the just-checkpointed post-runtime backend sibling.
+- `docs/backend/MACHINE_STEP_PLAN.md` is the current design/staging authority for the just-checkpointed post-launch backend sibling.
+- `docs/backend/MACHINE_DECODE_PLAN.md` is the current design/staging authority for the just-checkpointed post-step backend sibling.
+- `docs/backend/MACHINE_PAYLOAD_DECODE_PLAN.md` is the current design/staging authority for the just-checkpointed post-decode backend sibling.
+- `docs/backend/MACHINE_INTERP_PLAN.md` is the current design/staging authority for the just-checkpointed post-payload backend sibling.
+- `docs/backend/MACHINE_TRANSITION_PLAN.md` is the current design/staging authority for the just-checkpointed post-interp backend sibling.
+- `docs/backend/MACHINE_STATE_PLAN.md` is the current design/staging authority for the just-checkpointed post-transition backend sibling.
+- `docs/backend/MACHINE_MUTATION_PLAN.md` is the current design/staging authority for the just-checkpointed post-state backend sibling.
+- `docs/backend/MACHINE_WRITEBACK_PLAN.md` is the current design/staging authority for the just-checkpointed post-mutation backend sibling.
+- `docs/backend/MACHINE_COMMIT_PLAN.md` is the current design/staging authority for the just-checkpointed post-writeback backend sibling.
+- `docs/backend/MACHINE_APPLY_PLAN.md` is the current design/staging authority for the just-checkpointed post-commit backend sibling.
+- `docs/backend/MACHINE_OBSERVE_PLAN.md` is the current design/staging authority for the just-checkpointed post-apply backend sibling.
+- `docs/backend/MACHINE_DELTA_PLAN.md` is the current design/staging authority for the just-checkpointed post-observe backend sibling.
+- `docs/backend/MACHINE_TRACE_PLAN.md` is the current design/staging authority for the just-checkpointed post-delta backend sibling.
+- `docs/backend/MACHINE_EVENT_PLAN.md` is the current design/staging authority for the just-checkpointed post-trace backend sibling.
+- `docs/backend/MACHINE_OUTCOME_PLAN.md` is the current design/staging authority for the just-checkpointed post-event backend sibling.
+- `docs/backend/MACHINE_HISTORY_PLAN.md` is the current design/staging authority for the just-checkpointed post-outcome backend sibling.
+- `docs/backend/MACHINE_TIMELINE_PLAN.md` is the current design/staging authority for the just-checkpointed post-history backend sibling.
+- `docs/backend/MACHINE_LOG_PLAN.md` is the current design/staging authority for the just-checkpointed post-timeline backend sibling.
+- `docs/backend/MACHINE_JOURNAL_PLAN.md` is the current design/staging authority for the new post-log backend mainline.
+- `docs/backend/MACHINE_LOAD_PLAN.md` is the current design/staging authority for the just-checkpointed post-exec loader-prep backend sibling.
+- `docs/backend/MACHINE_EXEC_PLAN.md` is the current design/staging authority for the just-checkpointed post-image exec-prep backend sibling.
+- `docs/backend/MACHINE_IMAGE_PLAN.md` is the current design/staging authority for the just-checkpointed post-ELF image-prep backend sibling.
+- `docs/ssa/MEMORY_SSA_DESIGN.md` is the current design/staging authority for the checkpointed memory-SSA line.
 
 ## Current Guidance
 
@@ -18,30 +43,344 @@
 5. Do not build multiple parallel AST-to-IR pipelines.
 6. Lower-IR work is now checkpointed into maintenance-first mode: keep the current phase-2 boundary stable, and reopen active expansion only for confirmed bugs, new lowering features, or a concrete downstream consumer need.
 7. The strict `lower_ir -> value_ssa` conversion stage is now checkpointed. Treat conversion itself as maintenance-first unless a new correctness bug appears.
-8. The next active implementation target is SSA shared analysis and the first true SSA-side optimization surfaces, not more conversion churn.
+8. `machine_elf` is now checkpoint-ready / maintenance-first unless a concrete
+   external-ELF consumer need reopens it.
+9. `memory_ssa` / `memory_ssa_pass` is now checkpoint-ready /
+   maintenance-first by default: reopen it for confirmed bugs, explicit new
+    downstream-consumer pressure, or a deliberately chosen post-checkpoint
+    Memory-SSA expansion, not for speculative broadening.
+10. Backend target-direction memory: the intended final target language / ISA
+    for this repository is **RISC-V**. Current generic or preview profiles are
+    still allowed as staging tools, but downstream backend planning should
+    treat them as temporary compatibility surfaces rather than as a change of
+    final target direction.
+11. A concrete post-checkpoint backend reopening is now active inside the
+    otherwise maintenance-first bytes/object/ELF stack: direct
+    `machine_ir`-report profile-aware builds should prefer making
+    `riscv32-preview` change real `.text` bytes, not only later-stage ELF
+    header or relocation-policy metadata.
+12. Backend repository-layout memory: machine code is no longer stored as a
+    flat forest of top-level `src/machine_*` / `tests/machine_*` directories.
+    Prefer the grouped layout:
+    - `src/machine/lowering/` and `tests/machine/lowering/`
+    - `src/machine/object/` and `tests/machine/object/`
+    - `src/machine/runtime/` and `tests/machine/runtime/`
+    - `src/machine/observe/` and `tests/machine/observe/`
+    with public headers under the flat include namespace `include/machine/*.h`.
 
 ## Current Active Slice
 
-- The repository's current active backend-facing implementation slice is now
-  the Machine-IR roadmap in
-  [docs/MACHINE_IR_PLAN.md](/workspaces/compiler_lab/docs/MACHINE_IR_PLAN.md).
+- There is no longer an earlier backend default mainline at `machine_elf`, and
+  the image-prep, exec-prep, loader-prep, runtime-process, launch-state,
+  fetch-state, tag-decode, payload-byte-decode, execute-current-instruction,
+  next-state-transition, applied-state, deferred-mutation, writeback, commit,
+  application-plan, observed-state, before-after-delta, execution-record,
+  event-family, outcome-family, single-entry-history, single-tick-timeline,
+  and single-line-log lines are no longer the furthest downstream active
+  slices either. The repository's current active backend implementation
+  slice, and therefore the default backend progress authority for
+  "现在做到哪了", is now the Machine-Journal / single-record-journal line in
+  [docs/backend/MACHINE_JOURNAL_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_JOURNAL_PLAN.md).
+- The just-finished Memory-SSA / Memory-SSA-pass line in
+  [docs/ssa/MEMORY_SSA_DESIGN.md](/workspaces/compiler_lab/docs/ssa/MEMORY_SSA_DESIGN.md)
+  is now checkpoint-ready / maintenance-first unless a concrete bug or
+  deliberately chosen post-checkpoint expansion reopens it.
+- When asking "现在做到哪了" for the current backend mainline snapshot,
+  prefer the `MJR1`-`MJR3` stage names from
+  `docs/backend/MACHINE_JOURNAL_PLAN.md`:
+  - `MJR1`: representation skeleton
+  - `MJR2`: first journal from `machine_log`
+  - `MJR3`: first upstream bridge
+- Current rough position on that line:
+-  - `MJR1`: effectively `100%`
+-  - `MJR2`: effectively `100%`
+-  - `MJR3`: effectively `100%`
+-  - the newest backend work is no longer “how much of the first explicit
+    exact-log versus preview-log single-line meaning is already surfaced
+    above timeline?” but “how much of the first explicit exact-journal
+    versus preview-journal single-record meaning is already surfaced above
+    log: exact journal records, preview journal records, blocked journal
+    states, stable journal-family names, single-record counts/indexes, and
+    first bridged log/timeline/history/outcome/event/trace/delta/observe/
+    apply/commit/writeback/mutation/state/transition/interp/payload/decode/
+    step/`machine_ir` journal wrappers”
+- The Machine-Journal roadmap in
+  [docs/backend/MACHINE_JOURNAL_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_JOURNAL_PLAN.md)
+  should now be treated as the active downstream backend progress snapshot.
+- The Machine-Log roadmap in
+  [docs/backend/MACHINE_LOG_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LOG_PLAN.md)
+  should now be treated as the just-checkpointed historical post-timeline
+  log snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  log / bridge bug reopens it.
+- The Machine-Timeline roadmap in
+  [docs/backend/MACHINE_TIMELINE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TIMELINE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-history
+  timeline snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete timeline / bridge bug reopens it.
+- The Machine-History roadmap in
+  [docs/backend/MACHINE_HISTORY_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_HISTORY_PLAN.md)
+  should now be treated as the just-checkpointed historical post-outcome
+  history snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete history / bridge bug reopens it.
+- The Machine-Outcome roadmap in
+  [docs/backend/MACHINE_OUTCOME_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_OUTCOME_PLAN.md)
+  should now be treated as the just-checkpointed historical post-event
+  outcome snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete outcome / bridge bug reopens it.
+- The Machine-Event roadmap in
+  [docs/backend/MACHINE_EVENT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_EVENT_PLAN.md)
+  should now be treated as the just-checkpointed historical post-trace event
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  event / bridge bug reopens it.
+- The Machine-Trace roadmap in
+  [docs/backend/MACHINE_TRACE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TRACE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-delta trace
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  trace / bridge bug reopens it.
+- The Machine-Delta roadmap in
+  [docs/backend/MACHINE_DELTA_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_DELTA_PLAN.md)
+  should now be treated as the just-checkpointed historical post-observe
+  delta snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete delta / bridge bug reopens it.
+- The Machine-Observe roadmap in
+  [docs/backend/MACHINE_OBSERVE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_OBSERVE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-apply
+  observe snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete observe / bridge bug reopens it.
+- The Machine-Apply roadmap in
+  [docs/backend/MACHINE_APPLY_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_APPLY_PLAN.md)
+  should now be treated as the just-checkpointed historical post-commit apply
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  apply / bridge bug reopens it.
+- The Machine-Commit roadmap in
+  [docs/backend/MACHINE_COMMIT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_COMMIT_PLAN.md)
+  should now be treated as the just-checkpointed historical post-writeback
+  commit snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete commit / bridge bug reopens it.
+- The Machine-Writeback roadmap in
+  [docs/backend/MACHINE_WRITEBACK_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_WRITEBACK_PLAN.md)
+  should now be treated as the just-checkpointed historical post-mutation
+  writeback snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete writeback / bridge bug reopens it.
+- The Machine-Mutation roadmap in
+  [docs/backend/MACHINE_MUTATION_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_MUTATION_PLAN.md)
+  should now be treated as the just-checkpointed historical post-state
+  mutation snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete mutation / bridge bug reopens it.
+- The Machine-State roadmap in
+  [docs/backend/MACHINE_STATE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_STATE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-transition
+  state snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  state / bridge bug reopens it.
+- The Machine-Transition roadmap in
+  [docs/backend/MACHINE_TRANSITION_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TRANSITION_PLAN.md)
+  should now be treated as the just-checkpointed historical post-interp
+  transition snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete transition / bridge bug reopens it.
+- The Machine-Interp roadmap in
+  [docs/backend/MACHINE_INTERP_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_INTERP_PLAN.md)
+  should now be treated as the just-checkpointed historical post-payload
+  execution-result snapshot and as checkpoint-ready / maintenance-first unless
+  a concrete interp / bridge bug reopens it.
+- The Machine-Payload-Decode roadmap in
+  [docs/backend/MACHINE_PAYLOAD_DECODE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_PAYLOAD_DECODE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-decode
+  payload-byte snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete payload-decode / bridge bug reopens it.
+- The Machine-Decode roadmap in
+  [docs/backend/MACHINE_DECODE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_DECODE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-step
+  tag-decode snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete tag-decode / bridge bug reopens it.
+- The Machine-Step roadmap in
+  [docs/backend/MACHINE_STEP_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_STEP_PLAN.md)
+  should now be treated as the just-checkpointed historical post-launch
+  fetch-state snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete fetch-state / mapped-byte bug reopens it.
+- The Machine-Launch roadmap in
+  [docs/backend/MACHINE_LAUNCH_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LAUNCH_PLAN.md)
+  should now be treated as the just-checkpointed historical post-runtime
+  launch snapshot and as checkpoint-ready / maintenance-first unless a
+  concrete launch-state / richer-register-seeding bug reopens it.
+- The Machine-Runtime roadmap in
+  [docs/backend/MACHINE_RUNTIME_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_RUNTIME_PLAN.md)
+  should now be treated as the just-checkpointed historical post-load runtime
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  runtime-memory / launch-surface bug reopens it.
+- The Machine-Load roadmap in
+  [docs/backend/MACHINE_LOAD_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LOAD_PLAN.md)
+  should now be treated as the just-checkpointed historical post-exec load
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  load-byte, entry-map, or upstream-bridge bug reopens it.
+- The Machine-Exec roadmap in
+  [docs/backend/MACHINE_EXEC_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_EXEC_PLAN.md)
+  should now be treated as the just-checkpointed historical post-image exec
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  exec-entry or upstream-bridge bug reopens it.
+- The Machine-Image roadmap in
+  [docs/backend/MACHINE_IMAGE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_IMAGE_PLAN.md)
+  should now be treated as the just-checkpointed historical post-ELF image
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  image-address or relocation-view bug reopens it.
+- The Machine-ELF roadmap in
+  [docs/backend/MACHINE_ELF_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_ELF_PLAN.md)
+  should now be treated as the just-checkpointed historical post-container
+  snapshot and as checkpoint-ready / maintenance-first unless a concrete
+  external-ELF compatibility need reopens it.
+- The Machine-Select / target-lowering roadmap in
+  [docs/backend/MACHINE_SELECT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_SELECT_PLAN.md)
+  should now be treated as a historical checkpoint-ready sibling rather than
+  the active implementation authority.
+- The Machine-Layout / branch-lowering roadmap in
+  [docs/backend/MACHINE_LAYOUT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LAYOUT_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete layout bug or downstream consumer pressure reopens it.
+- The Machine-Emit / label-surfacing roadmap in
+  [docs/backend/MACHINE_EMIT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_EMIT_PLAN.md)
+  should now be treated as checkpoint-near / maintenance-first unless a
+  concrete emitted-artifact bug or downstream consumer pressure reopens it.
+- The Machine-Encode / offset-assignment roadmap in
+  [docs/backend/MACHINE_ENCODE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_ENCODE_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete encode-prep bug or downstream byte-bearing consumer pressure
+  reopens it.
+- The Machine-IR roadmap in
+  [docs/backend/MACHINE_IR_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_IR_PLAN.md)
+  should now be treated as a near-closed cleanup/checkpoint authority unless a
+  concrete machine-ir consumer bug reopens it.
 - The allocator-mainline authority in
-  [docs/VALUE_SSA_ALLOCATOR_PLAN.md](/workspaces/compiler_lab/docs/VALUE_SSA_ALLOCATOR_PLAN.md)
+  [docs/ssa/VALUE_SSA_ALLOCATOR_PLAN.md](/workspaces/compiler_lab/docs/ssa/VALUE_SSA_ALLOCATOR_PLAN.md)
   should now be treated as near-closed / checkpointed unless a concrete
   allocator bug reopens it.
 - The machine-register-model authority in
-  [docs/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md](/workspaces/compiler_lab/docs/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md)
+  [docs/ssa/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md](/workspaces/compiler_lab/docs/ssa/VALUE_SSA_MACHINE_REGISTER_MODEL_PLAN.md)
   should now be treated as stage-close / maintenance-first unless a concrete
   `machine_ir` gap reopens it.
-- When asking "现在做到哪了", prefer the staged percentages recorded in
-  `docs/MACHINE_IR_PLAN.md`, especially:
+- The Machine-Bytes / byte-bearing roadmap in
+  [docs/backend/MACHINE_BYTES_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_BYTES_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete byte/fixup bug or downstream object-facing consumer pressure
+  reopens it.
+- The Machine-Object / object-facing roadmap in
+  [docs/backend/MACHINE_OBJECT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_OBJECT_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete object-surface bug or downstream relocation-facing consumer
+  pressure reopens it.
+- The Machine-Reloc / relocation-facing roadmap in
+  [docs/backend/MACHINE_RELOC_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_RELOC_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete relocation-surface bug or downstream final-serialization consumer
+  pressure reopens it.
+- The Machine-Container / final-serialization roadmap in
+  [docs/backend/MACHINE_CONTAINER_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_CONTAINER_PLAN.md)
+  should now be treated as checkpoint-ready / maintenance-first unless a
+  concrete container-surface bug or downstream target-specific-format consumer
+  pressure reopens it.
+- The next recommended post-`machine_container` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_ELF_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_ELF_PLAN.md).
+- The next recommended post-`machine_elf` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_IMAGE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_IMAGE_PLAN.md).
+- The next recommended post-`machine_image` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_EXEC_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_EXEC_PLAN.md).
+- The next recommended post-`machine_exec` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_LOAD_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LOAD_PLAN.md).
+- The next recommended post-`machine_load` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_RUNTIME_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_RUNTIME_PLAN.md).
+- The next recommended post-`machine_runtime` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_LAUNCH_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LAUNCH_PLAN.md).
+- The next recommended post-`machine_launch` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_STEP_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_STEP_PLAN.md).
+- The next recommended post-`machine_step` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_DECODE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_DECODE_PLAN.md).
+- The next recommended post-`machine_decode` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_PAYLOAD_DECODE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_PAYLOAD_DECODE_PLAN.md).
+- The next recommended post-`machine_payload_decode` consumer-planning
+  authority has now advanced to
+  [docs/backend/MACHINE_INTERP_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_INTERP_PLAN.md).
+- The next recommended post-`machine_interp` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_TRANSITION_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TRANSITION_PLAN.md).
+- The next recommended post-`machine_transition` consumer-planning authority
+  has now advanced to
+  [docs/backend/MACHINE_STATE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_STATE_PLAN.md).
+- The next recommended post-`machine_state` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_MUTATION_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_MUTATION_PLAN.md).
+- The next recommended post-`machine_mutation` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_WRITEBACK_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_WRITEBACK_PLAN.md).
+- The next recommended post-`machine_writeback` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_COMMIT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_COMMIT_PLAN.md).
+- The next recommended post-`machine_commit` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_APPLY_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_APPLY_PLAN.md).
+- The next recommended post-`machine_apply` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_OBSERVE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_OBSERVE_PLAN.md).
+- The next recommended post-`machine_observe` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_DELTA_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_DELTA_PLAN.md).
+- The next recommended post-`machine_delta` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_TRACE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TRACE_PLAN.md).
+- The next recommended post-`machine_trace` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_EVENT_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_EVENT_PLAN.md).
+- The next recommended post-`machine_event` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_OUTCOME_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_OUTCOME_PLAN.md).
+- The next recommended post-`machine_outcome` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_HISTORY_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_HISTORY_PLAN.md).
+- The next recommended post-`machine_history` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_TIMELINE_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_TIMELINE_PLAN.md).
+- The next recommended post-`machine_timeline` consumer-planning authority has
+  now advanced to
+  [docs/backend/MACHINE_LOG_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_LOG_PLAN.md).
+- The next recommended post-`machine_log` consumer-planning authority has now
+  advanced to
+  [docs/backend/MACHINE_JOURNAL_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_JOURNAL_PLAN.md).
+- When asking "现在做到哪了", prefer the staged percentages recorded in the
+  currently active plan document.
+- The previous post-`machine_container` consumer-planning authority is now in
+  [docs/backend/MACHINE_ELF_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_ELF_PLAN.md).
+- The previous post-`machine_reloc` consumer-planning authority is now in
+  [docs/backend/MACHINE_CONTAINER_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_CONTAINER_PLAN.md).
+- For the just-checkpointed machine-elf line, the relevant historical
+  snapshot is now in `docs/backend/MACHINE_ELF_PLAN.md`, especially:
+  - `Stage MELF4 target profile / relocation policy plumbing`
+  - `Stage MELF5 ELF parse / round-trip surface`
+- For the just-checkpointed machine-layout line, the relevant historical
+  snapshot is now in `docs/backend/MACHINE_LAYOUT_PLAN.md`, especially:
+  - `Stage ML2 first lowering from machine_select`
+  - `Stage ML3 first upstream bridge`
+- For the just-checkpointed machine-emit line, the relevant historical
+  snapshot is now in `docs/backend/MACHINE_EMIT_PLAN.md`, especially:
+  - `Stage ME1 representation skeleton`
+  - `Stage ME2 first lowering from machine_layout`
+  - `Stage ME3 first upstream bridge`
+- For the just-checkpointed machine-encode line, the relevant historical
+  snapshot is now in `docs/backend/MACHINE_ENCODE_PLAN.md`, especially:
+  - `Stage MC1 representation skeleton`
+  - `Stage MC2 first lowering from machine_emit`
+  - `Stage MC3 first upstream bridge`
+- For the just-closed machine-ir line, the relevant historical snapshot is
+  still in `docs/backend/MACHINE_IR_PLAN.md`, especially:
   - `Stage MIR1 representation skeleton`
   - `Stage MIR2 first Value-SSA bridge`
   - `Stage MIR3 first consumer migration`
   - `Stage MIR4 machine cleanup pressure`
-- Keep that snapshot updated there when the active machine/backend mainline
-  shifts, rather than trying to restate the same evolving percentages only in
-  the execution log below.
 
 ## Current State
 
@@ -62,6 +401,535 @@
 - Lower IR: the current conversion mainline can now also source formal dominator-tree traversal from the input layer and drive block conversion directly from it, so future rename/construction work no longer needs to keep an ad hoc CFG-ordering fallback alive once lower-IR analysis is present.
 - Lower IR: input-layer analysis authority now also covers a representative multi-backedge loop-header join-temp family, not only the earlier single-backedge loop-header example.
 - Value SSA: representative conversion coverage now also includes a multi-backedge loop-carried temp shape, not only the earlier single-backedge loop-header phi example.
+- Machine Select: the selected-lowering line is now effectively at a
+  checkpointed backend boundary. A real sibling module with verifier, dump,
+  query/summary surfaces, canonicalized `machine_ir` bridge, selected cleanup,
+  and explicit call/result/return family shaping is landed strongly enough
+  that further expansion should now be need-driven rather than the default
+  active mainline.
+- Machine Image: a first sibling post-ELF load-image-prep layer is now landed
+  with separate `include/machine/image.h`, `src/machine/runtime/machine_image/`, and
+  `tests/machine/runtime/machine_image/` surfaces. The current slice has a real verifier,
+  dump, summary/query helpers, direct lowering from `machine_elf`, and an
+  upstream bridge from canonicalized `machine_ir` through the current object /
+  ELF pipeline. Current lowering projects `.text` into one first load segment
+  with a profile-owned base virtual address, surfaces virtual addresses for
+  image-defined text symbols, selects one entry symbol/address when a suitable
+  global text function exists, and exposes relocation sites as resolved
+  in-image targets versus unresolved external obligations. The module now also
+  has a first structured report artifact above that raw image file, including
+  cached header / entry-symbol / segment / symbol / relocation summaries plus
+  resolved-versus-unresolved relocation index sets. Raw and report-side
+  consumer navigation are now also more address-oriented than the first cut:
+  callers can locate segment coverage by virtual address, symbol summaries by
+  virtual address, relocation summaries by site virtual address, and
+  resolved-versus-unresolved relocation subsets directly instead of rescanning
+  every table manually. That same query surface now also has first explicit
+  segment-local symbol/relocation subset access on both raw image files and
+  structured image reports, so later image consumers can inspect one load
+  segment's resident symbols and relocation sites without replaying a whole
+  image-table filter loop. The structured report layer now also caches those
+  segment-local symbol/relocation partitions, including resolved-versus-
+  unresolved relocation subsets per segment, so downstream consumers no
+  longer need to reconstruct those filtered index views from the whole-image
+  tables on every query. That same report layer now also exposes first
+  segment-artifact retrieval by segment index, name, or covered virtual
+  address, so a downstream consumer can step from one bridged image report to
+  one cached segment-scoped artifact directly instead of orchestrating a
+  bundle of separate segment-local queries. That same object-style consumer
+  boundary now also reaches cached symbol artifacts and relocation artifacts,
+  including source-segment and resolved-target context where available, so
+  later callers can traverse one bridged image report as a linked artifact
+  graph rather than as disconnected summary tables. That same linked artifact
+  graph is now also navigable from symbol targets back to their incoming
+  relocation subsets, including resolved-versus-unresolved partitions, so
+  downstream consumers can inspect one target symbol's image obligations
+  without reconstructing reverse edges by hand. That same report boundary now
+  also offers a higher-level overview artifact with cached symbol-class
+  partitions, so a downstream caller can begin from top-level image summary
+  slices and only descend into detailed segment/symbol/relocation artifacts
+  where needed. That same overview entry now also covers top-level
+  relocation-class slices such as resolved/unresolved and call/control
+  families, so common image-obligation views no longer need to be rebuilt
+  outside the module either. That same report structure is now also surfaced
+  in `machine_image_dump_report(...)` and the report-dump bridge entrypoints,
+  so text-mode consumers of machine-ir/ELF/bytes can see the bridged
+  overview/filter/cache picture directly instead of only the raw image table
+  dump. That bridge story now also reaches existing
+  `MachineElfReport` artifacts directly rather than only raw ELF files, and
+  now also reaches ELF bytes directly for image file / image report / dump
+  construction without forcing a caller to stage an explicit intermediate
+  `MachineElfFile`. The module now also has a first artifact lifecycle of its
+  own through image-file clone, report refresh, and direct raw/report dump
+  helpers from image/ELF artifacts, so downstream experiments can keep image
+  artifacts alive and re-summarize them locally instead of rebuilding all the
+  glue by hand. That same image-prep surface now also has explicit
+  target-policy summary artifacts plus profile-aware build/report/dump/
+  report-dump variants across image-file, ELF-file, ELF-report, ELF-bytes,
+  and direct `MachineIrAllocateRewriteReport` bridge inputs, so later
+  consumers can choose the active target profile at the image boundary
+  without reopening `machine_elf` policy plumbing by hand. This is
+  intentionally still image-prep rather than a full linker or final
+  executable mainline: default next work should stay focused on broadening
+  the load-image artifact itself unless a later multi-object or executable
+  step is explicitly chosen.
+- Machine Exec: a first sibling post-image executable-prep layer is now landed
+  with separate `include/machine/exec.h`, `src/machine/runtime/machine_exec/`, and
+  `tests/machine/runtime/machine_exec/` surfaces. The current slice has a real verifier,
+  dump, summary/query helpers, direct lowering from `machine_image`, and an
+  upstream bridge from canonicalized `machine_ir` through the current image
+  pipeline. Current lowering intentionally stays conservative: it requires a
+  known entry address, rejects images with unresolved relocations, now also
+  requires that the chosen entry lands inside an executable segment,
+  preserves current image segment order/virtual addresses, and surfaces one
+  first executable permission policy over those segments instead of
+  pretending to be a full loader or final runtime container. The module now
+  also has a first structured report artifact above the raw exec file,
+  including cached header / segment summaries plus executable-segment index
+  subsets, and that same report-owned surface is now reflected in the report
+  dump helpers too. Raw and report-side consumer navigation are now also more
+  entry/address-aware than the first cut: callers can recover the entry
+  segment directly and find the covering segment for one virtual address
+  without rescanning the whole segment table manually. That same report layer
+  is now also more artifact-oriented than the first cut: callers can start
+  from an overview artifact, recover segment artifacts by index/name/covered
+  address, and walk executable / non-executable / entry segment filter views
+  instead of hand-rebuilding those common slices outside the module. The
+  bridge side already reaches `MachineImageFile`, `MachineImageReport`, and
+  `MachineIrAllocateRewriteReport` for raw exec files, exec reports, and
+  direct dump/report-dump helpers, and the module now also has a first small
+  artifact lifecycle of its own through exec-file clone, report refresh, and
+  direct dump-from-file helpers. That same upstream bridge family now also
+  reaches `MachineElfFile`, `MachineElfReport`, ELF bytes, and profile-aware
+  `machine_ir` bridge variants directly for raw exec files, exec reports,
+  direct dumps, and report dumps. So the new downstream line can already be
+  exercised end-to-end without reopening earlier backend siblings. This is
+  intentionally still executable-prep rather than full linker / loader /
+  runtime semantics: default next work should stay focused on broadening this
+  executable-candidate boundary unless a later runtime-facing mainline is
+  explicitly chosen.
+- Machine Load: a first sibling post-exec loader-prep layer is now landed
+  with separate `include/machine/load.h`, `src/machine/runtime/machine_load/`, and
+  `tests/machine/runtime/machine_load/` surfaces. The current slice has a real verifier,
+  dump, summary/query helpers, direct lowering from `machine_exec`, and an
+  upstream bridge from canonicalized `machine_ir` through the current image /
+  exec pipeline. Current lowering intentionally stays conservative: it
+  preserves segment order, permissions, and virtual addresses while
+  materializing explicit owned byte-bearing load segments, now rounds
+  `memory_byte_count` up through a profile-owned load-alignment policy,
+  explicitly zero-fills the tail beyond current file bytes inside the owned
+  payload, and surfaces the entry-containing load segment without yet
+  claiming page-table policy beyond that first alignment rule, stack setup,
+  or process runtime semantics. The module now also has a first structured
+  report artifact above the raw load file, including cached header / segment
+  summaries plus executable and non-executable segment index subsets, and
+  that same report-owned surface is reflected in the report dump helpers too.
+  The active load-alignment / zero-fill rule is now also surfaced as an
+  explicit target-policy artifact on both raw and report sides instead of
+  being hidden entirely inside lowering. Raw and report-side consumer
+  navigation are now also more load-map-aware than the first cut: callers can
+  recover the entry segment directly, find the covering segment for one
+  virtual address, read one mapped byte by virtual address, copy one whole
+  flat memory image, and walk executable / non-executable / entry segment
+  filter views without rescanning the whole load-segment table manually. The
+  bridge side already reaches `MachineExecFile`, `MachineExecReport`,
+  `MachineImageFile`, `MachineImageReport`, `MachineElfFile`,
+  `MachineElfReport`, ELF bytes, and profile-aware `machine_ir` bridge
+  variants for raw load files, load reports, direct dumps, and report dumps.
+  This line should now be treated as checkpoint-ready / maintenance-first by
+  default: the next deliberately chosen runtime-facing mainline has already
+  advanced downstream to `machine_runtime`.
+- Machine Runtime: a first sibling post-load process-prep layer is now landed
+  with separate `include/machine/runtime.h`, `src/machine/runtime/machine_runtime/`, and
+  `tests/machine/runtime/machine_runtime/` surfaces. The current slice has a real verifier,
+  dump, summary/query helpers, direct lowering from `machine_load`, and an
+  upstream bridge from canonicalized `machine_ir` through the current image /
+  exec / load pipeline. Current lowering intentionally stays conservative: it
+  preserves load-backed runtime segments and entry PC, adds one synthetic
+  writable non-executable stack segment through a profile-owned
+  `stack_alignment` / `stack_byte_count` / `stack_gap_byte_count` policy,
+  surfaces one initial stack pointer at the top of that stack segment, and
+  exposes one first unified runtime memory view over load + stack segments
+  without yet claiming argv/env/auxv materialization, scheduler semantics, or
+  full OS/runtime behavior. The module now also has a first structured report
+  artifact above the raw runtime file, including cached header / target-policy
+  / memory / segment summaries plus executable and non-executable segment
+  index subsets and direct stack-segment ownership. Raw and report-side
+  consumer navigation are now also more runtime-memory-aware than the first
+  cut: callers can recover the entry segment directly, recover the stack
+  segment directly, find the covering segment for one virtual address, read
+  one mapped byte by virtual address, copy one whole flat runtime image, and
+  walk executable / non-executable / entry / stack filter views without
+  rescanning the runtime-segment table manually. That same runtime-memory
+  surface now also reaches flat memory offsets directly: callers can ask
+  which runtime segment owns one flat runtime-memory offset, read one mapped
+  byte by offset, copy one segment's owned bytes directly, and recover one
+  report-side segment summary/artifact by offset instead of manually
+  translating back to virtual addresses. The bridge side already
+  reaches `MachineLoadFile`, `MachineLoadReport`, `MachineExecFile`,
+  `MachineExecReport`, `MachineImageFile`, `MachineImageReport`,
+  `MachineElfFile`, `MachineElfReport`, ELF bytes, and profile-aware
+  `MachineIrAllocateRewriteReport` variants for raw runtime files, runtime
+  reports, direct dumps, and report dumps. This is intentionally still
+  process-prep rather than full runtime semantics: default next work should
+  stay focused on broadening this runtime/process artifact unless a later
+  launch or execution consumer layer is explicitly chosen.
+- Machine Emit: a first sibling label-surfacing post-layout layer is now
+  landed with separate `include/machine/emit.h`, `src/machine/lowering/machine_emit/`, and
+  `tests/machine/lowering/machine_emit/` surfaces. The current slice has a real verifier,
+  dump, summary surface, direct lowering from `machine_layout`, and an
+  upstream bridge from canonicalized `machine_ir` through `machine_select`
+  and `machine_layout`. Current lowering preserves selected ops and lowered
+  layout terminator families while assigning stable globally unique emitted
+  labels in block order, so dumps can now surface artifact-ready names such
+  as `F0.L0`, `F0.L1`, ... rather than only raw `layout.N` indices. The
+  public surface now also has first
+  whole-program/per-function query helpers plus direct `lower + dump`
+  convenience entrypoints, so later backend consumers no longer need to
+  rebuild that emission-prep plumbing by hand. That query surface now also
+  reaches emitted blocks directly: current authority includes function lookup
+  by name, emitted-block lookup by emit index or globally unique label, and block-level
+  summary over emitted/original ids plus terminator kind. A first structured
+  report artifact is now landed above that query layer too: direct
+  `machine_layout` input and canonicalized `machine_ir`/`MachineIrAllocateRewriteReport`
+  bridge input can now produce emitted-program shape reports with per-function
+  summaries, per-block shape summaries, and prefiltered function index sets
+  for emitted call/fallthrough/branch families. That report surface now also
+  has first exact dump entrypoints on both the direct-layout side and the
+  `MachineIrAllocateRewriteReport` bridge side, so artifact-style emitted
+  inspection no longer needs a hand-written wrapper around report build plus
+  dump. Program/report lookup now also treats emitted labels as globally
+  unique artifact names rather than only function-local shorthands. On top of
+  that, an existing emitted program can now be deep-cloned, turned back into
+  a fresh emitted report, and have that report shape refreshed explicitly
+  after later local mutations. This is
+  intentionally still emission-prep rather than final encoding:
+  default next work should stay bug-driven or
+  downstream-consumer-driven unless a later encoding mainline is explicitly
+  chosen.
+- Machine Encode: a first sibling offset-aware post-emit layer is now landed
+  with separate `include/machine/encode.h`, `src/machine/lowering/machine_encode/`, and
+  `tests/machine/lowering/machine_encode/` surfaces. The current slice has a real verifier,
+  dump, summary surface, direct lowering from `machine_emit`, and an upstream
+  bridge from canonicalized `machine_ir` through `machine_select`,
+  `machine_layout`, and `machine_emit`. Current lowering intentionally uses a
+  tiny abstract code-unit model rather than real bytes: each selected op gets
+  one unit and each terminator gets one unit, which is already enough to give
+  later consumers stable block `start/end` offsets and target offsets in
+  dumps without prematurely locking an ISA byte format. The first surface now
+  also has small function/block summary helpers plus a deep-clone path for
+  encoded programs themselves, so later post-encode experiments do not need
+  to bounce back to `machine_emit` after every local mutation. That helper
+  surface now also reaches program-level label lookup plus function-local
+  offset-to-block lookup, so downstream consumers can resolve one encoded
+  block by either emitted name or abstract code-unit position without
+  restaging manual scans. It now also has a first structured terminator-target
+  summary API, so consumers can ask one encoded block for resolved target
+  labels and target offsets directly instead of reparsing the dump text.
+  Verifier-side authority is now also a bit more real there: encoded
+  terminators are checked for in-range target indices instead of only
+  validating offset contiguity/span bookkeeping. A first
+  structured `machine_encode` report artifact is now also landed above the raw
+  encoded program, with per-function summaries, per-block offset summaries,
+  and direct report dumps from both `machine_emit` and `machine_ir` input.
+  That bridge side now also accepts an existing `MachineEmitLowerReport`
+  artifact directly for encode program/report/dump construction, so downstream
+  consumers that already live on emitted reports do not need to peel the
+  raw emitted program back out by hand just to continue into encode.
+  That same bridge story now also reaches `MachineIrAllocateRewriteReport`
+  directly for encode program/report/dump construction, so a report-oriented
+  downstream consumer can continue from machine-ir all the way through encode
+  without manually rebuilding intermediate emitted artifacts.
+  The encoded report side now also has first high-level function-index sets
+  for call-bearing, fallthrough-bearing, and branch-bearing encoded
+  functions, so later consumers can stay on the report artifact instead of
+  rescanning every summary manually.
+  That report surface now also has first lookup helpers by emitted label and
+  by per-function abstract offset, plus a direct report-side terminator-target
+  query for one encoded block. Program/report lookup can now also resolve one
+  encoded block directly from `function_name + abstract_offset`, so later
+  consumers do not have to hand-stage that lookup themselves. Plain `branch`
+  and `compare-branch` families now also dump resolved target labels/offsets
+  explicitly on the encode side instead of falling back to generic `term=N`,
+  and the current
+  `make test-machine-encode`, `make test`, and `git diff --check` checkpoint
+  stays green with those helpers in place. The current first machine-encode
+  slice should now be read as checkpoint-ready rather than merely
+  checkpoint-near. This is
+  intentionally still encoding-prep rather than real byte encoding: default next work should
+  stay bug-driven or downstream-consumer-driven unless a later true encoding
+  mainline is explicitly chosen.
+- Machine ELF: the first post-container ELF sibling is now no longer limited
+  to one invisible hardcoded header policy. Current authority still keeps the
+  repository conservative by defaulting public builds to a generic ELF32
+  profile, but the `machine_elf` boundary now also has an explicit target-
+  profile concept that owns `e_machine`, `e_flags`, and relocation-type
+  mapping policy. That same surface is now exercised by a focused
+  `riscv32-preview` profile and now also by an `i386-preview` profile, with
+  verifier/header/dump/query coverage over both profile-selected header fields
+  and current call/control relocation opcode mapping. On top of that,
+  `machine_elf` now also has a first parse /
+  round-trip surface: one generated ELF byte image can be parsed back into a
+  fresh `MachineElfFile`, have its section/symbol/relocation/profile metadata
+  reconstructed, and then be re-verified through the same public verifier.
+  That parse side is now also a little more consumer-facing and a little less
+  permissive than the first cut: direct `bytes -> dump` convenience exists,
+  the verifier now treats the repository's current canonical section
+  family/link semantics as part of the parse contract rather than only
+  checking generic byte-table consistency, and one parsed/edited
+  `MachineElfFile` can now also be refreshed back into canonical ELF bytes
+  without having to rebuild the whole artifact through `machine_container`
+  again first. The importer is now also one notch less coupled to one exact
+  emitted section-header order: it can accept the repository's current ELF
+  subset with reordered section headers when the section-link/name semantics
+  remain self-consistent, then normalize that input back into the repository's
+  canonical internal section order and rebuilt byte image. It is also now one
+  notch less coupled to “exactly the canonical 6 sections”: extra non-core
+  sections can be tolerated on import as long as the required core
+  `.text/.strtab/.symtab/.rel.text/.shstrtab` family remains self-consistent.
+  The importer is now also one notch less coupled to “every canonical section
+  must already exist in the input”: `.rel.text` may be absent on import and
+  will be synthesized back as an empty canonical section during normalization.
+  Symbol-table import is now also one notch less coupled to the repository's
+  exact local/global ordering: a self-consistent non-canonical `symtab`
+  ordering can now be accepted and normalized back into the repository's
+  canonical local-then-global layout with relocation symbol indices remapped
+  accordingly.
+  That import path is now also explicitly usable as a canonicalizer: accepted
+  byte images can be normalized directly back into the repository's canonical
+  ELF byte image without routing through `machine_container`, and that same
+  canonicalization path can now also re-emit directly under a requested
+  preview target profile rather than only preserving the imported profile.
+  On top of that, imported/normalized artifacts now also have a first direct
+  clone surface, and raw bytes can now also be lifted directly into a
+  canonicalized `MachineElfFile`, so local edit experiments do not need to
+  consume the only parsed copy in place or hand-stage parse/refresh glue. On
+  top of that, the line now also has a first structured report artifact above
+  the raw ELF file, so later consumers can stay on cached
+  header/section/symbol/relocation summaries instead of rebuilding that scan
+  every time.
+  The active mainline is therefore no longer “does an ELF skeleton exist at
+  all?” but “how much more target-policy realism and parse/import hardening
+  should be added on top of the now-explicit ELF boundary before switching to
+  a new sibling?”
+- Machine Bytes: a first sibling byte-bearing post-encode layer is now landed
+  with separate `include/machine/bytes.h`, `src/machine/object/machine_bytes/`, and
+  `tests/machine/object/machine_bytes/` surfaces. The current slice has a real verifier,
+  dump, summary surface, direct lowering from `machine_encode`, and upstream
+  bridges from both canonicalized `machine_ir` and report-oriented
+  `MachineEncodeReport` / `MachineIrAllocateRewriteReport` artifacts. Current
+  lowering still stays target-agnostic, but it is now no longer only
+  `tag + filler`: immediate families, call arg counts/arg kinds, branch target
+  pairs, compare ops, and `branch_on_true` state now surface into the first
+  payload bytes directly. So this stage has moved further from “offset counts
+  only” toward “real byte-bearing structure exists as data” without yet
+  claiming final ISA encoding. The first report surface now also carries
+  per-function byte summaries, per-block byte summaries, and high-level
+  function index sets for call/fallthrough/branch families, and those
+  function summaries now count real op-byte / terminator-byte totals rather
+  than only raw item counts. So downstream consumers can stay on
+  one byte-bearing artifact instead of rescanning summaries by hand. That raw
+  byte-bearing surface now also reaches direct byte-image consumers more
+  cleanly than before: one block's bytes can be viewed directly, one
+  function/program/report can be copied into a flat byte image, and whole-
+  program byte-offset lookup now exists on the program side too rather than
+  only on the report artifact. It now also has direct program/report
+  convenience helpers for total byte count, absolute per-function byte spans
+  on the raw program side, and per-function/per-block byte copying without
+  forcing later consumers to restage those slices manually. The report side
+  now also has a first structured reference-summary surface for call sites and
+  control-flow target sites, including owner offsets, patch offsets, and
+  resolved target labels/offsets, and it now also lifts that into a first
+  explicit fixup-summary artifact with target kind plus owner/patch span
+  metadata. On top of that, the same report layer now also exposes a first
+  minimal symbol summary surface for defined function/block symbols plus
+  unresolved external call symbols, and fixups can resolve directly to those
+  symbol indices. It now also exposes one minimal `.text` section summary over
+  the byte image, including section span plus function/block/symbol/fixup
+  counts. Section-oriented consumers can now also read the symbol slice and
+  fixup slice belonging to `.text` directly, and the report dump prints that
+  section/symbol/fixup snapshot in one place. So later relocation/fixup consumers no longer need to
+  reconstruct those sites from dump text or reinterpret raw byte/reference
+  scans by hand. That
+  bridge line now also reaches raw `machine_emit` and `MachineEmitLowerReport`
+  artifacts directly, so byte-bearing consumers can continue from emitted
+  artifacts without restaging a manual encode step first. This is
+  intentionally still pre-relocation and pre-object-file rather than full
+  target-final encoding: default next work should now focus on deepening this
+  byte-bearing line or choosing the next relocation/object-file mainline.
+- Machine Object: a first sibling object-facing post-bytes layer is now
+  landed with separate `include/machine/object.h`, `src/machine/object/machine_object/`, and
+  `tests/machine/object/machine_object/` surfaces. The current slice has a real verifier,
+  dump, direct lowering from both `MachineBytesReport` and `MachineBytesProgram`,
+  and a first upstream bridge from `MachineIrAllocateRewriteReport` through the
+  current byte-bearing pipeline. Current lowering intentionally stays
+  conservative: it preserves one `.text` section, section-local bytes, defined
+  function/block symbols, unresolved external call symbols, and call/control
+  fixups as first-class object-facing containers rather than claiming final
+  relocation encoding or full object-file serialization. The object-facing
+  query layer now also exposes section lookup by name, section-byte copying,
+  section-local symbol/fixup slices, symbol lookup by name, direct fixup lookup,
+  and summary helpers over sections/symbols/fixups. This should now be treated
+  as a checkpoint-ready sibling rather than the continuing default mainline:
+  the first object-facing artifact is real enough to advance under test, while
+  later target-specific relocation encoding or final file serialization should
+  remain explicitly future work. The current `make test-machine-object`,
+  `make test`, and `git diff --check` checkpoint is now green for this first
+  object-facing slice.
+- Machine Reloc: a first sibling relocation-facing post-object layer is now
+  landed with separate `include/machine/reloc.h`, `src/machine/object/machine_reloc/`, and
+  `tests/machine/object/machine_reloc/` surfaces. The current slice has a real verifier,
+  dump, direct lowering from `MachineObjectFile`, and a first upstream bridge
+  from `MachineIrAllocateRewriteReport` through the current object pipeline.
+  Current lowering intentionally stays conservative: it preserves the embedded
+  object artifact, surfaces one relocation table per object section, and lifts
+  current call/control fixups into explicit relocation records with patch-span
+  and target-symbol metadata rather than claiming target-final relocation
+  opcode encoding or final file serialization. The relocation-facing query
+  layer now also exposes whole-file summaries, relocation-section lookup by
+  name, section-local relocation slices, direct relocation lookup, and summary
+  helpers over relocation sections/records. This should now be treated as a
+  checkpoint-ready sibling rather than the continuing default mainline: the
+  first relocation artifact is real enough to advance under test, while final
+  object-file serialization should remain the next explicit downstream choice.
+  The current `make test-machine-reloc`, `make test`, and `git diff --check`
+  checkpoint is now green for this first relocation-facing slice.
+- Machine Container: a first sibling final-serialization post-reloc layer is
+  now landed with separate `include/machine/container.h`,
+  `src/machine/object/machine_container/`, and `tests/machine/object/machine_container/` surfaces. The
+  current slice has a real verifier, dump, direct serialization from
+  `MachineRelocFile`, and a first upstream bridge from
+  `MachineIrAllocateRewriteReport` through the current relocation pipeline.
+  Current serialization intentionally stays format-agnostic: it preserves the
+  embedded relocation artifact, emits a stable custom byte container with
+  header/section-table/symbol-table/relocation-table/string-table/payload
+  regions, and exposes layout/query helpers over that container rather than
+  claiming ELF/COFF/Mach-O compatibility. This should now be treated as a
+  checkpoint-ready sibling rather than the continuing default mainline: the
+  first final serialized artifact is real enough to advance under test, while
+  target-specific object format compatibility remains the next explicit
+  downstream choice. The current `make test-machine-container`, `make test`,
+  and `git diff --check` checkpoint is now green for this first
+  container-facing slice.
+- Machine ELF: a first sibling target-specific post-container layer is now
+  landed with separate `include/machine/elf.h`, `src/machine/object/machine_elf/`, and
+  `tests/machine/object/machine_elf/` surfaces. The current slice has a real verifier, dump,
+  direct ELF serialization from `MachineContainerFile`, and a first upstream
+  bridge from `MachineIrAllocateRewriteReport` through the current container
+  pipeline. Current serialization intentionally stays conservative but real:
+  it emits one ELF32 little-endian relocatable skeleton with section headers,
+  `.text`, `.strtab`, `.symtab`, `.rel.text`, and `.shstrtab`, while still
+  using the repository's current placeholder relocation-type mapping instead
+  of claiming full platform-ABI relocation semantics. This should now be
+  treated as the active backend mainline: the first target-specific object
+  format artifact is real enough to advance under test, while stronger ABI
+  compatibility or sibling object formats remain explicit downstream choices.
+  The current `make test-machine-elf`, `make test`, and `git diff --check`
+  checkpoint is now green for this first ELF-facing slice.
+- Machine Layout: a first sibling linear-layout layer is now landed with
+  separate `include/machine/layout.h`, `src/machine/lowering/machine_layout/`, and
+  `tests/machine/lowering/machine_layout/` surfaces. The current slice has a real verifier,
+  dump, summary surface, direct lowering from `machine_select`, and an
+  upstream bridge from canonicalized `machine_ir` through `machine_select`.
+  Current lowering already preserves selected ops inside layout blocks and
+  lowers `jump` / `br` / `cmpbr` families into `fallthrough`-aware terminator
+  forms. It now also has a first real block-ordering policy rather than
+  preserving source order blindly: preferred successors may be laid out first
+  so direct branch/jump fallthroughs are created by layout itself. That
+  policy is now also slightly more selective than raw DFS: on two-way control
+  it may prefer a single-predecessor, chain-extending successor as the
+  fallthrough path instead of following a fixed successor order, and it now
+  also has a first trace-span tie-break when both sides are locally plausible.
+  That local branch scoring now also discounts successors that only jump
+  straight into a shared tail that the current local-growth policy would defer
+  anyway, instead of counting that deferred tail as if it were an immediate
+  local trace extension.
+  It now also has a first explicit shared-merge deferral rule, so a branch arm
+  may stop before sinking into a multi-predecessor merge tail and let that
+  shared tail be laid out after the branch arms instead. Current authority is
+  still intentionally conservative there: preserving local branch-arm trace
+  shape currently wins over a more aggressive "merge became ready, stitch it
+  immediately" policy, and the current local-trace rule now enforces that more
+  directly by keeping such shared tails deferred until the later seed phase.
+  Above that local rule, seed selection now also has one small function-level
+  stitching preference: a deferred shared tail that is already fully ready may
+  be picked ahead of an unrelated longer-but-not-ready deferred trace. That
+  seed policy is now also explicit in shape rather than only being implied by
+  numeric comparator order: ready shared tails, ready continuations,
+  attached-unready work, and detached traces are now distinct classes before
+  later tie-breaks apply, and that predecessor-frontier freshness tie-break
+  now applies across the non-detached seed side broadly rather than only to
+  ready shared merges. In other words, current function-level stitching may
+  continue to read as mostly branch/compare-symmetric at this point:
+  direct-side compare-family authority now explicitly covers not only the
+  earlier defer/seed/continuation families, but also the most local
+  branch-reorder preference and the "multiple ready shared merges compete"
+  freshness family. It now also covers several older local branch-shaping
+  heuristics that used to be branch-only: the single-predecessor fallthrough
+  preference, the local trace-span tie-break, and the
+  "do not count an immediately deferred shared tail as ordinary local trace"
+  scoring rule. It now also covers one seed-class ordering boundary that used
+  to be locked only through later bridge work: `ready continuation >
+  attached-unready`.
+  In other words, current function-level stitching may
+  continue the freshest already-attached region whether that next seed is a
+  ready shared tail or an ordinary ready continuation, before falling back to
+  broader visited-count, trace, or id tie-breaks. The current branch and seed
+  heuristics now also consume one shared function-level trace-span view rather
+  than each recomputing their own local estimate ad hoc. Bridge-side
+  authority is also a bit stronger now on canonicalized shared-tail
+  micro-shapes with real effectful wrapper ops: current tests explicitly lock
+  the layout that survives `machine_ir` cleanup, instead of assuming those
+  bridge cases must preserve the same block decomposition as direct
+  `machine_select` input. That bridge-side explicitness now also covers the
+  compare-branch sibling of the same family, including canonicalized cases
+  where upstream cleanup legally sinks a shared return tail into each
+  effectful arm before `machine_layout` sees the CFG. In other words, bridge
+  authority is now starting to lock both:
+  the multi-block effectful shared-tail cases that still survive as layout
+  problems, and the more aggressively canonicalized compare/shared-tail cases
+  that arrive at layout only after the old shared return has already been
+  duplicated into each arm. Bridge coverage is now also beginning to reach the
+  seed-selection layer itself, not only local branch-lowering shape: one
+  canonicalized effectful CFG family now locks the "multiple ready shared
+  merges compete" behavior on the bridge too. That bridge-side seed/stitching
+  authority now also has a compare-family sibling, so the current ready-shared
+  merge freshness policy is no longer bridge-locked only for plain branch
+  families. Put differently: the bridge side now has both branch-driven and
+  compare-driven canonicalized CFG families covering the current shared-tail
+  freshness/seed-ordering story, not only the earlier local fallthrough
+  families. That compare-side bridge coverage now also reaches the
+  ready-continuation sibling of the same stitching family, so compare-driven
+  bridge authority is no longer limited to shared-merge cases only. Bridge
+  authority now also reaches the branch-local scoring layer on both major
+  sibling families, so canonicalized branch/shared-tail and
+  compare/shared-tail bridge coverage now lock not just seed ordering but
+  also the "do not overcount an immediately deferred shared tail as local
+  trace" preference. Bridge coverage now also reaches the older seed-priority rule
+  itself, not only freshness among ready candidates: one canonicalized
+  effectful CFG family now locks that a ready shared merge may still beat a
+  longer-but-not-ready deferred trace on the bridge too, and that same rule
+  now also has a canonicalized compare-family bridge sibling. Bridge
+  authority now also explicitly reaches the older local trace-span tie-break:
+  canonicalized branch-driven and compare-driven effectful CFG families both
+  lock that tied local successor scores may still defer to the longer
+  surviving post-cleanup trace. Bridge authority now also explicitly reaches
+  the seed-class boundary between ready continuations and attached-but-unready
+  work: canonicalized branch-driven and compare-driven effectful CFG families
+  both lock that a ready continuation may still outrank an older attached
+  deferred trace. Bridge authority now also explicitly reaches the older
+  single-predecessor / chain-extending successor preference itself:
+  canonicalized branch-driven and compare-driven effectful CFG families both
+  lock that layout may still choose the successor whose post-cleanup
+  surviving block continues into a single-predecessor chain. Bridge authority
+  now also explicitly reaches the most local branch-reorder preference
+  itself: canonicalized branch-driven and compare-driven CFG families both
+  lock that layout may still reorder the immediate branch targets to make the
+  preferred successor the direct fallthrough block. This is now the active
+  backend consumer line rather than only a plan document, but it should also
+  be read as checkpoint-near: default next work should be bug-driven or
+  downstream-consumer-driven rather than "add more layout heuristics by
+  default" unless a clearly missing family is found.
 
 ## Canonical IR Maintenance Stance
 
@@ -86,7 +954,7 @@ Current recommended direction:
 - make lower-IR value instructions temp/immediate-only and keep locals/globals as slot-only entities
 - defer generic address-taking, SSA, and register allocation until the lower-memory layer proves its value
 
-For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
+For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 
 ## Near-Term Plan
 
@@ -125,7 +993,7 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
    - keep the current builder/API and verifier contracts stable
    - treat the present regression matrix as sufficient authority for the current phase
    - reopen this slice only for concrete bugs, new lowering features, or a concrete downstream consumer need
-7. The next active design/execution target is now value-SSA phase S2 on top of lower IR; follow `docs/VALUE_SSA_DESIGN.md`, not ad hoc SSA experiments directly on lower IR.
+7. The next active design/execution target is now value-SSA phase S2 on top of lower IR; follow `docs/ssa/VALUE_SSA_DESIGN.md`, not ad hoc SSA experiments directly on lower IR.
 8. Near-term value-SSA implementation goal:
    - keep the strict conversion boundary stable:
       - `include/value_ssa.h`
@@ -165,7 +1033,7 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
 - Lower-IR work must not turn canonical IR into a mixed transitional representation.
 - Keep stable internal numeric IDs for blocks, locals, temps, and later lower-IR entities; human-readable names belong in dumps, not identity.
 - Do not introduce lower IR as a second front-end authority surface.
-- Do not treat `docs/LOWER_IR_DESIGN.md` as implementation permission by itself; roadmap and user intent still matter.
+- Do not treat `docs/ir/LOWER_IR_DESIGN.md` as implementation permission by itself; roadmap and user intent still matter.
 
 ## Current Known Limitations
 
@@ -567,6 +1435,35 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
 - 2026-04-17: That same predecessor-materialization slice now also applies to direct branch predecessors, not only plain `jmp -> join` blocks. If a branching predecessor has one edge to the join and the projected operands for a safe binary are already available in that predecessor, `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` may now materialize the binary before the branch terminator and still reuse it on the join edge. Representative direct-pass/full-pipeline coverage now locks a partial-unknown global-barrier family where the blocked predecessor does `call; load_global; load_local e; br e, join, exit`, and the pass still strengthens the join to `phi [11], [22], [add(load_global g.0, 3)]` while preserving the non-join exit edge.
 - 2026-04-17: That branch-predecessor materialization line is now also regression-locked on a stronger combined family rather than only a one-layer join result. In a blocked branch predecessor where the join path needs both `add(load_global g.0, 3)` and then `add(<that>, 5)`, the current fixed-point loop now materializes both safe binaries before the branch terminator and still collapses the join to one final result phi (`phi [16], [27], [add(add(load_global g.0, 3), 5)]`) while preserving the sibling non-join exit edge. This is mainly a coverage/logging step: it confirms the earlier branch-materialization and same-block recursive projection slices compose on one real CFG shape.
 - 2026-04-17: That join-local projection/materialization logic no longer depends on one fixed-point iteration per missing predecessor-side binary. The blocked-edge projector can now recurse through same-block `mov` / safe `binary` glue, synthesize the needed predecessor-side chain immediately, and still finish the current join rewrite in the same pass. Representative direct-pass/full-pipeline coverage now locks a deeper branch-blocked family where the unknown edge materializes `add(load_global g.0, 3)`, then `+5`, `+7`, `+9`, `+11`, and `+13` before the branch terminator, while the join itself collapses straight to `phi [56], [67], [that_deep_chain]`.
+- 2026-05-01: Slot-precise internal-call summaries now also have explicit mixed local/global authority above the earlier scalar-replacement layer. In a three-way mixed join where the helper edge writes `a.0=3`, `g.0=30`, then calls an internal helper that only reads `h.1`, both `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and the full `memory_ssa_pass_run_pipeline(...)` now collapse two repeated joined `add(load_local a.0, load_global g.0)` computations all the way to `phi [11], [22], [33]` instead of preserving a fake `g.0` barrier on the helper edge. This extends the current `M2` authority from mixed scalar-replacement-only coverage into mixed helper-call memory-aware CSE and pipeline coverage as well.
+- 2026-05-01: That same slot-precise helper-call authority now also covers the current recursive join-local CSE/materialization slice rather than stopping at the shallow mixed join. In representative `materialized` and `branch-materialized-nested` families, the helper edge writes `a.0=3`, `g.0=30`, then calls an internal helper that only reads `h.1`; after that, both `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and the full pipeline now collapse the joined arithmetic all the way to direct per-edge constants such as `phi [16], [27], [38]`, without preserving a synthetic helper-edge `load_global g.0`, `add g.0, 3`, or `add(add(g.0, 3), 5)` chain. This pushes `M2` authority one step deeper: precise helper summaries now reach the first recursive predecessor-materialization / branch-materialization families too, not only the earlier shallow mixed helper-call case.
+- 2026-05-01: That same blocked-edge helper-call coverage now also spans both ends of the current branch-materialized family rather than only the earlier recursive middle slice. In representative shallow branch-materialized and deep branch-materialized families, the helper edge again writes `a.0=3`, `g.0=30`, then calls the internal `helper()` that only reads `h.1`; after that, both the direct Memory-SSA-aware CSE entrypoint and the full pipeline now collapse the join to direct per-edge constants such as `phi [11], [22], [33]` and `phi [56], [67], [78]` while preserving the sibling non-join exit edge. So the current `M2` authority now covers shallow, nested, and deep branch-materialized helper-call families under slot-precise internal-call summaries, not only one recursive example plus the earlier non-branch materialized case.
+- 2026-05-01: That same helper-summary line now also closes the current non-branch blocked-edge predecessor-binary family instead of leaving it as a `touch()`-only case. In the representative three-way join where one predecessor already materializes `add(load_global g.0, 3)` before the join, but the internal helper only reads `h.1`, both `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and the full pipeline now collapse the final join all the way to `phi [11], [22], [33]` without preserving a fake post-helper `load_global g.0` or the helper-edge predecessor binary. So by this point the current `M2` authority covers the simple blocked-edge predecessor-binary family, the non-branch materialized family, and the shallow/nested/deep branch-materialized family under slot-precise internal-call summaries.
+- 2026-05-01: That same precise helper-call line now also reaches one loop-level high-level consumer instead of stopping at acyclic join and blocked-edge families. In the representative loop where `main` first stores `g.0 = 9`, then loops forever through an internal `helper()` that only reads `h.1`, the full Memory-SSA pipeline now deletes the `g.0` store entirely and collapses the program to a pure `call helper(); jmp` loop. This matters because the earlier `touch()` version had to keep the `g.0` store live forever and treat the loop body as a barrier; the new helper-summary coverage proves that slot-precise call modeling now influences loop-shaped high-level cleanup too, not only join-local CSE/materialization families.
+- 2026-05-01: That same loop-level helper-call authority now also reaches mixed local/global scalar replacement instead of only the final pipeline cleanup. In the representative loop where `main` initializes `(a.0, g.0)` to `(1, 10)`, the backedge rewrites only `a.0` to `2`, and the loop body calls the internal `helper()` that only reads `h.1`, `memory_ssa_pass_scalar_replace_slots(...)` now erases the `g.0` carrier completely, keeps only the loop-header local phi for `a.0`, and reduces the exit to `add(phi(local), 10)`. This closes another meaningful `M2` gap because precise helper-call summaries are now shaping loop-level mixed scalar replacement itself, not only loop pipeline cleanup or the earlier acyclic mixed helper-call families.
+- 2026-05-01: That same loop-level mixed helper-call authority now also survives through the full high-level Memory-SSA pipeline, not only the standalone scalar-replacement entrypoint. On that same representative `(a.0, g.0) = (1, 10)` loop where only `a.0` changes on the backedge and the loop body calls the internal `helper()` that only reads `h.1`, `memory_ssa_pass_run_pipeline(...)` now stabilizes at the same `add(phi(local), 10)` exit form instead of reintroducing `g.0` carrier loads/stores or keeping extra slot traffic alive. So the current `M2` authority now includes loop-shaped mixed helper-call scalar replacement both as a direct consumer and as part of the full Memory-SSA cleanup pipeline.
+- 2026-05-01: We now also have a more explicit loop-header global-readonly boundary across consumer layers instead of only a single “readonly helper loops are fine” statement. In the representative loop where `main` first loads unknown `g.0`, the loop header reloads `g.0`, and the body calls the internal `helper()` that only reads `h.1`, `memory_ssa_pass_promote_global_slots(...)` still stays conservative and keeps the loop-header `load_global g.0`, while `memory_ssa_pass_scalar_replace_global_slots(...)` and the full pipeline go further and collapse the dead exit away, leaving a `call helper(); jmp` self-loop carrying the entry-loaded global value by phi. This is a useful near-final `M2` fact because it makes the current boundary between loop-level promotion conservatism and stronger loop-level scalar-replacement/pipeline cleanup explicit under precise internal-call summaries.
+- 2026-05-01: That same loop-header global-readonly boundary now also covers the intermediate memory-value canonicalizer instead of skipping straight from promotion to the full pipeline. On the same representative loop, `memory_ssa_pass_canonicalize_memory_values(...)` is already on the stronger side of the boundary: like `scalar_replace_global_slots(...)` and `memory_ssa_pass_run_pipeline(...)`, it deletes the entry `load_global g.0` plus the dead exit and collapses the program to a pure `call helper(); jmp` self-loop, while `memory_ssa_pass_promote_global_slots(...)` still keeps the loop-header reload. This is another meaningful near-final `M2` checkpoint because the current layer split is now explicit across promotion, memory-value canonicalization, scalar replacement, and the full pipeline under precise internal-call summaries.
+- 2026-05-01: We now also have a second explicit loop-level helper-call stratification on the “known entry store” side rather than only the earlier “unknown entry load” side. In the representative loop where `main` first stores `g.0 = 9`, the body calls the internal `helper()` that only reads `h.1`, and the exit reads `g.0`, `memory_ssa_pass_forward_global_loads(...)` is already strong enough to reduce the exit to `mov 9`, `memory_ssa_pass_promote_global_slots(...)` still remains conservative and keeps the exit `load_global g.0`, and `memory_ssa_pass_canonicalize_memory_values(...)` plus the full pipeline go further and delete the store/load/exit path entirely, collapsing the program to a pure `call helper(); jmp` loop. This is a useful near-final `M2` fact because it shows the current layer boundary is consistent across both loop-level global-helper seeding modes: unknown entry load and known entry store.
+- 2026-05-01: That same known-entry-store helper-loop ladder is now also explicit on the global-only scalar-replacement layer, not only on forwarding/promotion/canonicalize/pipeline. On the same representative loop, `memory_ssa_pass_scalar_replace_global_slots(...)` is already on the stronger side of the boundary with `memory_ssa_pass_canonicalize_memory_values(...)` and `memory_ssa_pass_run_pipeline(...)`: it deletes the entry `store_global g.0, 9` plus the dead exit and collapses the program to pure `call helper(); jmp`, while `memory_ssa_pass_promote_global_slots(...)` still keeps the exit `load_global g.0`. This is another near-final `M2` checkpoint because the pure-global helper-loop consumer ladder is now fully populated across forwarding, promotion, scalar replacement, memory-value canonicalization, and the full pipeline.
+- 2026-05-01: We now also have a first pure read-only helper-call repeated-load ladder instead of only loop- and join-shaped families. In the representative straight-line case `call helper(); load_global g.0; ... later load_global g.0`, where the internal `helper()` reads only `h.1`, `memory_ssa_pass_forward_global_loads(...)` already reuses the first `load_global g.0`, and both `memory_ssa_pass_canonicalize_memory_values(...)` and `memory_ssa_pass_run_pipeline(...)` stabilize at the same single-load form `call helper(); load_global g.0; ret ...`. This is another useful near-final `M2` checkpoint because it shows the slot-precise call summary now also feeds a direct repeated-read consumer ladder, not only store-seeded loops or join/materialization families.
+- 2026-05-01: We now also have a first explicit readonly-helper partial-phi-forward global family at the raw forwarding layer rather than only repeated-load or loop examples. In representative two-way, scrambled, ancestor-reuse, and multi-pred join shapes where an internal `helper()` reads only `h.1`, `memory_ssa_pass_forward_global_loads(...)` now propagates the one surviving `g.0` version across the join by inserting missing predecessor-side loads where needed, building join phis over sibling loads, and preferring an already available ancestor-carried value when one path already has it. This is another near-final `M2` checkpoint because it shows the precise call summary now influences the foundational global-join forwarding family itself, not only the later scalar-replace/canonicalize/pipeline consumers above it.
+- 2026-05-01: On top of that same readonly-helper partial-phi-forward family, the global-only scalar-replacement consumer is now also explicitly stronger than the raw forwarding surface instead of merely matching it. In representative two-way, scrambled, ancestor-reuse, and multi-pred helper-join shapes, `memory_ssa_pass_forward_global_loads(...)` still exposes the surviving `g.0` meaning through join-local `phi/mov` glue, but `memory_ssa_pass_scalar_replace_global_slots(...)` already goes further and collapses the whole family to the simpler `call helper(); load_global g.0; ret ...` form. This is another near-final `M2` checkpoint because it sharpens the layer split: readonly-helper join forwarding is one thing, and the higher scalar-replacement layer already knows how to flatten that global carrier skeleton away when nothing else still depends on the join structure.
+- 2026-05-01: That same global-only scalar-replacement layer now also has explicit readonly-helper store-shape authority instead of being locked only on repeated-load, join, and loop families. In representative dead-store-before-helper and redundant-store-after-helper shapes where the internal `helper()` reads only `h.1`, `memory_ssa_pass_scalar_replace_global_slots(...)` now deletes the `g.0` carrier store entirely and simplifies the program to `call helper(); ret 0`. This is another useful near-final `M2` checkpoint because it confirms the slot-precise helper summary feeding the pure-global join ladder also reaches the direct global-store cleanup shapes at the scalar-replacement tier, not only the later memory-value / pipeline consumers.
+- 2026-05-01: That same readonly-helper global-join family now also reaches the intermediate and full high-level canonicalizers instead of stopping at scalar replacement. In representative two-way, scrambled, ancestor-reuse, and multi-pred helper-join shapes, both `memory_ssa_pass_canonicalize_memory_values(...)` and `memory_ssa_pass_run_pipeline(...)` now stabilize at the same flattened `call helper(); load_global g.0; ret ...` form as `memory_ssa_pass_scalar_replace_global_slots(...)`, while the raw forwarding layer still intentionally surfaces the more explicit `phi/mov` glue. This is another near-final `M2` checkpoint because the layer split is now explicit across forwarding, scalar replacement, memory-value canonicalization, and the full pipeline for the readonly-helper global-join family.
+- 2026-05-01: That same pure-global readonly-helper family now also explicitly reaches the direct memory-aware redundant-binary consumer instead of leaving that middle layer documented only for mixed/materialized helper-call shapes. In the representative repeated-load case and the representative two-way, scrambled, ancestor-reuse, and multi-pred partial-phi helper-join shapes, `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` now stabilizes at the same flattened `call helper(); load_global g.0; ret ...` form as `memory_ssa_pass_scalar_replace_global_slots(...)`, `memory_ssa_pass_canonicalize_memory_values(...)`, and `memory_ssa_pass_run_pipeline(...)`, while the raw forwarding layer still intentionally keeps the more explicit `phi/mov` glue where applicable. This is another useful near-final `M2` checkpoint because the pure-global readonly-helper ladder is now explicit across forwarding, scalar replacement, direct memory-aware CSE, memory-value canonicalization, and the full pipeline.
+- 2026-05-01: The pure-global unknown-call barrier line now also has an explicit stronger-consumer ladder instead of being documented mainly through forwarding, dead-store cleanup, and one loop-pipeline endpoint. In representative straight-line `store_global g.0, 9; call touch(); load_global g.0` and loop-shaped `store_global g.0, 9; ... call touch() ... exit load_global g.0` families, `memory_ssa_pass_scalar_replace_global_slots(...)` stays conservative at the barrier, `memory_ssa_pass_canonicalize_memory_values(...)` keeps the same `store/call/load` or `store/jmp/call-loop` form, and the stronger `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` / `memory_ssa_pass_run_pipeline(...)` layers still remain on that same side of the boundary rather than drifting toward the readonly-helper endpoints. This is another useful near-final `M2` checkpoint because the pure-global unknown-call story is now explicit across scalar replacement, memory-value canonicalization, direct memory-aware CSE, and the full pipeline, not only across forwarding/promotion/store-cleanup layers.
+- 2026-05-01: That same direct memory-aware CSE layer now also has explicit helper-call store-shape and loop-shape authority instead of stopping at repeated-load and join families. In representative dead-store-before-helper and redundant-store-after-helper shapes it already simplifies to `call helper(); ret 0`; on the representative known-entry-store helper loop it also collapses to a pure `call helper(); jmp` self-loop; and on the representative mixed local/global helper loop it stabilizes at the same `add(phi(local), 10)` exit form as `memory_ssa_pass_scalar_replace_slots(...)` / `memory_ssa_pass_canonicalize_memory_values(...)`. But the representative loop-header global-readonly helper family is still one layer more conservative there: unlike `memory_ssa_pass_canonicalize_memory_values(...)` and `memory_ssa_pass_run_pipeline(...)`, `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` currently keeps the entry `load_global g.0` plus the loop-carried phi while still deleting the dead exit. This is another useful near-final `M2` checkpoint because direct memory-aware CSE now has an explicit loop/store ladder of its own, not only the earlier join/materialization ladder.
+- 2026-05-01: The intermediate memory-value canonicalizer now also has explicit mixed local/global helper-call authority instead of leaving the acyclic mixed families documented only at the lower scalar-replace tier and the higher CSE/pipeline tier. In representative two-way and three-way mixed joins where an internal `helper()` reads only `h.1`, `memory_ssa_pass_canonicalize_memory_values(...)` now stabilizes at the same conservative `phi(local) + phi/global-carrier + add` boundary as `memory_ssa_pass_scalar_replace_slots(...)`: the local carrier is fully scalar-replaced, the helper edge may still contribute one surviving `load_global g.0`, and the final arithmetic intentionally remains `add(...)` because this tier stops before memory-aware redundant-binary elimination. This is another useful near-final `M2` checkpoint because it makes the middle layer boundary explicit for mixed helper-call families too, not only for pure-global helper joins or for the stronger CSE/pipeline endpoints.
+- 2026-05-01: That same mixed helper-call family now also has a fuller join-shape ladder instead of being locked only on one scrambled case plus the earlier multi-pred and loop shapes. In representative source-order two-way, scrambled two-way, and scrambled multi-pred joins where the helper edge still contributes one surviving `load_global g.0`, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now stabilize at the expected `phi(local) + phi(global) + add` boundary, even when the join block is numbered before one or more predecessor blocks. On top of that, the stronger `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and `memory_ssa_pass_run_pipeline(...)` layers already go one step further on both the two-way and scrambled-multi-pred joins and may fold the join to phi-of-edge-results forms such as `phi [11], [add(load_global g.0, 2)]` and `phi [11], [22], [add(load_global g.0, 3)]` instead of preserving the explicit `add(phi(local), phi(global))`; and the representative three-way mixed helper join remains strong enough to collapse all the way to per-edge constants (`11/22/33`). This is another useful near-final `M2` checkpoint because it makes the mixed-family layer split explicit across ordinary two-way, scrambled two-way, scrambled multi-pred, and multi-pred helper-call joins.
+- 2026-05-01: That same mixed helper-call join ladder now also has an explicit ordinary multi-pred intermediate endpoint instead of jumping directly from the lower/middle `phi(local) + phi(global) + add` boundary to the fully-known-edge `11/22/33` case. In the representative source-order three-way join where the helper edge still contributes only `local=3` plus one surviving `load_global g.0`, both `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and `memory_ssa_pass_run_pipeline(...)` now stabilize at `phi [11], [22], [add(load_global g.0, 3)]`. This is another useful near-final `M2` checkpoint because it makes the direct-CSE/pipeline boundary explicit for the ordinary multi-pred mixed helper family too, not only for the scrambled variant or the later fully-known-edge family.
+- 2026-05-01: That same mixed helper-call authority now also reaches the current `materialized` and `branch-materialized-nested` families at the lower and middle consumers instead of being documented there only on the stronger memory-aware CSE / pipeline side. In representative shapes where the helper edge stores `(a.0, g.0) = (3, 30)` before calling the internal readonly `helper()`, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now reduce the remaining slot traffic to explicit local/global carrier phis followed by the surviving arithmetic chain (`add(phi(local), phi(global))`, then `+5` where present), without reintroducing a fake unknown-call barrier on the helper edge. This is another useful near-final `M2` checkpoint because it makes the lower/middle-layer boundary explicit for the first recursive mixed helper-call materialization families too, not only for the later direct-CSE/pipeline endpoint that collapses them all the way to edge-result phis.
+- 2026-05-01: The mixed local/global family now also has an explicit unknown-global-barrier ladder instead of being documented mainly through the more precise readonly-helper side. In representative two-way, three-way, and loop-shaped `touch()` barrier examples, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now intentionally stop at the conservative `phi(local) + phi(global/load_global) + add` boundary, while the stronger `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and `memory_ssa_pass_run_pipeline(...)` layers may still fold the two-way and three-way join shapes one step further to phi-of-edge-results forms such as `phi [11], [add(load_global g.0, 2)]` and `phi [11], [22], [add(load_global g.0, 3)]`. But the loop-shaped unknown-barrier family still stays one layer more conservative there and preserves the exit-side `load_global g.0` plus the final `add(phi(local), load_global g.0)` form. This is another useful near-final `M2` checkpoint because it makes the layered boundary under a true unknown global barrier explicit across two-way, multi-pred, and loop-shaped mixed families, not only under the slot-precise internal-helper call summaries.
+- 2026-05-01: That same unknown-global-barrier loop family is now also explicit at the stronger direct-CSE/pipeline tier rather than being inferred only from the lower scalar-replace/memory-value layers plus the pure-global loop-barrier examples. In the representative loop where `main` seeds `(a.0, g.0) = (1, 10)`, the backedge rewrites only `a.0` to `2`, and the loop body calls unknown `touch()`, both `memory_ssa_pass_eliminate_redundant_memory_binaries(...)` and `memory_ssa_pass_run_pipeline(...)` remain on the conservative side of the boundary: they preserve the entry `store_global g.0, 10`, the exit `load_global g.0`, and the final `add(phi(local), load_global g.0)` instead of collapsing toward the stronger readonly-helper `add(phi(local), 10)` or `call; jmp` endpoints. This is another useful near-final `M2` checkpoint because it makes the loop-side split under a true unknown global barrier explicit all the way up through the strongest current consumers too.
+- 2026-05-01: That same lower/middle-layer materialization authority now also spans the branch-materialized family's shallow and deep ends rather than only the earlier nested middle slice. In representative branch-materialized and branch-materialized-deep shapes where the helper edge stores `(a.0, g.0) = (3, 30)`, then calls the readonly `helper()` before branching either to the join or to the side exit, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now preserve the same explicit local/global carrier phis at the join and leave the remaining arithmetic chain in SSA form (`add(phi(local), phi(global))`, then the current `+5/+7/+9/+11/+13` tail where present), while the sibling non-join exit edge remains intact. This is another useful near-final `M2` checkpoint because the lower/middle-layer boundary is now explicit across shallow, nested, and deep branch-materialized mixed helper-call families too, not only on the later direct-CSE/pipeline side.
+- 2026-05-01: That same lower/middle-layer mixed helper-call authority now also reaches the current partial-unknown predecessor family instead of leaving that family documented only on the stronger direct-CSE/pipeline side. In the representative three-way join where the helper edge stores `(a.0, g.0) = (3, 30)`, then calls the readonly `helper()` and still materializes one local `add(3, g.0)` on that edge, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now reduce the surviving memory traffic to the same explicit local/global carrier phis as the ordinary mixed multi-pred family, namely `phi(local=[1,2,3]) + phi(global=[10,20,30]) + add`, without reintroducing an unknown-call-style barrier on the helper edge. This is another useful near-final `M2` checkpoint because it makes the lower/middle-layer boundary explicit for the partial-unknown mixed helper-call family too, not only for the later direct-CSE/pipeline endpoint that keeps the helper-edge predecessor binary visible.
+- 2026-05-01: That same lower/middle-layer mixed-shape authority now also reaches the current partial-unknown materialized and branch-materialized families instead of leaving those shapes documented only on the stronger direct-CSE/pipeline side. In representative `materialized-partial-unknown` and `branch-materialized-partial-unknown` shapes, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now reduce the surviving memory traffic to explicit local/global carrier phis plus the remaining join-local arithmetic (`add(phi(local), phi(global))`, then `+5` where present), while still preserving the side-exit branch shape on the branch-materialized family. This is another useful near-final `M2` checkpoint because it makes the lower/middle-layer boundary explicit for the partial-unknown materialization families too, not only for the later direct-CSE/pipeline endpoints that keep the barrier-edge materialized arithmetic visible.
+- 2026-05-01: That same lower/middle-layer partial-unknown materialization authority now also spans the branch-materialized family's nested and deep ends rather than stopping at the shallow branch case. In representative branch-materialized-nested-partial-unknown and branch-materialized-deep-partial-unknown shapes, both `memory_ssa_pass_scalar_replace_slots(...)` and `memory_ssa_pass_canonicalize_memory_values(...)` now preserve the same explicit local/global carrier phis at the join and leave the remaining arithmetic chain in SSA form (`add(phi(local), phi(global))`, then `+5` and the later `+7/+9/+11/+13` tail where present), while the sibling non-join exit edge remains intact. This is another useful near-final `M2` checkpoint because the lower/middle-layer boundary is now explicit across shallow, nested, and deep branch-materialized partial-unknown families too, not only for the later direct-CSE/pipeline endpoints that keep the barrier-edge materialized arithmetic visible more explicitly.
 - 2026-04-17: Implementation-structure note: that join-local predecessor projector now threads one explicit internal projection/materialization context instead of passing the same `(function, def_use, join block, predecessor edge, allow_materialize)` parameter set through every recursive helper call. This is not a semantic change, but it makes the current narrow join-local expression-projector easier to extend without further parameter-plumbing churn.
 - 2026-04-17: The first real allocator consumer is now underway as its own sibling module instead of remaining only allocator-prep facts. `include/value_ssa_alloc.h` and `src/value_ssa_alloc/` now provide a first conservative allocation-result surface, a first `value_ssa_allocate_function(...)` entrypoint, a debug dump surface, and isolated allocator regression coverage. Current scope is intentionally small: deterministic coloring under a budget, affinity-biased color preference when safe, and spill-candidate marking when no color is available. Spill rewrite remains deferred.
 - 2026-04-17: That first allocator surface now also has a small program-level and query layer above the initial function allocator. `value_ssa_allocate_program(...)`, per-value color/spill query helpers, and regression coverage for both now exist, so later spill-policy or allocator-driver work no longer needs to treat the result as an opaque dump-only artifact.
@@ -611,7 +1508,7 @@ For detailed rationale and examples, read `docs/LOWER_IR_DESIGN.md`.
 - 2026-04-18: Allocator select traces now carry the same spill-cost breakdown as the removal plan. `value_ssa_dump_allocation_select_trace(...)` still reports reverse-select outcome (`colored`, `optimistic-colored`, `spill-confirmed`, or `spill`), but each line now also includes the total/use/live-range/affinity cost seen at removal time, so review can connect "why this value was removed as a spill candidate" with "what happened during select" without comparing two separate dumps by hand.
 - 2026-04-18: Spill rewrite now also has a first conservative dominating-reload reuse rule above the earlier same-block and unique-predecessor-chain reuse. If one block already materializes `load_local spill.N` and that reload dominates a later use through a region with no intervening `store_local spill.N`, rewrite may now reuse that existing SSA reload even after reconverging CFG shape instead of inserting another load in a later dominated block. Focused allocator coverage now locks both the positive reconverged case and the negative clobber case.
 - 2026-04-18: While landing that broader reload reuse, allocator spill rewrite also closed a real correctness hole in the older unique-predecessor-chain rule. Reuse no longer walks past an intervening `store_local spill.N` while searching earlier blocks for a spill reload, so a later use cannot accidentally keep reading a stale pre-clobber reload from farther up the chain. The new negative dominating-reload regression is also guarding this older path.
-- 2026-04-18: Allocator roadmap authority is now updated in `docs/VALUE_SSA_ALLOCATOR_PLAN.md` for the post-first-allocator state. The near-term sequence is no longer "land a first allocator" but "finish one more short spill-rewrite CFG-coverage stretch, then switch to explicit coalescing, then strengthen optimistic coloring retry and spill-cost policy before later Briggs/Chaitin-style consolidation, live-range splitting, and target/machine constraints."
+- 2026-04-18: Allocator roadmap authority is now updated in `docs/ssa/VALUE_SSA_ALLOCATOR_PLAN.md` for the post-first-allocator state. The near-term sequence is no longer "land a first allocator" but "finish one more short spill-rewrite CFG-coverage stretch, then switch to explicit coalescing, then strengthen optimistic coloring retry and spill-cost policy before later Briggs/Chaitin-style consolidation, live-range splitting, and target/machine constraints."
 - 2026-04-18: Spill rewrite loop coverage is now also stronger than straight chains or reconverged acyclic CFG only. Phi-defined spilled values carried by a loop header may now materialize one header reload and reuse it through both the loop body and the exit path when no loop-body clobber intervenes. Focused allocator coverage now locks that positive loop family explicitly.
 - 2026-04-18: While adding that loop family, allocator spill rewrite also closed another correctness hole in the older unique-predecessor-chain reuse rule. Reuse no longer looks only into predecessor blocks; it first checks whether the current target block itself has already `store_local spill.N` before the use. This prevents stale predecessor reload reuse across a same-block spill-slot clobber inside loop bodies or other single-predecessor descendants. The new negative loop-clobber regression is guarding that boundary.
 - 2026-04-18: Spill rewrite reconvergence coverage is now also stronger than one-join diamonds only. A single dominating spill reload may now be reused through multiple successive reconverged CFG layers (`join -> split -> join -> split -> join`) when no intermediate path stores to that spill slot. Focused allocator coverage now locks a nested two-reconvergence family where one `load_local spill.0.0` materialized at the first join feeds later uses through two more joins.

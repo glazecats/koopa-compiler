@@ -10,12 +10,25 @@
   ],
   "containerEnv": {
     "IKUN": "${localEnv:IKUN}",
-    "ikun": "${localEnv:IKUN}"
+    "ikun": "${localEnv:IKUN}",
+    "CLIPROXYAPI_KEY": "${localEnv:CLIPROXYAPI_KEY}",
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "ANTHROPIC_BASE_URL": "${localEnv:ANTHROPIC_BASE_URL}",
+    "CLAUDE_CODE_DISABLE_THINKING": "${localEnv:CLAUDE_CODE_DISABLE_THINKING}",
+    "CLAUDE_CODE_MODEL": "${localEnv:CLAUDE_CODE_MODEL}"
   },
   "remoteEnv": {
     "IKUN": "${localEnv:IKUN}",
-    "ikun": "${localEnv:IKUN}"
+    "ikun": "${localEnv:IKUN}",
+    "CLIPROXYAPI_KEY": "${localEnv:CLIPROXYAPI_KEY}",
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "ANTHROPIC_BASE_URL": "${localEnv:ANTHROPIC_BASE_URL}",
+    "CLAUDE_CODE_DISABLE_THINKING": "${localEnv:CLAUDE_CODE_DISABLE_THINKING}",
+    "CLAUDE_CODE_MODEL": "${localEnv:CLAUDE_CODE_MODEL}",
+    "PATH": "/root/.local/bin:${containerEnv:PATH}"
   },
+  "postCreateCommand": "bash -lc 'set -e; if ! command -v curl >/dev/null 2>&1; then apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl; fi; unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; if ! command -v claude >/dev/null 2>&1; then curl -fsSL https://claude.ai/install.sh | bash || true; fi'",
+  "postStartCommand": "bash -lc 'set -e; mkdir -p /root/.claude; persistent_cfg=/root/.claude/config.json; if [ -f /root/.claude.json ] && [ ! -L /root/.claude.json ] && [ ! -e \"$persistent_cfg\" ]; then cp /root/.claude.json \"$persistent_cfg\"; fi; if [ -e \"$persistent_cfg\" ]; then rm -f /root/.claude.json; ln -s \"$persistent_cfg\" /root/.claude.json; fi; if command -v claude >/dev/null 2>&1; then exit 0; fi; vsix=$(find /vscode/vscode-server/extensionsCache -maxdepth 1 -type f -name \"anthropic.claude-code-*-linux-x64\" | sort | tail -n 1); if [ -n \"$vsix\" ]; then mkdir -p /root/.local/bin; VSIX_PATH=\"$vsix\" python3 - <<\"PY\"\nimport os\nimport stat\nimport zipfile\nvsix = os.environ[\"VSIX_PATH\"]\nout = \"/root/.local/bin/claude\"\nwith zipfile.ZipFile(vsix) as zf, open(out, \"wb\") as f:\n    f.write(zf.read(\"extension/resources/native-binary/claude\"))\nos.chmod(out, os.stat(out).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)\nPY\nfi'",
   "customizations": {
     "vscode": {
       "settings": {},
@@ -27,6 +40,7 @@
     }
   },
   "mounts": [
-      "source=codex-home,target=/root/.codex,type=volume"
+    "source=codex-home,target=/root/.codex,type=volume",
+    "source=claude-home,target=/root/.claude,type=volume"
   ]
 }

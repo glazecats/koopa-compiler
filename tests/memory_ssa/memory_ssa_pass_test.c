@@ -1337,6 +1337,14 @@ static int build_scalar_replace_global_join_program(ValueSsaProgram *program, Va
     instruction.has_result = 1;
     instruction.result = value_ssa_value_id(cond_value);
     instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
     if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
         !value_ssa_block_set_branch(entry, value_ssa_value_id(cond_value), 1, 2, error)) {
         value_ssa_program_free(program);
@@ -1430,12 +1438,7 @@ static int build_scalar_replace_mixed_join_program(ValueSsaProgram *program, Val
         value_ssa_program_free(program);
         return 0;
     }
-    memset(&instruction, 0, sizeof(instruction));
-    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
-    instruction.as.store.slot = value_ssa_slot_global(0);
-    instruction.as.store.value = value_ssa_value_immediate(10);
-    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
-        !value_ssa_block_set_jump(then_block, 3, error)) {
+    if (!value_ssa_block_set_jump(then_block, 3, error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -1541,6 +1544,14 @@ static int build_scalar_replace_mixed_multi_pred_join_program(ValueSsaProgram *p
     instruction.has_result = 1;
     instruction.result = value_ssa_value_id(cond_value);
     instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
     if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
         !value_ssa_block_set_branch(
             &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
@@ -1548,6 +1559,9 @@ static int build_scalar_replace_mixed_multi_pred_join_program(ValueSsaProgram *p
         return 0;
     }
 
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
     instruction.result = value_ssa_value_id(split_cond_value);
     instruction.as.load_slot = value_ssa_slot_local(1);
     if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
@@ -1565,12 +1579,7 @@ static int build_scalar_replace_mixed_multi_pred_join_program(ValueSsaProgram *p
         value_ssa_program_free(program);
         return 0;
     }
-    memset(&instruction, 0, sizeof(instruction));
-    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
-    instruction.as.store.slot = value_ssa_slot_global(0);
-    instruction.as.store.value = value_ssa_value_immediate(10);
-    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
-        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+    if (!value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -1951,6 +1960,9 @@ static int build_scalar_replace_mixed_multi_pred_global_barrier_program(ValueSsa
         return 0;
     }
 
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
     instruction.result = value_ssa_value_id(split_cond_value);
     instruction.as.load_slot = value_ssa_slot_local(1);
     if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
@@ -2175,6 +2187,792 @@ static int build_scalar_replace_mixed_loop_global_barrier_program(ValueSsaProgra
     instruction.as.binary.rhs = value_ssa_value_id(global_value);
     if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
         !value_ssa_block_set_return(exit_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scalar_replace_mixed_loop_other_global_call_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *header = NULL;
+    ValueSsaBasicBlock *body = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t cond_value;
+    size_t local_value;
+    size_t global_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &header, error) ||
+        !value_ssa_function_append_block(function, NULL, &body, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    local_value = value_ssa_function_allocate_value(function);
+    global_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || local_value == (size_t)-1 ||
+        global_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(header, &instruction, error) ||
+        !value_ssa_block_set_branch(header, value_ssa_value_id(cond_value), 2, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(body, &instruction, error) ||
+        !value_ssa_block_set_jump(body, 1, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scalar_replace_mixed_other_global_call_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t cond_value;
+    size_t local_value;
+    size_t global_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &then_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &else_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &join_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    local_value = value_ssa_function_allocate_value(function);
+    global_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || local_value == (size_t)-1 ||
+        global_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_id(cond_value), 1, 2, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(else_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(else_block, &instruction, error) ||
+        !value_ssa_block_set_jump(else_block, 3, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scalar_replace_mixed_scrambled_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t join_id;
+    size_t then_id;
+    size_t else_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t local_value;
+    size_t global_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, &entry, error) ||
+        !value_ssa_function_append_block(function, &join_id, &join_block, error) ||
+        !value_ssa_function_append_block(function, &then_id, &then_block, error) ||
+        !value_ssa_function_append_block(function, &else_id, &else_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    local_value = value_ssa_function_allocate_value(function);
+    global_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || local_value == (size_t)-1 ||
+        global_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_id(cond_value), then_id, else_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(1);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(else_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(else_block, &instruction, error) ||
+        !value_ssa_block_set_jump(else_block, join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scalar_replace_mixed_multi_pred_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaFunction *declare_touch = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t helper_value;
+    size_t local_value;
+    size_t global_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "touch", 0, &declare_touch, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    local_value = value_ssa_function_allocate_value(function);
+    global_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        local_value == (size_t)-1 || global_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[split_id], value_ssa_value_id(split_cond_value), right_then_id, right_else_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(sum_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scalar_replace_mixed_scrambled_multi_pred_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaFunction *declare_touch = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t join_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t helper_value;
+    size_t local_value;
+    size_t global_value;
+    size_t sum_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "touch", 0, &declare_touch, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    local_value = value_ssa_function_allocate_value(function);
+    global_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        local_value == (size_t)-1 || global_value == (size_t)-1 || sum_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(sum_value), error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -2853,6 +3651,872 @@ static int build_memory_aware_cse_partial_unknown_predecessor_binary_program(Val
     return 1;
 }
 
+static int build_memory_aware_cse_partial_unknown_predecessor_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t barrier_global_value;
+    size_t barrier_sum;
+    size_t join_local_value;
+    size_t join_global_value;
+    size_t join_sum;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    barrier_global_value = value_ssa_function_allocate_value(function);
+    barrier_sum = value_ssa_function_allocate_value(function);
+    join_local_value = value_ssa_function_allocate_value(function);
+    join_global_value = value_ssa_function_allocate_value(function);
+    join_sum = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        barrier_global_value == (size_t)-1 || barrier_sum == (size_t)-1 || join_local_value == (size_t)-1 ||
+        join_global_value == (size_t)-1 || join_sum == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(barrier_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(barrier_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_immediate(3);
+    instruction.as.binary.rhs = value_ssa_value_id(barrier_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_local_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(join_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(join_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_memory_aware_cse_mixed_multi_pred_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t local_value0;
+    size_t global_value0;
+    size_t sum0;
+    size_t local_value1;
+    size_t global_value1;
+    size_t sum1;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    local_value0 = value_ssa_function_allocate_value(function);
+    global_value0 = value_ssa_function_allocate_value(function);
+    sum0 = value_ssa_function_allocate_value(function);
+    local_value1 = value_ssa_function_allocate_value(function);
+    global_value1 = value_ssa_function_allocate_value(function);
+    sum1 = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        local_value0 == (size_t)-1 || global_value0 == (size_t)-1 || sum0 == (size_t)-1 ||
+        local_value1 == (size_t)-1 || global_value1 == (size_t)-1 || sum1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value0);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value0);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value0);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(local_value1);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(global_value1);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(local_value1);
+    instruction.as.binary.rhs = value_ssa_value_id(global_value1);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(sum1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_memory_aware_cse_materialized_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t join_local_value;
+    size_t join_global_value;
+    size_t join_sum;
+    size_t join_final_sum;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    join_local_value = value_ssa_function_allocate_value(function);
+    join_global_value = value_ssa_function_allocate_value(function);
+    join_sum = value_ssa_function_allocate_value(function);
+    join_final_sum = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        join_local_value == (size_t)-1 || join_global_value == (size_t)-1 || join_sum == (size_t)-1 ||
+        join_final_sum == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(2);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_local_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(join_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_final_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_sum);
+    instruction.as.binary.rhs = value_ssa_value_immediate(5);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(join_final_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_memory_aware_cse_branch_materialized_nested_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t exit_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t branch_cond_value;
+    size_t join_local_value;
+    size_t join_global_value;
+    size_t join_sum;
+    size_t join_final_sum;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "e", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &exit_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    branch_cond_value = value_ssa_function_allocate_value(function);
+    join_local_value = value_ssa_function_allocate_value(function);
+    join_global_value = value_ssa_function_allocate_value(function);
+    join_sum = value_ssa_function_allocate_value(function);
+    join_final_sum = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        branch_cond_value == (size_t)-1 || join_local_value == (size_t)-1 || join_global_value == (size_t)-1 ||
+        join_sum == (size_t)-1 || join_final_sum == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(branch_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[right_else_id], value_ssa_value_id(branch_cond_value), join_id, exit_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_local_value);
+    instruction.as.load_slot = value_ssa_slot_local(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(join_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_final_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_sum);
+    instruction.as.binary.rhs = value_ssa_value_immediate(5);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(join_final_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (!value_ssa_block_set_return(&function->blocks[exit_id], value_ssa_value_immediate(0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_memory_aware_cse_partial_unknown_materialized_binary_program(ValueSsaProgram *program,
     ValueSsaError *error) {
     ValueSsaFunction *declare_function = NULL;
@@ -3431,6 +5095,455 @@ static int build_memory_aware_cse_branch_materialized_nested_partial_unknown_pro
     }
 
     if (!value_ssa_block_set_return(&function->blocks[exit_id], value_ssa_value_immediate(0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_memory_aware_cse_branch_materialized_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t exit_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t branch_cond_value;
+    size_t join_local_value;
+    size_t join_global_value;
+    size_t join_sum;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "e", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &exit_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    branch_cond_value = value_ssa_function_allocate_value(function);
+    join_local_value = value_ssa_function_allocate_value(function);
+    join_global_value = value_ssa_function_allocate_value(function);
+    join_sum = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        branch_cond_value == (size_t)-1 || join_local_value == (size_t)-1 || join_global_value == (size_t)-1 ||
+        join_sum == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(branch_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[right_else_id], value_ssa_value_id(branch_cond_value), join_id, exit_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_local_value);
+    instruction.as.load_slot = value_ssa_slot_local(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(join_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(join_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (!value_ssa_block_set_return(&function->blocks[exit_id], value_ssa_value_immediate(0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_memory_aware_cse_branch_materialized_deep_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    static const long long tail_constants[] = {5, 7, 9, 11, 13};
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t exit_id;
+    size_t helper_value;
+    size_t cond_value;
+    size_t split_cond_value;
+    size_t branch_cond_value;
+    size_t join_local_value;
+    size_t join_global_value;
+    size_t join_sum;
+    size_t tail_results[sizeof(tail_constants) / sizeof(tail_constants[0])];
+    size_t current_value;
+    size_t index;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, NULL, error) ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "d", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "e", 1, NULL, error) ||
+        !value_ssa_function_append_local(function, "a", 0, NULL, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &exit_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    cond_value = value_ssa_function_allocate_value(function);
+    split_cond_value = value_ssa_function_allocate_value(function);
+    branch_cond_value = value_ssa_function_allocate_value(function);
+    join_local_value = value_ssa_function_allocate_value(function);
+    join_global_value = value_ssa_function_allocate_value(function);
+    join_sum = value_ssa_function_allocate_value(function);
+    for (index = 0; index < (sizeof(tail_constants) / sizeof(tail_constants[0])); ++index) {
+        tail_results[index] = value_ssa_function_allocate_value(function);
+    }
+    if (helper_value == (size_t)-1 || cond_value == (size_t)-1 || split_cond_value == (size_t)-1 ||
+        branch_cond_value == (size_t)-1 || join_local_value == (size_t)-1 || join_global_value == (size_t)-1 ||
+        join_sum == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    for (index = 0; index < (sizeof(tail_constants) / sizeof(tail_constants[0])); ++index) {
+        if (tail_results[index] == (size_t)-1) {
+            value_ssa_program_free(program);
+            return 0;
+        }
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(&helper->blocks[0], &instruction, error) ||
+        !value_ssa_block_set_return(&helper->blocks[0], value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_id(cond_value), left_id, split_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(split_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[split_id], &instruction, error) ||
+        !value_ssa_block_set_branch(&function->blocks[split_id],
+            value_ssa_value_id(split_cond_value),
+            right_then_id,
+            right_else_id,
+            error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(10);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(20);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_then_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(3);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(30);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(branch_cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(2);
+    if (!value_ssa_block_append_instruction(&function->blocks[right_else_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_local_value);
+    instruction.as.load_slot = value_ssa_slot_local(3);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_global_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(join_local_value);
+    instruction.as.binary.rhs = value_ssa_value_id(join_global_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    current_value = join_sum;
+    for (index = 0; index < (sizeof(tail_constants) / sizeof(tail_constants[0])); ++index) {
+        memset(&instruction, 0, sizeof(instruction));
+        instruction.kind = VALUE_SSA_INSTR_BINARY;
+        instruction.has_result = 1;
+        instruction.result = value_ssa_value_id(tail_results[index]);
+        instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+        instruction.as.binary.lhs = value_ssa_value_id(current_value);
+        instruction.as.binary.rhs = value_ssa_value_immediate(tail_constants[index]);
+        if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error)) {
+            value_ssa_program_free(program);
+            return 0;
+        }
+        current_value = tail_results[index];
+    }
+
+    if (!value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(current_value), error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[right_else_id], value_ssa_value_id(branch_cond_value), join_id, exit_id, error) ||
+        !value_ssa_block_set_return(&function->blocks[exit_id], value_ssa_value_immediate(0), error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -4153,6 +6266,389 @@ static int build_multi_pred_partial_phi_forward_global_program(ValueSsaProgram *
     return 1;
 }
 
+static int build_partial_phi_forward_other_global_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t then_value;
+    size_t join_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &then_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &else_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &join_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    then_value = value_ssa_function_allocate_value(function);
+    join_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || then_value == (size_t)-1 || join_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_immediate(1), 1, 2, error) ||
+        !value_ssa_block_set_jump(else_block, 3, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(then_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(join_value);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(join_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_scrambled_partial_phi_forward_other_global_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t join_id;
+    size_t then_id;
+    size_t else_id;
+    size_t helper_value;
+    size_t then_value;
+    size_t join_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, &entry_id, &entry, error) ||
+        !value_ssa_function_append_block(function, &join_id, &join_block, error) ||
+        !value_ssa_function_append_block(function, &then_id, &then_block, error) ||
+        !value_ssa_function_append_block(function, &else_id, &else_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    then_value = value_ssa_function_allocate_value(function);
+    join_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || then_value == (size_t)-1 || join_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_immediate(1), then_id, else_id, error) ||
+        !value_ssa_block_set_jump(else_block, join_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(then_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(join_value);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(join_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_partial_phi_forward_other_global_with_ancestor_value_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t entry_value;
+    size_t then_move_value;
+    size_t join_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &then_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &else_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &join_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    entry_value = value_ssa_function_allocate_value(function);
+    then_move_value = value_ssa_function_allocate_value(function);
+    join_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || entry_value == (size_t)-1 || then_move_value == (size_t)-1 ||
+        join_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(entry_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_immediate(1), 1, 2, error) ||
+        !value_ssa_block_set_jump(else_block, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(then_move_value);
+    instruction.as.mov_value = value_ssa_value_id(entry_value);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(join_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_multi_pred_partial_phi_forward_other_global_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t entry_id;
+    size_t left_id;
+    size_t split_id;
+    size_t right_then_id;
+    size_t right_else_id;
+    size_t join_id;
+    size_t helper_value;
+    size_t left_load_value;
+    size_t left_move_value;
+    size_t join_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, &entry_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &left_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &split_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_then_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &right_else_id, NULL, error) ||
+        !value_ssa_function_append_block(function, &join_id, NULL, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    left_load_value = value_ssa_function_allocate_value(function);
+    left_move_value = value_ssa_function_allocate_value(function);
+    join_value = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || left_load_value == (size_t)-1 || left_move_value == (size_t)-1 ||
+        join_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[entry_id], value_ssa_value_immediate(1), left_id, split_id, error) ||
+        !value_ssa_block_set_branch(
+            &function->blocks[split_id], value_ssa_value_immediate(1), right_then_id, right_else_id, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(left_load_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(left_move_value);
+    instruction.as.mov_value = value_ssa_value_id(left_load_value);
+    if (!value_ssa_block_append_instruction(&function->blocks[left_id], &instruction, error) ||
+        !value_ssa_block_set_jump(&function->blocks[left_id], join_id, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_then_id], join_id, error) ||
+        !value_ssa_block_set_jump(&function->blocks[right_else_id], join_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(join_value);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(&function->blocks[join_id], &instruction, error) ||
+        !value_ssa_block_set_return(&function->blocks[join_id], value_ssa_value_id(join_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_loop_header_partial_parameter_local_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *entry = NULL;
@@ -4244,6 +6740,89 @@ static int build_repeated_global_load_after_call_program(ValueSsaProgram *progra
         return 0;
     }
     memcpy(instruction.as.call.callee_name, "touch", 6);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_repeated_global_load_after_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t value0;
+    size_t value1;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    if (helper_value == (size_t)-1 || value0 == (size_t)-1 || value1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
     if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
         free(instruction.as.call.callee_name);
         value_ssa_program_free(program);
@@ -4412,6 +6991,145 @@ static int build_internal_other_global_call_program(ValueSsaProgram *program, Va
     instruction.as.load_slot = value_ssa_slot_global(0);
     if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
         !value_ssa_block_set_return(main_block, value_ssa_value_id(main_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_dead_global_store_before_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *main_function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *main_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &main_function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(main_function, NULL, &main_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    if (helper_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
+        !value_ssa_block_set_return(main_block, value_ssa_value_immediate(0), error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_redundant_global_store_after_other_global_call_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *main_function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *main_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &main_function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(main_function, NULL, &main_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    if (helper_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
+        !value_ssa_block_set_return(main_block, value_ssa_value_immediate(0), error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -5794,6 +8512,96 @@ static int build_loop_global_call_barrier_program(ValueSsaProgram *program, Valu
     return 1;
 }
 
+static int build_loop_global_other_global_call_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *header = NULL;
+    ValueSsaBasicBlock *body = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaGlobal *global = NULL;
+    size_t helper_value;
+    size_t value0;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_global(program, "h", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &header, error) ||
+        !value_ssa_function_append_block(function, NULL, &body, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    if (helper_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_global(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(0);
+    instruction.as.store.value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, 1, error) ||
+        !value_ssa_block_set_branch(header, value_ssa_value_immediate(1), 2, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.as.call.callee_name = (char *)malloc(7);
+    if (!instruction.as.call.callee_name) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    memcpy(instruction.as.call.callee_name, "helper", 7);
+    if (!value_ssa_block_append_instruction(body, &instruction, error) ||
+        !value_ssa_block_set_jump(body, 1, error)) {
+        free(instruction.as.call.callee_name);
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_global(0);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_dead_store_branch_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *entry = NULL;
@@ -6492,6 +9300,178 @@ static int test_memory_ssa_pass_forwards_loop_header_global_load_through_readonl
     return ok;
 }
 
+static int test_memory_ssa_pass_promotes_loop_header_global_load_through_readonly_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_header_global_readonly_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: promote loop-header global readonly-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_promote_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: promote loop-header global readonly-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PROMOTE-LOOP-HEADER-GLOBAL-READONLY-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = load_global g.0\n"
+        "    br 1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    ssa.2 = mov ssa.1\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ret ssa.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_loop_header_readonly_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_header_global_readonly_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace loop-header global readonly-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace loop-header global readonly-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-LOOP-HEADER-READONLY-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.0: ssa.0], [bb.1: ssa.1]\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_keeps_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global call-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    call touch()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_keeps_loop_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global loop call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global loop call-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-LOOP-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_promotes_same_value_loop_global_slot(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -6790,6 +9770,51 @@ static int test_memory_ssa_pass_forwards_repeated_global_load_after_call(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_forwards_repeated_global_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_repeated_global_load_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: repeated global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: repeated global-after-other-call forward failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-GLOBAL-REUSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = mov ssa.0\n"
+        "    ret ssa.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_forwards_phi_join_global_load(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -6992,6 +10017,56 @@ static int test_memory_ssa_pass_partially_redundant_global_join_load(void) {
     return ok;
 }
 
+
+static int test_memory_ssa_pass_partially_redundant_global_join_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: partial phi-forward global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: partial phi-forward global other-call forward failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-PARTIAL-PHI-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    br 1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.3 = phi [bb.1: ssa.0], [bb.2: ssa.2]\n"
+        "    ssa.1 = mov ssa.3\n"
+        "    ret ssa.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_partially_redundant_scrambled_global_join_load(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -7017,6 +10092,58 @@ static int test_memory_ssa_pass_partially_redundant_scrambled_global_join_load(v
         "func main() {\n"
         "  bb.0:\n"
         "    call touch()\n"
+        "    br 1, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.3 = phi [bb.2: ssa.0], [bb.3: ssa.2]\n"
+        "    ssa.1 = mov ssa.3\n"
+        "    ret ssa.1\n"
+        "  bb.2:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+
+static int test_memory_ssa_pass_partially_redundant_scrambled_global_join_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scrambled_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scrambled partial phi-forward global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scrambled partial phi-forward global other-call forward failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-PARTIAL-PHI-GLOBAL-SCRAMBLED-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
         "    br 1, bb.2, bb.3\n"
         "  bb.1:\n"
         "    ssa.3 = phi [bb.2: ssa.0], [bb.3: ssa.2]\n"
@@ -7075,6 +10202,57 @@ static int test_memory_ssa_pass_partially_redundant_global_join_prefers_ancestor
     return ok;
 }
 
+
+static int test_memory_ssa_pass_partially_redundant_global_join_prefers_ancestor_value_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_with_ancestor_value_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: partial phi-forward global ancestor other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: partial phi-forward global ancestor other-call forward failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-PARTIAL-PHI-GLOBAL-ANCESTOR-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    br 1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.1 = mov ssa.0\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.2 = mov ssa.0\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_partially_redundant_multi_pred_global_join_load(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -7100,6 +10278,64 @@ static int test_memory_ssa_pass_partially_redundant_multi_pred_global_join_load(
         "func main() {\n"
         "  bb.0:\n"
         "    call touch()\n"
+        "    br 1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ssa.1 = mov ssa.0\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    br 1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    ssa.3 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    ssa.4 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.5 = phi [bb.1: ssa.1], [bb.3: ssa.3], [bb.4: ssa.4]\n"
+        "    ssa.2 = mov ssa.5\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+
+static int test_memory_ssa_pass_partially_redundant_multi_pred_global_join_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_multi_pred_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: multi-pred partial phi-forward global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: multi-pred partial phi-forward global other-call forward failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-PARTIAL-PHI-GLOBAL-MULTI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
         "    br 1, bb.1, bb.2\n"
         "  bb.1:\n"
         "    ssa.0 = load_global g.0\n"
@@ -7390,6 +10626,51 @@ static int test_memory_ssa_pass_keeps_loop_global_load_after_call(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminates_loop_global_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: loop other-global-call setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_forward_global_loads(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: loop other-global-call forward failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-FWD-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    br 1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.0 = mov 9\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_keeps_loop_global_load_after_call_for_global_promotion(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -7420,6 +10701,55 @@ static int test_memory_ssa_pass_keeps_loop_global_load_after_call_for_global_pro
         "    br 1, bb.2, bb.3\n"
         "  bb.2:\n"
         "    call touch()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_loop_global_load_after_other_global_call_for_global_promotion(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: promote loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_promote_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: promote loop other-global-call pass failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PROMOTE-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    br 1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
         "    jmp bb.1\n"
         "  bb.3:\n"
         "    ssa.0 = load_global g.0\n"
@@ -7954,6 +11284,81 @@ static int test_memory_ssa_pass_keeps_global_store_before_call_live(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminates_dead_global_store_before_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_dead_global_store_before_other_global_call_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: dead global-before-other-call setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_dead_stores(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: dead global-before-other-call elimination failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-DEAD-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_global_store_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_redundant_global_store_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: redundant global-after-other-call setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_stores(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: redundant global-after-other-call elimination failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-REDUNDANT-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_eliminates_overwritten_stores(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8157,6 +11562,322 @@ static int test_memory_ssa_pass_canonicalize_memory_values_local_join(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_canonicalize_memory_values_loop_header_global_readonly_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_header_global_readonly_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop-header global readonly-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop-header global readonly-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-LOOP-HEADER-GLOBAL-READONLY-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_keeps_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value global call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value global call-barrier canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    call touch()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_keeps_loop_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop global call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop global call-barrier canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-LOOP-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed global-barrier canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.2: 2]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.2: ssa.1]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_multi_pred_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_multi_pred_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed multi-pred global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed multi-pred global-barrier canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-MULTI-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.2]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_loop_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed loop global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed loop global-barrier canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-LOOP-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 10\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.0, ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed loop other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = add ssa.0, 10\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_scalar_replace_local_slots_join(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8221,6 +11942,382 @@ static int test_memory_ssa_pass_scalar_replace_global_slots_join(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_scalar_replace_global_slots_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_internal_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global-after-other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 9\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_dead_store_before_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_dead_global_store_before_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace dead store before other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace dead store before other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-DEAD-STORE-BEFORE-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_redundant_store_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_redundant_global_store_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace redundant store after other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace redundant store after other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-REDUNDANT-STORE-AFTER-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_repeated_global_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_repeated_global_load_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace repeated global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace repeated global-after-other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-REUSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-PARTIAL-PHI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scrambled_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global scrambled other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global scrambled other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-SCRAMBLED-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_ancestor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_with_ancestor_value_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global ancestor other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global ancestor other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-ANCESTOR-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_multi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_multi_pred_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global multi other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial phi global multi other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-MULTI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_global_slots_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_global_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace global loop other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-GLOBAL-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_scalar_replace_slots_mixed_join(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8246,14 +12343,15 @@ static int test_memory_ssa_pass_scalar_replace_slots_mixed_join(void) {
         "    ssa.0 = load_local c.0\n"
         "    br ssa.0, bb.1, bb.2\n"
         "  bb.1:\n"
+        "    ssa.1 = load_global g.0\n"
         "    jmp bb.3\n"
         "  bb.2:\n"
         "    jmp bb.3\n"
         "  bb.3:\n"
-        "    ssa.1 = phi [bb.1: 1], [bb.2: 2]\n"
-        "    ssa.2 = phi [bb.1: 10], [bb.2: 20]\n"
-        "    ssa.3 = add ssa.1, ssa.2\n"
-        "    ret ssa.3\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.2: 2]\n"
+        "    ssa.3 = phi [bb.1: ssa.1], [bb.2: 20]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
         "}\n");
 
     value_ssa_program_free(&program);
@@ -8438,6 +12536,228 @@ static int test_memory_ssa_pass_scalar_replace_slots_mixed_multi_pred_global_bar
     return ok;
 }
 
+static int test_memory_ssa_pass_scalar_replace_slots_mixed_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MIXED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.2: 2]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.2: ssa.1]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_mixed_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed scrambled other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed scrambled other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MIXED-SCRAMBLED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 1], [bb.3: 2]\n"
+        "    ssa.2 = phi [bb.2: 10], [bb.3: ssa.4]\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    call helper()\n"
+        "    ssa.4 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_mixed_scrambled_multi_pred_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed scrambled multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed scrambled multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MIXED-SCRAMBLED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 1], [bb.4: 2], [bb.5: 3]\n"
+        "    ssa.2 = phi [bb.2: 10], [bb.4: 20], [bb.5: ssa.5]\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.4 = load_local d.1\n"
+        "    br ssa.4, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    jmp bb.1\n"
+        "  bb.5:\n"
+        "    call helper()\n"
+        "    ssa.5 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_mixed_multi_pred_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MIXED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.2]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_scalar_replace_slots_mixed_loop_global_barrier(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8485,6 +12805,576 @@ static int test_memory_ssa_pass_scalar_replace_slots_mixed_loop_global_barrier(v
     return ok;
 }
 
+static int test_memory_ssa_pass_scalar_replace_slots_mixed_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace mixed loop other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MIXED-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = add ssa.0, 10\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ssa.5 = add ssa.4, 5\n"
+        "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_nested_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized nested other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized nested other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-NESTED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ret ssa.6\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ret ssa.5\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_deep_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized deep other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized deep other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-DEEP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ssa.7 = add ssa.6, 7\n"
+        "    ssa.8 = add ssa.7, 9\n"
+        "    ssa.9 = add ssa.8, 11\n"
+        "    ssa.10 = add ssa.9, 13\n"
+        "    ret ssa.10\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_partial_unknown_predecessor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_predecessor_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial-unknown other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace partial-unknown other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-PARTIAL-UNKNOWN-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_materialized_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_materialized_binary_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace materialized partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace materialized partial-unknown failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-MATERIALIZED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.2]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ret ssa.6\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized partial-unknown failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ret ssa.6\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_nested_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized nested partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized nested partial-unknown failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-NESTED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ssa.7 = add ssa.6, 5\n"
+        "    ret ssa.7\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_scalar_replace_slots_branch_materialized_deep_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized deep partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace branch materialized deep partial-unknown failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-BRANCH-MATERIALIZED-DEEP-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ssa.7 = add ssa.6, 5\n"
+        "    ssa.8 = add ssa.7, 7\n"
+        "    ssa.9 = add ssa.8, 9\n"
+        "    ssa.10 = add ssa.9, 11\n"
+        "    ssa.11 = add ssa.10, 13\n"
+        "    ret ssa.11\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_canonicalize_memory_values_global_chain(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8516,6 +13406,1083 @@ static int test_memory_ssa_pass_canonicalize_memory_values_global_chain(void) {
         "    call touch()\n"
         "    ssa.0 = load_global g.0\n"
         "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_redundant_global_store_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value global-after-other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_dead_store_before_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_dead_global_store_before_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value dead store before other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value dead store before other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-DEAD-STORE-BEFORE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.2: 2]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.2: ssa.1]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed scrambled other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed scrambled other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-SCRAMBLED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 1], [bb.3: 2]\n"
+        "    ssa.2 = phi [bb.2: 10], [bb.3: ssa.4]\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    call helper()\n"
+        "    ssa.4 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_scrambled_multi_pred_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed scrambled multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed scrambled multi-pred other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-SCRAMBLED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 1], [bb.4: 2], [bb.5: 3]\n"
+        "    ssa.2 = phi [bb.2: 10], [bb.4: 20], [bb.5: ssa.5]\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.4 = load_local d.1\n"
+        "    br ssa.4, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    jmp bb.1\n"
+        "  bb.5:\n"
+        "    call helper()\n"
+        "    ssa.5 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value materialized other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ssa.5 = add ssa.4, 5\n"
+        "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_nested_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized nested other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized nested other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-NESTED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ret ssa.6\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ret ssa.5\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_deep_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized deep other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized deep other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-DEEP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ssa.7 = add ssa.6, 7\n"
+        "    ssa.8 = add ssa.7, 9\n"
+        "    ssa.9 = add ssa.8, 11\n"
+        "    ssa.10 = add ssa.9, 13\n"
+        "    ret ssa.10\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_partial_unknown_predecessor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_predecessor_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial-unknown other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial-unknown other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-PARTIAL-UNKNOWN-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.3 = phi [bb.1: 10], [bb.3: 20], [bb.4: 30]\n"
+        "    ssa.4 = add ssa.2, ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_materialized_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_materialized_binary_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value materialized partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value materialized partial-unknown canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MATERIALIZED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.2]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ssa.6 = add ssa.5, 5\n"
+        "    ret ssa.6\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized partial-unknown canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ret ssa.6\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_nested_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized nested partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized nested partial-unknown canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-NESTED-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ssa.7 = add ssa.6, 5\n"
+        "    ret ssa.7\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_deep_partial_unknown_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_partial_unknown_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized deep partial-unknown setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value branch materialized deep partial-unknown canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-BRANCH-MATERIALIZED-DEEP-PARTIAL-UNKNOWN",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    ssa.3 = load_global g.0\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.5 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.3]\n"
+        "    ssa.6 = add ssa.4, ssa.5\n"
+        "    ssa.7 = add ssa.6, 5\n"
+        "    ssa.8 = add ssa.7, 7\n"
+        "    ssa.9 = add ssa.8, 9\n"
+        "    ssa.10 = add ssa.9, 11\n"
+        "    ssa.11 = add ssa.10, 13\n"
+        "    ret ssa.11\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_mixed_multi_pred_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value mixed multi-pred other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-MIXED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 1], [bb.3: 2], [bb.4: 3]\n"
+        "    ssa.4 = phi [bb.1: 10], [bb.3: 20], [bb.4: ssa.2]\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_partial_phi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-PARTIAL-PHI-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_partial_phi_multi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_multi_pred_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global multi other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global multi other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-PARTIAL-PHI-GLOBAL-MULTI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_partial_phi_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scrambled_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global scrambled other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global scrambled other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-PARTIAL-PHI-GLOBAL-SCRAMBLED-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_partial_phi_ancestor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_with_ancestor_value_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global ancestor other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value partial phi global ancestor other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-PARTIAL-PHI-GLOBAL-ANCESTOR-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_repeated_global_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_repeated_global_load_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value repeated global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value repeated global-after-other-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-GLOBAL-REUSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_canonicalize_memory_values_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_canonicalize_memory_values(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-value loop other-global-call canonicalize failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMVAL-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
         "}\n");
 
     value_ssa_program_free(&program);
@@ -8762,6 +14729,556 @@ static int test_memory_ssa_pass_pipeline_forwards_internal_pure_call_global(void
     return ok;
 }
 
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_global_barrier_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed global-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = add ssa.1, 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.2: ssa.2]\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_multi_pred_global_barrier_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_mixed_multi_pred_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed multi-pred global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed multi-pred global-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-MULTI-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call touch()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.2, 3\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 11], [bb.3: 22], [bb.4: ssa.3]\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_cleans_other_global_call_store_shapes(void) {
+    ValueSsaProgram redundant_program;
+    ValueSsaProgram dead_program;
+    ValueSsaError error;
+    int ok = 1;
+
+    if (!build_redundant_global_store_after_other_global_call_program(&redundant_program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline other-global redundant setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+    if (!memory_ssa_pass_run_pipeline(&redundant_program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline other-global redundant run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&redundant_program);
+        return 0;
+    }
+    ok &= expect_dump("MEMORY-SSA-PASS-PIPELINE-OTHER-GLOBAL-REDUNDANT",
+        &redundant_program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+    value_ssa_program_free(&redundant_program);
+
+    if (!build_dead_global_store_before_other_global_call_program(&dead_program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline other-global dead setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+    if (!memory_ssa_pass_run_pipeline(&dead_program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline other-global dead run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&dead_program);
+        return 0;
+    }
+    ok &= expect_dump("MEMORY-SSA-PASS-PIPELINE-OTHER-GLOBAL-DEAD",
+        &dead_program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+    value_ssa_program_free(&dead_program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_other_global_call_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_two_way_other_global_call_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed two-way other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed two-way other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-TWO-WAY-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = add ssa.1, 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.2: ssa.2]\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_scrambled_other_global_call_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed scrambled other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed scrambled other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-SCRAMBLED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 11], [bb.3: ssa.3]\n"
+        "    ret ssa.1\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.2, 2\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_scrambled_multi_pred_other_global_call_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed scrambled multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed scrambled multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-SCRAMBLED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 11], [bb.4: 22], [bb.5: ssa.4]\n"
+        "    ret ssa.1\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_local d.1\n"
+        "    br ssa.2, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    jmp bb.1\n"
+        "  bb.5:\n"
+        "    call helper()\n"
+        "    ssa.3 = load_global g.0\n"
+        "    ssa.4 = add ssa.3, 3\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_multi_pred_other_global_call_binaries(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.2, 3\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 11], [bb.3: 22], [bb.4: ssa.3]\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 16], [bb.3: 27], [bb.4: 38]\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_nested_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized nested other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized nested other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-BRANCH-MATERIALIZED-NESTED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 16], [bb.3: 27], [bb.4: 38]\n"
+        "    ret ssa.3\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_pipeline_reuses_repeated_global_load_after_call(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -8791,6 +15308,250 @@ static int test_memory_ssa_pass_pipeline_reuses_repeated_global_load_after_call(
         "func main() {\n"
         "  bb.0:\n"
         "    call touch()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_keeps_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: pipeline global call-barrier setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: pipeline global call-barrier failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    call touch()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_reuses_repeated_global_load_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_repeated_global_load_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline repeated global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline repeated global-after-other-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-GLOBAL-REUSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_partial_phi_global_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global other-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-PARTIAL-PHI-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_partial_phi_global_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scrambled_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global scrambled other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global scrambled other-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-PARTIAL-PHI-GLOBAL-SCRAMBLED-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_partial_phi_global_ancestor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_with_ancestor_value_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global ancestor other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global ancestor other-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-PARTIAL-PHI-GLOBAL-ANCESTOR-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_partial_phi_global_multi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_multi_pred_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global multi other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial phi global multi other-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-PARTIAL-PHI-GLOBAL-MULTI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
         "    ssa.0 = load_global g.0\n"
         "    ret ssa.0\n"
         "}\n");
@@ -8957,6 +15718,880 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_global
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed global-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = add ssa.1, 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.2: ssa.2]\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_after_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_redundant_global_store_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse global-after-other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_keeps_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse global call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse global call-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    call touch()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_keeps_loop_global_call_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_call_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop global call-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop global call-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-LOOP-GLOBAL-CALL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 9\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = add ssa.1, 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.2: ssa.2]\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed scrambled other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed scrambled other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-SCRAMBLED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 11], [bb.3: ssa.3]\n"
+        "    ret ssa.1\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.2, 2\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_scrambled_multi_pred_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_scrambled_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed scrambled multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed scrambled multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-SCRAMBLED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.2, bb.3\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.2: 11], [bb.4: 22], [bb.5: ssa.4]\n"
+        "    ret ssa.1\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_local d.1\n"
+        "    br ssa.2, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    jmp bb.1\n"
+        "  bb.5:\n"
+        "    call helper()\n"
+        "    ssa.3 = load_global g.0\n"
+        "    ssa.4 = add ssa.3, 3\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_multi_pred_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed multi-pred other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed multi-pred other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-MULTI-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.2, 3\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.4 = phi [bb.1: 11], [bb.3: 22], [bb.4: ssa.3]\n"
+        "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_dead_store_before_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_dead_global_store_before_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse dead store before other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse dead store before other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-DEAD-STORE-BEFORE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_repeated_global_load_after_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_repeated_global_load_after_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse repeated global-after-other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse repeated global-after-other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-GLOBAL-REUSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-PARTIAL-PHI-GLOBAL-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_scrambled_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scrambled_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global scrambled other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global scrambled other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-PARTIAL-PHI-GLOBAL-SCRAMBLED-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_ancestor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_partial_phi_forward_other_global_with_ancestor_value_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global ancestor other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global ancestor other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-PARTIAL-PHI-GLOBAL-ANCESTOR-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_multi_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_multi_pred_partial_phi_forward_other_global_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global multi other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial phi global multi other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-PARTIAL-PHI-GLOBAL-MULTI-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call helper()\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_loop_header_global_readonly_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_header_global_readonly_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop-header global readonly other-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop-header global readonly other-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-LOOP-HEADER-GLOBAL-READONLY-OTHER-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.0: ssa.0], [bb.1: ssa.1]\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse loop other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_mixed_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed loop other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = add ssa.0, 10\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_mixed_loop_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed loop global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse mixed loop global-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MIXED-LOOP-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 10\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.0, ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_mixed_multi_pred_other_global_call_program(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: memory-aware cse other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: memory-aware cse other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_partial_unknown_predecessor_binary(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -9002,6 +16637,61 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_partia
         "  bb.5:\n"
         "    ssa.4 = phi [bb.1: 11], [bb.3: 22], [bb.4: ssa.3]\n"
         "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_partial_unknown_predecessor_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_predecessor_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial-unknown other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse partial-unknown other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-PARTIAL-UNKNOWN-PRED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.2\n"
         "}\n");
 
     value_ssa_program_free(&program);
@@ -9054,6 +16744,60 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_materi
         "  bb.5:\n"
         "    ssa.5 = phi [bb.1: 16], [bb.3: 27], [bb.4: ssa.4]\n"
         "    ret ssa.5\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 16], [bb.3: 27], [bb.4: 38]\n"
+        "    ret ssa.2\n"
         "}\n");
 
     value_ssa_program_free(&program);
@@ -9114,6 +16858,63 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-BRANCH-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.3\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_nested_partial_unknown_edge(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -9161,6 +16962,64 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch
         "  bb.5:\n"
         "    ssa.6 = phi [bb.1: 16], [bb.3: 27], [bb.4: ssa.5]\n"
         "    ret ssa.6\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_nested_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_nested_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized nested other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized nested other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-BRANCH-MATERIALIZED-NESTED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 16], [bb.3: 27], [bb.4: 38]\n"
+        "    ret ssa.3\n"
         "  bb.6:\n"
         "    ret 0\n"
         "}\n");
@@ -9228,6 +17087,64 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_deep_other_global_call(
+    void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized deep other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: memory-aware cse branch materialized deep other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-MEMORY-AWARE-CSE-BRANCH-MATERIALIZED-DEEP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 56], [bb.3: 67], [bb.4: 78]\n"
+        "    ret ssa.3\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_pipeline_eliminates_partial_unknown_predecessor_binary(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -9273,6 +17190,60 @@ static int test_memory_ssa_pass_pipeline_eliminates_partial_unknown_predecessor_
         "  bb.5:\n"
         "    ssa.4 = phi [bb.1: 11], [bb.3: 22], [bb.4: ssa.3]\n"
         "    ret ssa.4\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_partial_unknown_predecessor_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_partial_unknown_predecessor_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial-unknown other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline partial-unknown other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-PARTIAL-UNKNOWN-PRED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ssa.2 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.2\n"
         "}\n");
 
     value_ssa_program_free(&program);
@@ -9422,6 +17393,63 @@ static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_partial_
     return ok;
 }
 
+static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-BRANCH-MATERIALIZED-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 11], [bb.3: 22], [bb.4: 33]\n"
+        "    ret ssa.3\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_nested_partial_unknown_edge(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -9528,6 +17556,63 @@ static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_deep_par
         "  bb.5:\n"
         "    ssa.10 = phi [bb.1: 56], [bb.3: 67], [bb.4: ssa.9]\n"
         "    ret ssa.10\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_branch_materialized_deep_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_memory_aware_cse_branch_materialized_deep_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized deep other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline branch materialized deep other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-BRANCH-MATERIALIZED-DEEP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0, d.1, e.2) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local c.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.5\n"
+        "  bb.2:\n"
+        "    ssa.1 = load_local d.1\n"
+        "    br ssa.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    jmp bb.5\n"
+        "  bb.4:\n"
+        "    call helper()\n"
+        "    ssa.2 = load_local e.2\n"
+        "    br ssa.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.3 = phi [bb.1: 56], [bb.3: 67], [bb.4: 78]\n"
+        "    ret ssa.3\n"
         "  bb.6:\n"
         "    ret 0\n"
         "}\n");
@@ -9655,6 +17740,191 @@ static int test_memory_ssa_pass_pipeline_keeps_loop_global_call_barrier(void) {
         "    jmp bb.1\n"
         "  bb.1:\n"
         "    call touch()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_loop_other_global_call_store(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_global_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline loop other-global-call run failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_loop_other_global_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_other_global_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed loop other-global-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed loop other-global-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-LOOP-OTHER-GLOBAL-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call helper()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = add ssa.0, 10\n"
+        "    ret ssa.2\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_eliminates_mixed_loop_global_barrier(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_scalar_replace_mixed_loop_global_barrier_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed loop global-barrier setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline mixed loop global-barrier failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-MIXED-LOOP-GLOBAL-BARRIER",
+        &program,
+        "global g.0\n"
+        "\n"
+        "declare touch()\n"
+        "\n"
+        "func main(c.0) {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 10\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 1], [bb.2: 2]\n"
+        "    ssa.1 = load_local c.0\n"
+        "    br ssa.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    call touch()\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.2 = load_global g.0\n"
+        "    ssa.3 = add ssa.0, ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_pass_pipeline_loop_header_global_readonly_call(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_loop_header_global_readonly_call_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline loop-header global readonly-call setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_run_pipeline(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: pipeline loop-header global readonly-call failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-PIPELINE-LOOP-HEADER-GLOBAL-READONLY-CALL",
+        &program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global h.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = phi [bb.0: ssa.0], [bb.1: ssa.1]\n"
+        "    call helper()\n"
         "    jmp bb.1\n"
         "}\n");
 
@@ -10027,6 +18297,7 @@ int main(void) {
     ok &= test_memory_ssa_pass_forwards_same_value_loop_local_load();
     ok &= test_memory_ssa_pass_forwards_loop_header_parameter_local_load();
     ok &= test_memory_ssa_pass_forwards_loop_header_global_load_through_readonly_call();
+    ok &= test_memory_ssa_pass_promotes_loop_header_global_load_through_readonly_call();
     ok &= test_memory_ssa_pass_promotes_same_value_loop_global_slot();
     ok &= test_memory_ssa_pass_keeps_differing_value_loop_local_load();
     ok &= test_memory_ssa_pass_keeps_phi_load_unforwarded();
@@ -10035,18 +18306,25 @@ int main(void) {
     ok &= test_memory_ssa_pass_forwards_same_value_phi_global_load();
     ok &= test_memory_ssa_pass_forwards_same_value_loop_global_load();
     ok &= test_memory_ssa_pass_forwards_repeated_global_load_after_call();
+    ok &= test_memory_ssa_pass_forwards_repeated_global_load_after_other_global_call();
     ok &= test_memory_ssa_pass_forwards_phi_join_global_load();
     ok &= test_memory_ssa_pass_promotes_same_value_phi_global_slot();
     ok &= test_memory_ssa_pass_promotes_global_slot_using_ancestor_input_value();
     ok &= test_memory_ssa_pass_reuses_dominating_equivalent_phi_global_load();
     ok &= test_memory_ssa_pass_partially_redundant_global_join_load();
+    ok &= test_memory_ssa_pass_partially_redundant_global_join_load_after_other_global_call();
     ok &= test_memory_ssa_pass_partially_redundant_scrambled_global_join_load();
+    ok &= test_memory_ssa_pass_partially_redundant_scrambled_global_join_load_after_other_global_call();
     ok &= test_memory_ssa_pass_partially_redundant_global_join_prefers_ancestor_value();
+    ok &= test_memory_ssa_pass_partially_redundant_global_join_prefers_ancestor_value_after_other_global_call();
     ok &= test_memory_ssa_pass_partially_redundant_multi_pred_global_join_load();
+    ok &= test_memory_ssa_pass_partially_redundant_multi_pred_global_join_load_after_other_global_call();
     ok &= test_memory_ssa_pass_forwards_global_load_after_internal_pure_call();
     ok &= test_memory_ssa_pass_forwards_global_load_after_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_loop_global_load_after_other_global_call();
     ok &= test_memory_ssa_pass_keeps_loop_global_load_after_call();
     ok &= test_memory_ssa_pass_keeps_loop_global_load_after_call_for_global_promotion();
+    ok &= test_memory_ssa_pass_eliminates_loop_global_load_after_other_global_call_for_global_promotion();
     ok &= test_memory_ssa_pass_keeps_global_load_after_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_local_join_store();
     ok &= test_memory_ssa_pass_eliminates_redundant_parameter_local_store();
@@ -10062,18 +18340,74 @@ int main(void) {
     ok &= test_memory_ssa_pass_eliminates_dead_global_store();
     ok &= test_memory_ssa_pass_eliminates_dead_global_store_globally();
     ok &= test_memory_ssa_pass_keeps_global_store_before_call_live();
+    ok &= test_memory_ssa_pass_eliminates_dead_global_store_before_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_global_store_after_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_overwritten_stores();
     ok &= test_memory_ssa_pass_eliminates_phi_and_loop_overwritten_stores();
     ok &= test_memory_ssa_pass_canonicalize_memory_values_local_join();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_loop_header_global_readonly_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_loop_other_global_call();
     ok &= test_memory_ssa_pass_scalar_replace_local_slots_join();
     ok &= test_memory_ssa_pass_scalar_replace_global_slots_join();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_after_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_dead_store_before_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_redundant_store_after_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_repeated_global_load_after_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_ancestor_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_partial_phi_multi_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_loop_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_loop_header_readonly_call();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_keeps_global_call_barrier();
+    ok &= test_memory_ssa_pass_scalar_replace_global_slots_keeps_loop_global_call_barrier();
     ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_join();
     ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_multi_pred_join();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_scrambled_multi_pred_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_multi_pred_other_global_call();
     ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_loop_exit();
     ok &= test_memory_ssa_pass_scalar_replace_slots_keeps_global_call_barrier();
     ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_multi_pred_global_barrier();
     ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_loop_global_barrier();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_mixed_loop_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_nested_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_deep_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_partial_unknown_predecessor_other_global_call();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_nested_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_scalar_replace_slots_branch_materialized_deep_partial_unknown_edge();
     ok &= test_memory_ssa_pass_canonicalize_memory_values_global_chain();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_keeps_global_call_barrier();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_keeps_loop_global_call_barrier();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_global_barrier();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_multi_pred_global_barrier();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_loop_global_barrier();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_after_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_dead_store_before_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_scrambled_multi_pred_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_multi_pred_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_nested_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_deep_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_partial_unknown_predecessor_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_nested_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_branch_materialized_deep_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_repeated_global_load_after_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_partial_phi_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_partial_phi_multi_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_partial_phi_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_partial_phi_ancestor_other_global_call();
+    ok &= test_memory_ssa_pass_canonicalize_memory_values_loop_other_global_call();
     ok &= test_memory_ssa_pass_canonicalize_memory_values_rejects_invalid_input();
     ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_local_join();
     ok &= test_memory_ssa_pass_build_memory_canonicalized_from_lower_ir_fold_program();
@@ -10085,26 +18419,73 @@ int main(void) {
     ok &= test_memory_ssa_pass_pipeline_eliminates_redundant_parameter_local_join_load_phi_store();
     ok &= test_memory_ssa_pass_pipeline_eliminates_redundant_parameter_local_loop_phi_store();
     ok &= test_memory_ssa_pass_pipeline_forwards_internal_pure_call_global();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_global_barrier_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_multi_pred_global_barrier_binaries();
+    ok &= test_memory_ssa_pass_pipeline_cleans_other_global_call_store_shapes();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_other_global_call_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_two_way_other_global_call_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_scrambled_other_global_call_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_scrambled_multi_pred_other_global_call_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_multi_pred_other_global_call_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_nested_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_reuses_repeated_global_load_after_call();
+    ok &= test_memory_ssa_pass_pipeline_keeps_global_call_barrier();
+    ok &= test_memory_ssa_pass_pipeline_reuses_repeated_global_load_after_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_partial_phi_global_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_partial_phi_global_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_partial_phi_global_ancestor_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_partial_phi_global_multi_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries();
     ok &= test_memory_ssa_pass_eliminates_redundant_nested_join_memory_binaries();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_global_barrier();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_keeps_global_call_barrier();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_keeps_loop_global_call_barrier();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_global_barrier();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_after_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_scrambled_multi_pred_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_mixed_multi_pred_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_dead_store_before_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_repeated_global_load_after_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_scrambled_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_ancestor_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_partial_phi_multi_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_loop_header_global_readonly_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_loop_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_mixed_loop_global_barrier();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_mixed_loop_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_materialized_other_global_call();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_partial_unknown_predecessor_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_partial_unknown_predecessor_binary();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_materialized_partial_unknown_edge();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_nested_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_nested_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_deep_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_branch_materialized_deep_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_eliminates_memory_aware_redundant_binary();
     ok &= test_memory_ssa_pass_pipeline_eliminates_nested_join_memory_binaries();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_partial_unknown_predecessor_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_eliminates_partial_unknown_predecessor_binary();
     ok &= test_memory_ssa_pass_pipeline_eliminates_materialized_partial_unknown_edge();
     ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_nested_partial_unknown_edge();
     ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_deep_partial_unknown_edge();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_branch_materialized_deep_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_cfg_revisit_local();
     ok &= test_memory_ssa_pass_pipeline_cfg_revisit_global();
     ok &= test_memory_ssa_pass_pipeline_same_value_loop();
     ok &= test_memory_ssa_pass_pipeline_keeps_loop_global_call_barrier();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_loop_global_barrier();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_loop_other_global_call_store();
+    ok &= test_memory_ssa_pass_pipeline_eliminates_mixed_loop_other_global_call();
+    ok &= test_memory_ssa_pass_pipeline_loop_header_global_readonly_call();
     ok &= test_memory_ssa_pass_pipeline_is_fixed_point();
     ok &= test_memory_ssa_pass_pipeline_rejects_invalid_input();
     ok &= test_memory_ssa_pass_keeps_live_join_store();
