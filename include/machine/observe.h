@@ -138,6 +138,8 @@ int machine_observe_file_get_target_policy_summary(const MachineObserveFile *obs
     MachineObserveTargetPolicySummary *out_summary);
 int machine_observe_file_get_summary(const MachineObserveFile *observe_file,
     size_t *out_mapped_byte_count);
+int machine_observe_file_get_source_elf_artifact_summary(const MachineObserveFile *observe_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_observe_file_get_header_summary(const MachineObserveFile *observe_file,
     MachineObserveHeaderSummary *out_summary);
 int machine_observe_file_get_apply_summary(const MachineObserveFile *observe_file,
@@ -251,6 +253,9 @@ int machine_observe_report_get_apply_file(const MachineObserveReport *report,
     const MachineApplyFile **out_apply_file);
 int machine_observe_report_get_apply_report(const MachineObserveReport *report,
     const MachineApplyReport **out_apply_report);
+int machine_observe_report_get_source_elf_artifact_summary_artifact(
+    const MachineObserveReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_observe_report_get_header_summary_artifact(const MachineObserveReport *report,
     const MachineObserveHeaderSummary **out_summary);
 int machine_observe_report_get_target_policy_summary_artifact(const MachineObserveReport *report,

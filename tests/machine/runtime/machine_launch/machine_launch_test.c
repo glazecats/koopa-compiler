@@ -8,22 +8,27 @@
 
 static int build_expected_launch_dump_text(char *buffer, size_t buffer_size,
     const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
     size_t initial_stack_pointer = base_virtual_address + 0x3000u;
 
-    if (!buffer || buffer_size == 0u || !profile_name || !pc_register_name || !sp_register_name) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name ||
+        !pc_register_name || !sp_register_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_launch profile=%s pc=0x%zx sp=0x%zx registers=2 runtime_segments=2 mapped_bytes=8192\n"
+               "machine_launch profile=%s elf_origin=%s elf_semantics=%s pc=0x%zx sp=0x%zx registers=2 runtime_segments=2 mapped_bytes=8192\n"
                "program_counter_register: lreg.0 %s\n"
                "stack_pointer_register: lreg.1 %s\n"
                "registers:\n"
                "  lreg.0 %s value=0x%zx\n"
                "  lreg.1 %s value=0x%zx\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                initial_stack_pointer,
                pc_register_name,
@@ -36,16 +41,19 @@ static int build_expected_launch_dump_text(char *buffer, size_t buffer_size,
 
 static int build_expected_launch_report_dump_text(char *buffer, size_t buffer_size,
     const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
     size_t initial_stack_pointer = base_virtual_address + 0x3000u;
 
-    if (!buffer || buffer_size == 0u || !profile_name || !pc_register_name || !sp_register_name) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name ||
+        !pc_register_name || !sp_register_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_launch profile=%s pc=0x%zx sp=0x%zx registers=2 runtime_segments=2 mapped_bytes=8192\n"
+               "machine_launch profile=%s elf_origin=%s elf_semantics=%s pc=0x%zx sp=0x%zx registers=2 runtime_segments=2 mapped_bytes=8192\n"
                "program_counter_register: lreg.0 %s\n"
                "stack_pointer_register: lreg.1 %s\n"
                "registers:\n"
@@ -53,6 +61,7 @@ static int build_expected_launch_report_dump_text(char *buffer, size_t buffer_si
                "  lreg.1 %s value=0x%zx\n"
                "report_overview:\n"
                "  registers=2 runtime-segments=2 mapped-bytes=8192 pc=0x%zx sp=0x%zx pc-register=0 sp-register=1\n"
+               "  elf_source: target=%s origin=%s semantics=%s\n"
                "  policy: profile=%s pc-reg=%s sp-reg=%s\n"
                "  runtime-launch: pc=0x%zx sp=0x%zx stack-segment=1 stack-base=0x%zx stack-end=0x%zx stack-bytes=4096\n"
                "  initial-stack: base=0x%zx end=0x%zx bytes=20 word=4 argc=0\n"
@@ -61,6 +70,8 @@ static int build_expected_launch_report_dump_text(char *buffer, size_t buffer_si
                "  lreg.0 %s pc=yes sp=no value=0x%zx\n"
                "  lreg.1 %s pc=no sp=yes value=0x%zx\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                initial_stack_pointer,
                pc_register_name,
@@ -71,6 +82,9 @@ static int build_expected_launch_report_dump_text(char *buffer, size_t buffer_si
                initial_stack_pointer,
                base_virtual_address,
                initial_stack_pointer,
+               profile_name,
+               origin_profile_name,
+               semantics_name,
                profile_name,
                pc_register_name,
                sp_register_name,
@@ -179,6 +193,8 @@ static int build_resolved_machine_ir_report(
 static int verify_launch_file_with_profile(const MachineLaunchFile *launch_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
@@ -196,6 +212,7 @@ static int verify_launch_file_with_profile(const MachineLaunchFile *launch_file,
     size_t runtime_segment_count = 0u;
     size_t mapped_byte_count = 0u;
     size_t register_index = 0u;
+    MachineElfArtifactSummary source_artifact_summary;
     int ok = 1;
 
     memset(&header_summary, 0, sizeof(header_summary));
@@ -204,12 +221,15 @@ static int verify_launch_file_with_profile(const MachineLaunchFile *launch_file,
     memset(&initial_stack_summary, 0, sizeof(initial_stack_summary));
     memset(&runtime_memory_summary, 0, sizeof(runtime_memory_summary));
     memset(&register_summary, 0, sizeof(register_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&launch_error, 0, sizeof(launch_error));
     memset(expected_dump, 0, sizeof(expected_dump));
     if (!build_expected_launch_dump_text(
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             pc_register_name,
             sp_register_name,
             base_virtual_address)) {
@@ -220,6 +240,10 @@ static int verify_launch_file_with_profile(const MachineLaunchFile *launch_file,
         !machine_launch_file_get_summary(
             launch_file, &register_count, &runtime_segment_count, &mapped_byte_count) ||
         register_count != 2u || runtime_segment_count != 2u || mapped_byte_count != 8192u ||
+        !machine_launch_file_get_source_elf_artifact_summary(launch_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_launch_file_get_header_summary(launch_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.program_counter != base_virtual_address ||
@@ -274,6 +298,8 @@ cleanup:
 static int verify_launch_report_with_profile(const MachineLaunchReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
@@ -288,6 +314,7 @@ static int verify_launch_report_with_profile(const MachineLaunchReport *report,
     const MachineRuntimeInitialStackSummary *initial_stack_summary = NULL;
     const MachineRuntimeMemorySummary *runtime_memory_summary = NULL;
     const MachineLaunchRegisterSummary *register_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     char *dump_text = NULL;
     char expected_dump[2048];
     size_t register_count = 0u;
@@ -304,6 +331,8 @@ static int verify_launch_report_with_profile(const MachineLaunchReport *report,
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             pc_register_name,
             sp_register_name,
             base_virtual_address)) {
@@ -321,10 +350,15 @@ static int verify_launch_report_with_profile(const MachineLaunchReport *report,
         overview_artifact.stack_pointer_register_index != 1u ||
         !machine_launch_report_get_file(report, &launch_file) || !launch_file ||
         !machine_launch_report_get_runtime_file(report, &runtime_file) || !runtime_file ||
+        !machine_launch_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_launch_report_get_header_summary_artifact(report, &header_summary) ||
         !header_summary || header_summary->target_profile != profile ||
         header_summary->program_counter != base_virtual_address ||
         header_summary->stack_pointer != base_virtual_address + 0x3000u ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_launch_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary ||
         strcmp(target_policy_summary->program_counter_register_name, pc_register_name) != 0 ||
@@ -439,6 +473,8 @@ static int test_machine_launch_mainline(void) {
         &launch_file,
         "launch-generic-runtime-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -454,6 +490,8 @@ static int test_machine_launch_mainline(void) {
         &cloned_launch,
         "launch-generic-cloned-runtime-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -468,6 +506,8 @@ static int test_machine_launch_mainline(void) {
         &launch_file,
         "launch-generic-runtime-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -482,6 +522,8 @@ static int test_machine_launch_mainline(void) {
         &launch_file,
         "launch-generic-load-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -496,6 +538,8 @@ static int test_machine_launch_mainline(void) {
         &launch_file,
         "launch-generic-load-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -509,6 +553,8 @@ static int test_machine_launch_mainline(void) {
         &launch_report,
         "launch-generic-runtime-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -524,6 +570,8 @@ static int test_machine_launch_mainline(void) {
         &launch_report,
         "launch-generic-refreshed-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -538,6 +586,8 @@ static int test_machine_launch_mainline(void) {
         &launch_report,
         "launch-generic-runtime-report-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -552,6 +602,8 @@ static int test_machine_launch_mainline(void) {
         &launch_report,
         "launch-generic-load-file-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -566,6 +618,8 @@ static int test_machine_launch_mainline(void) {
         &launch_report,
         "launch-generic-load-report-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -615,6 +669,8 @@ static int test_machine_launch_ir_bridge_and_wrappers(void) {
         &launch_file,
         "launch-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -622,18 +678,20 @@ static int test_machine_launch_ir_bridge_and_wrappers(void) {
         &launch_report,
         "launch-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
     ok &= expect_text("launch ir dump wrapper", dump_text,
-        "machine_launch profile=generic-elf32 pc=0x1000 sp=0x4000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_launch profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans pc=0x1000 sp=0x4000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "program_counter_register: lreg.0 pc\n"
         "stack_pointer_register: lreg.1 sp\n"
         "registers:\n"
         "  lreg.0 pc value=0x1000\n"
         "  lreg.1 sp value=0x4000\n");
     ok &= expect_text("launch ir report-dump wrapper", report_dump_text,
-        "machine_launch profile=generic-elf32 pc=0x1000 sp=0x4000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_launch profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans pc=0x1000 sp=0x4000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "program_counter_register: lreg.0 pc\n"
         "stack_pointer_register: lreg.1 sp\n"
         "registers:\n"
@@ -641,6 +699,7 @@ static int test_machine_launch_ir_bridge_and_wrappers(void) {
         "  lreg.1 sp value=0x4000\n"
         "report_overview:\n"
         "  registers=2 runtime-segments=2 mapped-bytes=8192 pc=0x1000 sp=0x4000 pc-register=0 sp-register=1\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 pc-reg=pc sp-reg=sp\n"
         "  runtime-launch: pc=0x1000 sp=0x4000 stack-segment=1 stack-base=0x3000 stack-end=0x4000 stack-bytes=4096\n"
         "  initial-stack: base=0x3fec end=0x4000 bytes=20 word=4 argc=0\n"
@@ -695,6 +754,8 @@ static int test_machine_launch_profile_bridge(void) {
         &launch_file,
         "launch-i386-ir-file",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "eip",
         "esp",
         0x08048000u);
@@ -702,18 +763,20 @@ static int test_machine_launch_profile_bridge(void) {
         &launch_report,
         "launch-i386-ir-report",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "eip",
         "esp",
         0x08048000u);
     ok &= expect_text("launch i386 dump wrapper", dump_text,
-        "machine_launch profile=i386-preview pc=0x8048000 sp=0x804b000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_launch profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans pc=0x8048000 sp=0x804b000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "program_counter_register: lreg.0 eip\n"
         "stack_pointer_register: lreg.1 esp\n"
         "registers:\n"
         "  lreg.0 eip value=0x8048000\n"
         "  lreg.1 esp value=0x804b000\n");
     ok &= expect_text("launch i386 report-dump wrapper", report_dump_text,
-        "machine_launch profile=i386-preview pc=0x8048000 sp=0x804b000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_launch profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans pc=0x8048000 sp=0x804b000 registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "program_counter_register: lreg.0 eip\n"
         "stack_pointer_register: lreg.1 esp\n"
         "registers:\n"
@@ -721,6 +784,7 @@ static int test_machine_launch_profile_bridge(void) {
         "  lreg.1 esp value=0x804b000\n"
         "report_overview:\n"
         "  registers=2 runtime-segments=2 mapped-bytes=8192 pc=0x8048000 sp=0x804b000 pc-register=0 sp-register=1\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview pc-reg=eip sp-reg=esp\n"
         "  runtime-launch: pc=0x8048000 sp=0x804b000 stack-segment=1 stack-base=0x804a000 stack-end=0x804b000 stack-bytes=4096\n"
         "  initial-stack: base=0x804afec end=0x804b000 bytes=20 word=4 argc=0\n"

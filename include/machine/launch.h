@@ -97,6 +97,8 @@ int machine_launch_file_get_summary(const MachineLaunchFile *launch_file,
     size_t *out_register_count,
     size_t *out_runtime_segment_count,
     size_t *out_mapped_byte_count);
+int machine_launch_file_get_source_elf_artifact_summary(const MachineLaunchFile *launch_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_launch_file_get_header_summary(const MachineLaunchFile *launch_file,
     MachineLaunchHeaderSummary *out_summary);
 int machine_launch_file_get_runtime_launch_summary(const MachineLaunchFile *launch_file,
@@ -208,6 +210,8 @@ int machine_launch_report_get_file(const MachineLaunchReport *report,
     const MachineLaunchFile **out_file);
 int machine_launch_report_get_runtime_file(const MachineLaunchReport *report,
     const MachineRuntimeFile **out_runtime_file);
+int machine_launch_report_get_source_elf_artifact_summary_artifact(const MachineLaunchReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_launch_report_get_header_summary_artifact(const MachineLaunchReport *report,
     const MachineLaunchHeaderSummary **out_summary);
 int machine_launch_report_get_target_policy_summary_artifact(const MachineLaunchReport *report,

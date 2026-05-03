@@ -66,6 +66,15 @@ int machine_runtime_report_get_file(const MachineRuntimeReport *report,
     return 1;
 }
 
+int machine_runtime_report_get_source_elf_artifact_summary_artifact(const MachineRuntimeReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_runtime_report_get_header_summary_artifact(const MachineRuntimeReport *report,
     const MachineRuntimeHeaderSummary **out_summary) {
     if (!report || !out_summary) {
@@ -792,8 +801,12 @@ int machine_runtime_dump_report(const MachineRuntimeReport *report,
         !machine_runtime_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_runtime_append_format(
             &builder,
-            "machine_runtime profile=%s base=0x%zx entry=0x%zx sp=0x%zx segments=%zu mapped_bytes=%zu\n",
+            "machine_runtime profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx sp=0x%zx segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             report->header_summary.base_virtual_address,
             report->header_summary.entry_virtual_address,
             report->header_summary.initial_stack_pointer,
@@ -852,6 +865,15 @@ int machine_runtime_dump_report(const MachineRuntimeReport *report,
             report->header_summary.entry_virtual_address,
             report->header_summary.initial_stack_pointer,
             report->stack_segment_index) ||
+        !machine_runtime_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_runtime_append_format(
             &builder,
             "  policy: profile=%s base=0x%zx stack-align=%zu stack-size=%zu stack-gap=%zu\n",

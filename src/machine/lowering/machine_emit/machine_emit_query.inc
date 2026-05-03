@@ -23,6 +23,33 @@ int machine_emit_program_get_summary(const MachineEmitProgram *program,
     return 1;
 }
 
+int machine_emit_lower_report_get_target_policy_summary_artifact(const MachineEmitLowerReport *report,
+    const MachineEmitTargetPolicySummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->target_policy_summary;
+    return 1;
+}
+
+int machine_emit_lower_report_verify_current_riscv32_preview_compatibility(const MachineEmitLowerReport *report,
+    MachineEmitError *error) {
+    if (!report) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-138: invalid emit-report compatibility contract");
+        return 0;
+    }
+    return machine_emit_verify_current_riscv32_preview_compatibility(&report->program, error);
+}
+
+int machine_emit_lower_report_verify_current_riscv32_preview_bytes_compatibility(const MachineEmitLowerReport *report,
+    MachineEmitError *error) {
+    if (!report) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-141: invalid emit-report bytes-compatibility contract");
+        return 0;
+    }
+    return machine_emit_verify_current_riscv32_preview_bytes_compatibility(&report->program, error);
+}
+
 int machine_emit_program_get_function(const MachineEmitProgram *program,
     size_t function_index,
     const MachineEmitFunction **out_function) {

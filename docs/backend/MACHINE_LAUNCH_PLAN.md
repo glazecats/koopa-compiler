@@ -105,6 +105,10 @@ Do not start with:
     `MachineLoadReport`, and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw launch files, launch reports, direct dumps, and
     report dumps
+  - that same launch-facing bridge now also preserves upstream ELF
+    provenance instead of flattening it away at launch-state time: raw launch
+    files, launch reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_runtime`
   - that same first bridge/lifecycle surface is now also regression-locked:
     clone, report refresh, raw/report dump wrappers, runtime/load bridge
     entrypoints, and profiled `machine_ir` bridge entrypoints are all now

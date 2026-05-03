@@ -151,12 +151,15 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_timeline_file(const MachineTimelineFile *timeline_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineTimelineResolutionKind resolution_kind,
     MachineTimelineKind timeline_kind,
     const char *expected_dump) {
     MachineTimelineHeaderSummary header_summary;
     MachineTimelineTargetPolicySummary target_policy_summary;
     MachineTimelineSummary timeline_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineTimelineError timeline_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -164,9 +167,14 @@ static int verify_timeline_file(const MachineTimelineFile *timeline_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&timeline_summary, 0, sizeof(timeline_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&timeline_error, 0, sizeof(timeline_error));
 
     if (!machine_timeline_verify_file(timeline_file, &timeline_error) ||
+        !machine_timeline_file_get_source_elf_artifact_summary(timeline_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_timeline_file_get_header_summary(timeline_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.timeline_entry_count != 1u ||
@@ -192,6 +200,8 @@ cleanup:
 static int verify_timeline_report(const MachineTimelineReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineTimelineResolutionKind resolution_kind,
     const char *expected_dump) {
     MachineTimelineReportOverviewArtifact overview_artifact;
@@ -200,6 +210,7 @@ static int verify_timeline_report(const MachineTimelineReport *report,
     const MachineTimelineHeaderSummary *header_summary = NULL;
     const MachineTimelineTargetPolicySummary *target_policy_summary = NULL;
     const MachineTimelineSummary *timeline_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineTimelineError timeline_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -210,8 +221,13 @@ static int verify_timeline_report(const MachineTimelineReport *report,
     if (!machine_timeline_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_timeline_report_get_file(report, &timeline_file) || !timeline_file ||
         !machine_timeline_report_get_history_report(report, &history_report) || !history_report ||
+        !machine_timeline_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_timeline_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         header_summary->timeline_entry_count != 1u ||
         header_summary->timeline_entry_index != 0u ||
         !machine_timeline_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
@@ -266,9 +282,11 @@ static int test_machine_timeline_mainline(void) {
         &timeline_file,
         "timeline-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_PREVIEW_TIMELINE,
         MACHINE_TIMELINE_KIND_VALUE_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=value-timeline history=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_timeline_clone_file(&timeline_file, &cloned_timeline_file, &timeline_error) ||
@@ -283,11 +301,14 @@ static int test_machine_timeline_mainline(void) {
         &timeline_report,
         "timeline-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_PREVIEW_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=value-timeline history=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: history=preview-history status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000 entries=1 entry-index=0\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 exact=yes preview=yes single-tick=yes\n"
         "  timeline: resolution=preview-timeline kind=value-timeline history=value-history exact=no single-tick=yes entries=1 entry-index=0 state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 
@@ -346,9 +367,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_EXACT_TIMELINE,
         MACHINE_TIMELINE_KIND_PROGRAM_STOP_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=exact-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=exact-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=exact-timeline kind=program-stop-timeline history=program-stop-history outcome=program-stopped event=control-halt trace=exact-trace change-class=status-and-fetch apply=applied-state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 exact=yes single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=halted status-changed=yes pc-changed=no stack-changed=no fetch-changed=yes targets=[] return-imm=7\n");
 
     machine_timeline_report_free(&timeline_report);
@@ -366,9 +389,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_TIMELINE_KIND_BLOCKED_CONTROL_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=blocked-on-control kind=blocked-control-timeline history=blocked-control-history outcome=blocked-control event=blocked-control trace=blocked-on-control change-class=none apply=blocked-on-control commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[1] return-imm=-\n");
 
     machine_timeline_report_free(&timeline_report);
@@ -386,9 +411,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_TIMELINE_KIND_BLOCKED_UNSUPPORTED_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=blocked-unsupported kind=blocked-unsupported-timeline history=blocked-unsupported-history outcome=blocked-unsupported event=blocked-unsupported trace=blocked-unsupported change-class=none apply=blocked-unsupported commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[] return-imm=-\n");
 
     machine_timeline_report_free(&timeline_report);
@@ -405,9 +432,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_PREVIEW_TIMELINE,
         MACHINE_TIMELINE_KIND_LOCAL_UPDATE_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=local-update-timeline history=local-update-history outcome=local-updated event=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_timeline_file_free(&timeline_file);
@@ -423,9 +452,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_PREVIEW_TIMELINE,
         MACHINE_TIMELINE_KIND_GLOBAL_UPDATE_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=global-update-timeline history=global-update-history outcome=global-updated event=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_timeline_file_free(&timeline_file);
@@ -441,9 +472,11 @@ static int test_machine_timeline_custom_step_cases(void) {
         &timeline_file,
         "timeline-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TIMELINE_RESOLUTION_PREVIEW_TIMELINE,
         MACHINE_TIMELINE_KIND_CALL_TIMELINE,
-        "machine_timeline profile=generic-elf32 history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=call-timeline history=call-history outcome=call-issued event=call-effect trace=preview-trace change-class=program-counter-and-fetch apply=pending-call-application commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
 cleanup:
@@ -487,13 +520,14 @@ static int test_machine_timeline_i386_bridge(void) {
     }
 
     ok &= expect_text("timeline i386 dump wrapper", dump_text,
-        "machine_timeline profile=i386-preview history=preview-history origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=value-timeline history=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("timeline i386 report dump wrapper", report_dump_text,
-        "machine_timeline profile=i386-preview history=preview-history origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
+        "machine_timeline profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans history=preview-history origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1 entry-index=0\n"
         "timeline: resolution=preview-timeline kind=value-timeline history=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-tick=yes entries=1 entry-index=0 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: history=preview-history status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000 entries=1 entry-index=0\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview exact=yes preview=yes single-tick=yes\n"
         "  timeline: resolution=preview-timeline kind=value-timeline history=value-history exact=no single-tick=yes entries=1 entry-index=0 state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 

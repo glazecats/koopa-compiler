@@ -363,4 +363,63 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
     return 1;
 }
 
+int machine_emit_verify_current_riscv32_preview_compatibility(const MachineEmitProgram *program,
+    MachineEmitError *error) {
+    MachineEmitTargetPolicySummary policy_summary;
+
+    if (!program) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-135: invalid riscv32-preview compatibility contract");
+        return 0;
+    }
+    if (!machine_emit_verify_program(program, error)) {
+        return 0;
+    }
+    if (!machine_emit_program_get_target_policy_summary(program, &policy_summary)) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-136: missing emit target policy summary");
+        return 0;
+    }
+    if (program->register_bank.register_count >
+        policy_summary.select_policy.current_riscv32_preview_logical_register_cap) {
+        machine_emit_set_error(
+            error,
+            0,
+            0,
+            "MACHINE-EMIT-137: current riscv32-preview lane supports at most %zu logical machine registers",
+            policy_summary.select_policy.current_riscv32_preview_logical_register_cap);
+        return 0;
+    }
+    return 1;
+}
+
+int machine_emit_verify_current_riscv32_preview_bytes_compatibility(const MachineEmitProgram *program,
+    MachineEmitError *error) {
+    MachineEncodeProgram encode_program;
+    MachineEncodeError encode_error;
+    int ok;
+
+    if (!program) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-139: invalid riscv32-preview bytes-compatibility contract");
+        return 0;
+    }
+    if (!machine_emit_verify_current_riscv32_preview_compatibility(program, error)) {
+        return 0;
+    }
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_encode_program_init(&encode_program);
+    ok = machine_encode_lower_program_from_machine_emit(program, &encode_program, &encode_error) &&
+        machine_encode_verify_current_riscv32_preview_bytes_compatibility(&encode_program, &encode_error);
+    machine_encode_program_free(&encode_program);
+    if (!ok) {
+        machine_emit_set_error(
+            error,
+            encode_error.line,
+            encode_error.column,
+            "MACHINE-EMIT-140: current riscv32-preview bytes bridge rejected emitted program: %s",
+            encode_error.message);
+        return 0;
+    }
+    return 1;
+}
+
 #endif

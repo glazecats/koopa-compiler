@@ -9,6 +9,8 @@ void machine_elf_file_init(MachineElfFile *elf_file) {
         return;
     }
     elf_file->target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    elf_file->origin_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    elf_file->relocation_semantics = MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN;
     elf_file->sections = NULL;
     elf_file->section_count = 0;
     elf_file->section_capacity = 0;
@@ -68,6 +70,8 @@ int machine_elf_clone_file(const MachineElfFile *source,
 
     machine_elf_file_free(out_elf_file);
     out_elf_file->target_profile = source->target_profile;
+    out_elf_file->origin_profile = source->origin_profile;
+    out_elf_file->relocation_semantics = source->relocation_semantics;
     out_elf_file->section_count = source->section_count;
     out_elf_file->section_capacity = source->section_count;
     out_elf_file->symbol_count = source->symbol_count;
@@ -159,6 +163,8 @@ void machine_elf_report_init(MachineElfReport *report) {
         return;
     }
     machine_elf_file_init(&report->file);
+    memset(&report->artifact_summary, 0, sizeof(report->artifact_summary));
+    memset(&report->relocation_family_summary, 0, sizeof(report->relocation_family_summary));
     memset(&report->header_summary, 0, sizeof(report->header_summary));
     memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->section_summaries = NULL;
@@ -209,6 +215,52 @@ int machine_elf_file_get_target_profile(const MachineElfFile *elf_file,
         return 0;
     }
     *out_profile = elf_file->target_profile;
+    return 1;
+}
+
+int machine_elf_file_get_artifact_summary(const MachineElfFile *elf_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!elf_file || !out_summary) {
+        return 0;
+    }
+    out_summary->target_profile = elf_file->target_profile;
+    out_summary->origin_profile = elf_file->origin_profile;
+    out_summary->relocation_semantics = elf_file->relocation_semantics;
+    return 1;
+}
+
+int machine_elf_file_get_relocation_family_summary(const MachineElfFile *elf_file,
+    MachineElfRelocationFamilySummary *out_summary) {
+    size_t relocation_index;
+
+    if (!elf_file || !out_summary) {
+        return 0;
+    }
+    memset(out_summary, 0, sizeof(*out_summary));
+    for (relocation_index = 0u; relocation_index < elf_file->relocation_count; ++relocation_index) {
+        switch (elf_file->relocations[relocation_index].source_kind) {
+            case MACHINE_BYTES_FIXUP_CALL_TARGET:
+                out_summary->call_relocation_count += 1u;
+                break;
+            case MACHINE_BYTES_FIXUP_CONTROL_PRIMARY:
+                out_summary->primary_control_relocation_count += 1u;
+                break;
+            case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
+                out_summary->secondary_control_relocation_count += 1u;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+                out_summary->data_address_relocation_count += 1u;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+                out_summary->data_load_relocation_count += 1u;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+                out_summary->data_store_relocation_count += 1u;
+                break;
+            default:
+                break;
+        }
+    }
     return 1;
 }
 

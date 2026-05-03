@@ -400,6 +400,8 @@ static int test_machine_emit_report_surface_from_machine_layout(void) {
     MachineLayoutProgram layout_program;
     MachineEmitLowerReport report;
     MachineEmitError emit_error;
+    MachineEmitTargetPolicySummary program_policy_summary;
+    const MachineEmitTargetPolicySummary *report_policy_summary = NULL;
     const MachineEmitProgram *program_view = NULL;
     const MachineEmitFunction *function_view = NULL;
     const MachineEmitFunctionShapeSummary *function_shape = NULL;
@@ -415,6 +417,7 @@ static int test_machine_emit_report_surface_from_machine_layout(void) {
     int ok = 1;
 
     memset(&emit_error, 0, sizeof(emit_error));
+    memset(&program_policy_summary, 0, sizeof(program_policy_summary));
     machine_layout_program_init(&layout_program);
     machine_emit_lower_report_init(&report);
 
@@ -478,6 +481,19 @@ static int test_machine_emit_report_surface_from_machine_layout(void) {
         ok = 0;
     }
     if (!machine_emit_lower_report_get_program(&report, &program_view) || !program_view ||
+        !machine_emit_program_get_target_policy_summary(&report.program, &program_policy_summary) ||
+        !machine_emit_lower_report_get_target_policy_summary_artifact(&report, &report_policy_summary) ||
+        !machine_emit_verify_current_riscv32_preview_compatibility(&report.program, &emit_error) ||
+        !machine_emit_lower_report_verify_current_riscv32_preview_compatibility(&report, &emit_error) ||
+        program_policy_summary.select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !program_policy_summary.preserves_spill_operands_for_later_materialization ||
+        !program_policy_summary.preserves_global_slot_ops_for_later_address_formation ||
+        !program_policy_summary.preserves_fallthrough_terminator_shapes ||
+        !report_policy_summary ||
+        report_policy_summary->select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !report_policy_summary->preserves_spill_operands_for_later_materialization ||
+        !report_policy_summary->preserves_global_slot_ops_for_later_address_formation ||
+        !report_policy_summary->preserves_fallthrough_terminator_shapes ||
         !machine_emit_lower_report_get_function_by_name(&report, "main", NULL, &function_view) || !function_view) {
         fprintf(stderr, "[machine-emit] FAIL: report program/function lookup mismatch\n");
         ok = 0;
@@ -520,6 +536,165 @@ static int test_machine_emit_report_surface_from_machine_layout(void) {
 
     machine_layout_program_free(&layout_program);
     machine_emit_lower_report_free(&report);
+    return ok;
+}
+
+static int test_machine_emit_rejects_riscv32_preview_incompatible_register_bank(void) {
+    MachineEmitProgram program;
+    MachineEmitError error;
+    size_t register_index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    machine_emit_program_init(&program);
+
+    program.register_bank.register_count = 9u;
+    program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(9u, sizeof(MachineEmitRegisterDesc));
+    program.function_count = 1u;
+    program.function_capacity = 1u;
+    program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+    for (register_index = 0u; register_index < 9u; ++register_index) {
+        program.register_bank.registers[register_index].register_id = register_index;
+        program.register_bank.registers[register_index].name = dup_text("r");
+        program.register_bank.registers[register_index].allocatable = 1u;
+        if (!program.register_bank.registers[register_index].name) {
+            machine_emit_program_free(&program);
+            return 0;
+        }
+    }
+
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].block_count = 1u;
+    program.functions[0].block_capacity = 1u;
+    program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!program.functions[0].name || !program.functions[0].blocks) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].emit_index = 0u;
+    program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program.functions[0].blocks[0].op_count = 1u;
+    program.functions[0].blocks[0].op_capacity = 1u;
+    program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    if (!program.functions[0].blocks[0].label_name || !program.functions[0].blocks[0].ops) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    program.functions[0].blocks[0].ops[0].has_result = 1;
+    program.functions[0].blocks[0].ops[0].result = machine_select_operand_register(8u);
+    program.functions[0].blocks[0].ops[0].as.copy_value = machine_select_operand_immediate(3);
+    program.functions[0].blocks[0].has_terminator = 1;
+    program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_register(8u);
+
+    if (machine_emit_verify_current_riscv32_preview_compatibility(&program, &error) ||
+        strstr(error.message, "MACHINE-EMIT-137") == NULL) {
+        fprintf(stderr,
+            "[machine-emit] FAIL: oversized riscv32-preview register bank was not rejected: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&program);
+    return ok;
+}
+
+static int test_machine_emit_rejects_riscv32_preview_bytes_incompatible_branch_range(void) {
+    MachineEmitProgram program;
+    MachineEmitError error;
+    size_t op_index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    machine_emit_program_init(&program);
+
+    program.register_bank.register_count = 1u;
+    program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    program.function_count = 1u;
+    program.function_capacity = 1u;
+    program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+    program.register_bank.registers[0].register_id = 0u;
+    program.register_bank.registers[0].name = dup_text("r0");
+    program.register_bank.registers[0].allocatable = 1u;
+
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].block_count = 3u;
+    program.functions[0].block_capacity = 3u;
+    program.functions[0].blocks = (MachineEmitBlock *)calloc(3u, sizeof(MachineEmitBlock));
+    if (!program.register_bank.registers[0].name ||
+        !program.functions[0].name ||
+        !program.functions[0].blocks) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+
+    program.functions[0].blocks[0].emit_index = 0u;
+    program.functions[0].blocks[0].original_layout_index = 0u;
+    program.functions[0].blocks[0].original_block_id = 0u;
+    program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program.functions[0].blocks[0].has_terminator = 1;
+    program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_BRANCH;
+    program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_register(0u);
+    program.functions[0].blocks[0].terminator.as.branch.then_target = 2u;
+    program.functions[0].blocks[0].terminator.as.branch.else_target = 1u;
+
+    program.functions[0].blocks[1].emit_index = 1u;
+    program.functions[0].blocks[1].original_layout_index = 1u;
+    program.functions[0].blocks[1].original_block_id = 1u;
+    program.functions[0].blocks[1].label_name = dup_text("F0.L1");
+    program.functions[0].blocks[1].op_count = 513u;
+    program.functions[0].blocks[1].op_capacity = 513u;
+    program.functions[0].blocks[1].ops = (MachineEmitOp *)calloc(513u, sizeof(MachineEmitOp));
+    program.functions[0].blocks[1].has_terminator = 1;
+    program.functions[0].blocks[1].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program.functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(0u);
+    if (!program.functions[0].blocks[0].label_name ||
+        !program.functions[0].blocks[1].label_name ||
+        !program.functions[0].blocks[1].ops) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+    for (op_index = 0u; op_index < 513u; ++op_index) {
+        program.functions[0].blocks[1].ops[op_index].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+        program.functions[0].blocks[1].ops[op_index].has_result = 1;
+        program.functions[0].blocks[1].ops[op_index].result = machine_select_operand_register(0u);
+        program.functions[0].blocks[1].ops[op_index].as.copy_value = machine_select_operand_immediate(5000);
+    }
+
+    program.functions[0].blocks[2].emit_index = 2u;
+    program.functions[0].blocks[2].original_layout_index = 2u;
+    program.functions[0].blocks[2].original_block_id = 2u;
+    program.functions[0].blocks[2].label_name = dup_text("F0.L2");
+    program.functions[0].blocks[2].has_terminator = 1;
+    program.functions[0].blocks[2].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program.functions[0].blocks[2].terminator.as.return_value = machine_select_operand_immediate(0u);
+    if (!program.functions[0].blocks[2].label_name) {
+        machine_emit_program_free(&program);
+        return 0;
+    }
+
+    if (machine_emit_verify_current_riscv32_preview_bytes_compatibility(&program, &error) ||
+        strstr(error.message, "MACHINE-EMIT-140") == NULL ||
+        strstr(error.message, "MACHINE-ENCODE-125") == NULL ||
+        strstr(error.message, "MACHINE-BYTES-344") == NULL) {
+        fprintf(stderr,
+            "[machine-emit] FAIL: preview bytes-compatibility branch-range reject mismatch: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&program);
     return ok;
 }
 
@@ -609,6 +784,7 @@ static int test_machine_emit_clone_and_report_from_program(void) {
     }
     if (!machine_emit_build_report_from_program_dump(&cloned_program, &actual_text, &emit_error) || !actual_text ||
         strstr(actual_text, "machine_emit-report call_funcs=0 fallthrough_funcs=1 branch_funcs=0 total_block_summaries=2\n") != actual_text ||
+        strstr(actual_text, "target_policy preview_reg_cap=8 preserves_spills=1 preserves_global_slots=1 preserves_fallthrough=1\n") == NULL ||
         strstr(actual_text, "emit.1 label=F0.L1 layout.1 bb.1 ops=0 calls=0 has_term=1 term=1\n") == NULL) {
         fprintf(stderr, "[machine-emit] FAIL: report-from-program dump mismatch\nactual:\n%s\n", actual_text ? actual_text : "<null>");
         ok = 0;
@@ -668,6 +844,7 @@ static int test_machine_emit_report_dump_from_machine_layout(void) {
     if (!actual_text ||
         strcmp(actual_text,
             "machine_emit-report call_funcs=0 fallthrough_funcs=1 branch_funcs=0 total_block_summaries=2\n"
+            "target_policy preview_reg_cap=8 preserves_spills=1 preserves_global_slots=1 preserves_fallthrough=1\n"
             "functions-with-calls:\n"
             "functions-with-fallthrough: 0\n"
             "functions-with-branches:\n"
@@ -952,6 +1129,8 @@ int main(void) {
     ok &= test_machine_emit_report_bridge_from_machine_ir_report();
     ok &= test_machine_emit_report_dump_from_machine_ir_report();
     ok &= test_machine_emit_verifier_rejects_duplicate_labels();
+    ok &= test_machine_emit_rejects_riscv32_preview_incompatible_register_bank();
+    ok &= test_machine_emit_rejects_riscv32_preview_bytes_incompatible_branch_range();
 
     if (!ok) {
         return 1;

@@ -151,12 +151,15 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_outcome_file(const MachineOutcomeFile *outcome_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineOutcomeResolutionKind resolution_kind,
     MachineOutcomeKind outcome_kind,
     const char *expected_dump) {
     MachineOutcomeHeaderSummary header_summary;
     MachineOutcomeTargetPolicySummary target_policy_summary;
     MachineOutcomeSummary outcome_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineOutcomeError outcome_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -164,9 +167,14 @@ static int verify_outcome_file(const MachineOutcomeFile *outcome_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&outcome_summary, 0, sizeof(outcome_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&outcome_error, 0, sizeof(outcome_error));
 
     if (!machine_outcome_verify_file(outcome_file, &outcome_error) ||
+        !machine_outcome_file_get_source_elf_artifact_summary(outcome_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_outcome_file_get_header_summary(outcome_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_outcome_file_get_target_policy_summary(outcome_file, &target_policy_summary) ||
@@ -190,6 +198,8 @@ cleanup:
 static int verify_outcome_report(const MachineOutcomeReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineOutcomeResolutionKind resolution_kind,
     const char *expected_dump) {
     MachineOutcomeReportOverviewArtifact overview_artifact;
@@ -198,6 +208,7 @@ static int verify_outcome_report(const MachineOutcomeReport *report,
     const MachineOutcomeHeaderSummary *header_summary = NULL;
     const MachineOutcomeTargetPolicySummary *target_policy_summary = NULL;
     const MachineOutcomeSummary *outcome_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineOutcomeError outcome_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -208,8 +219,13 @@ static int verify_outcome_report(const MachineOutcomeReport *report,
     if (!machine_outcome_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_outcome_report_get_file(report, &outcome_file) || !outcome_file ||
         !machine_outcome_report_get_event_report(report, &event_report) || !event_report ||
+        !machine_outcome_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_outcome_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_outcome_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->surfaces_preview_outcome ||
         !machine_outcome_report_get_outcome_summary_artifact(report, &outcome_summary) ||
@@ -262,9 +278,11 @@ static int test_machine_outcome_mainline(void) {
         &outcome_file,
         "outcome-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_PREVIEW_OUTCOME,
         MACHINE_OUTCOME_KIND_VALUE_AVAILABLE,
-        "machine_outcome profile=generic-elf32 event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_outcome_clone_file(&outcome_file, &cloned_outcome_file, &outcome_error) ||
@@ -279,11 +297,14 @@ static int test_machine_outcome_mainline(void) {
         &outcome_report,
         "outcome-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_PREVIEW_OUTCOME,
-        "machine_outcome profile=generic-elf32 event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: event=preview-event status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 exact=yes preview=yes family=yes\n"
         "  outcome: resolution=preview-outcome kind=value-available event=register-result exact=no state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 
@@ -342,9 +363,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_EXACT_OUTCOME,
         MACHINE_OUTCOME_KIND_PROGRAM_STOPPED,
-        "machine_outcome profile=generic-elf32 event=exact-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=exact-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=exact-outcome kind=program-stopped event=control-halt trace=exact-trace change-class=status-and-fetch apply=applied-state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 exact=yes origin-status=ready observed-status=halted status-changed=yes pc-changed=no stack-changed=no fetch-changed=yes targets=[] return-imm=7\n");
 
     machine_outcome_report_free(&outcome_report);
@@ -362,9 +385,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_OUTCOME_KIND_BLOCKED_CONTROL,
-        "machine_outcome profile=generic-elf32 event=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=blocked-on-control kind=blocked-control event=blocked-control trace=blocked-on-control change-class=none apply=blocked-on-control commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 exact=no origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[1] return-imm=-\n");
 
     machine_outcome_report_free(&outcome_report);
@@ -382,9 +407,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_OUTCOME_KIND_BLOCKED_UNSUPPORTED,
-        "machine_outcome profile=generic-elf32 event=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=blocked-unsupported kind=blocked-unsupported event=blocked-unsupported trace=blocked-unsupported change-class=none apply=blocked-unsupported commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[] return-imm=-\n");
 
     machine_outcome_report_free(&outcome_report);
@@ -401,9 +428,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_PREVIEW_OUTCOME,
         MACHINE_OUTCOME_KIND_LOCAL_UPDATED,
-        "machine_outcome profile=generic-elf32 event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=local-updated event=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_outcome_file_free(&outcome_file);
@@ -419,9 +448,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_PREVIEW_OUTCOME,
         MACHINE_OUTCOME_KIND_GLOBAL_UPDATED,
-        "machine_outcome profile=generic-elf32 event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=global-updated event=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_outcome_file_free(&outcome_file);
@@ -437,9 +468,11 @@ static int test_machine_outcome_custom_step_cases(void) {
         &outcome_file,
         "outcome-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OUTCOME_RESOLUTION_PREVIEW_OUTCOME,
         MACHINE_OUTCOME_KIND_CALL_ISSUED,
-        "machine_outcome profile=generic-elf32 event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=call-issued event=call-effect trace=preview-trace change-class=program-counter-and-fetch apply=pending-call-application commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
 cleanup:
@@ -483,13 +516,14 @@ static int test_machine_outcome_i386_bridge(void) {
     }
 
     ok &= expect_text("outcome i386 dump wrapper", dump_text,
-        "machine_outcome profile=i386-preview event=preview-event origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("outcome i386 report dump wrapper", report_dump_text,
-        "machine_outcome profile=i386-preview event=preview-event origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_outcome profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans event=preview-event origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "outcome: resolution=preview-outcome kind=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: event=preview-event status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview exact=yes preview=yes family=yes\n"
         "  outcome: resolution=preview-outcome kind=value-available event=register-result exact=no state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 

@@ -364,6 +364,15 @@ int machine_journal_file_get_summary(const MachineJournalFile *journal_file,
     return machine_log_file_get_summary(&journal_file->log_file, out_mapped_byte_count);
 }
 
+int machine_journal_file_get_source_elf_artifact_summary(
+    const MachineJournalFile *journal_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!journal_file || !out_summary) {
+        return 0;
+    }
+    return machine_log_file_get_source_elf_artifact_summary(&journal_file->log_file, out_summary);
+}
+
 int machine_journal_file_get_header_summary(const MachineJournalFile *journal_file,
     MachineJournalHeaderSummary *out_summary) {
     MachineLogHeaderSummary log_header_summary;
@@ -780,8 +789,18 @@ int machine_journal_dump_file(const MachineJournalFile *journal_file,
 
     if (!machine_journal_append_format(
             &builder,
-            "machine_journal profile=%s log=%s timeline=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu records=%zu record-index=%zu\n",
+            "machine_journal profile=%s elf_origin=%s elf_semantics=%s log=%s timeline=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu records=%zu record-index=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                journal_file->log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                journal_file->log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_log_resolution_kind_name(header_summary.log_resolution_kind),
             machine_timeline_resolution_kind_name(header_summary.timeline_resolution_kind),
             machine_step_status_name(header_summary.origin_step_status),
@@ -974,6 +993,19 @@ int machine_journal_report_get_log_report(const MachineJournalReport *report,
     return 1;
 }
 
+int machine_journal_report_get_source_elf_artifact_summary_artifact(
+    const MachineJournalReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file
+                        .delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file
+                        .state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file
+                        .launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 #define MACHINE_JOURNAL_DEFINE_REPORT_ARTIFACT_GETTER(name, field, type) \
 int name(const MachineJournalReport *report, const type **out_summary) { \
     if (!report || !out_summary) { \
@@ -1030,8 +1062,18 @@ int machine_journal_dump_report(const MachineJournalReport *report,
 
     if (!machine_journal_append_format(
             &builder,
-            "machine_journal profile=%s log=%s timeline=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu records=%zu record-index=%zu\n",
+            "machine_journal profile=%s elf_origin=%s elf_semantics=%s log=%s timeline=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu records=%zu record-index=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_log_resolution_kind_name(report->header_summary.log_resolution_kind),
             machine_timeline_resolution_kind_name(report->header_summary.timeline_resolution_kind),
             machine_step_status_name(report->header_summary.origin_step_status),
@@ -1095,6 +1137,24 @@ int machine_journal_dump_report(const MachineJournalReport *report,
             report->header_summary.origin_stack_pointer,
             report->header_summary.journal_record_count,
             report->header_summary.journal_record_index) ||
+        !machine_journal_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.log_file.timeline_file.history_file.outcome_file.event_file.trace_file.delta_file
+                    .observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                    .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_journal_append_format(
             &builder,
             "  policy: profile=%s exact=%s preview=%s single-record=%s\n",

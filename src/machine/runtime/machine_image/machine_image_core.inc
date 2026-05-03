@@ -9,6 +9,9 @@ void machine_image_file_init(MachineImageFile *image_file) {
         return;
     }
     image_file->target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.origin_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.relocation_semantics = MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN;
     image_file->base_virtual_address = 0u;
     image_file->has_entry = 0;
     image_file->entry_symbol_index = 0u;
@@ -31,6 +34,7 @@ void machine_image_report_init(MachineImageReport *report) {
         return;
     }
     machine_image_file_init(&report->file);
+    memset(&report->source_elf_artifact_summary, 0, sizeof(report->source_elf_artifact_summary));
     memset(&report->header_summary, 0, sizeof(report->header_summary));
     memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     memset(&report->entry_symbol_summary, 0, sizeof(report->entry_symbol_summary));
@@ -135,6 +139,7 @@ int machine_image_clone_file(const MachineImageFile *source,
 
     machine_image_file_free(out_image_file);
     out_image_file->target_profile = source->target_profile;
+    out_image_file->source_elf_artifact_summary = source->source_elf_artifact_summary;
     out_image_file->base_virtual_address = source->base_virtual_address;
     out_image_file->has_entry = source->has_entry;
     out_image_file->entry_symbol_index = source->entry_symbol_index;
@@ -308,6 +313,15 @@ int machine_image_file_get_target_profile(const MachineImageFile *image_file,
     return 1;
 }
 
+int machine_image_file_get_source_elf_artifact_summary(const MachineImageFile *image_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!image_file || !out_summary) {
+        return 0;
+    }
+    *out_summary = image_file->source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_image_file_get_target_policy_summary(const MachineImageFile *image_file,
     MachineImageTargetPolicySummary *out_summary) {
     if (!image_file || !out_summary) {
@@ -352,6 +366,7 @@ static int machine_image_apply_profile(MachineImageFile *image_file,
     }
 
     image_file->target_profile = profile;
+    image_file->source_elf_artifact_summary.target_profile = profile;
     image_file->base_virtual_address = machine_image_base_virtual_address(profile);
     for (segment_index = 0u; segment_index < image_file->segment_count; ++segment_index) {
         MachineImageSegment *segment = &image_file->segments[segment_index];
@@ -394,6 +409,15 @@ static int machine_image_apply_profile(MachineImageFile *image_file,
                 break;
             case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
                 relocation_type = elf_policy.secondary_control_relocation_type;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+                relocation_type = elf_policy.data_address_relocation_type;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+                relocation_type = elf_policy.data_load_relocation_type;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+                relocation_type = elf_policy.data_store_relocation_type;
                 break;
         }
         relocation->type = relocation_type;

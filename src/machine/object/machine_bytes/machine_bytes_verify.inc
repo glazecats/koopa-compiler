@@ -6,6 +6,7 @@
 
 int machine_bytes_verify_program(const MachineBytesProgram *program, MachineBytesError *error) {
     size_t function_index;
+    size_t *function_byte_offsets = NULL;
 
     if (!program) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-100: invalid verifier contract");
@@ -13,6 +14,10 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
     }
     if (!machine_bytes_target_profile_is_valid(program->target_profile)) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-122: invalid target profile");
+        return 0;
+    }
+    if (!machine_bytes_profile_supports_register_bank(
+            program->target_profile, program->register_bank.register_count, error)) {
         return 0;
     }
     if (program->register_bank.register_count > 0 && !program->register_bank.registers) {
@@ -26,6 +31,19 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
     if (program->function_count > 0 && !program->functions) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-103: function table missing");
         return 0;
+    }
+    if (program->function_count > 0) {
+        size_t running_function_offset = 0u;
+
+        function_byte_offsets = (size_t *)calloc(program->function_count, sizeof(size_t));
+        if (!function_byte_offsets) {
+            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-123: out of memory verifying function offsets");
+            return 0;
+        }
+        for (function_index = 0u; function_index < program->function_count; ++function_index) {
+            function_byte_offsets[function_index] = running_function_offset;
+            running_function_offset += machine_bytes_function_total_byte_count(&program->functions[function_index]);
+        }
     }
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
@@ -84,14 +102,25 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
                     expected_bytes = (unsigned char *)calloc(block->byte_count, sizeof(unsigned char));
                 }
                 if (block->byte_count > 0 && !expected_bytes) {
+                    free(function_byte_offsets);
                     machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-123: out of memory verifying bytes");
                     return 0;
                 }
                 expected_block.bytes = expected_bytes;
-                if (!machine_bytes_write_block_bytes_for_profile(program->target_profile, &expected_block) ||
+                if (!machine_bytes_write_block_bytes_for_profile(
+                        program->target_profile,
+                        program,
+                        function,
+                        function_byte_offsets ? function_byte_offsets[function_index] : 0u,
+                        function_byte_offsets,
+                        &expected_block,
+                        error) ||
                     (block->byte_count > 0 && memcmp(block->bytes, expected_bytes, block->byte_count) != 0)) {
                     free(expected_bytes);
-                    machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-113: op byte mismatch");
+                    free(function_byte_offsets);
+                    if (!error || error->message[0] == '\0') {
+                        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-113: op byte mismatch");
+                    }
                     return 0;
                 }
                 free(expected_bytes);
@@ -157,6 +186,36 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
 
             running_offset = block->end_byte_offset;
         }
+    }
+    free(function_byte_offsets);
+    return 1;
+}
+
+int machine_bytes_verify_current_riscv32_preview_compatibility(const MachineBytesProgram *program,
+    MachineBytesError *error) {
+    MachineBytesTargetPolicySummary policy_summary;
+
+    if (!program) {
+        machine_bytes_set_error(
+            error, 0, 0, "MACHINE-BYTES-132: invalid riscv32-preview compatibility contract");
+        return 0;
+    }
+    if (!machine_bytes_verify_program(program, error)) {
+        return 0;
+    }
+    if (!machine_bytes_program_get_target_policy_summary(program, &policy_summary)) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-133: missing bytes target policy summary");
+        return 0;
+    }
+    if (program->register_bank.register_count > policy_summary.max_logical_machine_register_count &&
+        policy_summary.max_logical_machine_register_count > 0u) {
+        machine_bytes_set_error(
+            error,
+            0,
+            0,
+            "MACHINE-BYTES-134: current riscv32-preview lane supports at most %zu logical machine registers",
+            policy_summary.max_logical_machine_register_count);
+        return 0;
     }
     return 1;
 }

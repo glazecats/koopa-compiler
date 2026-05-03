@@ -25,8 +25,10 @@ int machine_elf_dump_file(const MachineElfFile *elf_file,
     memset(&builder, 0, sizeof(builder));
     if (!machine_elf_append_format(
             &builder,
-            "machine_elf profile=%s bytes=%zu sections=%zu symbols=%zu relocations=%zu shoff=%zu\nsections:\n",
+            "machine_elf profile=%s origin=%s semantics=%s bytes=%zu sections=%zu symbols=%zu relocations=%zu shoff=%zu\nsections:\n",
             machine_elf_target_profile_name(elf_file->target_profile),
+            machine_elf_target_profile_name(elf_file->origin_profile),
+            machine_elf_relocation_semantics_name(elf_file->relocation_semantics),
             elf_file->byte_count,
             elf_file->section_count,
             elf_file->symbol_count,

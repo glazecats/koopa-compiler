@@ -1,4 +1,5 @@
 #include "machine/emit.h"
+#include "machine/bytes.h"
 
 #include <stdarg.h>
 #include <stdio.h>

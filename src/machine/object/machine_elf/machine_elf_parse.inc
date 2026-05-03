@@ -25,6 +25,8 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
     size_t *old_to_new_section_index = NULL;
     size_t first_null_index = (size_t)-1;
     size_t first_text_index = (size_t)-1;
+    size_t first_sbss_index = (size_t)-1;
+    size_t first_sdata_index = (size_t)-1;
     size_t first_strtab_index = (size_t)-1;
     size_t first_symtab_index = (size_t)-1;
     size_t first_rel_text_index = (size_t)-1;
@@ -85,6 +87,8 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
 
     machine_elf_file_free(out_elf_file);
     out_elf_file->target_profile = profile;
+    out_elf_file->origin_profile = profile;
+    out_elf_file->relocation_semantics = MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE;
     out_elf_file->bytes = (unsigned char *)malloc(byte_count == 0u ? 1u : byte_count);
     out_elf_file->sections = (MachineElfSection *)calloc(section_count, sizeof(MachineElfSection));
     if (!out_elf_file->bytes || !out_elf_file->sections) {
@@ -137,7 +141,9 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
         section->entry_size = machine_elf_read_u32_le(bytes, header_offset + 36u);
 
         if ((section->type != MACHINE_ELF_SECTION_NULL || section->file_offset != 0u || section->byte_count != 0u) &&
-            (section->file_offset > byte_count || section->byte_count > byte_count - section->file_offset)) {
+            ((section->type != MACHINE_ELF_SECTION_NOBITS &&
+                    (section->file_offset > byte_count || section->byte_count > byte_count - section->file_offset)) ||
+                (section->type == MACHINE_ELF_SECTION_NOBITS && section->file_offset > byte_count))) {
             machine_elf_file_free(out_elf_file);
             machine_elf_set_error(error, 0, 0, "MACHINE-ELF-139: parsed section exceeds file span");
             return 0;
@@ -157,6 +163,20 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
                 return 0;
             }
             first_text_index = section_index;
+        } else if (strcmp(section->name, ".sbss") == 0) {
+            if (first_sbss_index != (size_t)-1) {
+                machine_elf_file_free(out_elf_file);
+                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-140: duplicate parsed .sbss section");
+                return 0;
+            }
+            first_sbss_index = section_index;
+        } else if (strcmp(section->name, ".sdata") == 0) {
+            if (first_sdata_index != (size_t)-1) {
+                machine_elf_file_free(out_elf_file);
+                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-140: duplicate parsed .sdata section");
+                return 0;
+            }
+            first_sdata_index = section_index;
         } else if (strcmp(section->name, ".strtab") == 0) {
             if (first_strtab_index != (size_t)-1) {
                 machine_elf_file_free(out_elf_file);
@@ -217,14 +237,34 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
         old_to_new_section_index[first_null_index] = 0u;
     }
     old_to_new_section_index[first_text_index] = 1u;
-    old_to_new_section_index[first_strtab_index] = 2u;
-    old_to_new_section_index[first_symtab_index] = 3u;
-    if (first_rel_text_index != (size_t)-1) {
-        old_to_new_section_index[first_rel_text_index] = 4u;
-    }
-    old_to_new_section_index[first_shstrtab_index] = 5u;
     {
-        MachineElfSection *canonical_sections = (MachineElfSection *)calloc(6u, sizeof(MachineElfSection));
+        size_t next_section_index = 2u;
+        size_t canonical_section_count;
+        size_t canonical_strtab_index;
+        size_t canonical_symtab_index;
+        size_t canonical_rel_text_index;
+        size_t canonical_shstrtab_index;
+
+        if (first_sbss_index != (size_t)-1) {
+            old_to_new_section_index[first_sbss_index] = next_section_index++;
+        }
+        if (first_sdata_index != (size_t)-1) {
+            old_to_new_section_index[first_sdata_index] = next_section_index++;
+        }
+        canonical_strtab_index = next_section_index++;
+        canonical_symtab_index = next_section_index++;
+        canonical_rel_text_index = next_section_index++;
+        canonical_shstrtab_index = next_section_index++;
+        old_to_new_section_index[first_strtab_index] = canonical_strtab_index;
+        old_to_new_section_index[first_symtab_index] = canonical_symtab_index;
+        if (first_rel_text_index != (size_t)-1) {
+            old_to_new_section_index[first_rel_text_index] = canonical_rel_text_index;
+        }
+        old_to_new_section_index[first_shstrtab_index] = canonical_shstrtab_index;
+        canonical_section_count = canonical_shstrtab_index + 1u;
+    {
+        MachineElfSection *canonical_sections =
+            (MachineElfSection *)calloc(canonical_section_count, sizeof(MachineElfSection));
         if (!canonical_sections) {
             free(old_to_new_section_index);
             machine_elf_file_free(out_elf_file);
@@ -252,13 +292,19 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
             canonical_sections[0].entry_size = 0u;
         }
         canonical_sections[1] = out_elf_file->sections[first_text_index];
-        canonical_sections[2] = out_elf_file->sections[first_strtab_index];
-        canonical_sections[3] = out_elf_file->sections[first_symtab_index];
+        if (first_sbss_index != (size_t)-1) {
+            canonical_sections[old_to_new_section_index[first_sbss_index]] = out_elf_file->sections[first_sbss_index];
+        }
+        if (first_sdata_index != (size_t)-1) {
+            canonical_sections[old_to_new_section_index[first_sdata_index]] = out_elf_file->sections[first_sdata_index];
+        }
+        canonical_sections[canonical_strtab_index] = out_elf_file->sections[first_strtab_index];
+        canonical_sections[canonical_symtab_index] = out_elf_file->sections[first_symtab_index];
         if (first_rel_text_index != (size_t)-1) {
-            canonical_sections[4] = out_elf_file->sections[first_rel_text_index];
+            canonical_sections[canonical_rel_text_index] = out_elf_file->sections[first_rel_text_index];
         } else {
-            canonical_sections[4].name = machine_elf_strdup(".rel.text");
-            if (!canonical_sections[4].name) {
+            canonical_sections[canonical_rel_text_index].name = machine_elf_strdup(".rel.text");
+            if (!canonical_sections[canonical_rel_text_index].name) {
                 free(canonical_sections);
                 free(old_to_new_section_index);
                 machine_elf_file_free(out_elf_file);
@@ -266,7 +312,7 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
                 return 0;
             }
         }
-        canonical_sections[5] = out_elf_file->sections[first_shstrtab_index];
+        canonical_sections[canonical_shstrtab_index] = out_elf_file->sections[first_shstrtab_index];
         for (section_index = 0u; section_index < section_count; ++section_index) {
             if (old_to_new_section_index[section_index] == (size_t)-1) {
                 free(out_elf_file->sections[section_index].name);
@@ -274,14 +320,15 @@ int machine_elf_parse_file_from_bytes(const unsigned char *bytes,
         }
         free(out_elf_file->sections);
         out_elf_file->sections = canonical_sections;
+        out_elf_file->text_section_index = 1u;
+        out_elf_file->strtab_section_index = canonical_strtab_index;
+        out_elf_file->symtab_section_index = canonical_symtab_index;
+        out_elf_file->rel_text_section_index = canonical_rel_text_index;
+        out_elf_file->shstrtab_section_index = canonical_shstrtab_index;
+        out_elf_file->section_count = canonical_section_count;
+        out_elf_file->section_capacity = canonical_section_count;
     }
-    out_elf_file->text_section_index = 1u;
-    out_elf_file->strtab_section_index = 2u;
-    out_elf_file->symtab_section_index = 3u;
-    out_elf_file->rel_text_section_index = 4u;
-    out_elf_file->shstrtab_section_index = 5u;
-    out_elf_file->section_count = 6u;
-    out_elf_file->section_capacity = 6u;
+    }
 
     {
         const MachineElfSection *strtab_section = &out_elf_file->sections[old_to_new_section_index[first_strtab_index]];
@@ -450,12 +497,18 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     MachineElfTargetPolicy policy;
     unsigned char *old_bytes;
     unsigned char *text_bytes = NULL;
+    unsigned char *sdata_bytes = NULL;
     unsigned char *new_bytes = NULL;
     size_t old_byte_count;
+    size_t sbss_section_index = (size_t)-1;
+    size_t sdata_section_index = (size_t)-1;
     size_t text_offset;
     size_t text_size;
+    size_t sdata_offset = 0u;
+    size_t sdata_size = 0u;
     size_t strtab_size = 1u;
     size_t shstrtab_size = 1u;
+    size_t canonical_section_count;
     size_t symtab_offset;
     size_t rel_offset;
     size_t shstrtab_offset;
@@ -475,6 +528,8 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     size_t *old_to_new_symbol_index = NULL;
     MachineElfSymbol *normalized_symbols = NULL;
     uint32_t text_name_offset;
+    uint32_t sbss_name_offset = 0u;
+    uint32_t sdata_name_offset = 0u;
     uint32_t strtab_name_offset;
     uint32_t symtab_name_offset;
     uint32_t reltext_name_offset;
@@ -488,18 +543,27 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-149: unknown elf refresh target profile");
         return 0;
     }
-    if (elf_file->section_count != 6u || !elf_file->sections ||
+    if (elf_file->section_count < 6u || !elf_file->sections ||
         elf_file->symbol_count == 0u || !elf_file->symbols ||
         (elf_file->relocation_count > 0u && !elf_file->relocations) ||
         !elf_file->bytes ||
         elf_file->text_section_index != 1u ||
-        elf_file->strtab_section_index != 2u ||
-        elf_file->symtab_section_index != 3u ||
-        elf_file->rel_text_section_index != 4u ||
-        elf_file->shstrtab_section_index != 5u) {
+        elf_file->text_section_index >= elf_file->section_count ||
+        elf_file->strtab_section_index >= elf_file->section_count ||
+        elf_file->symtab_section_index >= elf_file->section_count ||
+        elf_file->rel_text_section_index >= elf_file->section_count ||
+        elf_file->shstrtab_section_index >= elf_file->section_count) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-150: invalid elf refresh metadata");
         return 0;
     }
+    for (symbol_index = 0u; symbol_index < elf_file->section_count; ++symbol_index) {
+        if (machine_elf_section_name_equals(&elf_file->sections[symbol_index], ".sbss")) {
+            sbss_section_index = symbol_index;
+        } else if (machine_elf_section_name_equals(&elf_file->sections[symbol_index], ".sdata")) {
+            sdata_section_index = symbol_index;
+        }
+    }
+    canonical_section_count = 6u + (sbss_section_index != (size_t)-1 ? 1u : 0u) + (sdata_section_index != (size_t)-1 ? 1u : 0u);
 
     text_offset = elf_file->sections[elf_file->text_section_index].file_offset;
     text_size = elf_file->sections[elf_file->text_section_index].byte_count;
@@ -507,13 +571,23 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-151: invalid text section source span");
         return 0;
     }
+    if (sdata_section_index != (size_t)-1) {
+        sdata_offset = elf_file->sections[sdata_section_index].file_offset;
+        sdata_size = elf_file->sections[sdata_section_index].byte_count;
+        if (sdata_offset > elf_file->byte_count || sdata_size > elf_file->byte_count - sdata_offset) {
+            machine_elf_set_error(error, 0, 0, "MACHINE-ELF-151: invalid sdata section source span");
+            return 0;
+        }
+    }
 
     if (!machine_elf_replace_owned_string(&elf_file->sections[0].name, "") ||
         !machine_elf_replace_owned_string(&elf_file->sections[1].name, ".text") ||
-        !machine_elf_replace_owned_string(&elf_file->sections[2].name, ".strtab") ||
-        !machine_elf_replace_owned_string(&elf_file->sections[3].name, ".symtab") ||
-        !machine_elf_replace_owned_string(&elf_file->sections[4].name, ".rel.text") ||
-        !machine_elf_replace_owned_string(&elf_file->sections[5].name, ".shstrtab")) {
+        (sbss_section_index != (size_t)-1 && !machine_elf_replace_owned_string(&elf_file->sections[sbss_section_index].name, ".sbss")) ||
+        (sdata_section_index != (size_t)-1 && !machine_elf_replace_owned_string(&elf_file->sections[sdata_section_index].name, ".sdata")) ||
+        !machine_elf_replace_owned_string(&elf_file->sections[elf_file->strtab_section_index].name, ".strtab") ||
+        !machine_elf_replace_owned_string(&elf_file->sections[elf_file->symtab_section_index].name, ".symtab") ||
+        !machine_elf_replace_owned_string(&elf_file->sections[elf_file->rel_text_section_index].name, ".rel.text") ||
+        !machine_elf_replace_owned_string(&elf_file->sections[elf_file->shstrtab_section_index].name, ".shstrtab")) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-152: out of memory normalizing section names");
         return 0;
     }
@@ -569,9 +643,11 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
             return 0;
         }
         if (symbol->is_defined) {
-            if (symbol->section_index != elf_file->text_section_index) {
+            if (symbol->section_index != elf_file->text_section_index &&
+                symbol->section_index != sbss_section_index &&
+                symbol->section_index != sdata_section_index) {
                 free(symbol_referenced_by_relocation);
-                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-156: refresh only supports .text-defined symbols");
+                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-156: refresh only supports canonical direct-build sections");
                 return 0;
             }
         } else {
@@ -666,6 +742,12 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     free(old_to_new_symbol_index);
 
     shstrtab_size += strlen(".text") + 1u;
+    if (sbss_section_index != (size_t)-1) {
+        shstrtab_size += strlen(".sbss") + 1u;
+    }
+    if (sdata_section_index != (size_t)-1) {
+        shstrtab_size += strlen(".sdata") + 1u;
+    }
     shstrtab_size += strlen(".strtab") + 1u;
     shstrtab_size += strlen(".symtab") + 1u;
     shstrtab_size += strlen(".rel.text") + 1u;
@@ -679,21 +761,36 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     if (text_size > 0u) {
         memcpy(text_bytes, elf_file->bytes + text_offset, text_size);
     }
+    if (sdata_section_index != (size_t)-1) {
+        sdata_bytes = (unsigned char *)malloc(sdata_size == 0u ? 1u : sdata_size);
+        if (!sdata_bytes) {
+            free(text_bytes);
+            machine_elf_set_error(error, 0, 0, "MACHINE-ELF-158: out of memory copying sdata bytes");
+            return 0;
+        }
+        if (sdata_size > 0u) {
+            memcpy(sdata_bytes, elf_file->bytes + sdata_offset, sdata_size);
+        }
+    }
 
-    symtab_offset = machine_elf_align_up(MACHINE_ELF_HEADER_SIZE + text_size + strtab_size, 4u);
+    symtab_offset = machine_elf_align_up(MACHINE_ELF_HEADER_SIZE + text_size + sdata_size + strtab_size, 4u);
     rel_offset = machine_elf_align_up(symtab_offset + elf_file->symbol_count * MACHINE_ELF_SYMBOL_ENTRY_SIZE, 4u);
     shstrtab_offset = rel_offset + elf_file->relocation_count * MACHINE_ELF_RELOCATION_ENTRY_SIZE;
     shoff = machine_elf_align_up(shstrtab_offset + shstrtab_size, 4u);
-    byte_count = shoff + 6u * MACHINE_ELF_SECTION_HEADER_SIZE;
+    byte_count = shoff + canonical_section_count * MACHINE_ELF_SECTION_HEADER_SIZE;
 
     new_bytes = (unsigned char *)calloc(byte_count == 0u ? 1u : byte_count, 1u);
     if (!new_bytes) {
         free(text_bytes);
+        free(sdata_bytes);
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-159: out of memory rebuilding elf bytes");
         return 0;
     }
     if (text_size > 0u) {
         memcpy(new_bytes + MACHINE_ELF_HEADER_SIZE, text_bytes, text_size);
+    }
+    if (sdata_size > 0u) {
+        memcpy(new_bytes + MACHINE_ELF_HEADER_SIZE + text_size, sdata_bytes, sdata_size);
     }
 
     elf_file->sections[0].type = MACHINE_ELF_SECTION_NULL;
@@ -714,50 +811,83 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     elf_file->sections[1].align = 1u;
     elf_file->sections[1].entry_size = 0u;
 
-    elf_file->sections[2].type = MACHINE_ELF_SECTION_STRTAB;
-    elf_file->sections[2].file_offset = MACHINE_ELF_HEADER_SIZE + text_size;
-    elf_file->sections[2].byte_count = strtab_size;
-    elf_file->sections[2].flags = 0u;
-    elf_file->sections[2].link = 0u;
-    elf_file->sections[2].info = 0u;
-    elf_file->sections[2].align = 1u;
-    elf_file->sections[2].entry_size = 0u;
+    {
+        size_t next_section_index = 2u;
 
-    elf_file->sections[3].type = MACHINE_ELF_SECTION_SYMTAB;
-    elf_file->sections[3].file_offset = symtab_offset;
-    elf_file->sections[3].byte_count = elf_file->symbol_count * MACHINE_ELF_SYMBOL_ENTRY_SIZE;
-    elf_file->sections[3].flags = 0u;
-    elf_file->sections[3].link = elf_file->strtab_section_index;
-    elf_file->sections[3].info = (uint32_t)first_global_symbol_index;
-    elf_file->sections[3].align = 4u;
-    elf_file->sections[3].entry_size = MACHINE_ELF_SYMBOL_ENTRY_SIZE;
+        if (sbss_section_index != (size_t)-1) {
+            sbss_section_index = next_section_index++;
+            elf_file->sections[sbss_section_index].type = MACHINE_ELF_SECTION_NOBITS;
+            elf_file->sections[sbss_section_index].file_offset = MACHINE_ELF_HEADER_SIZE + text_size + sdata_size + strtab_size;
+            elf_file->sections[sbss_section_index].byte_count = elf_file->sections[sbss_section_index].byte_count;
+            elf_file->sections[sbss_section_index].flags = MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC;
+            elf_file->sections[sbss_section_index].link = 0u;
+            elf_file->sections[sbss_section_index].info = 0u;
+            elf_file->sections[sbss_section_index].align = 4u;
+            elf_file->sections[sbss_section_index].entry_size = 0u;
+        }
+        if (sdata_section_index != (size_t)-1) {
+            sdata_section_index = next_section_index++;
+            elf_file->sections[sdata_section_index].type = MACHINE_ELF_SECTION_PROGBITS;
+            elf_file->sections[sdata_section_index].file_offset = MACHINE_ELF_HEADER_SIZE + text_size;
+            elf_file->sections[sdata_section_index].byte_count = sdata_size;
+            elf_file->sections[sdata_section_index].flags = MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC;
+            elf_file->sections[sdata_section_index].link = 0u;
+            elf_file->sections[sdata_section_index].info = 0u;
+            elf_file->sections[sdata_section_index].align = 4u;
+            elf_file->sections[sdata_section_index].entry_size = 0u;
+        }
+        elf_file->strtab_section_index = next_section_index++;
+        elf_file->symtab_section_index = next_section_index++;
+        elf_file->rel_text_section_index = next_section_index++;
+        elf_file->shstrtab_section_index = next_section_index++;
+        elf_file->section_count = canonical_section_count;
+        elf_file->section_capacity = canonical_section_count;
+    }
 
-    elf_file->sections[4].type = MACHINE_ELF_SECTION_REL;
-    elf_file->sections[4].file_offset = rel_offset;
-    elf_file->sections[4].byte_count = elf_file->relocation_count * MACHINE_ELF_RELOCATION_ENTRY_SIZE;
-    elf_file->sections[4].flags = 0u;
-    elf_file->sections[4].link = elf_file->symtab_section_index;
-    elf_file->sections[4].info = elf_file->text_section_index;
-    elf_file->sections[4].align = 4u;
-    elf_file->sections[4].entry_size = MACHINE_ELF_RELOCATION_ENTRY_SIZE;
+    elf_file->sections[elf_file->strtab_section_index].type = MACHINE_ELF_SECTION_STRTAB;
+    elf_file->sections[elf_file->strtab_section_index].file_offset = MACHINE_ELF_HEADER_SIZE + text_size + sdata_size;
+    elf_file->sections[elf_file->strtab_section_index].byte_count = strtab_size;
+    elf_file->sections[elf_file->strtab_section_index].flags = 0u;
+    elf_file->sections[elf_file->strtab_section_index].link = 0u;
+    elf_file->sections[elf_file->strtab_section_index].info = 0u;
+    elf_file->sections[elf_file->strtab_section_index].align = 1u;
+    elf_file->sections[elf_file->strtab_section_index].entry_size = 0u;
 
-    elf_file->sections[5].type = MACHINE_ELF_SECTION_STRTAB;
-    elf_file->sections[5].file_offset = shstrtab_offset;
-    elf_file->sections[5].byte_count = shstrtab_size;
-    elf_file->sections[5].flags = 0u;
-    elf_file->sections[5].link = 0u;
-    elf_file->sections[5].info = 0u;
-    elf_file->sections[5].align = 1u;
-    elf_file->sections[5].entry_size = 0u;
+    elf_file->sections[elf_file->symtab_section_index].type = MACHINE_ELF_SECTION_SYMTAB;
+    elf_file->sections[elf_file->symtab_section_index].file_offset = symtab_offset;
+    elf_file->sections[elf_file->symtab_section_index].byte_count = elf_file->symbol_count * MACHINE_ELF_SYMBOL_ENTRY_SIZE;
+    elf_file->sections[elf_file->symtab_section_index].flags = 0u;
+    elf_file->sections[elf_file->symtab_section_index].link = elf_file->strtab_section_index;
+    elf_file->sections[elf_file->symtab_section_index].info = (uint32_t)first_global_symbol_index;
+    elf_file->sections[elf_file->symtab_section_index].align = 4u;
+    elf_file->sections[elf_file->symtab_section_index].entry_size = MACHINE_ELF_SYMBOL_ENTRY_SIZE;
+
+    elf_file->sections[elf_file->rel_text_section_index].type = MACHINE_ELF_SECTION_REL;
+    elf_file->sections[elf_file->rel_text_section_index].file_offset = rel_offset;
+    elf_file->sections[elf_file->rel_text_section_index].byte_count = elf_file->relocation_count * MACHINE_ELF_RELOCATION_ENTRY_SIZE;
+    elf_file->sections[elf_file->rel_text_section_index].flags = 0u;
+    elf_file->sections[elf_file->rel_text_section_index].link = elf_file->symtab_section_index;
+    elf_file->sections[elf_file->rel_text_section_index].info = elf_file->text_section_index;
+    elf_file->sections[elf_file->rel_text_section_index].align = 4u;
+    elf_file->sections[elf_file->rel_text_section_index].entry_size = MACHINE_ELF_RELOCATION_ENTRY_SIZE;
+
+    elf_file->sections[elf_file->shstrtab_section_index].type = MACHINE_ELF_SECTION_STRTAB;
+    elf_file->sections[elf_file->shstrtab_section_index].file_offset = shstrtab_offset;
+    elf_file->sections[elf_file->shstrtab_section_index].byte_count = shstrtab_size;
+    elf_file->sections[elf_file->shstrtab_section_index].flags = 0u;
+    elf_file->sections[elf_file->shstrtab_section_index].link = 0u;
+    elf_file->sections[elf_file->shstrtab_section_index].info = 0u;
+    elf_file->sections[elf_file->shstrtab_section_index].align = 1u;
+    elf_file->sections[elf_file->shstrtab_section_index].entry_size = 0u;
 
     string_cursor = 1u;
-    new_bytes[elf_file->sections[2].file_offset] = '\0';
+    new_bytes[elf_file->sections[elf_file->strtab_section_index].file_offset] = '\0';
     for (symbol_index = 1u; symbol_index < elf_file->symbol_count; ++symbol_index) {
         MachineElfSymbol *symbol = &elf_file->symbols[symbol_index];
         size_t entry_offset = symtab_offset + symbol_index * MACHINE_ELF_SYMBOL_ENTRY_SIZE;
         uint32_t st_name = machine_elf_append_string(
             new_bytes,
-            elf_file->sections[2].file_offset,
+            elf_file->sections[elf_file->strtab_section_index].file_offset,
             strtab_size,
             &string_cursor,
             symbol->name);
@@ -793,6 +923,12 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     shstring_cursor = 1u;
     new_bytes[shstrtab_offset] = '\0';
     text_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".text");
+    if (sbss_section_index != (size_t)-1) {
+        sbss_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".sbss");
+    }
+    if (sdata_section_index != (size_t)-1) {
+        sdata_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".sdata");
+    }
     strtab_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".strtab");
     symtab_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".symtab");
     reltext_name_offset = machine_elf_append_string(new_bytes, shstrtab_offset, shstrtab_size, &shstring_cursor, ".rel.text");
@@ -824,7 +960,7 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     machine_elf_write_u16_le(new_bytes, 42u, 0u);
     machine_elf_write_u16_le(new_bytes, 44u, 0u);
     machine_elf_write_u16_le(new_bytes, 46u, MACHINE_ELF_SECTION_HEADER_SIZE);
-    machine_elf_write_u16_le(new_bytes, 48u, 6u);
+    machine_elf_write_u16_le(new_bytes, 48u, (uint16_t)canonical_section_count);
     machine_elf_write_u16_le(new_bytes, 50u, (uint16_t)elf_file->shstrtab_section_index);
 
     machine_elf_write_u32_le(new_bytes, shoff + 1u * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, text_name_offset);
@@ -834,35 +970,53 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     machine_elf_write_u32_le(new_bytes, shoff + 1u * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[1].byte_count);
     machine_elf_write_u32_le(new_bytes, shoff + 1u * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 1u);
 
-    machine_elf_write_u32_le(new_bytes, shoff + 2u * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, strtab_name_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 2u * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_STRTAB);
-    machine_elf_write_u32_le(new_bytes, shoff + 2u * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[2].file_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 2u * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[2].byte_count);
-    machine_elf_write_u32_le(new_bytes, shoff + 2u * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 1u);
+    if (sbss_section_index != (size_t)-1) {
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, sbss_name_offset);
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_NOBITS);
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 8u, MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC);
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[sbss_section_index].file_offset);
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[sbss_section_index].byte_count);
+        machine_elf_write_u32_le(new_bytes, shoff + sbss_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
+    }
 
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, symtab_name_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_SYMTAB);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[3].file_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[3].byte_count);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 24u, (uint32_t)elf_file->sections[3].link);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 28u, elf_file->sections[3].info);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
-    machine_elf_write_u32_le(new_bytes, shoff + 3u * MACHINE_ELF_SECTION_HEADER_SIZE + 36u, MACHINE_ELF_SYMBOL_ENTRY_SIZE);
+    if (sdata_section_index != (size_t)-1) {
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, sdata_name_offset);
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_PROGBITS);
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 8u, MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC);
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[sdata_section_index].file_offset);
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[sdata_section_index].byte_count);
+        machine_elf_write_u32_le(new_bytes, shoff + sdata_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
+    }
 
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, reltext_name_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_REL);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[4].file_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[4].byte_count);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 24u, (uint32_t)elf_file->sections[4].link);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 28u, (uint32_t)elf_file->sections[4].info);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
-    machine_elf_write_u32_le(new_bytes, shoff + 4u * MACHINE_ELF_SECTION_HEADER_SIZE + 36u, MACHINE_ELF_RELOCATION_ENTRY_SIZE);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->strtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, strtab_name_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->strtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_STRTAB);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->strtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[elf_file->strtab_section_index].file_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->strtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[elf_file->strtab_section_index].byte_count);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->strtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 1u);
 
-    machine_elf_write_u32_le(new_bytes, shoff + 5u * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, shstrtab_name_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 5u * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_STRTAB);
-    machine_elf_write_u32_le(new_bytes, shoff + 5u * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[5].file_offset);
-    machine_elf_write_u32_le(new_bytes, shoff + 5u * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[5].byte_count);
-    machine_elf_write_u32_le(new_bytes, shoff + 5u * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 1u);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, symtab_name_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_SYMTAB);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[elf_file->symtab_section_index].file_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[elf_file->symtab_section_index].byte_count);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 24u, (uint32_t)elf_file->sections[elf_file->symtab_section_index].link);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 28u, elf_file->sections[elf_file->symtab_section_index].info);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->symtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 36u, MACHINE_ELF_SYMBOL_ENTRY_SIZE);
+
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, reltext_name_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_REL);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[elf_file->rel_text_section_index].file_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[elf_file->rel_text_section_index].byte_count);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 24u, (uint32_t)elf_file->sections[elf_file->rel_text_section_index].link);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 28u, (uint32_t)elf_file->sections[elf_file->rel_text_section_index].info);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 4u);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->rel_text_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 36u, MACHINE_ELF_RELOCATION_ENTRY_SIZE);
+
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->shstrtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 0u, shstrtab_name_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->shstrtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 4u, MACHINE_ELF_SECTION_STRTAB);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->shstrtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 16u, (uint32_t)elf_file->sections[elf_file->shstrtab_section_index].file_offset);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->shstrtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 20u, (uint32_t)elf_file->sections[elf_file->shstrtab_section_index].byte_count);
+    machine_elf_write_u32_le(new_bytes, shoff + elf_file->shstrtab_section_index * MACHINE_ELF_SECTION_HEADER_SIZE + 32u, 1u);
 
     old_bytes = elf_file->bytes;
     old_byte_count = elf_file->byte_count;
@@ -871,6 +1025,7 @@ int machine_elf_refresh_bytes(MachineElfFile *elf_file, MachineElfError *error) 
     elf_file->section_header_offset = shoff;
     free(old_bytes);
     free(text_bytes);
+    free(sdata_bytes);
     (void)old_byte_count;
     return machine_elf_verify_file(elf_file, error);
 }

@@ -138,6 +138,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_transition_file(const MachineTransitionFile *transition_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address,
     MachineTransitionResolutionKind resolution_kind,
     MachineStepStatus next_status,
@@ -150,6 +152,7 @@ static int verify_transition_file(const MachineTransitionFile *transition_file,
     MachineTransitionTargetPolicySummary target_policy_summary;
     MachineTransitionSummary transition_summary;
     MachineTransitionNextFetchSummary next_fetch_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineTransitionError transition_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -158,9 +161,14 @@ static int verify_transition_file(const MachineTransitionFile *transition_file,
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&transition_summary, 0, sizeof(transition_summary));
     memset(&next_fetch_summary, 0, sizeof(next_fetch_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&transition_error, 0, sizeof(transition_error));
 
     if (!machine_transition_verify_file(transition_file, &transition_error) ||
+        !machine_transition_file_get_source_elf_artifact_summary(transition_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_transition_file_get_header_summary(transition_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.program_counter != base_virtual_address ||
@@ -193,6 +201,8 @@ cleanup:
 static int verify_transition_report(const MachineTransitionReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineTransitionResolutionKind resolution_kind,
     int has_next_fetch,
     size_t next_program_counter,
@@ -204,6 +214,7 @@ static int verify_transition_report(const MachineTransitionReport *report,
     const MachineTransitionTargetPolicySummary *target_policy_summary = NULL;
     const MachineTransitionSummary *transition_summary = NULL;
     const MachineTransitionNextFetchSummary *next_fetch_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineTransitionError transition_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -214,8 +225,13 @@ static int verify_transition_report(const MachineTransitionReport *report,
     if (!machine_transition_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_transition_report_get_file(report, &transition_file) || !transition_file ||
         !machine_transition_report_get_interp_file(report, &interp_file) || !interp_file ||
+        !machine_transition_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_transition_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_transition_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->defers_control_transfer_targets ||
         !machine_transition_report_get_transition_summary_artifact(report, &transition_summary) ||
@@ -272,6 +288,8 @@ static int test_machine_transition_mainline(void) {
         &transition_file,
         "transition-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_TRANSITION_RESOLUTION_NEXT_FETCH,
         MACHINE_STEP_STATUS_READY,
@@ -279,7 +297,7 @@ static int test_machine_transition_mainline(void) {
         0x1001u,
         0u,
         0x8au,
-        "machine_transition profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_transition_clone_file(&transition_file, &cloned_transition_file, &transition_error) ||
@@ -294,13 +312,16 @@ static int test_machine_transition_mainline(void) {
         &transition_report,
         "transition-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRANSITION_RESOLUTION_NEXT_FETCH,
         1,
         0x1001u,
-        "machine_transition profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 linear-next-fetch=yes halt=yes deferred-control=yes\n"
         "  transition: resolution=next-fetch next-status=ready next-pc=0x1001 targets=[] return-imm=-\n");
 
@@ -360,6 +381,8 @@ static int test_machine_transition_custom_step_cases(void) {
         &transition_file,
         "transition-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_TRANSITION_RESOLUTION_HALT,
         MACHINE_STEP_STATUS_HALTED,
@@ -367,7 +390,7 @@ static int test_machine_transition_custom_step_cases(void) {
         0u,
         0u,
         0u,
-        "machine_transition profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 next-status=halted next-pc=- next-segment=- next-byte=- targets=[] return-imm=7\n");
 
     machine_transition_report_free(&transition_report);
@@ -388,6 +411,8 @@ static int test_machine_transition_custom_step_cases(void) {
         &transition_file,
         "transition-deferred-control-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_TRANSITION_RESOLUTION_DEFERRED_CONTROL_TRANSFER,
         MACHINE_STEP_STATUS_READY,
@@ -395,7 +420,7 @@ static int test_machine_transition_custom_step_cases(void) {
         0u,
         0u,
         0u,
-        "machine_transition profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 next-status=ready next-pc=- next-segment=- next-byte=- targets=[1] return-imm=-\n");
 
     machine_transition_report_free(&transition_report);
@@ -416,6 +441,8 @@ static int test_machine_transition_custom_step_cases(void) {
         &transition_file,
         "transition-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_TRANSITION_RESOLUTION_UNSUPPORTED,
         MACHINE_STEP_STATUS_READY,
@@ -423,7 +450,7 @@ static int test_machine_transition_custom_step_cases(void) {
         0u,
         0u,
         0u,
-        "machine_transition profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 next-status=ready next-pc=- next-segment=- next-byte=- targets=[] return-imm=-\n");
 
 cleanup:
@@ -468,13 +495,14 @@ static int test_machine_transition_i386_bridge(void) {
     }
 
     ok &= expect_text("transition i386 dump wrapper", dump_text,
-        "machine_transition profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("transition i386 report dump wrapper", report_dump_text,
-        "machine_transition profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_transition profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview linear-next-fetch=yes halt=yes deferred-control=yes\n"
         "  transition: resolution=next-fetch next-status=ready next-pc=0x8048001 targets=[] return-imm=-\n");
 

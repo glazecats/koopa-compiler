@@ -94,6 +94,8 @@ int machine_payload_decode_file_get_target_policy_summary(const MachinePayloadDe
     MachinePayloadDecodeTargetPolicySummary *out_summary);
 int machine_payload_decode_file_get_summary(const MachinePayloadDecodeFile *decode_file,
     size_t *out_mapped_byte_count);
+int machine_payload_decode_file_get_source_elf_artifact_summary(const MachinePayloadDecodeFile *decode_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_payload_decode_file_get_header_summary(const MachinePayloadDecodeFile *decode_file,
     MachinePayloadDecodeHeaderSummary *out_summary);
 int machine_payload_decode_file_get_runtime_launch_summary(const MachinePayloadDecodeFile *decode_file,
@@ -195,6 +197,9 @@ int machine_payload_decode_report_get_file(const MachinePayloadDecodeReport *rep
     const MachinePayloadDecodeFile **out_file);
 int machine_payload_decode_report_get_decode_file(const MachinePayloadDecodeReport *report,
     const MachineDecodeFile **out_decode_file);
+int machine_payload_decode_report_get_source_elf_artifact_summary_artifact(
+    const MachinePayloadDecodeReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_payload_decode_report_get_header_summary_artifact(const MachinePayloadDecodeReport *report,
     const MachinePayloadDecodeHeaderSummary **out_summary);
 int machine_payload_decode_report_get_target_policy_summary_artifact(const MachinePayloadDecodeReport *report,

@@ -138,6 +138,8 @@ int machine_commit_file_get_target_policy_summary(const MachineCommitFile *commi
     MachineCommitTargetPolicySummary *out_summary);
 int machine_commit_file_get_summary(const MachineCommitFile *commit_file,
     size_t *out_mapped_byte_count);
+int machine_commit_file_get_source_elf_artifact_summary(const MachineCommitFile *commit_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_commit_file_get_header_summary(const MachineCommitFile *commit_file,
     MachineCommitHeaderSummary *out_summary);
 int machine_commit_file_get_writeback_summary(const MachineCommitFile *commit_file,
@@ -341,6 +343,9 @@ int machine_commit_report_get_writeback_file(const MachineCommitReport *report,
     const MachineWritebackFile **out_writeback_file);
 int machine_commit_report_get_writeback_report(const MachineCommitReport *report,
     const MachineWritebackReport **out_writeback_report);
+int machine_commit_report_get_source_elf_artifact_summary_artifact(
+    const MachineCommitReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_commit_report_get_header_summary_artifact(const MachineCommitReport *report,
     const MachineCommitHeaderSummary **out_summary);
 int machine_commit_report_get_target_policy_summary_artifact(const MachineCommitReport *report,

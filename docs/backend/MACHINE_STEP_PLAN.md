@@ -101,6 +101,10 @@ Do not start with:
     `MachineRuntimeReport`, `MachineLoadFile`, `MachineLoadReport`, and
     profile-aware `MachineIrAllocateRewriteReport` variants for raw step
     files, step reports, direct dumps, and report dumps
+  - that same fetch-state bridge now also preserves upstream ELF provenance
+    instead of flattening it away at step-state time: raw step files, step
+    reports, and dump/report-dump helpers surface the embedded source-ELF
+    artifact summary carried through `machine_launch`
   - that same first bridge/lifecycle surface is now also regression-locked:
     clone, report refresh, raw/report dump wrappers, launch/runtime/load
     bridge entrypoints, and profiled `machine_ir` bridge entrypoints are all

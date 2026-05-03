@@ -97,7 +97,15 @@ typedef struct {
 } MachineEmitProgram;
 
 typedef struct {
+    MachineSelectTargetPolicySummary select_policy;
+    int preserves_spill_operands_for_later_materialization;
+    int preserves_global_slot_ops_for_later_address_formation;
+    int preserves_fallthrough_terminator_shapes;
+} MachineEmitTargetPolicySummary;
+
+typedef struct {
     MachineEmitProgram program;
+    MachineEmitTargetPolicySummary target_policy_summary;
     MachineEmitFunctionShapeSummary *function_shape_summaries;
     size_t *function_block_summary_offsets;
     MachineEmitBlockShapeSummary *block_shape_summaries;
@@ -114,6 +122,7 @@ void machine_emit_program_init(MachineEmitProgram *program);
 void machine_emit_program_free(MachineEmitProgram *program);
 void machine_emit_lower_report_init(MachineEmitLowerReport *report);
 void machine_emit_lower_report_free(MachineEmitLowerReport *report);
+int machine_emit_get_target_policy_summary(MachineEmitTargetPolicySummary *out_summary);
 int machine_emit_clone_program(const MachineEmitProgram *source,
     MachineEmitProgram *out_program,
     MachineEmitError *error);
@@ -144,6 +153,12 @@ int machine_emit_program_get_summary(const MachineEmitProgram *program,
     size_t *out_register_count,
     size_t *out_global_count,
     size_t *out_function_count);
+int machine_emit_program_get_target_policy_summary(const MachineEmitProgram *program,
+    MachineEmitTargetPolicySummary *out_summary);
+int machine_emit_verify_current_riscv32_preview_compatibility(const MachineEmitProgram *program,
+    MachineEmitError *error);
+int machine_emit_verify_current_riscv32_preview_bytes_compatibility(const MachineEmitProgram *program,
+    MachineEmitError *error);
 int machine_emit_program_get_function(const MachineEmitProgram *program,
     size_t function_index,
     const MachineEmitFunction **out_function);
@@ -161,6 +176,12 @@ int machine_emit_lower_report_get_summary(const MachineEmitLowerReport *report,
     size_t *out_global_count,
     size_t *out_function_count,
     size_t *out_total_block_summary_count);
+int machine_emit_lower_report_get_target_policy_summary_artifact(const MachineEmitLowerReport *report,
+    const MachineEmitTargetPolicySummary **out_summary);
+int machine_emit_lower_report_verify_current_riscv32_preview_compatibility(const MachineEmitLowerReport *report,
+    MachineEmitError *error);
+int machine_emit_lower_report_verify_current_riscv32_preview_bytes_compatibility(const MachineEmitLowerReport *report,
+    MachineEmitError *error);
 int machine_emit_lower_report_get_program(const MachineEmitLowerReport *report,
     const MachineEmitProgram **out_program);
 int machine_emit_lower_report_get_function(const MachineEmitLowerReport *report,

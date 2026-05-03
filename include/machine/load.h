@@ -122,6 +122,8 @@ int machine_load_file_get_summary(const MachineLoadFile *load_file,
     size_t *out_file_byte_count,
     size_t *out_memory_byte_count,
     size_t *out_executable_segment_count);
+int machine_load_file_get_source_elf_artifact_summary(const MachineLoadFile *load_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_load_file_get_header_summary(const MachineLoadFile *load_file,
     MachineLoadHeaderSummary *out_summary);
 int machine_load_file_get_memory_summary(const MachineLoadFile *load_file,
@@ -312,6 +314,8 @@ int machine_load_report_get_overview_artifact(const MachineLoadReport *report,
     MachineLoadReportOverviewArtifact *out_artifact);
 int machine_load_report_get_file(const MachineLoadReport *report,
     const MachineLoadFile **out_file);
+int machine_load_report_get_source_elf_artifact_summary_artifact(const MachineLoadReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_load_report_get_header_summary_artifact(const MachineLoadReport *report,
     const MachineLoadHeaderSummary **out_summary);
 int machine_load_report_get_target_policy_summary_artifact(const MachineLoadReport *report,

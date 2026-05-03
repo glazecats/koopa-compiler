@@ -1,5 +1,7 @@
 #include "machine/select.h"
 
+#include "machine/layout.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,6 +80,81 @@ static int machine_select_op_is_call_kind(MachineSelectOpKind kind) {
         default:
             return 0;
     }
+}
+
+int machine_select_get_target_policy_summary(MachineSelectTargetPolicySummary *out_summary) {
+    if (!out_summary) {
+        return 0;
+    }
+
+    memset(out_summary, 0, sizeof(*out_summary));
+    out_summary->current_riscv32_preview_logical_register_cap = 8u;
+    out_summary->supports_early_immediate_legalization = 1;
+    out_summary->supports_compare_branch_fusion = 1;
+    out_summary->preserves_spill_operands_for_later_materialization = 1;
+    out_summary->preserves_global_slot_ops_for_later_address_formation = 1;
+    return 1;
+}
+
+int machine_select_verify_current_riscv32_preview_compatibility(const MachineSelectProgram *program,
+    MachineSelectError *error) {
+    MachineSelectTargetPolicySummary policy_summary;
+
+    if (!program) {
+        machine_select_set_error(
+            error, 0, 0, "MACHINE-SELECT-418: invalid riscv32-preview compatibility contract");
+        return 0;
+    }
+    if (!machine_select_verify_program(program, error)) {
+        return 0;
+    }
+    if (!machine_select_program_get_target_policy_summary(program, &policy_summary)) {
+        machine_select_set_error(
+            error, 0, 0, "MACHINE-SELECT-419: missing riscv32-preview compatibility policy");
+        return 0;
+    }
+    if (program->register_bank.register_count > policy_summary.current_riscv32_preview_logical_register_cap) {
+        machine_select_set_error(
+            error,
+            0,
+            0,
+            "MACHINE-SELECT-420: current riscv32-preview lane supports at most %zu logical machine registers",
+            policy_summary.current_riscv32_preview_logical_register_cap);
+        return 0;
+    }
+    return 1;
+}
+
+int machine_select_verify_current_riscv32_preview_bytes_compatibility(const MachineSelectProgram *program,
+    MachineSelectError *error) {
+    MachineLayoutProgram layout_program;
+    MachineLayoutError layout_error;
+    int ok;
+
+    if (!program) {
+        machine_select_set_error(
+            error, 0, 0, "MACHINE-SELECT-422: invalid riscv32-preview bytes-compatibility contract");
+        return 0;
+    }
+    if (!machine_select_verify_current_riscv32_preview_compatibility(program, error)) {
+        return 0;
+    }
+
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_layout_program_init(&layout_program);
+    ok = machine_layout_lower_program_from_machine_select(program, &layout_program, &layout_error) &&
+        machine_layout_verify_current_riscv32_preview_bytes_compatibility(&layout_program, &layout_error);
+    machine_layout_program_free(&layout_program);
+    if (!ok) {
+        machine_select_set_error(
+            error,
+            layout_error.line,
+            layout_error.column,
+            "MACHINE-SELECT-423: current riscv32-preview bytes bridge rejected selected program: %s",
+            layout_error.message);
+        return 0;
+    }
+    return 1;
 }
 
 static int machine_select_append_format(MachineSelectStringBuilder *builder, const char *fmt, ...) {

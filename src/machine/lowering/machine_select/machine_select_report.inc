@@ -15,6 +15,7 @@ static void machine_select_lower_report_clear_shape(MachineSelectLowerReport *re
     free(report->function_indices_with_spills);
     free(report->function_indices_with_memory_ops);
     free(report->function_indices_with_branches);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_summaries = NULL;
     report->function_summary_count = 0;
     report->function_block_summary_offsets = NULL;
@@ -47,6 +48,11 @@ int machine_select_lower_report_refresh(MachineSelectLowerReport *report, Machin
     }
 
     machine_select_lower_report_clear_shape(report);
+    if (!machine_select_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-417: failed to compute target policy summary");
+        machine_select_lower_report_clear_shape(report);
+        return 0;
+    }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
         total_block_summary_count += report->program.functions[function_index].block_count;
     }
@@ -316,6 +322,17 @@ int machine_select_dump_lower_report_artifact(const MachineSelectLowerReport *re
             report->functions_with_spills_count,
             report->functions_with_memory_ops_count,
             report->functions_with_branches_count)) {
+        free(builder.data);
+        return 0;
+    }
+    if (!machine_select_append_format(
+            &builder,
+            "target_policy preview_reg_cap=%zu imm_legalization=%d cmpbr_fusion=%d preserves_spills=%d preserves_global_slots=%d\n",
+            report->target_policy_summary.current_riscv32_preview_logical_register_cap,
+            report->target_policy_summary.supports_early_immediate_legalization,
+            report->target_policy_summary.supports_compare_branch_fusion,
+            report->target_policy_summary.preserves_spill_operands_for_later_materialization,
+            report->target_policy_summary.preserves_global_slot_ops_for_later_address_formation)) {
         free(builder.data);
         return 0;
     }

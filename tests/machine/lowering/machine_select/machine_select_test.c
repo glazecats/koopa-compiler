@@ -550,6 +550,156 @@ static int test_machine_select_distinguishes_cmp_immediate_ops(void) {
     return ok;
 }
 
+static int test_machine_select_normalizes_commutative_immediate_to_rhs(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: commutative-imm setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: commutative-imm setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_immediate(7);
+    instruction.as.binary.rhs = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: commutative-imm lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.0 = alui.0 reg.0, 7\n"
+        "    ret reg.0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_keeps_noncommutative_lhs_immediate_out_of_imm_family(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: noncommutative-imm setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: noncommutative-imm setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_SUB;
+    instruction.as.binary.lhs = machine_ir_operand_immediate(7);
+    instruction.as.binary.rhs = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: noncommutative-imm lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.0 = alu.1 7, reg.0\n"
+        "    ret reg.0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_materializes_constant_binary_results(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -1649,6 +1799,88 @@ static int test_machine_select_lowers_compare_branch_immediate_terminator(void) 
     return ok;
 }
 
+static int test_machine_select_normalizes_compare_branch_lhs_immediate(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-cmpbri setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-cmpbri setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_LT;
+    instruction.as.binary.lhs = machine_ir_operand_immediate(4);
+    instruction.as.binary.rhs = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 1, 2, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-cmpbri lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    cmpbri.14 reg.0, 4, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_terminator_query_surface(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -2463,12 +2695,15 @@ static int test_machine_select_builds_report_artifact(void) {
     MachineSelectProgram select_program;
     MachineSelectLowerReport report;
     MachineSelectError select_error;
+    MachineSelectTargetPolicySummary program_policy_summary;
+    const MachineSelectTargetPolicySummary *report_policy_summary = NULL;
     const MachineSelectFunctionSummary *summary = NULL;
     char *actual_text = NULL;
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&select_error, 0, sizeof(select_error));
+    memset(&program_policy_summary, 0, sizeof(program_policy_summary));
     machine_ir_program_init(&machine_program);
     machine_select_program_init(&select_program);
     machine_select_lower_report_init(&report);
@@ -2484,7 +2719,24 @@ static int test_machine_select_builds_report_artifact(void) {
     }
 
     if (!machine_select_lower_report_get_function_summary_artifact(&report, 0, &summary) ||
+        !machine_select_program_get_target_policy_summary(&select_program, &program_policy_summary) ||
+        !machine_select_lower_report_get_target_policy_summary_artifact(&report, &report_policy_summary) ||
+        !machine_select_verify_current_riscv32_preview_compatibility(&select_program, &select_error) ||
+        !machine_select_lower_report_verify_current_riscv32_preview_compatibility(&report, &select_error) ||
+        !machine_select_verify_current_riscv32_preview_bytes_compatibility(&select_program, &select_error) ||
+        !machine_select_lower_report_verify_current_riscv32_preview_bytes_compatibility(&report, &select_error) ||
         !summary ||
+        program_policy_summary.current_riscv32_preview_logical_register_cap != 8u ||
+        !program_policy_summary.supports_early_immediate_legalization ||
+        !program_policy_summary.supports_compare_branch_fusion ||
+        !program_policy_summary.preserves_spill_operands_for_later_materialization ||
+        !program_policy_summary.preserves_global_slot_ops_for_later_address_formation ||
+        !report_policy_summary ||
+        report_policy_summary->current_riscv32_preview_logical_register_cap != 8u ||
+        !report_policy_summary->supports_early_immediate_legalization ||
+        !report_policy_summary->supports_compare_branch_fusion ||
+        !report_policy_summary->preserves_spill_operands_for_later_materialization ||
+        !report_policy_summary->preserves_global_slot_ops_for_later_address_formation ||
         report.function_summary_count != 1 ||
         summary->op_count != 3 ||
         summary->call_count != 0 ||
@@ -2508,6 +2760,126 @@ static int test_machine_select_builds_report_artifact(void) {
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
     machine_select_lower_report_free(&report);
+    return ok;
+}
+
+static int test_machine_select_rejects_riscv32_preview_incompatible_register_bank(void) {
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+    size_t register_index;
+
+    memset(&select_error, 0, sizeof(select_error));
+    machine_select_program_init(&select_program);
+
+    select_program.register_bank.register_count = 9u;
+    select_program.register_bank.registers =
+        (MachineSelectRegisterDesc *)calloc(9u, sizeof(MachineSelectRegisterDesc));
+    if (!select_program.register_bank.registers) {
+        return 0;
+    }
+    for (register_index = 0u; register_index < 9u; ++register_index) {
+        select_program.register_bank.registers[register_index].register_id = register_index;
+        select_program.register_bank.registers[register_index].name = dup_text("r");
+        select_program.register_bank.registers[register_index].allocatable = 1u;
+        if (!select_program.register_bank.registers[register_index].name) {
+            machine_select_program_free(&select_program);
+            return 0;
+        }
+    }
+
+    if (machine_select_verify_current_riscv32_preview_compatibility(&select_program, &select_error) ||
+        strstr(select_error.message, "MACHINE-SELECT-420") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: oversized riscv32-preview register bank was not rejected: %s\n",
+            select_error.message);
+        ok = 0;
+    }
+
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_rejects_riscv32_preview_bytes_incompatible_branch_range(void) {
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    size_t op_index;
+    int ok = 1;
+
+    memset(&select_error, 0, sizeof(select_error));
+    machine_select_program_init(&select_program);
+
+    select_program.register_bank.register_count = 1u;
+    select_program.register_bank.registers =
+        (MachineSelectRegisterDesc *)calloc(1u, sizeof(MachineSelectRegisterDesc));
+    select_program.function_count = 1u;
+    select_program.function_capacity = 1u;
+    select_program.functions = (MachineSelectFunction *)calloc(1u, sizeof(MachineSelectFunction));
+    if (!select_program.register_bank.registers || !select_program.functions) {
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    select_program.register_bank.registers[0].register_id = 0u;
+    select_program.register_bank.registers[0].name = dup_text("r0");
+    select_program.register_bank.registers[0].allocatable = 1u;
+    if (!select_program.register_bank.registers[0].name) {
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    select_program.functions[0].name = dup_text("main");
+    select_program.functions[0].has_body = 1;
+    select_program.functions[0].block_count = 3u;
+    select_program.functions[0].block_capacity = 3u;
+    select_program.functions[0].blocks = (MachineSelectBasicBlock *)calloc(3u, sizeof(MachineSelectBasicBlock));
+    if (!select_program.functions[0].name || !select_program.functions[0].blocks) {
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    select_program.functions[0].blocks[0].id = 0u;
+    select_program.functions[0].blocks[0].has_terminator = 1;
+    select_program.functions[0].blocks[0].terminator.kind = MACHINE_SELECT_TERM_BRANCH;
+    select_program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_register(0u);
+    select_program.functions[0].blocks[0].terminator.as.branch.then_target = 2u;
+    select_program.functions[0].blocks[0].terminator.as.branch.else_target = 1u;
+
+    select_program.functions[0].blocks[1].id = 1u;
+    select_program.functions[0].blocks[1].op_count = 513u;
+    select_program.functions[0].blocks[1].op_capacity = 513u;
+    select_program.functions[0].blocks[1].ops = (MachineSelectOp *)calloc(513u, sizeof(MachineSelectOp));
+    select_program.functions[0].blocks[1].has_terminator = 1;
+    select_program.functions[0].blocks[1].terminator.kind = MACHINE_SELECT_TERM_RETURN_IMM;
+    select_program.functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(0u);
+    if (!select_program.functions[0].blocks[1].ops) {
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    for (op_index = 0u; op_index < 513u; ++op_index) {
+        select_program.functions[0].blocks[1].ops[op_index].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+        select_program.functions[0].blocks[1].ops[op_index].has_result = 1;
+        select_program.functions[0].blocks[1].ops[op_index].result = machine_select_operand_register(0u);
+        select_program.functions[0].blocks[1].ops[op_index].as.copy_value = machine_select_operand_immediate(5000);
+    }
+
+    select_program.functions[0].blocks[2].id = 2u;
+    select_program.functions[0].blocks[2].has_terminator = 1;
+    select_program.functions[0].blocks[2].terminator.kind = MACHINE_SELECT_TERM_RETURN_IMM;
+    select_program.functions[0].blocks[2].terminator.as.return_value = machine_select_operand_immediate(0u);
+
+    if (machine_select_verify_current_riscv32_preview_bytes_compatibility(&select_program, &select_error) ||
+        strstr(select_error.message, "MACHINE-SELECT-423") == NULL ||
+        strstr(select_error.message, "MACHINE-LAYOUT-140") == NULL ||
+        strstr(select_error.message, "MACHINE-EMIT-140") == NULL ||
+        strstr(select_error.message, "MACHINE-ENCODE-125") == NULL ||
+        strstr(select_error.message, "MACHINE-BYTES-344") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: preview bytes-compatibility branch-range reject mismatch: %s\n",
+            select_error.message);
+        ok = 0;
+    }
+
+    machine_select_program_free(&select_program);
     return ok;
 }
 
@@ -3014,6 +3386,7 @@ static int test_machine_select_report_dump_surface(void) {
     ok = expect_report_dump(
         &report,
         "machine_select report registers=2 globals=1 functions=1 with_calls=0 with_spills=0 with_memory_ops=1 with_branches=0\n"
+        "target_policy preview_reg_cap=8 imm_legalization=1 cmpbr_fusion=1 preserves_spills=1 preserves_global_slots=1\n"
         "functions_with_calls:\n"
         "functions_with_spills:\n"
         "functions_with_memory_ops: 0\n"
@@ -3194,6 +3567,12 @@ int main(void) {
     if (!test_machine_select_distinguishes_cmp_immediate_ops()) {
         return 1;
     }
+    if (!test_machine_select_normalizes_commutative_immediate_to_rhs()) {
+        return 1;
+    }
+    if (!test_machine_select_keeps_noncommutative_lhs_immediate_out_of_imm_family()) {
+        return 1;
+    }
     if (!test_machine_select_materializes_constant_binary_results()) {
         return 1;
     }
@@ -3233,6 +3612,9 @@ int main(void) {
     if (!test_machine_select_lowers_compare_branch_immediate_terminator()) {
         return 1;
     }
+    if (!test_machine_select_normalizes_compare_branch_lhs_immediate()) {
+        return 1;
+    }
     if (!test_machine_select_terminator_query_surface()) {
         return 1;
     }
@@ -3261,6 +3643,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_builds_report_artifact()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_riscv32_preview_incompatible_register_bank()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_riscv32_preview_bytes_incompatible_branch_range()) {
         return 1;
     }
     if (!test_machine_select_report_refresh_surface()) {

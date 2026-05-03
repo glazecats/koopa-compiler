@@ -30,6 +30,33 @@ int machine_encode_program_get_summary(const MachineEncodeProgram *program,
     return 1;
 }
 
+int machine_encode_report_get_target_policy_summary_artifact(const MachineEncodeReport *report,
+    const MachineEncodeTargetPolicySummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->target_policy_summary;
+    return 1;
+}
+
+int machine_encode_report_verify_current_riscv32_preview_compatibility(const MachineEncodeReport *report,
+    MachineEncodeError *error) {
+    if (!report) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-123: invalid encode-report compatibility contract");
+        return 0;
+    }
+    return machine_encode_verify_current_riscv32_preview_compatibility(&report->program, error);
+}
+
+int machine_encode_report_verify_current_riscv32_preview_bytes_compatibility(const MachineEncodeReport *report,
+    MachineEncodeError *error) {
+    if (!report) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-126: invalid encode-report bytes-compatibility contract");
+        return 0;
+    }
+    return machine_encode_verify_current_riscv32_preview_bytes_compatibility(&report->program, error);
+}
+
 int machine_encode_program_get_function(const MachineEncodeProgram *program,
     size_t function_index,
     const MachineEncodeFunction **out_function) {

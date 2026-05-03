@@ -219,6 +219,7 @@ void machine_select_lower_report_init(MachineSelectLowerReport *report) {
         return;
     }
     machine_select_program_init(&report->program);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_summaries = NULL;
     report->function_summary_count = 0;
     report->function_block_summary_offsets = NULL;
@@ -247,6 +248,14 @@ void machine_select_lower_report_free(MachineSelectLowerReport *report) {
     free(report->function_indices_with_branches);
     machine_select_program_free(&report->program);
     machine_select_lower_report_init(report);
+}
+
+int machine_select_program_get_target_policy_summary(const MachineSelectProgram *program,
+    MachineSelectTargetPolicySummary *out_summary) {
+    if (!program || !out_summary) {
+        return 0;
+    }
+    return machine_select_get_target_policy_summary(out_summary);
 }
 
 MachineSelectOperand machine_select_operand_none(void) {

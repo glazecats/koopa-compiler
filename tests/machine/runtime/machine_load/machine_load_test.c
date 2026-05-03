@@ -8,33 +8,42 @@
 #include <string.h>
 
 static int build_expected_load_dump_text(char *buffer, size_t buffer_size,
-    const char *profile_name, size_t base_virtual_address) {
-    if (!buffer || buffer_size == 0u || !profile_name) {
+    const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
+    size_t base_virtual_address) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_load profile=%s base=0x%zx entry=0x%zx segments=1 file_bytes=9 memory_bytes=4096\n"
+               "machine_load profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx segments=1 file_bytes=9 memory_bytes=4096\n"
                "entry_segment: lseg.0 .text perms=r-x\n"
                "segments:\n"
                "  lseg.0 .text xseg=0 vaddr=0x%zx file-bytes=9 mem-bytes=4096 zero-fill=4087 align=4096 perms=r-x\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                base_virtual_address,
                base_virtual_address) > 0;
 }
 
 static int build_expected_load_report_dump_text(char *buffer, size_t buffer_size,
-    const char *profile_name, size_t base_virtual_address) {
-    if (!buffer || buffer_size == 0u || !profile_name) {
+    const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
+    size_t base_virtual_address) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_load profile=%s base=0x%zx entry=0x%zx segments=1 file_bytes=9 memory_bytes=4096\n"
+               "machine_load profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx segments=1 file_bytes=9 memory_bytes=4096\n"
                "entry_segment: lseg.0 .text perms=r-x\n"
                "segments:\n"
                "  lseg.0 .text xseg=0 vaddr=0x%zx file-bytes=9 mem-bytes=4096 zero-fill=4087 align=4096 perms=r-x\n"
                "report_overview:\n"
                "  segments=1 file_bytes=9 memory_bytes=4096 executable_segments=1 non_executable_segments=0 entry=0x%zx entry_segment=0\n"
+               "  elf_source: target=%s origin=%s semantics=%s\n"
                "  policy: profile=%s base=0x%zx align=4096\n"
                "  memory: base=0x%zx end=0x%zx entry-offset=0x0\n"
                "report_segment_filters:\n"
@@ -46,10 +55,15 @@ static int build_expected_load_report_dump_text(char *buffer, size_t buffer_size
                "report_segments:\n"
                "  lseg.0 .text entry=yes executable=yes file-bytes=9 mem-bytes=4096 zero-fill=4087 perms=r-x\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                base_virtual_address,
                base_virtual_address,
                base_virtual_address,
+               profile_name,
+               origin_profile_name,
+               semantics_name,
                profile_name,
                base_virtual_address,
                base_virtual_address,
@@ -168,6 +182,8 @@ static int build_resolved_machine_elf_artifacts(const MachineIrAllocateRewriteRe
 static int verify_load_file_with_profile(const MachineLoadFile *load_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachineLoadHeaderSummary header_summary;
     MachineLoadSegmentSummary segment_summary;
@@ -180,18 +196,22 @@ static int verify_load_file_with_profile(const MachineLoadFile *load_file,
     size_t executable_segment_count = 0u;
     size_t segment_index = 0u;
     size_t entry_segment_index = 0u;
+    MachineElfArtifactSummary source_artifact_summary;
     char *dump_text = NULL;
     char expected_dump[512];
     int ok = 1;
 
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&segment_summary, 0, sizeof(segment_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&load_error, 0, sizeof(load_error));
     memset(expected_dump, 0, sizeof(expected_dump));
     if (!build_expected_load_dump_text(
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -205,6 +225,10 @@ static int verify_load_file_with_profile(const MachineLoadFile *load_file,
             &executable_segment_count) ||
         segment_count != 1u || file_byte_count != 9u || memory_byte_count != 4096u ||
         executable_segment_count != 1u ||
+        !machine_load_file_get_source_elf_artifact_summary(load_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_load_file_get_header_summary(load_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.base_virtual_address != base_virtual_address ||
@@ -255,6 +279,8 @@ cleanup:
 static int verify_load_report_with_profile(const MachineLoadReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachineLoadError load_error;
     MachineLoadReportOverviewArtifact overview_artifact;
@@ -262,6 +288,7 @@ static int verify_load_report_with_profile(const MachineLoadReport *report,
     const MachineLoadHeaderSummary *header_summary = NULL;
     const MachineLoadTargetPolicySummary *target_policy_summary = NULL;
     const MachineLoadMemorySummary *memory_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     const MachineLoadSegmentSummary *segment_summary = NULL;
     const MachineLoadSegmentSummary *entry_segment_summary = NULL;
     const MachineLoadFile *load_file = NULL;
@@ -284,6 +311,8 @@ static int verify_load_report_with_profile(const MachineLoadReport *report,
             expected_report_dump,
             sizeof(expected_report_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -298,6 +327,8 @@ static int verify_load_report_with_profile(const MachineLoadReport *report,
         executable_segment_count != 1u ||
         !machine_load_report_get_file(report, &load_file) ||
         !load_file ||
+        !machine_load_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_load_report_get_header_summary_artifact(report, &header_summary) ||
         !header_summary ||
         !machine_load_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
@@ -310,6 +341,9 @@ static int verify_load_report_with_profile(const MachineLoadReport *report,
         header_summary->file_byte_count != 9u ||
         header_summary->memory_byte_count != 4096u ||
         target_policy_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         target_policy_summary->base_virtual_address != base_virtual_address ||
         target_policy_summary->segment_alignment != 0x1000u ||
         memory_summary->base_virtual_address != base_virtual_address ||
@@ -388,7 +422,13 @@ static int verify_load_report_with_profile(const MachineLoadReport *report,
         goto cleanup;
     }
 
-    ok &= verify_load_file_with_profile(load_file, "report-owned load file", profile, base_virtual_address);
+    ok &= verify_load_file_with_profile(
+        load_file,
+        "report-owned load file",
+        profile,
+        origin_profile,
+        semantics,
+        base_virtual_address);
     ok &= expect_text(context, dump_text, expected_report_dump);
 
 cleanup:
@@ -445,21 +485,32 @@ static int test_machine_load_builds_from_machine_ir_and_upstream_artifacts(void)
     }
 
     ok &= verify_load_file_with_profile(
-        &load_file, "load from machine-ir", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &load_file,
+        "load from machine-ir",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= verify_load_report_with_profile(
-        &load_report, "load report from exec report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &load_report,
+        "load report from exec report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_text("image dump bridge", dump_text,
-        "machine_load profile=generic-elf32 base=0x1000 entry=0x1000 segments=1 file_bytes=9 memory_bytes=4096\n"
+        "machine_load profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans base=0x1000 entry=0x1000 segments=1 file_bytes=9 memory_bytes=4096\n"
         "entry_segment: lseg.0 .text perms=r-x\n"
         "segments:\n"
         "  lseg.0 .text xseg=0 vaddr=0x1000 file-bytes=9 mem-bytes=4096 zero-fill=4087 align=4096 perms=r-x\n");
     ok &= expect_text("ir report dump bridge", report_dump_text,
-        "machine_load profile=generic-elf32 base=0x1000 entry=0x1000 segments=1 file_bytes=9 memory_bytes=4096\n"
+        "machine_load profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans base=0x1000 entry=0x1000 segments=1 file_bytes=9 memory_bytes=4096\n"
         "entry_segment: lseg.0 .text perms=r-x\n"
         "segments:\n"
         "  lseg.0 .text xseg=0 vaddr=0x1000 file-bytes=9 mem-bytes=4096 zero-fill=4087 align=4096 perms=r-x\n"
         "report_overview:\n"
         "  segments=1 file_bytes=9 memory_bytes=4096 executable_segments=1 non_executable_segments=0 entry=0x1000 entry_segment=0\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 base=0x1000 align=4096\n"
         "  memory: base=0x1000 end=0x2000 entry-offset=0x0\n"
         "report_segment_filters:\n"
@@ -544,18 +595,24 @@ static int test_machine_load_elf_bridge_helpers(void) {
             &load_file,
             "load from generic elf file",
             MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
             0x1000u) ||
         !machine_load_build_from_machine_elf_report(&generic_elf_report, &load_file, &load_error) ||
         !verify_load_file_with_profile(
             &load_file,
             "load from generic elf report",
             MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
             0x1000u) ||
         !machine_load_build_from_machine_elf_bytes(generic_elf_bytes, generic_elf_byte_count, &load_file, &load_error) ||
         !verify_load_file_with_profile(
             &load_file,
             "load from generic elf bytes",
             MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
             0x1000u) ||
         !machine_load_build_from_machine_elf_file_with_profile(
             &generic_elf_file,
@@ -566,6 +623,8 @@ static int test_machine_load_elf_bridge_helpers(void) {
             &load_file,
             "load from profiled elf file",
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+            MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
             0x08048000u) ||
         !machine_load_build_from_machine_ir_report_with_profile(
             &machine_report,
@@ -576,6 +635,8 @@ static int test_machine_load_elf_bridge_helpers(void) {
             &load_file,
             "load from profiled machine-ir bridge",
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+            MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+            MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
             0x08048000u) ||
         !machine_load_build_report_from_machine_elf_report_with_profile(
             &generic_elf_report,
@@ -586,6 +647,8 @@ static int test_machine_load_elf_bridge_helpers(void) {
             &load_report,
             "load report from profiled elf report",
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+            MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+            MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
             0x08048000u) ||
         !machine_load_build_dump_from_machine_elf_bytes_with_profile(
             generic_elf_bytes,
@@ -593,13 +656,14 @@ static int test_machine_load_elf_bridge_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &dump_text,
             &load_error) ||
-        strstr(dump_text, "machine_load profile=i386-preview base=0x8048000 entry=0x8048000") == NULL ||
+        strstr(dump_text, "machine_load profile=i386-preview elf_origin=generic-elf32 elf_semantics=imported-relocation-table base=0x8048000 entry=0x8048000") == NULL ||
         !machine_load_build_report_dump_from_machine_ir_report_with_profile(
             &machine_report,
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &report_dump_text,
             &load_error) ||
-        strstr(report_dump_text, "machine_load profile=i386-preview base=0x8048000 entry=0x8048000") == NULL ||
+        strstr(report_dump_text, "machine_load profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans base=0x8048000 entry=0x8048000") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans") == NULL ||
         strstr(report_dump_text, "report_segment_filters:") == NULL) {
         fprintf(stderr,
             "[machine-load] FAIL: elf bridge helper mismatch: %s\n",

@@ -98,6 +98,8 @@ static int build_resolved_machine_ir_report(
 static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFile *decode_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachinePayloadDecodeHeaderSummary header_summary;
     MachinePayloadDecodeTargetPolicySummary target_policy_summary;
@@ -108,6 +110,7 @@ static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFil
     MachineStepFetchSummary fetch_summary;
     MachineDecodeTagSummary decode_tag_summary;
     MachinePayloadDecodeSummary payload_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachinePayloadDecodeError decode_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -122,13 +125,16 @@ static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFil
     memset(&fetch_summary, 0, sizeof(fetch_summary));
     memset(&decode_tag_summary, 0, sizeof(decode_tag_summary));
     memset(&payload_summary, 0, sizeof(payload_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&decode_error, 0, sizeof(decode_error));
     memset(expected_dump, 0, sizeof(expected_dump));
 
     if (snprintf(expected_dump, sizeof(expected_dump),
-            "machine_payload_decode profile=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
+            "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
             "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address,
             base_virtual_address + 0x3000u,
             (size_t)0u,
@@ -137,6 +143,10 @@ static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFil
     }
 
     if (!machine_payload_decode_verify_file(decode_file, &decode_error) ||
+        !machine_payload_decode_file_get_source_elf_artifact_summary(decode_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_payload_decode_file_get_header_summary(decode_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.step_status != MACHINE_STEP_STATUS_READY ||
@@ -191,6 +201,8 @@ cleanup:
 static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachinePayloadDecodeError decode_error;
     MachinePayloadDecodeReportOverviewArtifact overview_artifact;
@@ -205,6 +217,7 @@ static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeR
     const MachineStepFetchSummary *fetch_summary = NULL;
     const MachineDecodeTagSummary *decode_tag_summary = NULL;
     const MachinePayloadDecodeSummary *payload_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     char *dump_text = NULL;
     char expected_dump[2048];
     int ok = 1;
@@ -214,19 +227,25 @@ static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeR
     memset(expected_dump, 0, sizeof(expected_dump));
 
     if (snprintf(expected_dump, sizeof(expected_dump),
-            "machine_payload_decode profile=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
+            "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
             "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
             "report_overview:\n"
             "  status=ready current-segment=0 mapped-bytes=8192 pc=0x%zx sp=0x%zx\n"
+            "  elf_source: target=%s origin=%s semantics=%s\n"
             "  policy: profile=%s max-payload=3\n"
             "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address,
             base_virtual_address + 0x3000u,
             (size_t)0u,
             (size_t)8192u,
             base_virtual_address,
             base_virtual_address + 0x3000u,
+            machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             machine_elf_target_profile_name(profile)) <= 0) {
         return 0;
     }
@@ -234,9 +253,14 @@ static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeR
     if (!machine_payload_decode_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_payload_decode_report_get_file(report, &payload_decode_file) || !payload_decode_file ||
         !machine_payload_decode_report_get_decode_file(report, &decode_file) || !decode_file ||
+        !machine_payload_decode_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_payload_decode_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
         header_summary->step_status != MACHINE_STEP_STATUS_READY ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_payload_decode_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || target_policy_summary->max_payload_byte_count != 3u ||
         !machine_payload_decode_report_get_runtime_launch_summary_artifact(report, &runtime_launch_summary) ||
@@ -326,6 +350,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_file,
         "payload-decode-generic-decode-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     if (!machine_payload_decode_clone_file(
@@ -340,6 +366,8 @@ static int test_machine_payload_decode_mainline(void) {
         &cloned_payload_decode_file,
         "payload-decode-generic-clone",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     machine_payload_decode_file_free(&payload_decode_file);
@@ -355,6 +383,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_file,
         "payload-decode-generic-decode-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     machine_payload_decode_file_free(&payload_decode_file);
@@ -370,6 +400,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_file,
         "payload-decode-generic-step-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     machine_payload_decode_file_free(&payload_decode_file);
@@ -385,6 +417,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_file,
         "payload-decode-generic-step-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     if (!machine_payload_decode_build_report_from_machine_decode_file(
@@ -399,6 +433,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_report,
         "payload-decode-generic-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     payload_decode_report.header_summary.program_counter = 0u;
@@ -414,6 +450,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_report,
         "payload-decode-generic-refreshed-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
     machine_payload_decode_report_free(&payload_decode_report);
@@ -429,6 +467,8 @@ static int test_machine_payload_decode_mainline(void) {
         &payload_decode_report,
         "payload-decode-generic-step-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
 
 cleanup:
@@ -480,20 +520,25 @@ static int test_machine_payload_decode_ir_bridge_and_profile(void) {
         &payload_decode_file,
         "payload-decode-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
     ok &= verify_payload_decode_report_with_profile(
         &payload_decode_report,
         "payload-decode-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u);
     ok &= expect_text("payload decode ir dump wrapper", dump_text,
-        "machine_payload_decode profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_payload_decode profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
     ok &= expect_text("payload decode ir report-dump wrapper", report_dump_text,
-        "machine_payload_decode profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_payload_decode profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 max-payload=3\n"
         "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
 
@@ -536,20 +581,25 @@ static int test_machine_payload_decode_ir_bridge_and_profile(void) {
         &payload_decode_file,
         "payload-decode-i386-ir-file",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x08048000u);
     ok &= verify_payload_decode_report_with_profile(
         &payload_decode_report,
         "payload-decode-i386-ir-report",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x08048000u);
     ok &= expect_text("payload decode i386 dump wrapper", dump_text,
-        "machine_payload_decode profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_payload_decode profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
     ok &= expect_text("payload decode i386 report-dump wrapper", report_dump_text,
-        "machine_payload_decode profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_payload_decode profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview max-payload=3\n"
         "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
 

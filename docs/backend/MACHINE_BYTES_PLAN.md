@@ -108,6 +108,72 @@ Do not start with:
     preview byte lane explicitly, and `riscv32-preview` now emits fixed-width
     4-byte RISC-V instruction skeletons for the landed subset instead of only
     reusing the generic tag-byte format under a different later-stage header
+  - that same `riscv32-preview` lane now also patches known internal
+    PC-relative displacements directly into emitted `jal` / branch words for
+    local control-flow edges and same-program direct calls instead of leaving
+    all target immediates as zero-filled skeleton placeholders
+  - that same preview lane is now also less likely to silently truncate
+    immediate-heavy RV32IM-shaped input: larger immediates and nontrivial
+    compare-immediate forms may now expand into multi-instruction preview
+    sequences (`lui/addi`, materialize-then-alu/cmp/branch, materialize-then-
+    store/return) instead of pretending one narrow immediate instruction was
+    always sufficient
+  - that same preview lane now also starts to surface a first minimal call
+    convention instead of treating every call as bare control transfer only:
+    preview call args may now be materialized/copied into `a0..a7`, and
+    preview call results may now stay in `a0` or be copied/spilled after the
+    `jal` when the current selected op shape requires it
+  - that same call-lowering slice is now also less "eight args only" than
+    the earlier preview checkpoint: when a selected call carries more than
+    eight args, the caller now reserves/restores a first aligned stack-arg
+    area around the `jal`, places overflow args there, and can also load
+    spill-backed call args from the caller frame instead of pretending those
+    values were already sitting in a convenient temporary register
+  - that same preview lane now also consumes a broader slice of spill-backed
+    value flow honestly instead of routing it through pseudo-register
+    stand-ins: selected `copy`, `materialize_imm`, `load_*`, `store_*`,
+    `alu`, `alui`, `return_spill`, plain branch, and compare-branch paths may
+    now load spill operands from the caller frame, compute through real
+    scratch registers, and write spill results back to stack slots, while
+    branch PC-relative immediates are now based on the real branch/jump word
+    position even when spill/immediate setup bytes appear earlier in the same
+    terminator region
+  - that same spill-backed value slice now also reaches selected compare
+    result production instead of stopping one layer early: `cmp` / `cmpi`
+    may now prepare spill operands from stack, produce their boolean result
+    in a real scratch/result register, and spill that result back to the
+    caller frame when the selected op result lives in `spill.N`
+  - that same preview memory slice is now also more honest about large
+    local/global slot offsets instead of only large spill/frame offsets:
+    `load_local`, `load_global`, `store_local`, and `store_global` no longer
+    rely on slot offsets accidentally fitting the signed 12-bit immediate
+    field, because large slot offsets now materialize the byte offset, add it
+    to the base register, and then issue the final zero-offset load/store
+  - that same preview lane now also has one explicit register-bank honesty
+    boundary instead of silently aliasing larger logical register files
+    through modulo mapping: current `riscv32-preview` support is intentionally
+    capped at 8 logical selected machine registers (`reg.0..reg.7` mapping to
+    `a0..a7`), and larger register banks now fail explicitly at the
+    `machine_bytes` boundary
+  - that same preview arithmetic slice is now also regression-locked for one
+    first explicit RV32M-shaped subset rather than only implicitly supported
+    in encoder code: focused coverage now checks register-register
+    `mul` / `div` / `mod` lowering all the way to the expected
+    `funct7=0x01` R-type preview words, so the current preview lane can more
+    honestly be described as covering a first **RV32IM-shaped arithmetic**
+    subset rather than only RV32I-style ALU/control forms
+  - preview control lowering is now also more honest about layout-level
+    fallthrough structure instead of always spelling every transfer as
+    branch-plus-jump: `fallthrough` now carries zero emitted bytes, preview
+    `brft.*` / `cmpbrft.*` families now emit only the taken-side branch word,
+    `branch_on_true` now affects the actual preview branch encoding rather
+    than only dump/report metadata, and preview control fixup patch spans now
+    track the real branch/jump word positions after any local setup bytes
+  - that same preview control/call patching line now also has one first
+    explicit honest-failure boundary instead of silently truncating internal
+    PC-relative targets that do not fit the current instruction form:
+    direct preview lowering now rejects out-of-range internal branch/jump/call
+    displacements rather than wrapping them into malformed `B`/`J` immediates
 - `MB3 first upstream / artifact bridges`: now effectively **~100%**
   - the canonicalized
     `machine_ir -> machine_select -> machine_layout -> machine_emit -> machine_encode -> machine_bytes`
@@ -132,6 +198,12 @@ Do not start with:
     helpers for total byte count, absolute per-function byte spans on the raw
     program surface, and per-function/per-block byte copying without forcing
     later consumers to rebuild those slices by hand
+  - that same consumer-facing bytes surface now also has a first explicit
+    target-policy summary instead of leaving current preview capabilities
+    implicit in the lowering code: callers can query profile/program/report
+    policy facts such as the current logical-register cap, internal
+    PC-relative patch honesty, direct-fallthrough honesty, paired global
+    address formation, and the current RV32M-shaped arithmetic slice
   - the byte-bearing report surface now also has a first structured reference
     layer above raw bytes: call sites and control-flow targets are surfaced as
     reference summaries with owner offsets, patch offsets, and resolved target

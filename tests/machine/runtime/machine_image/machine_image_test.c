@@ -68,11 +68,13 @@ static int test_machine_image_builds_from_machine_ir_report(void) {
     size_t relocation_count = 0u;
     size_t byte_count = 0u;
     MachineElfTargetProfile target_profile;
+    MachineElfArtifactSummary source_artifact_summary;
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&image_error, 0, sizeof(image_error));
     memset(&header_summary, 0, sizeof(header_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_image_file_init(&image_file);
 
@@ -132,6 +134,10 @@ static int test_machine_image_builds_from_machine_ir_report(void) {
         segment_count != 1u || symbol_count != 5u || relocation_count != 2u || byte_count != 9u ||
         !machine_image_file_get_target_profile(&image_file, &target_profile) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        !machine_image_file_get_source_elf_artifact_summary(&image_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        source_artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        source_artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         !machine_image_file_get_header_summary(&image_file, &header_summary) ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
         header_summary.base_virtual_address != 0x1000u ||
@@ -171,7 +177,7 @@ static int test_machine_image_builds_from_machine_ir_report(void) {
 
     ok &= expect_dump(
         &image_file,
-        "machine_image profile=generic-elf32 base=0x1000 bytes=9 segments=1 symbols=5 relocations=2 entry=main\n"
+        "machine_image profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans base=0x1000 bytes=9 segments=1 symbols=5 relocations=2 entry=main\n"
         "entry_address: 0x1000\n"
         "segments:\n"
         "  iseg.0 .text img@0 vaddr=0x1000 bytes=9 align=4096\n"
@@ -800,6 +806,8 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
     MachineImageError image_error;
     MachineImageTargetPolicySummary expected_policy;
     MachineImageTargetPolicySummary file_policy;
+    MachineElfArtifactSummary source_artifact_summary;
+    const MachineElfArtifactSummary *report_source_artifact = NULL;
     const MachineImageTargetPolicySummary *report_policy = NULL;
     const MachineImageHeaderSummary *report_header = NULL;
     MachineImageHeaderSummary header_summary;
@@ -815,6 +823,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
     memset(&image_error, 0, sizeof(image_error));
     memset(&expected_policy, 0, sizeof(expected_policy));
     memset(&file_policy, 0, sizeof(file_policy));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&header_summary, 0, sizeof(header_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
@@ -888,8 +897,12 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &profiled_image,
             &image_error) ||
+        !machine_image_file_get_source_elf_artifact_summary(&profiled_image, &source_artifact_summary) ||
         !machine_image_file_get_target_profile(&profiled_image, &target_profile) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         !machine_image_file_get_target_policy_summary(&profiled_image, &file_policy) ||
         file_policy.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         file_policy.base_virtual_address != 0x08048000u ||
@@ -903,8 +916,13 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &profiled_report,
             &image_error) ||
+        !machine_image_report_get_source_elf_artifact_summary_artifact(&profiled_report, &report_source_artifact) ||
+        !report_source_artifact ||
         !machine_image_report_get_target_policy_summary_artifact(&profiled_report, &report_policy) ||
         !report_policy ||
+        report_source_artifact->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        report_source_artifact->origin_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        report_source_artifact->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         report_policy->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         report_policy->base_virtual_address != 0x08048000u ||
         report_policy->segment_alignment != 0x1000u ||
@@ -913,8 +931,13 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &reprofiled_report,
             &image_error) ||
+        !machine_image_report_get_source_elf_artifact_summary_artifact(&reprofiled_report, &report_source_artifact) ||
+        !report_source_artifact ||
         !machine_image_report_get_header_summary_artifact(&reprofiled_report, &report_header) ||
         !report_header ||
+        report_source_artifact->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        report_source_artifact->origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        report_source_artifact->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         report_header->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         report_header->base_virtual_address != 0x08048000u ||
         report_header->entry_virtual_address != 0x08048000u ||
@@ -926,7 +949,11 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &temp_image,
             &image_error) ||
+        !machine_image_file_get_source_elf_artifact_summary(&temp_image, &source_artifact_summary) ||
         !machine_image_file_get_header_summary(&temp_image, &header_summary) ||
+        source_artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        source_artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         header_summary.base_virtual_address != 0x08048000u ||
         !machine_image_build_from_machine_elf_report_with_profile(
@@ -934,7 +961,11 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &temp_image,
             &image_error) ||
+        !machine_image_file_get_source_elf_artifact_summary(&temp_image, &source_artifact_summary) ||
         !machine_image_file_get_header_summary(&temp_image, &header_summary) ||
+        source_artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        source_artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         !machine_image_build_from_machine_elf_bytes_with_profile(
             elf_bytes,
@@ -942,7 +973,11 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &temp_image,
             &image_error) ||
+        !machine_image_file_get_source_elf_artifact_summary(&temp_image, &source_artifact_summary) ||
         !machine_image_file_get_header_summary(&temp_image, &header_summary) ||
+        source_artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        source_artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        source_artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW) {
         fprintf(stderr, "[machine-image] FAIL: profile/image helper mismatch: %s\n", image_error.message);
         ok = 0;
@@ -957,6 +992,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !dump_text ||
         strstr(dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(dump_text, "elf_origin=generic-elf32 elf_semantics=imported-relocation-table") == NULL ||
         strstr(dump_text, "base=0x8048000") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: dump-from-elf-bytes-with-profile mismatch: %s\n", image_error.message);
         ok = 0;
@@ -982,6 +1018,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !dump_text ||
         strstr(dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(dump_text, "elf_origin=i386-preview elf_semantics=direct-patch-spans") == NULL ||
         strstr(dump_text, "entry=main") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: dump-from-machine-ir-report-with-profile mismatch: %s\n", image_error.message);
         ok = 0;
@@ -995,6 +1032,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !report_dump_text ||
         strstr(report_dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
         strstr(report_dump_text, "report_overview:") == NULL ||
         strstr(report_dump_text, "policy: profile=i386-preview") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: report-dump-from-file-with-profile mismatch: %s\n", image_error.message);
@@ -1011,6 +1049,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !report_dump_text ||
         strstr(report_dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
         strstr(report_dump_text, "report_symbol_filters:") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: report-dump-from-elf-file-with-profile mismatch: %s\n", image_error.message);
         ok = 0;
@@ -1026,6 +1065,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !report_dump_text ||
         strstr(report_dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
         strstr(report_dump_text, "report_segments:") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: report-dump-from-elf-report-with-profile mismatch: %s\n", image_error.message);
         ok = 0;
@@ -1042,6 +1082,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !report_dump_text ||
         strstr(report_dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         strstr(report_dump_text, "report_relocation_filters:") == NULL) {
         fprintf(stderr, "[machine-image] FAIL: report-dump-from-elf-bytes-with-profile mismatch: %s\n", image_error.message);
         ok = 0;
@@ -1071,6 +1112,7 @@ static int test_machine_image_profile_and_ir_dump_helpers(void) {
             &image_error) ||
         !report_dump_text ||
         strstr(report_dump_text, "machine_image profile=i386-preview") == NULL ||
+        strstr(report_dump_text, "elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans") == NULL ||
         strstr(report_dump_text, "entry=main") == NULL ||
         strstr(report_dump_text, "report_symbol_filters:") == NULL ||
         strstr(report_dump_text, "report_relocation_filters:") == NULL) {
@@ -1116,6 +1158,9 @@ static int test_machine_image_segment_cached_subset_helpers(void) {
     machine_image_report_init(&image_report);
 
     image_file.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file.source_elf_artifact_summary.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file.source_elf_artifact_summary.origin_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file.source_elf_artifact_summary.relocation_semantics = MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS;
     image_file.base_virtual_address = 0x1000u;
     image_file.has_entry = 1;
     image_file.entry_symbol_index = 1u;

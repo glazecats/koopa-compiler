@@ -94,6 +94,64 @@ Do not start with:
     through the current object pipeline into `machine_reloc`
   - the module is wired into `Makefile`, included in `make test`, and covered
     by focused regression tests
+  - the current relocation artifact is now also slightly target-aware for the
+    active RISC-V preview line: when `machine_object` carries the
+    `riscv32-preview` target profile and an internal target byte offset is
+    already known, the relocation record preserves the matching PC-relative
+    preview addend instead of forcing every relocation addend to stay `0`
+  - that same reopened RISC-V preview line is now also more honest about
+    fallthrough-shaped control in direct profile-aware builds: if the preview
+    bytes layer records a zero-byte secondary edge for a layout fallthrough,
+    `machine_reloc` now sees only the one real primary control relocation
+    that still has a concrete patch span, instead of reviving a second fake
+    relocation for the semantic-but-unpatched fallthrough edge
+
+## Reopened RISC-V Slice
+
+- For the current reopened backend-honesty mainline, treat `machine_reloc` as
+  roughly **~94%** complete.
+- The landed slice now covers:
+  - preview addend preservation for same-program internal call/control targets
+  - direct preview fallthrough-control relocation honesty
+    direct `riscv32-preview` builds now keep only the relocation whose
+    branch/jump word actually exists in `.text`
+  - one first data-side global-access relocation slice for the active
+    RISC-V preview line: small preview `load_global` / `store_global`
+    families may now survive as paired explicit data-address plus
+    data-load/store relocations that target the matching global-object
+    symbols instead of disappearing back into raw address-forming code bytes
+    only
+  - that same relocation-facing surface now also reports those data-side
+    relocations through the consumer-facing family summary instead of forcing
+    callers to rediscover them from raw relocation rows manually
+  - that same preview-honesty slice is now also public/queryable instead of
+    being latent only in individual relocation records and dump strings:
+    callers can ask `machine_reloc` for a small target-policy summary that
+    explicitly says whether the current artifact preserves preview
+    PC-relative addends and direct-fallthrough honesty for the selected
+    target profile
+  - that same relocation-facing surface now also exposes one first relocation-
+    family summary above raw row iteration, so consumers can recover direct
+    `call` / `primary-control` / `secondary-control` counts without rescanning
+    the relocation array manually
+  - that same consumer-facing surface now also has one first structured
+    report artifact above the raw relocation file, so later consumers can
+    stay on cached target-policy / family / section / relocation summaries
+    rather than rewalking raw relocation arrays every time
+  - preview addend/fallthrough honesty is now also verifier-backed at the
+    relocation boundary itself instead of remaining only a build-path habit:
+    malformed preview relocations with drifted addends or fake zero-patch
+    secondary control entries are rejected directly by
+    `machine_reloc_verify_file(...)`
+- The remaining downstream pressure is mostly no longer inside raw relocation
+  construction itself, but in keeping later consumers such as
+  `machine_container` / `machine_elf` explicit about the information boundary
+  between:
+  - direct preview builds, which still know which control edges had
+    `patch_byte_count == 0`
+  - reparsed or reprofiled generic ELF, which may preserve two control
+    relocation records because that zero-patch distinction is not recoverable
+    from the imported relocation table alone
 
 ## File Management Rules
 

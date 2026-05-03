@@ -91,6 +91,8 @@ int machine_step_file_get_summary(const MachineStepFile *step_file,
     size_t *out_launch_register_count,
     size_t *out_runtime_segment_count,
     size_t *out_mapped_byte_count);
+int machine_step_file_get_source_elf_artifact_summary(const MachineStepFile *step_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_step_file_get_header_summary(const MachineStepFile *step_file,
     MachineStepHeaderSummary *out_summary);
 int machine_step_file_get_runtime_launch_summary(const MachineStepFile *step_file,
@@ -209,6 +211,8 @@ int machine_step_report_get_file(const MachineStepReport *report,
     const MachineStepFile **out_file);
 int machine_step_report_get_launch_file(const MachineStepReport *report,
     const MachineLaunchFile **out_launch_file);
+int machine_step_report_get_source_elf_artifact_summary_artifact(const MachineStepReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_step_report_get_header_summary_artifact(const MachineStepReport *report,
     const MachineStepHeaderSummary **out_summary);
 int machine_step_report_get_target_policy_summary_artifact(const MachineStepReport *report,

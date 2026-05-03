@@ -145,6 +145,8 @@ int machine_history_file_get_target_policy_summary(const MachineHistoryFile *his
     MachineHistoryTargetPolicySummary *out_summary);
 int machine_history_file_get_summary(const MachineHistoryFile *history_file,
     size_t *out_mapped_byte_count);
+int machine_history_file_get_source_elf_artifact_summary(const MachineHistoryFile *history_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_history_file_get_header_summary(const MachineHistoryFile *history_file,
     MachineHistoryHeaderSummary *out_summary);
 int machine_history_file_get_outcome_summary(const MachineHistoryFile *history_file,
@@ -346,6 +348,9 @@ int machine_history_report_get_outcome_file(const MachineHistoryReport *report,
     const MachineOutcomeFile **out_outcome_file);
 int machine_history_report_get_outcome_report(const MachineHistoryReport *report,
     const MachineOutcomeReport **out_outcome_report);
+int machine_history_report_get_source_elf_artifact_summary_artifact(
+    const MachineHistoryReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_history_report_get_header_summary_artifact(const MachineHistoryReport *report,
     const MachineHistoryHeaderSummary **out_summary);
 int machine_history_report_get_target_policy_summary_artifact(const MachineHistoryReport *report,

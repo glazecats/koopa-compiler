@@ -101,8 +101,12 @@ int machine_load_dump_file(const MachineLoadFile *load_file,
     }
     if (!machine_load_append_format(
             &builder,
-            "machine_load profile=%s base=0x%zx entry=0x%zx segments=%zu file_bytes=%zu memory_bytes=%zu\n",
+            "machine_load profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx segments=%zu file_bytes=%zu memory_bytes=%zu\n",
             machine_elf_target_profile_name(load_file->exec_file.image_file.target_profile),
+            machine_elf_target_profile_name(
+                load_file->exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                load_file->exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             load_file->exec_file.image_file.base_virtual_address,
             load_file->entry_virtual_address,
             load_file->segment_count,

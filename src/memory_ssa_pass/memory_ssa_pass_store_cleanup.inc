@@ -58,6 +58,27 @@ static int memory_ssa_pass_store_matches_previous_loaded_value(const ValueSsaFun
     return ok;
 }
 
+/*
+ * Current memory-SSA cleanup is intraprocedural. A global store inside a
+ * helper function may still be observed by its callers even if that helper
+ * itself does not read the global again afterward. Until we have a stronger
+ * interprocedural side-effect proof, treat non-main function global stores as
+ * externally observable and keep them alive.
+ */
+static int memory_ssa_pass_function_global_store_may_escape(const ValueSsaProgram *program,
+    size_t function_index) {
+    const ValueSsaFunction *function;
+
+    if (!program || function_index >= program->function_count) {
+        return 1;
+    }
+    function = &program->functions[function_index];
+    if (!function->has_body || !function->name) {
+        return 1;
+    }
+    return strcmp(function->name, "main") != 0;
+}
+
 static int memory_ssa_pass_eliminate_redundant_stores_impl(ValueSsaProgram *program,
     int include_locals,
     int include_globals,
@@ -342,6 +363,10 @@ static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
                 }
                 if ((instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL && !include_locals) ||
                     (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL && !include_globals)) {
+                    continue;
+                }
+                if (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL &&
+                    memory_ssa_pass_function_global_store_may_escape(program, function_index)) {
                     continue;
                 }
 

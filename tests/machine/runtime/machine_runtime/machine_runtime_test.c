@@ -7,21 +7,26 @@
 #include <string.h>
 
 static int build_expected_runtime_dump_text(char *buffer, size_t buffer_size,
-    const char *profile_name, size_t base_virtual_address) {
+    const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
+    size_t base_virtual_address) {
     size_t stack_base_virtual_address = base_virtual_address + 0x2000u;
     size_t initial_stack_pointer = base_virtual_address + 0x3000u;
 
-    if (!buffer || buffer_size == 0u || !profile_name) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_runtime profile=%s base=0x%zx entry=0x%zx sp=0x%zx segments=2 mapped_bytes=8192\n"
+               "machine_runtime profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx sp=0x%zx segments=2 mapped_bytes=8192\n"
                "entry_segment: rseg.0 .text perms=r-x\n"
                "stack_segment: rseg.1 .stack perms=rw-\n"
                "segments:\n"
                "  rseg.0 .text kind=load lseg=0 vaddr=0x%zx bytes=4096 perms=r-x\n"
                "  rseg.1 .stack kind=stack vaddr=0x%zx bytes=4096 perms=rw-\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                base_virtual_address,
                initial_stack_pointer,
@@ -30,16 +35,19 @@ static int build_expected_runtime_dump_text(char *buffer, size_t buffer_size,
 }
 
 static int build_expected_runtime_report_dump_text(char *buffer, size_t buffer_size,
-    const char *profile_name, size_t base_virtual_address) {
+    const char *profile_name,
+    const char *origin_profile_name,
+    const char *semantics_name,
+    size_t base_virtual_address) {
     size_t stack_base_virtual_address = base_virtual_address + 0x2000u;
     size_t initial_stack_pointer = base_virtual_address + 0x3000u;
     size_t initial_stack_base_virtual_address = initial_stack_pointer - 20u;
 
-    if (!buffer || buffer_size == 0u || !profile_name) {
+    if (!buffer || buffer_size == 0u || !profile_name || !origin_profile_name || !semantics_name) {
         return 0;
     }
     return snprintf(buffer, buffer_size,
-               "machine_runtime profile=%s base=0x%zx entry=0x%zx sp=0x%zx segments=2 mapped_bytes=8192\n"
+               "machine_runtime profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx sp=0x%zx segments=2 mapped_bytes=8192\n"
                "entry_segment: rseg.0 .text perms=r-x\n"
                "stack_segment: rseg.1 .stack perms=rw-\n"
                "segments:\n"
@@ -47,6 +55,7 @@ static int build_expected_runtime_report_dump_text(char *buffer, size_t buffer_s
                "  rseg.1 .stack kind=stack vaddr=0x%zx bytes=4096 perms=rw-\n"
                "report_overview:\n"
                "  segments=2 mapped_bytes=8192 executable_segments=1 non_executable_segments=1 entry=0x%zx sp=0x%zx stack_segment=1\n"
+               "  elf_source: target=%s origin=%s semantics=%s\n"
                "  policy: profile=%s base=0x%zx stack-align=4096 stack-size=4096 stack-gap=4096\n"
                "  memory: base=0x%zx end=0x%zx span-bytes=12288 mapped-bytes=8192 entry-offset=0x0 sp-offset=0x3000\n"
                "  stack: segment=1 base=0x%zx end=0x%zx bytes=4096 sp=0x%zx sp-offset=0x1000\n"
@@ -62,6 +71,8 @@ static int build_expected_runtime_report_dump_text(char *buffer, size_t buffer_s
                "  rseg.0 .text kind=load entry=yes stack=no executable=yes bytes=4096 perms=r-x\n"
                "  rseg.1 .stack kind=stack entry=no stack=yes executable=no bytes=4096 perms=rw-\n",
                profile_name,
+               origin_profile_name,
+               semantics_name,
                base_virtual_address,
                base_virtual_address,
                initial_stack_pointer,
@@ -69,6 +80,9 @@ static int build_expected_runtime_report_dump_text(char *buffer, size_t buffer_s
                stack_base_virtual_address,
                base_virtual_address,
                initial_stack_pointer,
+               profile_name,
+               origin_profile_name,
+               semantics_name,
                profile_name,
                base_virtual_address,
                base_virtual_address,
@@ -119,6 +133,8 @@ static int expect_text(const char *label, const char *actual_text, const char *e
 static int expect_runtime_dump_text_for_profile(const char *label,
     const char *actual_text,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     char expected_dump[1024];
 
@@ -127,6 +143,8 @@ static int expect_runtime_dump_text_for_profile(const char *label,
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -136,6 +154,8 @@ static int expect_runtime_dump_text_for_profile(const char *label,
 static int expect_runtime_report_dump_text_for_profile(const char *label,
     const char *actual_text,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     char expected_dump[4096];
 
@@ -144,6 +164,8 @@ static int expect_runtime_report_dump_text_for_profile(const char *label,
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -235,6 +257,8 @@ static int build_resolved_machine_ir_report(
 static int verify_runtime_file_with_profile(const MachineRuntimeFile *runtime_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachineRuntimeHeaderSummary header_summary;
     MachineRuntimeMemorySummary memory_summary;
@@ -265,6 +289,7 @@ static int verify_runtime_file_with_profile(const MachineRuntimeFile *runtime_fi
     size_t segment_byte_count = 0u;
     size_t window_byte_count = 0u;
     size_t window_base_virtual_address = 0u;
+    MachineElfArtifactSummary source_artifact_summary;
     int ok = 1;
 
     memset(&header_summary, 0, sizeof(header_summary));
@@ -275,12 +300,15 @@ static int verify_runtime_file_with_profile(const MachineRuntimeFile *runtime_fi
     memset(&initial_stack_summary, 0, sizeof(initial_stack_summary));
     memset(&text_summary, 0, sizeof(text_summary));
     memset(&stack_summary, 0, sizeof(stack_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&runtime_error, 0, sizeof(runtime_error));
     memset(expected_dump, 0, sizeof(expected_dump));
     if (!build_expected_runtime_dump_text(
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -289,6 +317,10 @@ static int verify_runtime_file_with_profile(const MachineRuntimeFile *runtime_fi
         !machine_runtime_file_get_summary(
             runtime_file, &segment_count, &mapped_byte_count, &executable_segment_count) ||
         segment_count != 2u || mapped_byte_count != 8192u || executable_segment_count != 1u ||
+        !machine_runtime_file_get_source_elf_artifact_summary(runtime_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_runtime_file_get_header_summary(runtime_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.base_virtual_address != base_virtual_address ||
@@ -455,6 +487,8 @@ cleanup:
 static int verify_runtime_report_with_profile(const MachineRuntimeReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address) {
     MachineRuntimeError runtime_error;
     MachineRuntimeReportOverviewArtifact overview_artifact;
@@ -473,6 +507,7 @@ static int verify_runtime_report_with_profile(const MachineRuntimeReport *report
     const MachineRuntimeGapSummary *gap_summary = NULL;
     const MachineRuntimeLaunchSummary *launch_summary = NULL;
     const MachineRuntimeInitialStackSummary *initial_stack_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     const MachineRuntimeFile *runtime_file = NULL;
     char *dump_text = NULL;
     char expected_dump[4096];
@@ -497,6 +532,8 @@ static int verify_runtime_report_with_profile(const MachineRuntimeReport *report
             expected_dump,
             sizeof(expected_dump),
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address)) {
         return 0;
     }
@@ -512,11 +549,16 @@ static int verify_runtime_report_with_profile(const MachineRuntimeReport *report
         overview_artifact.stack_segment_index != 1u ||
         !machine_runtime_report_get_file(report, &runtime_file) ||
         !runtime_file ||
+        !machine_runtime_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_runtime_report_get_header_summary_artifact(report, &header_summary) ||
         !header_summary ||
         header_summary->target_profile != profile ||
         header_summary->base_virtual_address != base_virtual_address ||
         header_summary->initial_stack_pointer != base_virtual_address + 0x3000u ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_runtime_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary ||
         target_policy_summary->stack_alignment != 4096u ||
@@ -727,7 +769,12 @@ static int test_machine_runtime_mainline(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_load_report(&load_report, &runtime_file, NULL)) {
@@ -736,7 +783,12 @@ static int test_machine_runtime_mainline(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-load-report-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-load-report-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     if (!machine_runtime_build_report_from_machine_load_file(&load_file, &runtime_report, NULL)) {
         fprintf(stderr, "[machine-runtime] FAIL: generic runtime report build failed\n");
@@ -744,7 +796,12 @@ static int test_machine_runtime_mainline(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_ir_report(&ir_report, &runtime_report, NULL)) {
@@ -753,7 +810,12 @@ static int test_machine_runtime_mainline(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-ir-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-ir-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
 cleanup:
     machine_runtime_report_free(&runtime_report);
@@ -838,7 +900,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-exec-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-exec-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_exec_report(&exec_report, &runtime_file, &runtime_error)) {
@@ -847,7 +914,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-exec-report-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-exec-report-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_image_file(&image_file, &runtime_file, &runtime_error)) {
@@ -856,7 +928,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-image-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-image-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_image_report(&image_report, &runtime_file, &runtime_error)) {
@@ -865,7 +942,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-image-report-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-image-report-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_elf_file(&elf_file, &runtime_file, &runtime_error)) {
@@ -874,7 +956,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-elf-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-elf-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     if (!machine_runtime_clone_file(&runtime_file, &cloned_runtime, &runtime_error) ||
         cloned_runtime.segments == runtime_file.segments ||
@@ -885,7 +972,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &cloned_runtime, "runtime-generic-cloned-elf-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &cloned_runtime,
+        "runtime-generic-cloned-elf-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_elf_report(&elf_report, &runtime_file, &runtime_error)) {
@@ -894,7 +986,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-elf-report-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-elf-report-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_elf_bytes(
@@ -904,7 +1001,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-generic-elf-bytes-file", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_file,
+        "runtime-generic-elf-bytes-file",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
 
     if (!machine_runtime_build_report_from_file(&runtime_file, &runtime_report, &runtime_error)) {
         fprintf(stderr, "[machine-runtime] FAIL: runtime report from file failed: %s\n", runtime_error.message);
@@ -912,7 +1014,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-file-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-file-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
 
     runtime_report.header_summary.initial_stack_pointer = 0u;
     runtime_report.launch_summary.initial_stack_pointer = 0u;
@@ -923,7 +1030,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-refreshed-file-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-refreshed-file-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_load_report(&load_report, &runtime_report, &runtime_error)) {
@@ -932,7 +1044,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-load-report-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-load-report-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_exec_file(&exec_file, &runtime_report, &runtime_error)) {
@@ -941,7 +1058,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-exec-file-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-exec-file-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_exec_report(&exec_report, &runtime_report, &runtime_error)) {
@@ -950,7 +1072,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-exec-report-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-exec-report-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_image_file(&image_file, &runtime_report, &runtime_error)) {
@@ -959,7 +1086,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-image-file-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-image-file-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_image_report(&image_report, &runtime_report, &runtime_error)) {
@@ -968,7 +1100,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-image-report-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-image-report-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_file(&elf_file, &runtime_report, &runtime_error)) {
@@ -977,7 +1114,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-elf-file-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-elf-file-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_report(&elf_report, &runtime_report, &runtime_error)) {
@@ -986,7 +1128,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-elf-report-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-elf-report-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_bytes(
@@ -996,7 +1143,12 @@ static int test_machine_runtime_bridge_matrix(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-generic-elf-bytes-report", MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        &runtime_report,
+        "runtime-generic-elf-bytes-report",
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
 
 cleanup:
     machine_runtime_report_free(&runtime_report);
@@ -1089,7 +1241,12 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from file", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
 
@@ -1100,9 +1257,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from load file", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from load file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from load report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from load report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1115,9 +1282,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from exec file", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from exec file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from exec report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from exec report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1130,9 +1307,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from image file", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from image file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from image report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from image report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1148,9 +1335,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from elf bytes", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from elf bytes",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from ir report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime dump from ir report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1163,9 +1360,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from file", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from load file", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from load file",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1178,9 +1385,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from load report", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from load report",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from exec file", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from exec file",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1193,9 +1410,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from exec report", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from exec report",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from image file", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from image file",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1208,9 +1435,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from image report", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from image report",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from elf file", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from elf file",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1225,9 +1462,19 @@ static int test_machine_runtime_dump_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from ir report", dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from ir report",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x1000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from elf bytes", report_dump_text, MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32, 0x1000u);
+        "runtime report dump from elf bytes",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x1000u);
 
 cleanup:
     free(report_dump_text);
@@ -1294,7 +1541,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-i386-elf-file", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_file,
+        "runtime-i386-elf-file",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_elf_report_with_profile(
@@ -1304,7 +1556,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-i386-elf-report-file", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_file,
+        "runtime-i386-elf-report-file",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
 
     machine_runtime_file_free(&runtime_file);
     if (!machine_runtime_build_from_machine_elf_bytes_with_profile(
@@ -1314,7 +1571,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_file_with_profile(
-        &runtime_file, "runtime-i386-elf-bytes-file", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_file,
+        "runtime-i386-elf-bytes-file",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x08048000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_file_with_profile(
@@ -1324,7 +1586,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-i386-elf-file-report", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_report,
+        "runtime-i386-elf-file-report",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_report_with_profile(
@@ -1334,7 +1601,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-i386-elf-report-report", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_report,
+        "runtime-i386-elf-report-report",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
 
     machine_runtime_report_free(&runtime_report);
     if (!machine_runtime_build_report_from_machine_elf_bytes_with_profile(
@@ -1344,7 +1616,12 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= verify_runtime_report_with_profile(
-        &runtime_report, "runtime-i386-elf-bytes-report", MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        &runtime_report,
+        "runtime-i386-elf-bytes-report",
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x08048000u);
 
     if (!machine_runtime_build_dump_from_machine_elf_file_with_profile(
             &elf_file, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, &dump_text, &runtime_error) ||
@@ -1355,9 +1632,19 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from profiled elf file", dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime dump from profiled elf file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from profiled elf report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime dump from profiled elf report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1372,9 +1659,19 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from profiled elf bytes", dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime dump from profiled elf bytes",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x08048000u);
     ok &= expect_runtime_dump_text_for_profile(
-        "runtime dump from profiled ir report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime dump from profiled ir report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1389,9 +1686,19 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from profiled elf file", dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime report dump from profiled elf file",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from profiled elf report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime report dump from profiled elf report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
     free(dump_text);
     dump_text = NULL;
     free(report_dump_text);
@@ -1406,9 +1713,19 @@ static int test_machine_runtime_profiled_wrappers(void) {
         goto cleanup;
     }
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from profiled elf bytes", dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime report dump from profiled elf bytes",
+        dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+        0x08048000u);
     ok &= expect_runtime_report_dump_text_for_profile(
-        "runtime report dump from profiled ir report", report_dump_text, MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW, 0x08048000u);
+        "runtime report dump from profiled ir report",
+        report_dump_text,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+        0x08048000u);
 
 cleanup:
     free(report_dump_text);
@@ -1452,6 +1769,8 @@ static int test_machine_runtime_profile_bridge(void) {
         &runtime_file,
         "runtime-i386-file",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x08048000u);
 
     if (!machine_runtime_build_report_from_machine_ir_report_with_profile(
@@ -1464,6 +1783,8 @@ static int test_machine_runtime_profile_bridge(void) {
         &runtime_report,
         "runtime-i386-report",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x08048000u);
 
 cleanup:

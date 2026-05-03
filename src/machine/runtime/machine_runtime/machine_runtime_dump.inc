@@ -28,8 +28,12 @@ int machine_runtime_dump_file(const MachineRuntimeFile *runtime_file,
 
     if (!machine_runtime_append_format(
             &builder,
-            "machine_runtime profile=%s base=0x%zx entry=0x%zx sp=0x%zx segments=%zu mapped_bytes=%zu\n",
+            "machine_runtime profile=%s elf_origin=%s elf_semantics=%s base=0x%zx entry=0x%zx sp=0x%zx segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                runtime_file->load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                runtime_file->load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             header_summary.base_virtual_address,
             header_summary.entry_virtual_address,
             header_summary.initial_stack_pointer,

@@ -110,6 +110,10 @@ Do not start with:
   - the same bridge family already reaches `MachineStepFile` /
     `MachineStepReport` and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw apply files, reports, direct dumps, and report dumps
+  - that same application-plan bridge now also preserves upstream ELF
+    provenance instead of flattening it away at apply-plan time: raw apply
+    files, apply reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_commit`
 
 ## File Management Rules
 

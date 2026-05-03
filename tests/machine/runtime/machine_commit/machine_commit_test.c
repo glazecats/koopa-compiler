@@ -151,6 +151,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_commit_file(const MachineCommitFile *commit_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineCommitResolutionKind resolution_kind,
     MachineCommitKind commit_kind,
     int has_committed_state,
@@ -160,6 +162,7 @@ static int verify_commit_file(const MachineCommitFile *commit_file,
     MachineCommitTargetPolicySummary target_policy_summary;
     MachineCommitSummary commit_summary;
     MachineCommitCurrentFetchSummary current_fetch_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineCommitError commit_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -168,9 +171,14 @@ static int verify_commit_file(const MachineCommitFile *commit_file,
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&commit_summary, 0, sizeof(commit_summary));
     memset(&current_fetch_summary, 0, sizeof(current_fetch_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&commit_error, 0, sizeof(commit_error));
 
     if (!machine_commit_verify_file(commit_file, &commit_error) ||
+        !machine_commit_file_get_source_elf_artifact_summary(commit_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_commit_file_get_header_summary(commit_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_commit_file_get_target_policy_summary(commit_file, &target_policy_summary) ||
@@ -198,6 +206,8 @@ cleanup:
 static int verify_commit_report(const MachineCommitReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineCommitResolutionKind resolution_kind,
     MachineCommitKind commit_kind,
     const char *expected_dump) {
@@ -207,6 +217,7 @@ static int verify_commit_report(const MachineCommitReport *report,
     const MachineCommitHeaderSummary *header_summary = NULL;
     const MachineCommitTargetPolicySummary *target_policy_summary = NULL;
     const MachineCommitSummary *commit_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineCommitError commit_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -217,8 +228,13 @@ static int verify_commit_report(const MachineCommitReport *report,
     if (!machine_commit_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_commit_report_get_file(report, &commit_file) || !commit_file ||
         !machine_commit_report_get_writeback_report(report, &writeback_report) || !writeback_report ||
+        !machine_commit_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_commit_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_commit_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->defers_call_commit ||
         !machine_commit_report_get_commit_summary_artifact(report, &commit_summary) ||
@@ -272,11 +288,13 @@ static int test_machine_commit_mainline(void) {
         &commit_file,
         "commit-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_DEFERRED_REGISTER_COMMIT,
         MACHINE_COMMIT_KIND_REGISTER,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     if (!machine_commit_clone_file(&commit_file, &cloned_commit_file, &commit_error) ||
@@ -291,12 +309,15 @@ static int test_machine_commit_mainline(void) {
         &commit_report,
         "commit-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_DEFERRED_REGISTER_COMMIT,
         MACHINE_COMMIT_KIND_REGISTER,
-        "machine_commit profile=generic-elf32 writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: writeback=deferred-register-writeback status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 state=yes register=yes slot=yes call=yes\n"
         "  commit: resolution=deferred-register-commit kind=register has-state=no status=- pc=- targets=[] return-imm=-\n");
 
@@ -355,11 +376,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_COMMITTED_STATE,
         MACHINE_COMMIT_KIND_STATE,
         1,
         0x1000u,
-        "machine_commit profile=generic-elf32 writeback=committed-no-op origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=committed-no-op origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=committed-state kind=state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 has-committed-state=yes status=halted pc=0x1000 current-segment=- current-byte=- targets=[] return-imm=7\n");
 
     machine_commit_report_free(&commit_report);
@@ -377,11 +400,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_COMMIT_KIND_NONE,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=blocked-on-control kind=none writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[1] return-imm=-\n");
 
     machine_commit_report_free(&commit_report);
@@ -399,11 +424,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_COMMIT_KIND_NONE,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=blocked-unsupported kind=none writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_commit_report_free(&commit_report);
@@ -420,11 +447,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_DEFERRED_LOCAL_COMMIT,
         MACHINE_COMMIT_KIND_LOCAL_SLOT,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=deferred-local-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-local-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-local-commit kind=local-slot writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_commit_file_free(&commit_file);
@@ -440,11 +469,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_DEFERRED_GLOBAL_COMMIT,
         MACHINE_COMMIT_KIND_GLOBAL_SLOT,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=deferred-global-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-global-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-global-commit kind=global-slot writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_commit_file_free(&commit_file);
@@ -460,11 +491,13 @@ static int test_machine_commit_custom_step_cases(void) {
         &commit_file,
         "commit-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_COMMIT_RESOLUTION_DEFERRED_CALL_COMMIT,
         MACHINE_COMMIT_KIND_CALL,
         0,
         0u,
-        "machine_commit profile=generic-elf32 writeback=deferred-call-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-call-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-call-commit kind=call writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
 cleanup:
@@ -508,13 +541,14 @@ static int test_machine_commit_i386_bridge(void) {
     }
 
     ok &= expect_text("commit i386 dump wrapper", dump_text,
-        "machine_commit profile=i386-preview writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
     ok &= expect_text("commit i386 report dump wrapper", report_dump_text,
-        "machine_commit profile=i386-preview writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_commit profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: writeback=deferred-register-writeback status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview state=yes register=yes slot=yes call=yes\n"
         "  commit: resolution=deferred-register-commit kind=register has-state=no status=- pc=- targets=[] return-imm=-\n");
 

@@ -715,8 +715,12 @@ int machine_state_dump_file(const MachineStateFile *state_file,
 
     if (!machine_state_append_format(
             &builder,
-            "machine_state profile=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_state profile=%s elf_origin=%s elf_semantics=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                state_file->transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                state_file->transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(header_summary.origin_step_status),
             header_summary.origin_program_counter,
             header_summary.origin_stack_pointer,
@@ -866,6 +870,17 @@ int machine_state_report_get_summary(const MachineStateReport *report,
     return 1;
 }
 
+int machine_state_file_get_source_elf_artifact_summary(const MachineStateFile *state_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!state_file || !out_summary) {
+        return 0;
+    }
+    *out_summary =
+        state_file->transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+            .load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_state_report_get_overview_artifact(const MachineStateReport *report,
     MachineStateReportOverviewArtifact *out_artifact) {
     if (!report || !out_artifact) {
@@ -905,6 +920,16 @@ int machine_state_report_get_transition_report(const MachineStateReport *report,
         return 0;
     }
     *out_transition_report = &report->transition_report;
+    return 1;
+}
+
+int machine_state_report_get_source_elf_artifact_summary_artifact(const MachineStateReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file
+                         .runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
     return 1;
 }
 
@@ -979,8 +1004,12 @@ int machine_state_dump_report(const MachineStateReport *report,
 
     if (!machine_state_append_format(
             &builder,
-            "machine_state profile=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_state profile=%s elf_origin=%s elf_semantics=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(report->header_summary.origin_step_status),
             report->header_summary.origin_program_counter,
             report->header_summary.origin_stack_pointer,
@@ -1063,6 +1092,15 @@ int machine_state_dump_report(const MachineStateReport *report,
             report->header_summary.mapped_byte_count,
             report->header_summary.origin_program_counter,
             report->header_summary.origin_stack_pointer) ||
+        !machine_state_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_state_append_format(
             &builder,
             "  policy: profile=%s ready=%s halt=%s deferred-control=%s\n",

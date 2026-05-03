@@ -38,6 +38,24 @@ int machine_elf_report_get_file(const MachineElfReport *report,
     return 1;
 }
 
+int machine_elf_report_get_artifact_summary_artifact(const MachineElfReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->artifact_summary;
+    return 1;
+}
+
+int machine_elf_report_get_relocation_family_summary_artifact(const MachineElfReport *report,
+    const MachineElfRelocationFamilySummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->relocation_family_summary;
+    return 1;
+}
+
 int machine_elf_report_get_header_summary_artifact(const MachineElfReport *report,
     const MachineElfHeaderSummary **out_summary) {
     if (!report || !out_summary) {

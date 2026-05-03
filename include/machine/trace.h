@@ -160,6 +160,8 @@ int machine_trace_file_get_target_policy_summary(const MachineTraceFile *trace_f
     MachineTraceTargetPolicySummary *out_summary);
 int machine_trace_file_get_summary(const MachineTraceFile *trace_file,
     size_t *out_mapped_byte_count);
+int machine_trace_file_get_source_elf_artifact_summary(const MachineTraceFile *trace_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_trace_file_get_header_summary(const MachineTraceFile *trace_file,
     MachineTraceHeaderSummary *out_summary);
 int machine_trace_file_get_delta_summary(const MachineTraceFile *trace_file,
@@ -307,6 +309,9 @@ int machine_trace_report_get_delta_file(const MachineTraceReport *report,
     const MachineDeltaFile **out_delta_file);
 int machine_trace_report_get_delta_report(const MachineTraceReport *report,
     const MachineDeltaReport **out_delta_report);
+int machine_trace_report_get_source_elf_artifact_summary_artifact(
+    const MachineTraceReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_trace_report_get_header_summary_artifact(const MachineTraceReport *report,
     const MachineTraceHeaderSummary **out_summary);
 int machine_trace_report_get_target_policy_summary_artifact(const MachineTraceReport *report,

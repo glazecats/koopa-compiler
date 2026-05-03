@@ -208,6 +208,18 @@ int machine_bytes_dump_report(const MachineBytesReport *report,
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-203: out of memory while dumping bytes report");
         goto cleanup;
     }
+    if (!machine_bytes_append_format(
+            &builder,
+            "target-policy profile=%s max_regs=%zu pc_relative=%d fallthrough=%d paired_globals=%d rv32m=%d\n",
+            machine_bytes_target_profile_name(report->target_policy_summary.target_profile),
+            report->target_policy_summary.max_logical_machine_register_count,
+            report->target_policy_summary.preserves_known_internal_pc_relative_targets,
+            report->target_policy_summary.preserves_direct_fallthrough_honesty,
+            report->target_policy_summary.uses_paired_global_data_addressing,
+            report->target_policy_summary.supports_rv32m_alu_ops)) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-203: out of memory while dumping bytes report");
+        goto cleanup;
+    }
     if (!machine_bytes_append_format(&builder, "functions-with-calls:")) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-203: out of memory while dumping bytes report");
         goto cleanup;
@@ -273,7 +285,8 @@ int machine_bytes_dump_report(const MachineBytesReport *report,
                 "  sym.%zu %s %s defined=%d fn=%s emit=%s offset=%s bytes=%zu incoming_fixups=%zu\n",
                 index,
                 symbol->kind == MACHINE_BYTES_SYMBOL_FUNCTION ? "function"
-                    : (symbol->kind == MACHINE_BYTES_SYMBOL_BLOCK ? "block" : "external"),
+                    : (symbol->kind == MACHINE_BYTES_SYMBOL_BLOCK ? "block"
+                           : (symbol->kind == MACHINE_BYTES_SYMBOL_GLOBAL_OBJECT ? "global" : "external")),
                 symbol->name ? symbol->name : "<null>",
                 symbol->is_defined,
                 symbol->has_function_index ? "yes" : "no",
@@ -297,7 +310,10 @@ int machine_bytes_dump_report(const MachineBytesReport *report,
                 "  fixup.%zu %s src=%s patch@%zu bytes=%zu target=%s sym=%s\n",
                 index,
                 fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET ? "call"
-                    : (fixup->kind == MACHINE_BYTES_FIXUP_CONTROL_PRIMARY ? "ctrl-primary" : "ctrl-secondary"),
+                    : (fixup->kind == MACHINE_BYTES_FIXUP_CONTROL_PRIMARY ? "ctrl-primary"
+                           : (fixup->kind == MACHINE_BYTES_FIXUP_CONTROL_SECONDARY ? "ctrl-secondary"
+                                  : (fixup->kind == MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET ? "data-load"
+                                         : "data-store"))),
                 fixup->source_label_name ? fixup->source_label_name : "<null>",
                 fixup->patch_byte_offset,
                 fixup->patch_byte_count,

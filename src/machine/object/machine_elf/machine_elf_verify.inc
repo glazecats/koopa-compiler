@@ -10,6 +10,7 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
     const MachineElfSection *strtab_section;
     const MachineElfSection *symtab_section;
     MachineElfHeaderSummary header_summary;
+    MachineElfRelocationFamilySummary relocation_family_summary;
     uint16_t expected_machine;
     uint32_t expected_flags;
 
@@ -19,6 +20,14 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
     }
     if (!machine_elf_get_target_policy(elf_file->target_profile, NULL)) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-114: unknown elf target profile");
+        return 0;
+    }
+    if (!machine_elf_get_target_policy(elf_file->origin_profile, NULL)) {
+        machine_elf_set_error(error, 0, 0, "MACHINE-ELF-114: unknown elf origin profile");
+        return 0;
+    }
+    if (elf_file->relocation_semantics == MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN) {
+        machine_elf_set_error(error, 0, 0, "MACHINE-ELF-114: unknown elf relocation semantics");
         return 0;
     }
     expected_machine = machine_elf_expected_machine_for_profile(elf_file->target_profile);
@@ -56,12 +65,29 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-117: invalid elf header fields");
         return 0;
     }
-    if (elf_file->section_count != 6u ||
-        elf_file->text_section_index != 1u ||
-        elf_file->strtab_section_index != 2u ||
-        elf_file->symtab_section_index != 3u ||
-        elf_file->rel_text_section_index != 4u ||
-        elf_file->shstrtab_section_index != 5u) {
+    memset(&relocation_family_summary, 0, sizeof(relocation_family_summary));
+    if (!machine_elf_file_get_relocation_family_summary(elf_file, &relocation_family_summary)) {
+        machine_elf_set_error(error, 0, 0, "MACHINE-ELF-132: invalid relocation-family summary contract");
+        return 0;
+    }
+    if (elf_file->relocation_semantics == MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS &&
+        elf_file->target_profile == MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW &&
+        elf_file->origin_profile == MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW &&
+        relocation_family_summary.secondary_control_relocation_count > 0u) {
+        machine_elf_set_error(error, 0, 0, "MACHINE-ELF-133: direct preview elf cannot keep secondary control relocations");
+        return 0;
+    }
+    if (elf_file->section_count < 6u ||
+        elf_file->text_section_index == 0u ||
+        elf_file->strtab_section_index == 0u ||
+        elf_file->symtab_section_index == 0u ||
+        elf_file->rel_text_section_index == 0u ||
+        elf_file->shstrtab_section_index == 0u ||
+        elf_file->text_section_index >= elf_file->section_count ||
+        elf_file->strtab_section_index >= elf_file->section_count ||
+        elf_file->symtab_section_index >= elf_file->section_count ||
+        elf_file->rel_text_section_index >= elf_file->section_count ||
+        elf_file->shstrtab_section_index >= elf_file->section_count) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-118: invalid elf section layout");
         return 0;
     }
@@ -111,6 +137,40 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-131: invalid canonical elf section semantics");
         return 0;
     }
+    for (section_index = 0u; section_index < elf_file->section_count; ++section_index) {
+        const MachineElfSection *section = &elf_file->sections[section_index];
+
+        if (section_index == 0u ||
+            section_index == elf_file->text_section_index ||
+            section_index == elf_file->strtab_section_index ||
+            section_index == elf_file->symtab_section_index ||
+            section_index == elf_file->rel_text_section_index ||
+            section_index == elf_file->shstrtab_section_index) {
+            continue;
+        }
+        if ((!machine_elf_section_name_equals(section, ".sbss") &&
+                !machine_elf_section_name_equals(section, ".sdata")) ||
+            section->link != 0u ||
+            section->info != 0u ||
+            section->align != 4u ||
+            section->entry_size != 0u) {
+            machine_elf_set_error(error, 0, 0, "MACHINE-ELF-131: invalid canonical elf section semantics");
+            return 0;
+        }
+        if (machine_elf_section_name_equals(section, ".sbss")) {
+            if (section->type != MACHINE_ELF_SECTION_NOBITS ||
+                section->flags != (MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC)) {
+                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-131: invalid canonical elf section semantics");
+                return 0;
+            }
+        } else if (machine_elf_section_name_equals(section, ".sdata")) {
+            if (section->type != MACHINE_ELF_SECTION_PROGBITS ||
+                section->flags != (MACHINE_ELF_SHF_WRITE | MACHINE_ELF_SHF_ALLOC)) {
+                machine_elf_set_error(error, 0, 0, "MACHINE-ELF-131: invalid canonical elf section semantics");
+                return 0;
+            }
+        }
+    }
     for (section_index = 0; section_index < elf_file->section_count; ++section_index) {
         const MachineElfSection *section = &elf_file->sections[section_index];
 
@@ -119,8 +179,12 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
             return 0;
         }
         if (section_index > 0u &&
-            (section->file_offset + section->byte_count > elf_file->byte_count ||
-             (section->byte_count > 0u && section->file_offset < MACHINE_ELF_HEADER_SIZE))) {
+            ((section->type != MACHINE_ELF_SECTION_NOBITS &&
+                    section->file_offset + section->byte_count > elf_file->byte_count) ||
+                (section->file_offset > elf_file->byte_count) ||
+                (section->type != MACHINE_ELF_SECTION_NOBITS &&
+                    section->byte_count > 0u &&
+                    section->file_offset < MACHINE_ELF_HEADER_SIZE))) {
             machine_elf_set_error(error, 0, 0, "MACHINE-ELF-120: elf section exceeds file span");
             return 0;
         }
@@ -238,6 +302,13 @@ int machine_elf_verify_file(const MachineElfFile *elf_file, MachineElfError *err
             (r_info & 0xFFu) != relocation->type ||
             relocation->type != machine_elf_map_relocation_type(elf_file->target_profile, relocation->source_kind)) {
             machine_elf_set_error(error, 0, 0, "MACHINE-ELF-130: invalid elf relocation symbol mapping");
+            return 0;
+        }
+        if (elf_file->relocation_semantics == MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS &&
+            elf_file->target_profile == MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW &&
+            elf_file->origin_profile == MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW &&
+            relocation->source_kind == MACHINE_BYTES_FIXUP_CONTROL_SECONDARY) {
+            machine_elf_set_error(error, 0, 0, "MACHINE-ELF-134: direct preview elf secondary relocation violates semantics");
             return 0;
         }
     }

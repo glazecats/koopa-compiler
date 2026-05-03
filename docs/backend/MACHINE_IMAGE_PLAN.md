@@ -161,6 +161,11 @@ Do not start with:
   - the same consumer boundary now also reaches ELF bytes directly rather
     than only in-memory ELF artifacts: callers can build raw images,
     structured image reports, and direct image dumps straight from ELF bytes
+  - that same consumer boundary now also preserves upstream ELF provenance
+    instead of flattening it away immediately: image files and reports carry
+    the source ELF artifact summary (`target_profile`, `origin_profile`,
+    direct-vs-imported relocation semantics), and current dump/report-dump
+    helpers surface that metadata directly
   - profile-aware rebuild/reprojection is now also a first-class part of the
     public lowering surface: callers can continue from existing image files,
     ELF files, ELF reports, or ELF bytes while explicitly choosing a target

@@ -89,7 +89,14 @@ typedef struct {
 } MachineEncodeProgram;
 
 typedef struct {
+    MachineEmitTargetPolicySummary emit_policy;
+    int preserves_block_unit_offsets;
+    int preserves_fallthrough_terminator_shapes;
+} MachineEncodeTargetPolicySummary;
+
+typedef struct {
     MachineEncodeProgram program;
+    MachineEncodeTargetPolicySummary target_policy_summary;
     MachineEncodeFunctionSummary *function_summaries;
     size_t *function_block_summary_offsets;
     MachineEncodeBlockSummary *block_summaries;
@@ -107,6 +114,7 @@ void machine_encode_program_free(MachineEncodeProgram *program);
 void machine_encode_report_init(MachineEncodeReport *report);
 void machine_encode_report_free(MachineEncodeReport *report);
 
+int machine_encode_get_target_policy_summary(MachineEncodeTargetPolicySummary *out_summary);
 int machine_encode_clone_program(const MachineEncodeProgram *source,
     MachineEncodeProgram *out_program,
     MachineEncodeError *error);
@@ -114,6 +122,12 @@ int machine_encode_program_get_summary(const MachineEncodeProgram *program,
     size_t *out_register_count,
     size_t *out_global_count,
     size_t *out_function_count);
+int machine_encode_program_get_target_policy_summary(const MachineEncodeProgram *program,
+    MachineEncodeTargetPolicySummary *out_summary);
+int machine_encode_verify_current_riscv32_preview_compatibility(const MachineEncodeProgram *program,
+    MachineEncodeError *error);
+int machine_encode_verify_current_riscv32_preview_bytes_compatibility(const MachineEncodeProgram *program,
+    MachineEncodeError *error);
 int machine_encode_program_get_function(const MachineEncodeProgram *program,
     size_t function_index,
     const MachineEncodeFunction **out_function);
@@ -163,6 +177,12 @@ int machine_encode_report_get_summary(const MachineEncodeReport *report,
     size_t *out_global_count,
     size_t *out_function_count,
     size_t *out_total_block_summary_count);
+int machine_encode_report_get_target_policy_summary_artifact(const MachineEncodeReport *report,
+    const MachineEncodeTargetPolicySummary **out_summary);
+int machine_encode_report_verify_current_riscv32_preview_compatibility(const MachineEncodeReport *report,
+    MachineEncodeError *error);
+int machine_encode_report_verify_current_riscv32_preview_bytes_compatibility(const MachineEncodeReport *report,
+    MachineEncodeError *error);
 int machine_encode_report_get_program(const MachineEncodeReport *report,
     const MachineEncodeProgram **out_program);
 int machine_encode_report_get_function(const MachineEncodeReport *report,

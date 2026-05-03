@@ -8,6 +8,8 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
     size_t total_block_summary_count = 0;
     size_t total_program_byte_count = 0;
     size_t total_reference_summary_count = 0;
+    size_t total_symbol_summary_capacity = 0;
+    size_t total_section_summary_capacity = 0;
     size_t function_index;
 
     if (!report) {
@@ -16,9 +18,20 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
     }
 
     machine_bytes_report_clear_shape(report);
+    if (!machine_bytes_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-408: failed to compute target policy summary");
+        machine_bytes_report_clear_shape(report);
+        return 0;
+    }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
         total_block_summary_count += report->program.functions[function_index].block_count;
         total_reference_summary_count += machine_bytes_function_reference_count(&report->program.functions[function_index]);
+    }
+    total_symbol_summary_capacity =
+        report->program.function_count + total_block_summary_count + report->program.global_count +
+        total_reference_summary_count;
+    if (report->program.function_count > 0u || report->program.global_count > 0u) {
+        total_section_summary_capacity = 3u;
     }
 
     if (report->program.function_count > 0) {
@@ -37,26 +50,16 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
         report->fixup_summaries = total_reference_summary_count > 0
             ? (MachineBytesFixupSummary *)calloc(total_reference_summary_count, sizeof(MachineBytesFixupSummary))
             : NULL;
-        report->symbol_summaries = (report->program.function_count + total_block_summary_count + total_reference_summary_count) > 0
-            ? (MachineBytesSymbolSummary *)calloc(
-                  report->program.function_count + total_block_summary_count + total_reference_summary_count,
-                  sizeof(MachineBytesSymbolSummary))
-            : NULL;
-        report->section_summaries = (MachineBytesSectionSummary *)calloc(1, sizeof(MachineBytesSectionSummary));
         report->function_indices_with_calls = (size_t *)malloc(report->program.function_count * sizeof(size_t));
         report->function_indices_with_fallthrough = (size_t *)malloc(report->program.function_count * sizeof(size_t));
         report->function_indices_with_branches = (size_t *)malloc(report->program.function_count * sizeof(size_t));
         report->total_block_summary_count = total_block_summary_count;
         report->total_reference_summary_count = total_reference_summary_count;
         report->total_fixup_summary_count = total_reference_summary_count;
-        report->total_symbol_summary_count =
-            report->program.function_count + total_block_summary_count + total_reference_summary_count;
         if (!report->function_summaries || !report->function_byte_offsets || !report->function_block_summary_offsets ||
             !report->function_reference_offsets || !report->function_fixup_offsets ||
             (total_block_summary_count > 0 && !report->block_summaries) ||
             (total_reference_summary_count > 0 && (!report->reference_summaries || !report->fixup_summaries)) ||
-            (report->total_symbol_summary_count > 0 && !report->symbol_summaries) ||
-            !report->section_summaries ||
             !report->function_indices_with_calls || !report->function_indices_with_fallthrough ||
             !report->function_indices_with_branches) {
             machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-401: out of memory building bytes report");
@@ -64,6 +67,25 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
             return 0;
         }
     }
+    if (total_symbol_summary_capacity > 0u) {
+        report->symbol_summaries =
+            (MachineBytesSymbolSummary *)calloc(total_symbol_summary_capacity, sizeof(MachineBytesSymbolSummary));
+        if (!report->symbol_summaries) {
+            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-401: out of memory building bytes report");
+            machine_bytes_report_clear_shape(report);
+            return 0;
+        }
+    }
+    if (total_section_summary_capacity > 0u) {
+        report->section_summaries =
+            (MachineBytesSectionSummary *)calloc(total_section_summary_capacity, sizeof(MachineBytesSectionSummary));
+        if (!report->section_summaries) {
+            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-401: out of memory building bytes report");
+            machine_bytes_report_clear_shape(report);
+            return 0;
+        }
+    }
+    report->total_symbol_summary_count = total_symbol_summary_capacity;
 
     total_block_summary_count = 0;
     total_reference_summary_count = 0;
@@ -88,11 +110,6 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
                 return 0;
             }
         }
-        if (!machine_bytes_report_populate_function_references(report, function_index, total_reference_summary_count)) {
-            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-404: failed to populate reference summaries");
-            machine_bytes_report_clear_shape(report);
-            return 0;
-        }
         total_reference_summary_count += machine_bytes_function_reference_count(function);
         if (summary->call_count > 0) {
             report->function_indices_with_calls[report->functions_with_calls_count++] = function_index;
@@ -106,6 +123,14 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
         total_program_byte_count += summary->byte_count;
     }
     report->total_program_byte_count = total_program_byte_count;
+    for (function_index = 0; function_index < report->program.function_count; ++function_index) {
+        if (!machine_bytes_report_populate_function_references(
+                report, function_index, report->function_reference_offsets[function_index])) {
+            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-404: failed to populate reference summaries");
+            machine_bytes_report_clear_shape(report);
+            return 0;
+        }
+    }
     if (!machine_bytes_report_populate_symbols(report) || !machine_bytes_report_populate_fixups(report)) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-406: failed to populate symbol/fixup summaries");
         machine_bytes_report_clear_shape(report);
@@ -137,6 +162,24 @@ int machine_bytes_report_get_summary(const MachineBytesReport *report,
         *out_total_block_summary_count = report->total_block_summary_count;
     }
     return 1;
+}
+
+int machine_bytes_report_get_target_policy_summary_artifact(const MachineBytesReport *report,
+    const MachineBytesTargetPolicySummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->target_policy_summary;
+    return 1;
+}
+
+int machine_bytes_report_verify_current_riscv32_preview_compatibility(const MachineBytesReport *report,
+    MachineBytesError *error) {
+    if (!report) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-135: invalid bytes-report compatibility contract");
+        return 0;
+    }
+    return machine_bytes_verify_current_riscv32_preview_compatibility(&report->program, error);
 }
 
 int machine_bytes_report_get_program(const MachineBytesReport *report,

@@ -94,6 +94,7 @@ typedef struct {
     int has_entry;
     size_t entry_symbol_index;
     size_t entry_virtual_address;
+    MachineElfArtifactSummary source_elf_artifact_summary;
     MachineImageSegment *segments;
     size_t segment_count;
     size_t segment_capacity;
@@ -109,6 +110,7 @@ typedef struct {
 
 typedef struct {
     MachineImageFile file;
+    MachineElfArtifactSummary source_elf_artifact_summary;
     MachineImageHeaderSummary header_summary;
     MachineImageTargetPolicySummary target_policy_summary;
     MachineImageSymbolSummary entry_symbol_summary;
@@ -260,6 +262,8 @@ int machine_image_get_target_policy_summary(MachineElfTargetProfile profile,
     MachineImageTargetPolicySummary *out_summary);
 int machine_image_file_get_target_profile(const MachineImageFile *image_file,
     MachineElfTargetProfile *out_profile);
+int machine_image_file_get_source_elf_artifact_summary(const MachineImageFile *image_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_image_file_get_target_policy_summary(const MachineImageFile *image_file,
     MachineImageTargetPolicySummary *out_summary);
 int machine_image_file_get_header_summary(const MachineImageFile *image_file,
@@ -474,6 +478,8 @@ int machine_image_report_get_overview_artifact(const MachineImageReport *report,
     MachineImageReportOverviewArtifact *out_artifact);
 int machine_image_report_get_file(const MachineImageReport *report,
     const MachineImageFile **out_file);
+int machine_image_report_get_source_elf_artifact_summary_artifact(const MachineImageReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_image_report_get_header_summary_artifact(const MachineImageReport *report,
     const MachineImageHeaderSummary **out_summary);
 int machine_image_report_get_target_policy_summary_artifact(const MachineImageReport *report,

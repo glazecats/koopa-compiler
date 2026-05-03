@@ -332,6 +332,14 @@ int machine_trace_file_get_summary(const MachineTraceFile *trace_file,
     return machine_delta_file_get_summary(&trace_file->delta_file, out_mapped_byte_count);
 }
 
+int machine_trace_file_get_source_elf_artifact_summary(const MachineTraceFile *trace_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!trace_file || !out_summary) {
+        return 0;
+    }
+    return machine_delta_file_get_source_elf_artifact_summary(&trace_file->delta_file, out_summary);
+}
+
 int machine_trace_file_get_header_summary(const MachineTraceFile *trace_file,
     MachineTraceHeaderSummary *out_summary) {
     MachineDeltaHeaderSummary delta_header_summary;
@@ -759,8 +767,16 @@ int machine_trace_dump_file(const MachineTraceFile *trace_file,
 
     if (!machine_trace_append_format(
             &builder,
-            "machine_trace profile=%s delta=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_trace profile=%s elf_origin=%s elf_semantics=%s delta=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                trace_file->delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                trace_file->delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_delta_resolution_kind_name(header_summary.delta_resolution_kind),
             machine_step_status_name(header_summary.origin_step_status),
             header_summary.origin_program_counter,
@@ -922,6 +938,18 @@ int machine_trace_report_get_delta_report(const MachineTraceReport *report,
     return 1;
 }
 
+int machine_trace_report_get_source_elf_artifact_summary_artifact(
+    const MachineTraceReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file
+                        .state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file
+                        .launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 #define MACHINE_TRACE_DEFINE_REPORT_ARTIFACT_GETTER(name, field, type) \
 int name(const MachineTraceReport *report, const type **out_summary) { \
     if (!report || !out_summary) { \
@@ -974,8 +1002,16 @@ int machine_trace_dump_report(const MachineTraceReport *report,
 
     if (!machine_trace_append_format(
             &builder,
-            "machine_trace profile=%s delta=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_trace profile=%s elf_origin=%s elf_semantics=%s delta=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_delta_resolution_kind_name(report->header_summary.delta_resolution_kind),
             machine_step_status_name(report->header_summary.origin_step_status),
             report->header_summary.origin_program_counter,
@@ -1026,6 +1062,21 @@ int machine_trace_dump_report(const MachineTraceReport *report,
             report->header_summary.mapped_byte_count,
             report->header_summary.origin_program_counter,
             report->header_summary.origin_stack_pointer) ||
+        !machine_trace_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file
+                    .transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file
+                    .load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_trace_append_format(
             &builder,
             "  policy: profile=%s exact=%s preview=%s class=%s\n",

@@ -59,6 +59,36 @@ static int expect_dump(const MachineElfFile *elf_file, const char *expected_text
     return ok;
 }
 
+static int dumps_match_ignoring_nonroundtrip_metadata(const char *lhs, const char *rhs) {
+    const char *lhs_origin;
+    const char *rhs_origin;
+    const char *lhs_after;
+    const char *rhs_after;
+    size_t lhs_prefix_length;
+    size_t rhs_prefix_length;
+
+    if (!lhs || !rhs) {
+        return 0;
+    }
+    lhs_origin = strstr(lhs, " origin=");
+    rhs_origin = strstr(rhs, " origin=");
+    if (!lhs_origin || !rhs_origin) {
+        return strcmp(lhs, rhs) == 0;
+    }
+    lhs_after = strstr(lhs_origin + 1, " bytes=");
+    rhs_after = strstr(rhs_origin + 1, " bytes=");
+    if (!lhs_after || !rhs_after) {
+        return strcmp(lhs, rhs) == 0;
+    }
+    lhs_prefix_length = (size_t)(lhs_origin - lhs);
+    rhs_prefix_length = (size_t)(rhs_origin - rhs);
+    if (lhs_prefix_length != rhs_prefix_length ||
+        memcmp(lhs, rhs, lhs_prefix_length) != 0) {
+        return 0;
+    }
+    return strcmp(lhs_after, rhs_after) == 0;
+}
+
 static int expect_round_trip_dump(const MachineElfFile *elf_file) {
     unsigned char *bytes = NULL;
     unsigned char *normalized_bytes = NULL;
@@ -92,8 +122,8 @@ static int expect_round_trip_dump(const MachineElfFile *elf_file) {
     }
 
     if (!original_dump || !parsed_dump || !parsed_dump_via_helper ||
-        strcmp(original_dump, parsed_dump) != 0 ||
-        strcmp(original_dump, parsed_dump_via_helper) != 0) {
+        !dumps_match_ignoring_nonroundtrip_metadata(original_dump, parsed_dump) ||
+        !dumps_match_ignoring_nonroundtrip_metadata(original_dump, parsed_dump_via_helper)) {
         fprintf(stderr,
             "[machine-elf] FAIL: round-trip dump mismatch\noriginal:\n%s\nparsed:\n%s\nhelper:\n%s\n",
             original_dump ? original_dump : "<null>",
@@ -140,10 +170,12 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
     size_t byte_count = 0;
     size_t first_global_symbol_index = 0u;
     MachineElfTargetProfile target_profile;
+    MachineElfArtifactSummary artifact_summary;
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     memset(&header_summary, 0, sizeof(header_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
@@ -202,7 +234,11 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
     if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
         !machine_elf_file_get_summary(&elf_file, &section_count, &symbol_count, &relocation_count, &byte_count) ||
         !machine_elf_file_get_target_profile(&elf_file, &target_profile) ||
+        !machine_elf_file_get_artifact_summary(&elf_file, &artifact_summary) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         section_count != 6u || symbol_count != 5u || relocation_count != 2u || byte_count != 468u ||
         !machine_elf_file_get_header_summary(&elf_file, &header_summary) ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
@@ -243,7 +279,7 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
 
     ok &= expect_dump(
         &elf_file,
-        "machine_elf profile=generic-elf32 bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
+        "machine_elf profile=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
         "sections:\n"
         "  esec.0  type=0 file@0 bytes=0 link=0 info=0 align=0 entsize=0\n"
         "  esec.1 .text type=1 file@52 bytes=9 link=0 info=0 align=1 entsize=0\n"
@@ -361,7 +397,7 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
                 memcmp(normalized_bytes, bytes, byte_count) != 0 ||
                 strcmp(
                     reordered_dump,
-                    "machine_elf profile=generic-elf32 bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
+                    "machine_elf profile=generic-elf32 origin=generic-elf32 semantics=imported-relocation-table bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
                     "sections:\n"
                     "  esec.0  type=0 file@0 bytes=0 link=0 info=0 align=0 entsize=0\n"
                     "  esec.1 .text type=1 file@52 bytes=9 link=0 info=0 align=1 entsize=0\n"
@@ -410,7 +446,7 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
                 !unsorted_symbol_dump ||
                 strcmp(
                     unsorted_symbol_dump,
-                    "machine_elf profile=generic-elf32 bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
+                    "machine_elf profile=generic-elf32 origin=generic-elf32 semantics=imported-relocation-table bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
                     "sections:\n"
                     "  esec.0  type=0 file@0 bytes=0 link=0 info=0 align=0 entsize=0\n"
                     "  esec.1 .text type=1 file@52 bytes=9 link=0 info=0 align=1 entsize=0\n"
@@ -471,7 +507,7 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
                 memcmp(normalized_bytes, bytes, byte_count) != 0 ||
                 strcmp(
                     extended_dump,
-                    "machine_elf profile=generic-elf32 bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
+                    "machine_elf profile=generic-elf32 origin=generic-elf32 semantics=imported-relocation-table bytes=468 sections=6 symbols=5 relocations=2 shoff=228\n"
                     "sections:\n"
                     "  esec.0  type=0 file@0 bytes=0 link=0 info=0 align=0 entsize=0\n"
                     "  esec.1 .text type=1 file@52 bytes=9 link=0 info=0 align=1 entsize=0\n"
@@ -500,6 +536,247 @@ static int test_machine_elf_builds_from_machine_ir_report(void) {
     }
 
     free(bytes);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
+    return ok;
+}
+
+static int test_machine_elf_builds_global_object_sections(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrGlobal *global = NULL;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    const MachineElfSection *section = NULL;
+    const MachineElfSymbol *symbol = NULL;
+    unsigned char *bytes = NULL;
+    size_t section_count = 0u;
+    size_t symbol_count = 0u;
+    size_t relocation_count = 0u;
+    size_t byte_count = 0u;
+    size_t first_global_symbol_index = 0u;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+
+    machine_report.program.register_bank.register_count = 1u;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0u;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_report.program.register_bank.registers[0].name) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_global(&machine_report.program, "g", &global, &machine_error) ||
+        !global ||
+        !machine_ir_program_append_global(&machine_report.program, "h", &global, &machine_error) ||
+        !global) {
+        fprintf(stderr, "[machine-elf] FAIL: global-section setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.globals[1].has_initializer = 1;
+    machine_report.program.globals[1].initializer_value = 7;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: global-section setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
+        !machine_elf_file_get_summary(&elf_file, &section_count, &symbol_count, &relocation_count, &byte_count) ||
+        section_count != 8u || symbol_count != 5u || relocation_count != 0u || byte_count == 0u ||
+        !machine_elf_file_get_first_global_symbol_index(&elf_file, &first_global_symbol_index) ||
+        first_global_symbol_index != 2u ||
+        !machine_elf_file_find_section_by_name(&elf_file, ".sbss", NULL, &section) || !section ||
+        section->type != MACHINE_ELF_SECTION_NOBITS || section->byte_count != 4u ||
+        !machine_elf_file_find_section_by_name(&elf_file, ".sdata", NULL, &section) || !section ||
+        section->type != MACHINE_ELF_SECTION_PROGBITS || section->byte_count != 4u ||
+        !machine_elf_file_find_symbol_by_name(&elf_file, "g", NULL, &symbol) || !symbol ||
+        symbol->binding != MACHINE_ELF_SYMBOL_GLOBAL || symbol->type != MACHINE_ELF_SYMBOL_OBJECT ||
+        !symbol->is_defined || symbol->value != 0u || symbol->size != 4u ||
+        !machine_elf_file_find_symbol_by_name(&elf_file, "h", NULL, &symbol) || !symbol ||
+        symbol->binding != MACHINE_ELF_SYMBOL_GLOBAL || symbol->type != MACHINE_ELF_SYMBOL_OBJECT ||
+        !symbol->is_defined || symbol->value != 0u || symbol->size != 4u ||
+        !machine_elf_file_copy_bytes(&elf_file, &bytes, &byte_count, &elf_error) ||
+        !bytes || byte_count < 4u ||
+        bytes[0] != 0x7Fu || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F') {
+        fprintf(stderr, "[machine-elf] FAIL: global-object elf mismatch: %s\n", elf_error.message);
+        ok = 0;
+    }
+    if (ok) {
+        ok &= expect_round_trip_dump(&elf_file);
+    }
+
+    free(bytes);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
+    return ok;
+}
+
+static int test_machine_elf_builds_preview_global_data_relocations(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrGlobal *global = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    const MachineElfRelocation *relocation = NULL;
+    MachineElfRelocationFamilySummary relocation_family_summary;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    memset(&relocation_family_summary, 0, sizeof(relocation_family_summary));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+
+    machine_report.program.register_bank.register_count = 1u;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0u;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_report.program.register_bank.registers[0].name) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_global(&machine_report.program, "g", &global, &machine_error) ||
+        !global ||
+        !machine_ir_program_append_global(&machine_report.program, "h", &global, &machine_error) ||
+        !global) {
+        fprintf(stderr, "[machine-elf] FAIL: preview-global-data setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.globals[1].has_initializer = 1;
+    machine_report.program.globals[1].initializer_value = 7;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview-global-data setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_global(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview-global-data setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = machine_ir_slot_global(1u);
+    instruction.as.store.value = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview-global-data setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_elf_build_from_machine_ir_report_with_profile(
+            &machine_report,
+            MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW,
+            &elf_file,
+            &elf_error) ||
+        !machine_elf_file_get_relocation_family_summary(&elf_file, &relocation_family_summary) ||
+        relocation_family_summary.call_relocation_count != 0u ||
+        relocation_family_summary.primary_control_relocation_count != 0u ||
+        relocation_family_summary.secondary_control_relocation_count != 0u ||
+        relocation_family_summary.data_address_relocation_count != 2u ||
+        relocation_family_summary.data_load_relocation_count != 1u ||
+        relocation_family_summary.data_store_relocation_count != 1u ||
+        elf_file.relocation_count != 4u ||
+        !machine_elf_file_get_relocation(&elf_file, 0u, &relocation) || !relocation ||
+        relocation->source_kind != MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET ||
+        relocation->type != (uint32_t)R_RISCV_HI20 ||
+        !relocation->symbol_name || strcmp(relocation->symbol_name, "g") != 0 ||
+        !machine_elf_file_get_relocation(&elf_file, 1u, &relocation) || !relocation ||
+        relocation->source_kind != MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET ||
+        relocation->type != (uint32_t)R_RISCV_LO12_I ||
+        !relocation->symbol_name || strcmp(relocation->symbol_name, "g") != 0 ||
+        !machine_elf_file_get_relocation(&elf_file, 2u, &relocation) || !relocation ||
+        relocation->source_kind != MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET ||
+        relocation->type != (uint32_t)R_RISCV_HI20 ||
+        !relocation->symbol_name || strcmp(relocation->symbol_name, "h") != 0 ||
+        !machine_elf_file_get_relocation(&elf_file, 3u, &relocation) || !relocation ||
+        relocation->source_kind != MACHINE_BYTES_FIXUP_DATA_STORE_TARGET ||
+        relocation->type != (uint32_t)R_RISCV_LO12_S ||
+        !relocation->symbol_name || strcmp(relocation->symbol_name, "h") != 0) {
+        fprintf(stderr,
+            "[machine-elf] FAIL: preview global data relocation mismatch: %s (reloc_count=%zu)\n",
+            elf_error.message,
+            elf_file.relocation_count);
+        if (machine_elf_file_get_relocation(&elf_file, 0u, &relocation) && relocation) {
+            fprintf(stderr,
+                "[machine-elf] reloc0 kind=%d type=%u name=%s\n",
+                (int)relocation->source_kind,
+                relocation->type,
+                relocation->symbol_name ? relocation->symbol_name : "<null>");
+        }
+        if (machine_elf_file_get_relocation(&elf_file, 1u, &relocation) && relocation) {
+            fprintf(stderr,
+                "[machine-elf] reloc1 kind=%d type=%u name=%s\n",
+                (int)relocation->source_kind,
+                relocation->type,
+                relocation->symbol_name ? relocation->symbol_name : "<null>");
+        }
+        if (machine_elf_file_get_relocation(&elf_file, 2u, &relocation) && relocation) {
+            fprintf(stderr,
+                "[machine-elf] reloc2 kind=%d type=%u name=%s\n",
+                (int)relocation->source_kind,
+                relocation->type,
+                relocation->symbol_name ? relocation->symbol_name : "<null>");
+        }
+        if (machine_elf_file_get_relocation(&elf_file, 3u, &relocation) && relocation) {
+            fprintf(stderr,
+                "[machine-elf] reloc3 kind=%d type=%u name=%s\n",
+                (int)relocation->source_kind,
+                relocation->type,
+                relocation->symbol_name ? relocation->symbol_name : "<null>");
+        }
+        ok = 0;
+    }
+
     machine_ir_allocate_rewrite_report_free(&machine_report);
     machine_elf_file_free(&elf_file);
     return ok;
@@ -2108,14 +2385,17 @@ static int test_machine_elf_builds_riscv32_preview_profile(void) {
     const MachineElfSection *generic_text_section = NULL;
     const MachineElfRelocation *relocation = NULL;
     MachineElfTargetProfile target_profile;
+    MachineElfArtifactSummary artifact_summary;
     unsigned char *preview_bytes = NULL;
     unsigned char *generic_bytes = NULL;
     size_t preview_byte_count = 0u;
     size_t generic_byte_count = 0u;
+    size_t relocation_count = 0u;
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     memset(&header_summary, 0, sizeof(header_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
@@ -2179,26 +2459,28 @@ static int test_machine_elf_builds_riscv32_preview_profile(void) {
             &elf_error) ||
         !machine_elf_build_from_machine_ir_report(&machine_report, &generic_elf_file, &elf_error) ||
         !machine_elf_file_get_target_profile(&elf_file, &target_profile) ||
+        !machine_elf_file_get_artifact_summary(&elf_file, &artifact_summary) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         !machine_elf_file_get_header_summary(&elf_file, &header_summary) ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
         header_summary.machine != (uint16_t)EM_RISCV ||
         header_summary.flags != 0u ||
         !machine_elf_file_get_text_section(&elf_file, NULL, &text_section) || !text_section ||
-        text_section->byte_count != 28u ||
+        text_section->byte_count != 24u ||
         !machine_elf_file_get_text_section(&generic_elf_file, NULL, &generic_text_section) || !generic_text_section ||
         generic_text_section->byte_count != 9u ||
         !machine_elf_file_copy_bytes(&elf_file, &preview_bytes, &preview_byte_count, &elf_error) ||
         !machine_elf_file_copy_bytes(&generic_elf_file, &generic_bytes, &generic_byte_count, &elf_error) ||
+        !machine_elf_file_get_summary(&elf_file, NULL, NULL, &relocation_count, NULL) ||
+        relocation_count != 1u ||
         !preview_bytes || !generic_bytes ||
         !machine_elf_file_get_relocation(&elf_file, 0u, &relocation) || !relocation ||
         relocation->source_kind != MACHINE_BYTES_FIXUP_CONTROL_PRIMARY ||
         relocation->offset != 4u ||
-        relocation->type != (uint32_t)R_RISCV_BRANCH ||
-        !machine_elf_file_get_relocation(&elf_file, 1u, &relocation) || !relocation ||
-        relocation->source_kind != MACHINE_BYTES_FIXUP_CONTROL_SECONDARY ||
-        relocation->offset != 8u ||
-        relocation->type != (uint32_t)R_RISCV_JAL) {
+        relocation->type != (uint32_t)R_RISCV_BRANCH) {
         fprintf(stderr, "[machine-elf] FAIL: riscv preview mismatch: %s\n", elf_error.message);
         ok = 0;
     }
@@ -2311,6 +2593,109 @@ static int test_machine_elf_builds_i386_preview_profile(void) {
         ok = 0;
     }
 
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
+    return ok;
+}
+
+static int test_machine_elf_preview_verifier_rejects_secondary_control_relocation_under_direct_semantics(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+
+    machine_report.program.register_bank.register_count = 1u;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0u;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview verifier setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview verifier setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_EQ;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 2, 1, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), &machine_error) ||
+        !machine_elf_build_from_machine_ir_report_with_profile(
+            &machine_report,
+            MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW,
+            &elf_file,
+            &elf_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: preview verifier setup failed: %s\n", elf_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    elf_file.relocation_count = 2u;
+    elf_file.relocation_capacity = 2u;
+    elf_file.relocations = (MachineElfRelocation *)realloc(elf_file.relocations, 2u * sizeof(MachineElfRelocation));
+    if (!elf_file.relocations) {
+        fprintf(stderr, "[machine-elf] FAIL: preview verifier setup realloc failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+    memset(&elf_file.relocations[1], 0, sizeof(elf_file.relocations[1]));
+    elf_file.relocations[1].source_kind = MACHINE_BYTES_FIXUP_CONTROL_SECONDARY;
+    elf_file.relocations[1].section_index = elf_file.relocations[0].section_index;
+    elf_file.relocations[1].offset = 8u;
+    elf_file.relocations[1].symbol_index = 2u;
+    elf_file.relocations[1].type = (uint32_t)R_RISCV_JAL;
+    elf_file.relocations[1].symbol_name = dup_text("F0.L1");
+    if (!elf_file.relocations[1].symbol_name) {
+        fprintf(stderr, "[machine-elf] FAIL: preview verifier setup symbol copy failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+    if (machine_elf_refresh_bytes(&elf_file, &elf_error) ||
+        strstr(elf_error.message, "MACHINE-ELF-133") == NULL) {
+        fprintf(stderr, "[machine-elf] FAIL: direct preview secondary relocation was not rejected: %s\n",
+            elf_error.message);
+        ok = 0;
+    }
+
+cleanup:
     machine_ir_allocate_rewrite_report_free(&machine_report);
     machine_elf_file_free(&elf_file);
     return ok;
@@ -2584,10 +2969,13 @@ static int test_machine_elf_normalize_bytes_with_profile_retargets_header_and_re
     size_t byte_count = 0u;
     size_t normalized_riscv_count = 0u;
     size_t normalized_i386_count = 0u;
+    size_t relocation_count = 0u;
+    MachineElfArtifactSummary artifact_summary;
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     memset(&header_summary, 0, sizeof(header_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
@@ -2657,9 +3045,15 @@ static int test_machine_elf_normalize_bytes_with_profile_retargets_header_and_re
             &normalized_riscv_count,
             &elf_error) ||
         !machine_elf_parse_file_from_bytes(normalized_riscv, normalized_riscv_count, &parsed_file, &elf_error) ||
+        !machine_elf_file_get_artifact_summary(&parsed_file, &artifact_summary) ||
         !machine_elf_file_get_header_summary(&parsed_file, &header_summary) ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
         header_summary.machine != (uint16_t)EM_RISCV ||
+        !machine_elf_file_get_summary(&parsed_file, NULL, NULL, &relocation_count, NULL) ||
+        relocation_count != 2u ||
         !machine_elf_file_get_relocation(&parsed_file, 0u, &relocation) || !relocation ||
         relocation->type != (uint32_t)R_RISCV_BRANCH ||
         !machine_elf_file_get_relocation(&parsed_file, 1u, &relocation) || !relocation ||
@@ -2673,7 +3067,11 @@ static int test_machine_elf_normalize_bytes_with_profile_retargets_header_and_re
             &elf_error) ||
         normalized_i386_count != byte_count ||
         !machine_elf_parse_file_from_bytes(normalized_i386, normalized_i386_count, &parsed_file, &elf_error) ||
+        !machine_elf_file_get_artifact_summary(&parsed_file, &artifact_summary) ||
         !machine_elf_file_get_header_summary(&parsed_file, &header_summary) ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         header_summary.machine != (uint16_t)EM_386 ||
         !machine_elf_file_get_relocation(&parsed_file, 0u, &relocation) || !relocation ||
@@ -2701,6 +3099,7 @@ static int test_machine_elf_clone_isolated_mutation_and_profile_dump(void) {
     MachineElfFile elf_file;
     MachineElfFile cloned_file;
     MachineElfError elf_error;
+    MachineElfArtifactSummary artifact_summary;
     unsigned char *bytes = NULL;
     size_t byte_count = 0u;
     char *profile_dump = NULL;
@@ -2709,6 +3108,7 @@ static int test_machine_elf_clone_isolated_mutation_and_profile_dump(void) {
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
     machine_elf_file_init(&cloned_file);
@@ -2768,7 +3168,13 @@ static int test_machine_elf_clone_isolated_mutation_and_profile_dump(void) {
     }
 
     if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
-        !machine_elf_clone_file(&elf_file, &cloned_file, &elf_error)) {
+        !machine_elf_file_get_artifact_summary(&elf_file, &artifact_summary) ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
+        !machine_elf_clone_file(&elf_file, &cloned_file, &elf_error) ||
+        !machine_elf_file_get_artifact_summary(&cloned_file, &artifact_summary) ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS) {
         fprintf(stderr, "[machine-elf] FAIL: clone failed: %s\n", elf_error.message);
         ok = 0;
         goto cleanup;
@@ -2794,7 +3200,7 @@ static int test_machine_elf_clone_isolated_mutation_and_profile_dump(void) {
             &profile_dump,
             &elf_error) ||
         !profile_dump ||
-        strstr(profile_dump, "machine_elf profile=i386-preview") == NULL ||
+        strstr(profile_dump, "machine_elf profile=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         strstr(profile_dump, "type=2") == NULL ||
         strstr(profile_dump, "type=11") == NULL) {
         fprintf(stderr, "[machine-elf] FAIL: profile dump helper mismatch: %s\n", elf_error.message);
@@ -2819,6 +3225,7 @@ static int test_machine_elf_build_file_from_bytes_helpers(void) {
     MachineElfFile rebuilt_file;
     MachineElfFile rebuilt_i386_file;
     MachineElfError elf_error;
+    MachineElfArtifactSummary artifact_summary;
     MachineElfHeaderSummary header_summary;
     const MachineElfRelocation *relocation = NULL;
     unsigned char *bytes = NULL;
@@ -2828,6 +3235,7 @@ static int test_machine_elf_build_file_from_bytes_helpers(void) {
 
     memset(&machine_error, 0, sizeof(machine_error));
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     memset(&header_summary, 0, sizeof(header_summary));
     machine_ir_allocate_rewrite_report_init(&machine_report);
     machine_elf_file_init(&elf_file);
@@ -2894,8 +3302,12 @@ static int test_machine_elf_build_file_from_bytes_helpers(void) {
     if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
         !machine_elf_file_copy_bytes(&elf_file, &bytes, &byte_count, &elf_error) ||
         !machine_elf_build_file_from_bytes(bytes, byte_count, &rebuilt_file, &elf_error) ||
+        !machine_elf_file_get_artifact_summary(&rebuilt_file, &artifact_summary) ||
         !machine_elf_file_get_target_profile(&rebuilt_file, &target_profile) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
         !machine_elf_file_get_header_summary(&rebuilt_file, &header_summary) ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
         header_summary.machine != 0u ||
@@ -2905,8 +3317,12 @@ static int test_machine_elf_build_file_from_bytes_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &rebuilt_i386_file,
             &elf_error) ||
+        !machine_elf_file_get_artifact_summary(&rebuilt_i386_file, &artifact_summary) ||
         !machine_elf_file_get_target_profile(&rebuilt_i386_file, &target_profile) ||
         target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary.origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary.relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
         !machine_elf_file_get_header_summary(&rebuilt_i386_file, &header_summary) ||
         header_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         header_summary.machine != (uint16_t)EM_386 ||
@@ -2937,12 +3353,15 @@ static int test_machine_elf_build_report_helpers(void) {
     MachineElfReport report;
     MachineElfReport riscv_report;
     MachineElfError elf_error;
+    const MachineElfArtifactSummary *artifact_summary = NULL;
+    const MachineElfRelocationFamilySummary *relocation_family_summary = NULL;
     const MachineElfHeaderSummary *header_summary = NULL;
     const MachineElfSectionSummary *section_summary = NULL;
     const MachineElfSymbolSummary *symbol_summary = NULL;
     const MachineElfRelocationSummary *relocation_summary = NULL;
     unsigned char *bytes = NULL;
     size_t byte_count = 0u;
+    size_t relocation_count = 0u;
     char *dump_text = NULL;
     int ok = 1;
 
@@ -3018,6 +3437,15 @@ static int test_machine_elf_build_report_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &report,
             &elf_error) ||
+        !machine_elf_report_get_artifact_summary_artifact(&report, &artifact_summary) || !artifact_summary ||
+        !machine_elf_report_get_relocation_family_summary_artifact(&report, &relocation_family_summary) ||
+        !relocation_family_summary ||
+        artifact_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary->origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE ||
+        relocation_family_summary->call_relocation_count != 0u ||
+        relocation_family_summary->primary_control_relocation_count != 1u ||
+        relocation_family_summary->secondary_control_relocation_count != 1u ||
         !machine_elf_report_get_header_summary_artifact(&report, &header_summary) || !header_summary ||
         header_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         header_summary->machine != (uint16_t)EM_386 ||
@@ -3028,17 +3456,28 @@ static int test_machine_elf_build_report_helpers(void) {
         !machine_elf_report_get_relocation_summary(&report, 0u, &relocation_summary) || !relocation_summary ||
         relocation_summary->type != (uint32_t)R_386_PC32 ||
         !machine_elf_dump_report(&report, &dump_text, &elf_error) ||
-        !dump_text || strstr(dump_text, "machine_elf profile=i386-preview") == NULL ||
+        !dump_text || strstr(dump_text, "machine_elf profile=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         !machine_elf_build_report_from_machine_ir_report_with_profile(
             &machine_report,
             MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW,
             &riscv_report,
             &elf_error) ||
+        !machine_elf_report_get_artifact_summary_artifact(&riscv_report, &artifact_summary) || !artifact_summary ||
+        !machine_elf_report_get_relocation_family_summary_artifact(&riscv_report, &relocation_family_summary) ||
+        !relocation_family_summary ||
+        artifact_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary->origin_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        artifact_summary->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
+        relocation_family_summary->call_relocation_count != 0u ||
+        relocation_family_summary->primary_control_relocation_count != 1u ||
+        relocation_family_summary->secondary_control_relocation_count != 0u ||
+        !machine_elf_report_get_summary(&riscv_report, NULL, NULL, &relocation_count, NULL) ||
+        relocation_count != 1u ||
         !machine_elf_report_get_header_summary_artifact(&riscv_report, &header_summary) || !header_summary ||
         header_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
         header_summary->machine != (uint16_t)EM_RISCV ||
-        !machine_elf_report_get_relocation_summary(&riscv_report, 1u, &relocation_summary) || !relocation_summary ||
-        relocation_summary->type != (uint32_t)R_RISCV_JAL) {
+        !machine_elf_report_get_relocation_summary(&riscv_report, 0u, &relocation_summary) || !relocation_summary ||
+        relocation_summary->type != (uint32_t)R_RISCV_BRANCH) {
         fprintf(stderr, "[machine-elf] FAIL: report helper mismatch: %s\n", elf_error.message);
         ok = 0;
     }
@@ -3060,6 +3499,7 @@ static int test_machine_elf_report_summary_and_dump_helpers(void) {
     MachineElfFile elf_file;
     MachineElfReport report;
     MachineElfError elf_error;
+    const MachineElfArtifactSummary *artifact_summary = NULL;
     unsigned char *bytes = NULL;
     size_t section_count = 0u;
     size_t symbol_count = 0u;
@@ -3131,6 +3571,10 @@ static int test_machine_elf_report_summary_and_dump_helpers(void) {
     if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
         !machine_elf_file_copy_bytes(&elf_file, &bytes, &byte_count, &elf_error) ||
         !machine_elf_build_report_from_file(&elf_file, &report, &elf_error) ||
+        !machine_elf_report_get_artifact_summary_artifact(&report, &artifact_summary) || !artifact_summary ||
+        artifact_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary->origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         !machine_elf_report_get_summary(&report, &section_count, &symbol_count, &relocation_count, &byte_count) ||
         section_count != 6u || symbol_count != 5u || relocation_count != 2u || byte_count != 468u ||
         !machine_elf_build_report_dump_from_bytes_with_profile(
@@ -3140,7 +3584,7 @@ static int test_machine_elf_report_summary_and_dump_helpers(void) {
             &dump_text,
             &elf_error) ||
         !dump_text ||
-        strstr(dump_text, "machine_elf profile=riscv32-preview") == NULL ||
+        strstr(dump_text, "machine_elf profile=riscv32-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         strstr(dump_text, "type=16") == NULL ||
         strstr(dump_text, "type=17") == NULL) {
         fprintf(stderr, "[machine-elf] FAIL: report-summary helper mismatch: %s\n", elf_error.message);
@@ -3163,6 +3607,7 @@ static int test_machine_elf_profile_helpers_from_file_and_machine_ir(void) {
     MachineElfFile elf_file;
     MachineElfReport i386_report;
     MachineElfError elf_error;
+    const MachineElfArtifactSummary *artifact_summary = NULL;
     const MachineElfHeaderSummary *header_summary = NULL;
     const MachineElfRelocationSummary *relocation_summary = NULL;
     char *dump_text = NULL;
@@ -3234,6 +3679,10 @@ static int test_machine_elf_profile_helpers_from_file_and_machine_ir(void) {
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
             &i386_report,
             &elf_error) ||
+        !machine_elf_report_get_artifact_summary_artifact(&i386_report, &artifact_summary) || !artifact_summary ||
+        artifact_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        artifact_summary->origin_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        artifact_summary->relocation_semantics != MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS ||
         !machine_elf_report_get_header_summary_artifact(&i386_report, &header_summary) || !header_summary ||
         header_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
         header_summary->machine != (uint16_t)EM_386 ||
@@ -3245,7 +3694,7 @@ static int test_machine_elf_profile_helpers_from_file_and_machine_ir(void) {
             &dump_text,
             &elf_error) ||
         !dump_text ||
-        strstr(dump_text, "machine_elf profile=riscv32-preview") == NULL ||
+        strstr(dump_text, "machine_elf profile=riscv32-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
         strstr(dump_text, "type=16") == NULL ||
         strstr(dump_text, "type=17") == NULL) {
         fprintf(stderr, "[machine-elf] FAIL: profile helper mismatch: %s\n", elf_error.message);
@@ -3430,11 +3879,20 @@ static int test_machine_elf_target_policy_summary_helpers(void) {
             MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
             &policy_summary) ||
         policy_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32 ||
+        policy_summary.bytes_policy.target_profile != MACHINE_BYTES_TARGET_PROFILE_GENERIC ||
+        policy_summary.bytes_policy.max_logical_machine_register_count != 0u ||
+        policy_summary.bytes_policy.preserves_known_internal_pc_relative_targets ||
+        policy_summary.bytes_policy.preserves_direct_fallthrough_honesty ||
+        policy_summary.bytes_policy.uses_paired_global_data_addressing ||
+        policy_summary.bytes_policy.supports_rv32m_alu_ops ||
         policy_summary.machine != 0u ||
         policy_summary.flags != 0u ||
         policy_summary.call_relocation_type != 1u ||
         policy_summary.primary_control_relocation_type != 2u ||
         policy_summary.secondary_control_relocation_type != 3u ||
+        policy_summary.data_address_relocation_type != 4u ||
+        policy_summary.data_load_relocation_type != 5u ||
+        policy_summary.data_store_relocation_type != 6u ||
         !machine_elf_build_from_machine_ir_report_with_profile(
             &machine_report,
             MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
@@ -3442,11 +3900,20 @@ static int test_machine_elf_target_policy_summary_helpers(void) {
             &elf_error) ||
         !machine_elf_file_get_target_policy_summary(&elf_file, &policy_summary) ||
         policy_summary.target_profile != MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW ||
+        policy_summary.bytes_policy.target_profile != MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW ||
+        policy_summary.bytes_policy.max_logical_machine_register_count != 0u ||
+        policy_summary.bytes_policy.preserves_known_internal_pc_relative_targets ||
+        policy_summary.bytes_policy.preserves_direct_fallthrough_honesty ||
+        policy_summary.bytes_policy.uses_paired_global_data_addressing ||
+        policy_summary.bytes_policy.supports_rv32m_alu_ops ||
         policy_summary.machine != (uint16_t)EM_386 ||
         policy_summary.flags != 0u ||
         policy_summary.call_relocation_type != (uint32_t)R_386_PLT32 ||
         policy_summary.primary_control_relocation_type != (uint32_t)R_386_PC32 ||
         policy_summary.secondary_control_relocation_type != (uint32_t)R_386_32PLT ||
+        policy_summary.data_address_relocation_type != (uint32_t)R_386_32 ||
+        policy_summary.data_load_relocation_type != (uint32_t)R_386_GOT32 ||
+        policy_summary.data_store_relocation_type != (uint32_t)R_386_GOTOFF ||
         !machine_elf_build_report_from_file_with_profile(
             &elf_file,
             MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW,
@@ -3455,11 +3922,20 @@ static int test_machine_elf_target_policy_summary_helpers(void) {
         !machine_elf_report_get_target_policy_summary_artifact(&report, &report_policy_summary) ||
         !report_policy_summary ||
         report_policy_summary->target_profile != MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW ||
+        report_policy_summary->bytes_policy.target_profile != MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW ||
+        report_policy_summary->bytes_policy.max_logical_machine_register_count != 8u ||
+        !report_policy_summary->bytes_policy.preserves_known_internal_pc_relative_targets ||
+        !report_policy_summary->bytes_policy.preserves_direct_fallthrough_honesty ||
+        !report_policy_summary->bytes_policy.uses_paired_global_data_addressing ||
+        !report_policy_summary->bytes_policy.supports_rv32m_alu_ops ||
         report_policy_summary->machine != (uint16_t)EM_RISCV ||
         report_policy_summary->flags != 0u ||
         report_policy_summary->call_relocation_type != (uint32_t)R_RISCV_CALL ||
         report_policy_summary->primary_control_relocation_type != (uint32_t)R_RISCV_BRANCH ||
-        report_policy_summary->secondary_control_relocation_type != (uint32_t)R_RISCV_JAL) {
+        report_policy_summary->secondary_control_relocation_type != (uint32_t)R_RISCV_JAL ||
+        report_policy_summary->data_address_relocation_type != (uint32_t)R_RISCV_HI20 ||
+        report_policy_summary->data_load_relocation_type != (uint32_t)R_RISCV_LO12_I ||
+        report_policy_summary->data_store_relocation_type != (uint32_t)R_RISCV_LO12_S) {
         fprintf(stderr, "[machine-elf] FAIL: target-policy helper mismatch: %s\n", elf_error.message);
         ok = 0;
     }
@@ -3605,6 +4081,8 @@ int main(void) {
     int ok = 1;
 
     ok &= test_machine_elf_builds_from_machine_ir_report();
+    ok &= test_machine_elf_builds_global_object_sections();
+    ok &= test_machine_elf_builds_preview_global_data_relocations();
     ok &= test_machine_elf_parse_accepts_droppable_local_section_symbols();
     ok &= test_machine_elf_parse_accepts_droppable_local_file_symbol();
     ok &= test_machine_elf_parse_accepts_droppable_local_symbol_on_extra_section();
@@ -3617,6 +4095,7 @@ int main(void) {
     ok &= test_machine_elf_parse_accepts_missing_rel_text_section();
     ok &= test_machine_elf_builds_from_machine_container_with_external_call();
     ok &= test_machine_elf_builds_riscv32_preview_profile();
+    ok &= test_machine_elf_preview_verifier_rejects_secondary_control_relocation_under_direct_semantics();
     ok &= test_machine_elf_builds_i386_preview_profile();
     ok &= test_machine_elf_refresh_bytes_reprofiles_and_renames_symbol();
     ok &= test_machine_elf_builds_i386_preview_external_call();

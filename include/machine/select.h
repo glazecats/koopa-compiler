@@ -179,6 +179,14 @@ typedef struct {
 } MachineSelectProgram;
 
 typedef struct {
+    size_t current_riscv32_preview_logical_register_cap;
+    int supports_early_immediate_legalization;
+    int supports_compare_branch_fusion;
+    int preserves_spill_operands_for_later_materialization;
+    int preserves_global_slot_ops_for_later_address_formation;
+} MachineSelectTargetPolicySummary;
+
+typedef struct {
     size_t block_count;
     size_t op_count;
     size_t call_count;
@@ -255,6 +263,7 @@ typedef enum {
 
 typedef struct {
     MachineSelectProgram program;
+    MachineSelectTargetPolicySummary target_policy_summary;
     MachineSelectFunctionSummary *function_summaries;
     size_t function_summary_count;
     size_t *function_block_summary_offsets;
@@ -274,6 +283,7 @@ void machine_select_program_init(MachineSelectProgram *program);
 void machine_select_program_free(MachineSelectProgram *program);
 void machine_select_lower_report_init(MachineSelectLowerReport *report);
 void machine_select_lower_report_free(MachineSelectLowerReport *report);
+int machine_select_get_target_policy_summary(MachineSelectTargetPolicySummary *out_summary);
 int machine_select_clone_program(const MachineSelectProgram *source,
     MachineSelectProgram *out_program,
     MachineSelectError *error);
@@ -305,6 +315,12 @@ int machine_select_program_get_summary(const MachineSelectProgram *program,
     size_t *out_register_count,
     size_t *out_global_count,
     size_t *out_function_count);
+int machine_select_program_get_target_policy_summary(const MachineSelectProgram *program,
+    MachineSelectTargetPolicySummary *out_summary);
+int machine_select_verify_current_riscv32_preview_compatibility(const MachineSelectProgram *program,
+    MachineSelectError *error);
+int machine_select_verify_current_riscv32_preview_bytes_compatibility(const MachineSelectProgram *program,
+    MachineSelectError *error);
 int machine_select_program_get_function_by_name(const MachineSelectProgram *program,
     const char *function_name,
     size_t *out_function_index,
@@ -385,6 +401,12 @@ int machine_select_lower_report_get_summary(const MachineSelectLowerReport *repo
     size_t *out_functions_with_memory_ops_count,
     size_t *out_functions_with_branches_count);
 int machine_select_lower_report_refresh(MachineSelectLowerReport *report, MachineSelectError *error);
+int machine_select_lower_report_get_target_policy_summary_artifact(const MachineSelectLowerReport *report,
+    const MachineSelectTargetPolicySummary **out_summary);
+int machine_select_lower_report_verify_current_riscv32_preview_compatibility(const MachineSelectLowerReport *report,
+    MachineSelectError *error);
+int machine_select_lower_report_verify_current_riscv32_preview_bytes_compatibility(const MachineSelectLowerReport *report,
+    MachineSelectError *error);
 int machine_select_lower_report_get_program(const MachineSelectLowerReport *report,
     const MachineSelectProgram **out_program);
 int machine_select_lower_report_get_function(const MachineSelectLowerReport *report,

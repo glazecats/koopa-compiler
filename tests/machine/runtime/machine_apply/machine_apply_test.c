@@ -151,6 +151,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_apply_file(const MachineApplyFile *apply_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineApplyResolutionKind resolution_kind,
     MachineApplyKind apply_kind,
     int has_applied_state,
@@ -161,6 +163,7 @@ static int verify_apply_file(const MachineApplyFile *apply_file,
     MachineApplyHeaderSummary header_summary;
     MachineApplyTargetPolicySummary target_policy_summary;
     MachineApplySummary apply_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineApplyError apply_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -168,9 +171,14 @@ static int verify_apply_file(const MachineApplyFile *apply_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&apply_summary, 0, sizeof(apply_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&apply_error, 0, sizeof(apply_error));
 
     if (!machine_apply_verify_file(apply_file, &apply_error) ||
+        !machine_apply_file_get_source_elf_artifact_summary(apply_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_apply_file_get_header_summary(apply_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_apply_file_get_target_policy_summary(apply_file, &target_policy_summary) ||
@@ -198,6 +206,8 @@ cleanup:
 static int verify_apply_report(const MachineApplyReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineApplyResolutionKind resolution_kind,
     MachineApplyKind apply_kind,
     const char *expected_dump) {
@@ -207,6 +217,7 @@ static int verify_apply_report(const MachineApplyReport *report,
     const MachineApplyHeaderSummary *header_summary = NULL;
     const MachineApplyTargetPolicySummary *target_policy_summary = NULL;
     const MachineApplySummary *apply_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineApplyError apply_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -217,8 +228,13 @@ static int verify_apply_report(const MachineApplyReport *report,
     if (!machine_apply_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_apply_report_get_file(report, &apply_file) || !apply_file ||
         !machine_apply_report_get_commit_report(report, &commit_report) || !commit_report ||
+        !machine_apply_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_apply_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_apply_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->surfaces_call_application ||
         !machine_apply_report_get_apply_summary_artifact(report, &apply_summary) ||
@@ -272,13 +288,15 @@ static int test_machine_apply_mainline(void) {
         &apply_file,
         "apply-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_PENDING_REGISTER_APPLICATION,
         MACHINE_APPLY_KIND_REGISTER,
         0,
         1,
         0,
         0u,
-        "machine_apply profile=generic-elf32 commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_apply_clone_file(&apply_file, &cloned_apply_file, &apply_error) ||
@@ -293,12 +311,15 @@ static int test_machine_apply_mainline(void) {
         &apply_report,
         "apply-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_PENDING_REGISTER_APPLICATION,
         MACHINE_APPLY_KIND_REGISTER,
-        "machine_apply profile=generic-elf32 commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: commit=deferred-register-commit status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 state=yes register=yes slot=yes call=yes preview=yes\n"
         "  apply: resolution=pending-register-application kind=register applied=no preview=yes imm=- apc=- ppc=0x1001 targets=[] return-imm=-\n");
 
@@ -357,13 +378,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_APPLIED_STATE,
         MACHINE_APPLY_KIND_STATE,
         1,
         1,
         1,
         7u,
-        "machine_apply profile=generic-elf32 commit=committed-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=committed-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=applied-state kind=state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 has-applied-state=yes applied-status=halted applied-pc=0x1000 applied-segment=- applied-byte=- has-preview-state=yes preview-status=halted preview-pc=0x1000 preview-segment=- preview-byte=- targets=[] return-imm=7\n");
 
     machine_apply_report_free(&apply_report);
@@ -381,13 +404,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_APPLY_KIND_NONE,
         0,
         0,
         1,
         1u,
-        "machine_apply profile=generic-elf32 commit=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=blocked-on-control kind=none commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=no preview-status=- preview-pc=- preview-segment=- preview-byte=- targets=[1] return-imm=-\n");
 
     machine_apply_report_free(&apply_report);
@@ -405,13 +430,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_APPLY_KIND_NONE,
         0,
         0,
         0,
         0u,
-        "machine_apply profile=generic-elf32 commit=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=blocked-unsupported kind=none commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=no preview-status=- preview-pc=- preview-segment=- preview-byte=- targets=[] return-imm=-\n");
 
     machine_apply_report_free(&apply_report);
@@ -428,13 +455,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_PENDING_LOCAL_APPLICATION,
         MACHINE_APPLY_KIND_LOCAL_SLOT,
         0,
         1,
         1,
         7u,
-        "machine_apply profile=generic-elf32 commit=deferred-local-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-local-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-local-application kind=local-slot commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xaa targets=[] return-imm=-\n");
 
     machine_apply_file_free(&apply_file);
@@ -450,13 +479,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_PENDING_GLOBAL_APPLICATION,
         MACHINE_APPLY_KIND_GLOBAL_SLOT,
         0,
         1,
         1,
         5u,
-        "machine_apply profile=generic-elf32 commit=deferred-global-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-global-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-global-application kind=global-slot commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xab targets=[] return-imm=-\n");
 
     machine_apply_file_free(&apply_file);
@@ -472,13 +503,15 @@ static int test_machine_apply_custom_step_cases(void) {
         &apply_file,
         "apply-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_APPLY_RESOLUTION_PENDING_CALL_APPLICATION,
         MACHINE_APPLY_KIND_CALL,
         0,
         1,
         1,
         2u,
-        "machine_apply profile=generic-elf32 commit=deferred-call-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-call-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-call-application kind=call commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xac targets=[] return-imm=-\n");
 
 cleanup:
@@ -522,13 +555,14 @@ static int test_machine_apply_i386_bridge(void) {
     }
 
     ok &= expect_text("apply i386 dump wrapper", dump_text,
-        "machine_apply profile=i386-preview commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("apply i386 report dump wrapper", report_dump_text,
-        "machine_apply profile=i386-preview commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_apply profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: commit=deferred-register-commit status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview state=yes register=yes slot=yes call=yes preview=yes\n"
         "  apply: resolution=pending-register-application kind=register applied=no preview=yes imm=- apc=- ppc=0x8048001 targets=[] return-imm=-\n");
 

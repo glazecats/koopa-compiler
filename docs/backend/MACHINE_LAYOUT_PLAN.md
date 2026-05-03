@@ -168,6 +168,28 @@ Do not start with:
     single-predecessor fallthrough preference, the local trace-span tie-break,
     and the "do not count an immediately deferred shared tail as ordinary
     local trace" scoring rule now all have explicit compare-side siblings too
+  - that same direct-side surface now also has a first explicit preview-lane
+    compatibility summary plus verifier entrypoint, so the current preview
+    register-cap / spill-preservation / global-slot-preservation /
+    fallthrough-shape facts are no longer visible only above layout in
+    `machine_select` or only below it in later emit/bytes layers
+  - that same layout side now also has a first direct program/function/block
+    query surface instead of leaving consumers with only dumps plus
+    `compute_summary`: callers can now query whole-program counts, look up one
+    function by index or name, inspect one function summary, and recover one
+    layout block summary directly from the structured artifact
+  - that same layout side now also has a first structured report artifact
+    instead of forcing later consumers to choose between raw program structs
+    and textual dumps: callers can now build/refresh/dump a layout report,
+    recover cached function/block summaries plus policy facts from it, and
+    stay on one artifact boundary before entering `machine_emit`
+  - that same layout-side compatibility surface now also has a first deeper
+    downstream bytes-bridge check instead of only local shape screening:
+    callers can now ask `machine_layout` to validate current
+    `riscv32-preview` compatibility by actually attempting the
+    `machine_layout -> machine_emit -> machine_encode -> machine_bytes`
+    preview path, so bytes-side range failures surface several stages earlier
+    than before
   - that same direct compare-family coverage now also reaches one seed-class
     ordering boundary that used to be locked only through later bridge work:
     `ready continuation > attached-but-unready` now has an explicit

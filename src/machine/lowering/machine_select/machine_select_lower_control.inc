@@ -67,6 +67,9 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
     MachineSelectBasicBlock *dest_block) {
     const MachineIrInstruction *tail_op;
     long long folded_value;
+    MachineIrBinaryOp compare_op;
+    MachineIrOperand lhs;
+    MachineIrOperand rhs;
 
     if (!src_block || !dest_block ||
         !src_block->has_terminator ||
@@ -85,10 +88,15 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
         return 0;
     }
 
+    compare_op = tail_op->as.binary.op;
+    lhs = tail_op->as.binary.lhs;
+    rhs = tail_op->as.binary.rhs;
+    machine_select_canonicalize_binary_immediate_side(&compare_op, &lhs, &rhs);
+
     if (machine_select_try_eval_binary_immediate(
-            tail_op->as.binary.op,
-            tail_op->as.binary.lhs,
-            tail_op->as.binary.rhs,
+            compare_op,
+            lhs,
+            rhs,
             &folded_value)) {
         machine_select_op_free(&dest_block->ops[dest_block->op_count - 1]);
         dest_block->op_count -= 1;
@@ -115,14 +123,14 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
 
     dest_block->terminator.kind =
         machine_select_binary_uses_immediate_form(
-            tail_op->as.binary.op,
-            tail_op->as.binary.lhs,
-            tail_op->as.binary.rhs)
+            compare_op,
+            lhs,
+            rhs)
         ? MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM
         : MACHINE_SELECT_TERM_COMPARE_BRANCH;
-    dest_block->terminator.as.compare_branch.op = tail_op->as.binary.op;
-    dest_block->terminator.as.compare_branch.lhs = machine_select_lower_operand(tail_op->as.binary.lhs);
-    dest_block->terminator.as.compare_branch.rhs = machine_select_lower_operand(tail_op->as.binary.rhs);
+    dest_block->terminator.as.compare_branch.op = compare_op;
+    dest_block->terminator.as.compare_branch.lhs = machine_select_lower_operand(lhs);
+    dest_block->terminator.as.compare_branch.rhs = machine_select_lower_operand(rhs);
     dest_block->terminator.as.compare_branch.then_target = src_block->terminator.as.branch.then_target;
     dest_block->terminator.as.compare_branch.else_target = src_block->terminator.as.branch.else_target;
     dest_block->has_terminator = 1;

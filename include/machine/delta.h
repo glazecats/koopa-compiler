@@ -146,6 +146,8 @@ int machine_delta_file_get_target_policy_summary(const MachineDeltaFile *delta_f
     MachineDeltaTargetPolicySummary *out_summary);
 int machine_delta_file_get_summary(const MachineDeltaFile *delta_file,
     size_t *out_mapped_byte_count);
+int machine_delta_file_get_source_elf_artifact_summary(const MachineDeltaFile *delta_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_delta_file_get_header_summary(const MachineDeltaFile *delta_file,
     MachineDeltaHeaderSummary *out_summary);
 int machine_delta_file_get_observe_summary(const MachineDeltaFile *delta_file,
@@ -275,6 +277,9 @@ int machine_delta_report_get_observe_file(const MachineDeltaReport *report,
     const MachineObserveFile **out_observe_file);
 int machine_delta_report_get_observe_report(const MachineDeltaReport *report,
     const MachineObserveReport **out_observe_report);
+int machine_delta_report_get_source_elf_artifact_summary_artifact(
+    const MachineDeltaReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_delta_report_get_header_summary_artifact(const MachineDeltaReport *report,
     const MachineDeltaHeaderSummary **out_summary);
 int machine_delta_report_get_target_policy_summary_artifact(const MachineDeltaReport *report,

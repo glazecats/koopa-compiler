@@ -151,12 +151,15 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_history_file(const MachineHistoryFile *history_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineHistoryResolutionKind resolution_kind,
     MachineHistoryKind history_kind,
     const char *expected_dump) {
     MachineHistoryHeaderSummary header_summary;
     MachineHistoryTargetPolicySummary target_policy_summary;
     MachineHistorySummary history_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineHistoryError history_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -164,9 +167,14 @@ static int verify_history_file(const MachineHistoryFile *history_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&history_summary, 0, sizeof(history_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&history_error, 0, sizeof(history_error));
 
     if (!machine_history_verify_file(history_file, &history_error) ||
+        !machine_history_file_get_source_elf_artifact_summary(history_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_history_file_get_header_summary(history_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.history_entry_count != 1u ||
@@ -191,6 +199,8 @@ cleanup:
 static int verify_history_report(const MachineHistoryReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineHistoryResolutionKind resolution_kind,
     const char *expected_dump) {
     MachineHistoryReportOverviewArtifact overview_artifact;
@@ -199,6 +209,7 @@ static int verify_history_report(const MachineHistoryReport *report,
     const MachineHistoryHeaderSummary *header_summary = NULL;
     const MachineHistoryTargetPolicySummary *target_policy_summary = NULL;
     const MachineHistorySummary *history_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineHistoryError history_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -209,8 +220,13 @@ static int verify_history_report(const MachineHistoryReport *report,
     if (!machine_history_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_history_report_get_file(report, &history_file) || !history_file ||
         !machine_history_report_get_outcome_report(report, &outcome_report) || !outcome_report ||
+        !machine_history_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_history_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         header_summary->history_entry_count != 1u ||
         !machine_history_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->surfaces_preview_history ||
@@ -264,9 +280,11 @@ static int test_machine_history_mainline(void) {
         &history_file,
         "history-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_VALUE_HISTORY,
-        "machine_history profile=generic-elf32 outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_history_clone_file(&history_file, &cloned_history_file, &history_error) ||
@@ -281,11 +299,14 @@ static int test_machine_history_mainline(void) {
         &history_report,
         "history-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
-        "machine_history profile=generic-elf32 outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: outcome=preview-outcome status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000 entries=1\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 exact=yes preview=yes single-entry=yes\n"
         "  history: resolution=preview-history kind=value-history outcome=value-available exact=no single-entry=yes entries=1 state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 
@@ -344,9 +365,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_EXACT_HISTORY,
         MACHINE_HISTORY_KIND_PROGRAM_STOP_HISTORY,
-        "machine_history profile=generic-elf32 outcome=exact-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=exact-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=exact-history kind=program-stop-history outcome=program-stopped event=control-halt trace=exact-trace change-class=status-and-fetch apply=applied-state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 exact=yes single-entry=yes entries=1 origin-status=ready observed-status=halted status-changed=yes pc-changed=no stack-changed=no fetch-changed=yes targets=[] return-imm=7\n");
 
     machine_history_report_free(&history_report);
@@ -364,9 +387,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_HISTORY_KIND_BLOCKED_CONTROL_HISTORY,
-        "machine_history profile=generic-elf32 outcome=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=blocked-on-control kind=blocked-control-history outcome=blocked-control event=blocked-control trace=blocked-on-control change-class=none apply=blocked-on-control commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 exact=no single-entry=yes entries=1 origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[1] return-imm=-\n");
 
     machine_history_report_free(&history_report);
@@ -384,9 +409,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_HISTORY_KIND_BLOCKED_UNSUPPORTED_HISTORY,
-        "machine_history profile=generic-elf32 outcome=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=blocked-unsupported kind=blocked-unsupported-history outcome=blocked-unsupported event=blocked-unsupported trace=blocked-unsupported change-class=none apply=blocked-unsupported commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[] return-imm=-\n");
 
     machine_history_report_free(&history_report);
@@ -403,9 +430,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_LOCAL_UPDATE_HISTORY,
-        "machine_history profile=generic-elf32 outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=local-update-history outcome=local-updated event=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_history_file_free(&history_file);
@@ -421,9 +450,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_GLOBAL_UPDATE_HISTORY,
-        "machine_history profile=generic-elf32 outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=global-update-history outcome=global-updated event=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_history_file_free(&history_file);
@@ -439,9 +470,11 @@ static int test_machine_history_custom_step_cases(void) {
         &history_file,
         "history-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_CALL_HISTORY,
-        "machine_history profile=generic-elf32 outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=call-history outcome=call-issued event=call-effect trace=preview-trace change-class=program-counter-and-fetch apply=pending-call-application commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
 cleanup:
@@ -485,13 +518,14 @@ static int test_machine_history_i386_bridge(void) {
     }
 
     ok &= expect_text("history i386 dump wrapper", dump_text,
-        "machine_history profile=i386-preview outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("history i386 report dump wrapper", report_dump_text,
-        "machine_history profile=i386-preview outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
+        "machine_history profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
         "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: outcome=preview-outcome status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000 entries=1\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview exact=yes preview=yes single-entry=yes\n"
         "  history: resolution=preview-history kind=value-history outcome=value-available exact=no single-entry=yes entries=1 state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 

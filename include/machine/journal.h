@@ -104,6 +104,9 @@ int machine_journal_file_get_target_policy_summary(
     MachineJournalTargetPolicySummary *out_summary);
 int machine_journal_file_get_summary(const MachineJournalFile *journal_file,
     size_t *out_mapped_byte_count);
+int machine_journal_file_get_source_elf_artifact_summary(
+    const MachineJournalFile *journal_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_journal_file_get_header_summary(const MachineJournalFile *journal_file,
     MachineJournalHeaderSummary *out_summary);
 int machine_journal_file_get_log_summary(const MachineJournalFile *journal_file,
@@ -359,6 +362,9 @@ int machine_journal_report_get_log_file(const MachineJournalReport *report,
     const MachineLogFile **out_log_file);
 int machine_journal_report_get_log_report(const MachineJournalReport *report,
     const MachineLogReport **out_log_report);
+int machine_journal_report_get_source_elf_artifact_summary_artifact(
+    const MachineJournalReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_journal_report_get_header_summary_artifact(const MachineJournalReport *report,
     const MachineJournalHeaderSummary **out_summary);
 int machine_journal_report_get_target_policy_summary_artifact(

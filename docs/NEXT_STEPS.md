@@ -57,8 +57,9 @@
 11. A concrete post-checkpoint backend reopening is now active inside the
     otherwise maintenance-first bytes/object/ELF stack: direct
     `machine_ir`-report profile-aware builds should prefer making
-    `riscv32-preview` change real `.text` bytes, not only later-stage ELF
-    header or relocation-policy metadata.
+    `riscv32-preview` change real `.text` bytes and downstream
+    object/relocation artifacts, not only later-stage ELF header or generic
+    relocation-policy metadata.
 12. Backend repository-layout memory: machine code is no longer stored as a
     flat forest of top-level `src/machine_*` / `tests/machine_*` directories.
     Prefer the grouped layout:
@@ -67,43 +68,215 @@
     - `src/machine/runtime/` and `tests/machine/runtime/`
     - `src/machine/observe/` and `tests/machine/observe/`
     with public headers under the flat include namespace `include/machine/*.h`.
+13. Current backend priority is **RISC-V correctness before backend
+    optimization**. In the reopened backend line, prefer first making
+    `machine_select -> machine_bytes -> machine_reloc -> machine_elf`
+    materially more honest for RISC-V over adding new backend optimization
+    families.
+14. Treat instruction selection completion and legalization/expansion as part
+    of that correctness-first RISC-V line, not as optional polish. In
+    practice this means work such as immediate materialization, call/global
+    address formation, compare/branch shaping, and other multi-instruction
+    lowering sequences should be scheduled before broader performance-driven
+    backend tuning.
+15. Distinguish backend optimization layers by urgency:
+    - do now: target-correct selection cleanup, legalization, expansion, and
+      small branch/layout canonicalization directly needed for RISC-V output
+    - do later: peephole cleanup, better immediate-form choice, and other
+      backend quality tuning once the first real RISC-V artifact is stable
+    - do much later: true late machine scheduling / instruction ordering over
+      already-stable target instructions
+16. Loop-oriented transformations such as loop unrolling are currently **not**
+    part of the active backend mainline. They should be treated as SSA-side
+    optimization work for a later phase, most likely under `value_ssa_pass`,
+    after the current RISC-V lowering/object pipeline is materially more real.
 
 ## Current Active Slice
 
-- There is no longer an earlier backend default mainline at `machine_elf`, and
-  the image-prep, exec-prep, loader-prep, runtime-process, launch-state,
-  fetch-state, tag-decode, payload-byte-decode, execute-current-instruction,
-  next-state-transition, applied-state, deferred-mutation, writeback, commit,
-  application-plan, observed-state, before-after-delta, execution-record,
-  event-family, outcome-family, single-entry-history, single-tick-timeline,
-  and single-line-log lines are no longer the furthest downstream active
-  slices either. The repository's current active backend implementation
-  slice, and therefore the default backend progress authority for
-  "现在做到哪了", is now the Machine-Journal / single-record-journal line in
-  [docs/backend/MACHINE_JOURNAL_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_JOURNAL_PLAN.md).
+- The downstream observe/runtime provenance follow-through line
+  (`machine_elf -> ... -> machine_journal`) is now effectively
+  **checkpointed end-to-end** for the current workstream.
+- The default code-changing backend mainline therefore returns to the earlier
+  **RISC-V correctness / artifact-honesty reopen** spanning:
+  `machine_select -> machine_bytes -> machine_reloc -> machine_elf`.
+- For "现在做到哪了" on the active backend mainline, prefer the following
+  snapshot unless the work visibly shifts again:
+  - `machine_select` immediate/legalization support: roughly `99%`
+  - `machine_bytes` RISC-V preview honesty slice: roughly `99%`
+  - `machine_reloc` preview relocation-honesty slice: roughly `96%`
+  - `machine_elf` external-artifact honesty follow-through: roughly `98%`
+  - reopened upstream RISC-V backend line overall: roughly `97%`
+- Current concrete wording should prefer:
+  - `machine_select` is effectively checkpointed for this reopen
+  - that same selected-side surface now also has a first explicit
+    compatibility/policy summary on program/report entrypoints, so upstream
+    consumers can query the current preview register cap and the selected-side
+    legalization/preservation facts the downstream RISC-V preview lane relies
+    on without reopening `machine_bytes`
+  - that same selected-side compatibility surface now also has a first
+    explicit `riscv32-preview` verifier entrypoint, so selected programs that
+    exceed the current preview register-cap boundary can fail at
+    `machine_select` instead of only much later in `machine_bytes`
+  - that same compatibility/policy surface now also survives through
+    `machine_emit` and `machine_encode` reports, so the current preview-lane
+    register-cap / spill-preservation / global-slot-preservation facts remain
+    visible across the whole `machine_select -> machine_emit -> machine_encode
+    -> machine_bytes` mainline instead of dropping out in the middle
+  - that same middle-layer compatibility surface now also has explicit
+    `riscv32-preview` verifier entrypoints on both `machine_emit` and
+    `machine_encode`, so oversized logical register banks can now fail
+    cleanly at any stage from selected lowering through abstract encoding,
+    instead of only after the bytes bridge
+  - that same early-compatibility chain now also reaches `machine_layout`, so
+    the current preview register-cap boundary can fail cleanly from
+    `machine_select` through layout, emit, encode, and bytes rather than only
+    at the later encoding side
+  - `machine_layout` now also has a first direct program/function/block query
+    surface, so the mainline no longer has to jump straight from selected-side
+    structured navigation to emit-side reports whenever it wants structured
+    layout inspection
+  - `machine_layout` now also has a first structured report artifact with
+    cached function/block summaries plus policy facts, so the mainline can now
+    stay artifact-oriented across `machine_select -> machine_layout ->
+    machine_emit` instead of skipping directly from selected reports to emit
+    reports
+  - that same chain now also uses a consistent explicit compatibility-verifier
+    surface all the way through `machine_bytes`, so every active lowering
+    stage from selected form through byte-bearing output can reject the
+    current preview register-cap incompatibility in its own native API layer
+  - `machine_encode` now also performs one first deeper preview-bridge
+    compatibility check rather than only local shape screening, so current
+    preview bytes-range failures such as out-of-range branch/jump/call shapes
+    can now be rejected at encode time instead of only after entering
+    `machine_bytes`
+  - the same deeper preview-bytes compatibility check now also reaches
+    `machine_emit` and `machine_layout`, so the current bytes-range failure
+    class can already surface from layout/emit/encode layers rather than only
+    after the final byte-bearing bridge
+  - that same deeper preview-bytes compatibility check now also reaches
+    `machine_select`, so the current bytes-range failure class can be
+    rejected from the earliest selected boundary instead of only after the
+    later layout/emit/encode stages
+  - `machine_bytes` is the nearest active upstream sibling when we are
+    deepening preview lowering semantics or locking them with regression
+    coverage
+  - a first real `compiler` CLI entrypoint is now wired into the repository:
+    `compiler -riscv input.sy -o output` and `compiler -perf input.sy -o output`
+    both drive the current SysY -> canonical IR -> lower IR -> value SSA ->
+    default memory-canonicalized Value-SSA -> machine IR -> preview byte bridge
+    and currently emit honest
+    RISC-V-flavored textual assembly for the current `rv32im`-shaped preview
+    subset, including an explicit `.attribute arch, "rv32im"` header plus
+    function metadata/local labels, and a first explicit
+    `.section .sbss,"aw",@nobits` / `.section .sdata,"aw",@progbits`
+    surface for globals with current preview `lui %hi(symbol)` +
+    `lw/sw %lo(symbol)(reg)` address-formation/load-store text for both loads
+    and stores, rather than
+    falling back to the older internal `machine_elf` dump or pretending a
+    fully pretty / ABI-complete final assembly printer already exists
+  - that same preview asm surface is now also smoke-checked against a real
+    assembler boundary in this environment: the repository test matrix feeds a
+    representative `compiler -riscv` output through `llvm-mc -triple=riscv32`
+    and requires object-file assembly to succeed, so the current text output
+    is no longer only "human-readable preview asm" but "assembler-accepted
+    preview asm" for the covered subset
+  - the default lower-ir -> memory-full canonicalization line no longer drops
+    a helper function's `store_global` just because the helper itself does not
+    read that global again locally; a focused regression now locks the
+    caller-observed global-store case, and `compiler -riscv` is back on the
+    default canonicalization route rather than a temporary classic-line
+    workaround
+  - `-koopa` remains intentionally unsupported for now, because this
+    workstream is targeting the direct RISC-V-side backend line rather than
+    reopening a separate Koopa output contract
+  - the latest `machine_bytes` reopen landed large local/global slot-offset
+    honesty for `riscv32-preview`, so slot-based memory ops no longer depend
+    on 12-bit offset luck any more than spill/frame accesses do
+  - that same reopened `machine_bytes` line now also has one explicit preview
+    register-bank honesty boundary: the current `riscv32-preview` lane only
+    claims `reg.0..reg.7 -> a0..a7`, and larger logical register banks now
+    fail visibly at `machine_bytes` instead of silently aliasing through
+    modulo-8 register mapping
+  - that same reopened `machine_bytes` line now also exposes a consumer-facing
+    target-policy summary on profile/program/report surfaces, so later stages
+    can query the current preview register cap, internal PC-relative honesty,
+    direct-fallthrough honesty, paired global addressing, and RV32M-shaped
+    arithmetic support without inferring those facts from implementation
+    details
+  - that same consumer-facing policy surface now also survives through
+    `machine_object`, `machine_reloc`, and `machine_elf` summaries, so
+    downstream artifact consumers no longer lose those bytes-side capability
+    facts when they cross into later object / relocation / ELF layers
+  - that same reopened `machine_bytes` line now also has an explicit
+    honest-failure boundary for internal preview PC-relative control/call
+    targets, so out-of-range branch/jump/call displacements fail visibly
+    instead of silently truncating into invalid immediates
+  - `machine_reloc` remains the next most likely structural reopen if the
+    pressure is about direct-preview versus imported/reprofiled relocation
+    honesty
+  - the latest `machine_reloc` reopen landed relocation-family summary
+    queries plus verifier-backed preview addend/fallthrough honesty, so
+    relocation consumers no longer need to hand-scan rows for basic family
+    counts and malformed preview addend drift now fails at the relocation
+    boundary itself; that same consumer-facing surface now also has a first
+    structured report artifact above the raw relocation file
+  - that same reopened bytes/object/reloc line now also carries one first
+    real global-object artifact surface instead of leaving globals only in
+    the compiler text exporter: `machine_bytes` reports now surface
+    `.sbss` / `.sdata` section summaries plus `global-object` symbols, and
+    direct `machine_object -> machine_reloc` builds now preserve those
+    sections structurally even when they carry zero relocations
+  - that same reopened RISC-V line now also has one first explicit
+    data-reference slice for global accesses: small preview `load_global` /
+    `store_global` families may now survive as paired `data-addr` +
+    `data-load` / `data-store` references/fixups/relocations, and direct
+    preview ELF builds may now map those references to
+    `R_RISCV_HI20 + R_RISCV_LO12_I/S` instead of leaving every global access
+    as a text-only convention with no artifact-side relocation meaning
+  - that same data-reference slice is now also visible in summary/query
+    surfaces rather than only buried in raw relocation rows: relocation-family
+    and target-policy helpers may now expose paired data-addr / data-load /
+    data-store relocation kinds and RISC-V preview data-relocation opcode
+    mappings directly
+  - the latest `machine_object` reopen landed target-policy/fixup-family
+    summaries plus verifier-backed preview target-byte-offset honesty, so the
+    object boundary now preserves the same direct-preview contract more
+    explicitly instead of forcing every later consumer straight to reloc/elf;
+    that same family-summary surface now also counts data-side object fixups,
+    not only call/control fixups, and now also has a first structured report
+    artifact above the raw object file
+  - `machine_elf` remains the downstream object-format boundary if the
+    pressure is about making that information boundary explicit to external
+    consumers
+  - the latest `machine_elf` reopen landed verifier-backed direct-versus-
+    imported preview semantics, so canonical direct preview ELF artifacts can
+    no longer silently keep secondary control relocations while generic-origin
+    reprofiling helpers still remain explicitly legal via `origin_profile`
+  - that same direct-build `machine_elf` line now also preserves one first
+    non-`.text` global-object slice from the upstream object chain: when the
+    object artifact carries `.sbss` / `.sdata` sections and `global-object`
+    symbols, direct ELF builds may now serialize those sections plus
+    `STT_OBJECT` globals instead of flattening everything back to a strict
+    `.text`-only object view, and the repository's own
+    parse/normalize/refresh path can now round-trip that same canonical
+    optional data-section family too
+  - the latest landed `machine_elf` consumer-facing slice is one first
+    relocation-family summary on raw/report artifacts, so external consumers
+    no longer need to rescan relocation rows just to distinguish direct
+    preview single-branch relocation shapes from imported/reprofiled
+    two-control-relocation shapes
+- The observe-side line is no longer the default answer for the active
+  code-changing backend position. Use it as historical/checkpoint context,
+  not as the default current frontier, unless a concrete downstream consumer
+  bug reopens it.
 - The just-finished Memory-SSA / Memory-SSA-pass line in
   [docs/ssa/MEMORY_SSA_DESIGN.md](/workspaces/compiler_lab/docs/ssa/MEMORY_SSA_DESIGN.md)
   is now checkpoint-ready / maintenance-first unless a concrete bug or
   deliberately chosen post-checkpoint expansion reopens it.
-- When asking "现在做到哪了" for the current backend mainline snapshot,
-  prefer the `MJR1`-`MJR3` stage names from
-  `docs/backend/MACHINE_JOURNAL_PLAN.md`:
-  - `MJR1`: representation skeleton
-  - `MJR2`: first journal from `machine_log`
-  - `MJR3`: first upstream bridge
-- Current rough position on that line:
--  - `MJR1`: effectively `100%`
--  - `MJR2`: effectively `100%`
--  - `MJR3`: effectively `100%`
--  - the newest backend work is no longer “how much of the first explicit
-    exact-log versus preview-log single-line meaning is already surfaced
-    above timeline?” but “how much of the first explicit exact-journal
-    versus preview-journal single-record meaning is already surfaced above
-    log: exact journal records, preview journal records, blocked journal
-    states, stable journal-family names, single-record counts/indexes, and
-    first bridged log/timeline/history/outcome/event/trace/delta/observe/
-    apply/commit/writeback/mutation/state/transition/interp/payload/decode/
-    step/`machine_ir` journal wrappers”
+- The historical `machine_journal` snapshot remains useful as a record of the
+  furthest previously landed downstream consumer stage, but it is no longer
+  the default answer for the current code-changing backend position unless the
+  work explicitly reopens journal-specific behavior.
 - The Machine-Journal roadmap in
   [docs/backend/MACHINE_JOURNAL_PLAN.md](/workspaces/compiler_lab/docs/backend/MACHINE_JOURNAL_PLAN.md)
   should now be treated as the active downstream backend progress snapshot.

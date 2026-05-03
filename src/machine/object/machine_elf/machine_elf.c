@@ -16,6 +16,7 @@
 #define MACHINE_ELF_EM_NONE 0u
 #define MACHINE_ELF_EV_CURRENT 1u
 #define MACHINE_ELF_SHN_UNDEF 0u
+#define MACHINE_ELF_SHF_WRITE 0x1u
 #define MACHINE_ELF_SHF_ALLOC 0x2u
 #define MACHINE_ELF_SHF_EXECINSTR 0x4u
 
@@ -46,6 +47,7 @@ static uint32_t machine_elf_append_string(unsigned char *bytes,
     const char *text);
 static int machine_elf_get_target_policy(MachineElfTargetProfile profile,
     MachineElfTargetPolicy *out_policy);
+static MachineBytesTargetProfile machine_elf_bytes_target_profile(MachineElfTargetProfile profile);
 static uint16_t machine_elf_expected_machine_for_profile(MachineElfTargetProfile profile);
 static uint32_t machine_elf_expected_flags_for_profile(MachineElfTargetProfile profile);
 static uint32_t machine_elf_map_relocation_type(MachineElfTargetProfile profile, MachineRelocKind kind);
@@ -207,6 +209,18 @@ const char *machine_elf_target_profile_name(MachineElfTargetProfile profile) {
     return "unknown";
 }
 
+const char *machine_elf_relocation_semantics_name(MachineElfRelocationSemantics semantics) {
+    switch (semantics) {
+        case MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS:
+            return "direct-patch-spans";
+        case MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE:
+            return "imported-relocation-table";
+        case MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN:
+        default:
+            return "unknown";
+    }
+}
+
 int machine_elf_get_target_policy_summary(MachineElfTargetProfile profile,
     MachineElfTargetPolicySummary *out_summary) {
     MachineElfTargetPolicy policy;
@@ -214,7 +228,12 @@ int machine_elf_get_target_policy_summary(MachineElfTargetProfile profile,
     if (!out_summary || !machine_elf_get_target_policy(profile, &policy)) {
         return 0;
     }
+    memset(out_summary, 0, sizeof(*out_summary));
     out_summary->target_profile = profile;
+    if (!machine_bytes_get_target_policy_summary(
+            machine_elf_bytes_target_profile(profile), &out_summary->bytes_policy)) {
+        return 0;
+    }
     out_summary->machine = policy.machine;
     out_summary->flags = policy.flags;
     out_summary->call_relocation_type =
@@ -223,6 +242,12 @@ int machine_elf_get_target_policy_summary(MachineElfTargetProfile profile,
         machine_elf_map_relocation_type(profile, MACHINE_BYTES_FIXUP_CONTROL_PRIMARY);
     out_summary->secondary_control_relocation_type =
         machine_elf_map_relocation_type(profile, MACHINE_BYTES_FIXUP_CONTROL_SECONDARY);
+    out_summary->data_address_relocation_type =
+        machine_elf_map_relocation_type(profile, MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET);
+    out_summary->data_load_relocation_type =
+        machine_elf_map_relocation_type(profile, MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET);
+    out_summary->data_store_relocation_type =
+        machine_elf_map_relocation_type(profile, MACHINE_BYTES_FIXUP_DATA_STORE_TARGET);
     return 1;
 }
 
@@ -284,6 +309,18 @@ static MachineBytesTargetProfile machine_elf_bytes_target_profile(MachineElfTarg
     }
 }
 
+static MachineElfTargetProfile machine_elf_profile_from_bytes_target_profile(MachineBytesTargetProfile profile) {
+    switch (profile) {
+        case MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW:
+            return MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW;
+        case MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW:
+            return MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW;
+        case MACHINE_BYTES_TARGET_PROFILE_GENERIC:
+        default:
+            return MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    }
+}
+
 static uint32_t machine_elf_map_relocation_type(MachineElfTargetProfile profile, MachineRelocKind kind) {
     if (profile == MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW) {
         switch (kind) {
@@ -293,6 +330,12 @@ static uint32_t machine_elf_map_relocation_type(MachineElfTargetProfile profile,
                 return (uint32_t)R_RISCV_BRANCH;
             case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
                 return (uint32_t)R_RISCV_JAL;
+            case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+                return (uint32_t)R_RISCV_HI20;
+            case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+                return (uint32_t)R_RISCV_LO12_I;
+            case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+                return (uint32_t)R_RISCV_LO12_S;
         }
         return 0u;
     }
@@ -304,6 +347,12 @@ static uint32_t machine_elf_map_relocation_type(MachineElfTargetProfile profile,
                 return (uint32_t)R_386_PC32;
             case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
                 return (uint32_t)R_386_32PLT;
+            case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+                return (uint32_t)R_386_32;
+            case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+                return (uint32_t)R_386_GOT32;
+            case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+                return (uint32_t)R_386_GOTOFF;
         }
         return 0u;
     }
@@ -315,6 +364,12 @@ static uint32_t machine_elf_map_relocation_type(MachineElfTargetProfile profile,
             return 2u;
         case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
             return 3u;
+        case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+            return 4u;
+        case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+            return 5u;
+        case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+            return 6u;
     }
     return 0u;
 }
@@ -327,6 +382,12 @@ static const char *machine_elf_relocation_kind_name(MachineRelocKind kind) {
             return "ctrl-primary";
         case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
             return "ctrl-secondary";
+        case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+            return "data-addr";
+        case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+            return "data-load";
+        case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
+            return "data-store";
     }
     return "unknown";
 }
@@ -353,6 +414,12 @@ static MachineRelocKind machine_elf_relocation_kind_from_type(MachineElfTargetPr
                 return MACHINE_BYTES_FIXUP_CONTROL_PRIMARY;
             case R_RISCV_JAL:
                 return MACHINE_BYTES_FIXUP_CONTROL_SECONDARY;
+            case R_RISCV_HI20:
+                return MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET;
+            case R_RISCV_LO12_I:
+                return MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET;
+            case R_RISCV_LO12_S:
+                return MACHINE_BYTES_FIXUP_DATA_STORE_TARGET;
         }
         return (MachineRelocKind)-1;
     }
@@ -364,6 +431,12 @@ static MachineRelocKind machine_elf_relocation_kind_from_type(MachineElfTargetPr
                 return MACHINE_BYTES_FIXUP_CONTROL_PRIMARY;
             case R_386_32PLT:
                 return MACHINE_BYTES_FIXUP_CONTROL_SECONDARY;
+            case R_386_32:
+                return MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET;
+            case R_386_GOT32:
+                return MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET;
+            case R_386_GOTOFF:
+                return MACHINE_BYTES_FIXUP_DATA_STORE_TARGET;
         }
         return (MachineRelocKind)-1;
     }
@@ -375,6 +448,12 @@ static MachineRelocKind machine_elf_relocation_kind_from_type(MachineElfTargetPr
             return MACHINE_BYTES_FIXUP_CONTROL_PRIMARY;
         case 3u:
             return MACHINE_BYTES_FIXUP_CONTROL_SECONDARY;
+        case 4u:
+            return MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET;
+        case 5u:
+            return MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET;
+        case 6u:
+            return MACHINE_BYTES_FIXUP_DATA_STORE_TARGET;
     }
     return (MachineRelocKind)-1;
 }

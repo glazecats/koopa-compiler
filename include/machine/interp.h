@@ -110,6 +110,8 @@ int machine_interp_file_get_target_policy_summary(const MachineInterpFile *inter
     MachineInterpTargetPolicySummary *out_summary);
 int machine_interp_file_get_summary(const MachineInterpFile *interp_file,
     size_t *out_mapped_byte_count);
+int machine_interp_file_get_source_elf_artifact_summary(const MachineInterpFile *interp_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_interp_file_get_header_summary(const MachineInterpFile *interp_file,
     MachineInterpHeaderSummary *out_summary);
 int machine_interp_file_get_runtime_launch_summary(const MachineInterpFile *interp_file,
@@ -231,6 +233,8 @@ int machine_interp_report_get_file(const MachineInterpReport *report,
     const MachineInterpFile **out_file);
 int machine_interp_report_get_payload_decode_file(const MachineInterpReport *report,
     const MachinePayloadDecodeFile **out_payload_decode_file);
+int machine_interp_report_get_source_elf_artifact_summary_artifact(const MachineInterpReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_interp_report_get_header_summary_artifact(const MachineInterpReport *report,
     const MachineInterpHeaderSummary **out_summary);
 int machine_interp_report_get_target_policy_summary_artifact(const MachineInterpReport *report,

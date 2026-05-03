@@ -23,11 +23,67 @@ static MachineSelectSlotRef machine_select_lower_slot(MachineIrSlotRef slot) {
         : machine_select_slot_global(slot.id);
 }
 
+static int machine_select_binary_is_commutative(MachineIrBinaryOp op) {
+    switch (op) {
+        case MACHINE_IR_BINARY_ADD:
+        case MACHINE_IR_BINARY_MUL:
+        case MACHINE_IR_BINARY_BIT_AND:
+        case MACHINE_IR_BINARY_BIT_XOR:
+        case MACHINE_IR_BINARY_BIT_OR:
+        case MACHINE_IR_BINARY_EQ:
+        case MACHINE_IR_BINARY_NE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static void machine_select_canonicalize_binary_immediate_side(
+    MachineIrBinaryOp *op,
+    MachineIrOperand *lhs,
+    MachineIrOperand *rhs) {
+    MachineIrOperand tmp;
+
+    if (!op || !lhs || !rhs ||
+        lhs->kind != MACHINE_IR_OPERAND_IMMEDIATE ||
+        rhs->kind == MACHINE_IR_OPERAND_IMMEDIATE) {
+        return;
+    }
+    if (machine_select_binary_is_commutative(*op)) {
+        tmp = *lhs;
+        *lhs = *rhs;
+        *rhs = tmp;
+        return;
+    }
+    if (machine_select_binary_is_compare(*op)) {
+        tmp = *lhs;
+        *lhs = *rhs;
+        *rhs = tmp;
+        switch (*op) {
+            case MACHINE_IR_BINARY_LT:
+                *op = MACHINE_IR_BINARY_GT;
+                break;
+            case MACHINE_IR_BINARY_LE:
+                *op = MACHINE_IR_BINARY_GE;
+                break;
+            case MACHINE_IR_BINARY_GT:
+                *op = MACHINE_IR_BINARY_LT;
+                break;
+            case MACHINE_IR_BINARY_GE:
+                *op = MACHINE_IR_BINARY_LE;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 static int machine_select_binary_uses_immediate_form(MachineIrBinaryOp op,
     MachineIrOperand lhs,
     MachineIrOperand rhs) {
     (void)op;
-    return lhs.kind == MACHINE_IR_OPERAND_IMMEDIATE || rhs.kind == MACHINE_IR_OPERAND_IMMEDIATE;
+    return lhs.kind != MACHINE_IR_OPERAND_IMMEDIATE &&
+        rhs.kind == MACHINE_IR_OPERAND_IMMEDIATE;
 }
 
 static int machine_select_try_eval_binary_immediate(MachineIrBinaryOp op,

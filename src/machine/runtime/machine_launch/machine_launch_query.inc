@@ -24,6 +24,15 @@ int machine_launch_file_get_summary(const MachineLaunchFile *launch_file,
     return 1;
 }
 
+int machine_launch_file_get_source_elf_artifact_summary(const MachineLaunchFile *launch_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!launch_file || !out_summary) {
+        return 0;
+    }
+    *out_summary = launch_file->runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_launch_file_get_header_summary(const MachineLaunchFile *launch_file,
     MachineLaunchHeaderSummary *out_summary) {
     if (!launch_file || !out_summary) {

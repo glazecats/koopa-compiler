@@ -65,6 +65,15 @@ int machine_launch_report_get_runtime_file(const MachineLaunchReport *report,
     return 1;
 }
 
+int machine_launch_report_get_source_elf_artifact_summary_artifact(const MachineLaunchReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_launch_report_get_header_summary_artifact(const MachineLaunchReport *report,
     const MachineLaunchHeaderSummary **out_summary) {
     if (!report || !out_summary) {
@@ -304,8 +313,12 @@ int machine_launch_dump_report(const MachineLaunchReport *report,
 
     if (!machine_launch_append_format(
             &builder,
-            "machine_launch profile=%s pc=0x%zx sp=0x%zx registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
+            "machine_launch profile=%s elf_origin=%s elf_semantics=%s pc=0x%zx sp=0x%zx registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             report->header_summary.program_counter,
             report->header_summary.stack_pointer,
             report->header_summary.register_count,
@@ -351,6 +364,15 @@ int machine_launch_dump_report(const MachineLaunchReport *report,
             report->header_summary.stack_pointer,
             report->program_counter_register_index,
             report->stack_pointer_register_index) ||
+        !machine_launch_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_launch_append_format(
             &builder,
             "  policy: profile=%s pc-reg=%s sp-reg=%s\n",

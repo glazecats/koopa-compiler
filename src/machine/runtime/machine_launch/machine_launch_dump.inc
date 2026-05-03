@@ -22,8 +22,12 @@ int machine_launch_dump_file(const MachineLaunchFile *launch_file,
 
     if (!machine_launch_append_format(
             &builder,
-            "machine_launch profile=%s pc=0x%zx sp=0x%zx registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
+            "machine_launch profile=%s elf_origin=%s elf_semantics=%s pc=0x%zx sp=0x%zx registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                launch_file->runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                launch_file->runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             header_summary.program_counter,
             header_summary.stack_pointer,
             header_summary.register_count,

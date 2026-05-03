@@ -169,6 +169,7 @@ static int machine_container_clone_reloc_file(const MachineRelocFile *source,
         machine_container_set_error(error, 0, 0, "MACHINE-CONTAINER-102: source relocation file failed verification");
         return 0;
     }
+    out_reloc_file->object_file.target_profile = source->object_file.target_profile;
 
     if (source->object_file.section_count > 0) {
         out_reloc_file->object_file.sections =

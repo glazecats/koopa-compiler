@@ -290,8 +290,26 @@ static int machine_select_cleanup_op_shape(MachineSelectOp *op) {
                 op->as.copy_value = machine_select_operand_immediate(folded_value);
                 return 1;
             }
-            if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
-                op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+            if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+                op->as.binary.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                switch (op->as.binary.op) {
+                    case MACHINE_IR_BINARY_ADD:
+                    case MACHINE_IR_BINARY_MUL:
+                    case MACHINE_IR_BINARY_BIT_AND:
+                    case MACHINE_IR_BINARY_BIT_XOR:
+                    case MACHINE_IR_BINARY_BIT_OR: {
+                        MachineSelectOperand tmp = op->as.binary.lhs;
+
+                        op->as.binary.lhs = op->as.binary.rhs;
+                        op->as.binary.rhs = tmp;
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            if (op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+                op->as.binary.lhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                 if (op->kind != MACHINE_SELECT_OP_ALU_IMM) {
                     op->kind = MACHINE_SELECT_OP_ALU_IMM;
                     return 1;
@@ -314,8 +332,31 @@ static int machine_select_cleanup_op_shape(MachineSelectOp *op) {
                 op->as.copy_value = machine_select_operand_immediate(folded_value);
                 return 1;
             }
-            if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
-                op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+            if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+                op->as.binary.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                MachineSelectOperand tmp = op->as.binary.lhs;
+
+                op->as.binary.lhs = op->as.binary.rhs;
+                op->as.binary.rhs = tmp;
+                switch (op->as.binary.op) {
+                    case MACHINE_IR_BINARY_LT:
+                        op->as.binary.op = MACHINE_IR_BINARY_GT;
+                        break;
+                    case MACHINE_IR_BINARY_LE:
+                        op->as.binary.op = MACHINE_IR_BINARY_GE;
+                        break;
+                    case MACHINE_IR_BINARY_GT:
+                        op->as.binary.op = MACHINE_IR_BINARY_LT;
+                        break;
+                    case MACHINE_IR_BINARY_GE:
+                        op->as.binary.op = MACHINE_IR_BINARY_LE;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            if (op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+                op->as.binary.lhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                 if (op->kind != MACHINE_SELECT_OP_CMP_IMM) {
                     op->kind = MACHINE_SELECT_OP_CMP_IMM;
                     return 1;
@@ -506,8 +547,31 @@ static int machine_select_cleanup_terminator_shape(MachineSelectBasicBlock *bloc
     }
 
     if (block->terminator.kind == MACHINE_SELECT_TERM_COMPARE_BRANCH) {
-        if (block->terminator.as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
-            block->terminator.as.compare_branch.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+        if (block->terminator.as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+            block->terminator.as.compare_branch.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
+            MachineSelectOperand tmp = block->terminator.as.compare_branch.lhs;
+
+            block->terminator.as.compare_branch.lhs = block->terminator.as.compare_branch.rhs;
+            block->terminator.as.compare_branch.rhs = tmp;
+            switch (block->terminator.as.compare_branch.op) {
+                case MACHINE_IR_BINARY_LT:
+                    block->terminator.as.compare_branch.op = MACHINE_IR_BINARY_GT;
+                    break;
+                case MACHINE_IR_BINARY_LE:
+                    block->terminator.as.compare_branch.op = MACHINE_IR_BINARY_GE;
+                    break;
+                case MACHINE_IR_BINARY_GT:
+                    block->terminator.as.compare_branch.op = MACHINE_IR_BINARY_LT;
+                    break;
+                case MACHINE_IR_BINARY_GE:
+                    block->terminator.as.compare_branch.op = MACHINE_IR_BINARY_LE;
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (block->terminator.as.compare_branch.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+            block->terminator.as.compare_branch.lhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
             block->terminator.kind = MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM;
             return 1;
         }

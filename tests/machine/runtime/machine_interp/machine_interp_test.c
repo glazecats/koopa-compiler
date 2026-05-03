@@ -138,6 +138,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_interp_file(const MachineInterpFile *interp_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     size_t base_virtual_address,
     MachineInterpActionKind action_kind,
     MachineStepStatus next_status,
@@ -160,6 +162,7 @@ static int verify_interp_file(const MachineInterpFile *interp_file,
     MachineDecodeTagSummary decode_tag_summary;
     MachinePayloadDecodeSummary payload_summary;
     MachineInterpSummary interp_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineInterpError interp_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -174,9 +177,14 @@ static int verify_interp_file(const MachineInterpFile *interp_file,
     memset(&decode_tag_summary, 0, sizeof(decode_tag_summary));
     memset(&payload_summary, 0, sizeof(payload_summary));
     memset(&interp_summary, 0, sizeof(interp_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&interp_error, 0, sizeof(interp_error));
 
     if (!machine_interp_verify_file(interp_file, &interp_error) ||
+        !machine_interp_file_get_source_elf_artifact_summary(interp_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_interp_file_get_header_summary(interp_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.program_counter != base_virtual_address ||
@@ -221,6 +229,8 @@ cleanup:
 static int verify_interp_report(const MachineInterpReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineInterpActionKind action_kind,
     int has_next_program_counter,
     size_t next_program_counter,
@@ -237,6 +247,7 @@ static int verify_interp_report(const MachineInterpReport *report,
     const MachineInterpHeaderSummary *header_summary = NULL;
     const MachineInterpTargetPolicySummary *target_policy_summary = NULL;
     const MachineInterpSummary *interp_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineInterpError interp_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -247,8 +258,13 @@ static int verify_interp_report(const MachineInterpReport *report,
     if (!machine_interp_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_interp_report_get_file(report, &interp_file) || !interp_file ||
         !machine_interp_report_get_payload_decode_file(report, &payload_decode_file) || !payload_decode_file ||
+        !machine_interp_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_interp_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_interp_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->resolves_linear_next_program_counter ||
         !machine_interp_report_get_interp_summary_artifact(report, &interp_summary) || !interp_summary ||
@@ -307,6 +323,8 @@ static int test_machine_interp_mainline(void) {
         &interp_file,
         "interp-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_INTERP_ACTION_ADVANCE,
         MACHINE_STEP_STATUS_READY,
@@ -318,7 +336,7 @@ static int test_machine_interp_mainline(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 targets=[] return-imm=-\n");
 
     if (!machine_interp_clone_file(&interp_file, &cloned_interp_file, &interp_error) ||
@@ -333,6 +351,8 @@ static int test_machine_interp_mainline(void) {
         &cloned_interp_file,
         "interp-generic-clone",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_INTERP_ACTION_ADVANCE,
         MACHINE_STEP_STATUS_READY,
@@ -344,13 +364,15 @@ static int test_machine_interp_mainline(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 targets=[] return-imm=-\n");
 
     ok &= verify_interp_report(
         &interp_report,
         "interp-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_INTERP_ACTION_ADVANCE,
         1,
         0x1001u,
@@ -360,10 +382,11 @@ static int test_machine_interp_mainline(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 targets=2 linear-next-pc=yes block-targets=yes\n"
         "  interp: action=advance next-status=ready next-pc=0x1001 targets=[] return-imm=-\n");
 
@@ -423,6 +446,8 @@ static int test_machine_interp_custom_step_cases(void) {
         &interp_file,
         "interp-return-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_INTERP_ACTION_HALT,
         MACHINE_STEP_STATUS_HALTED,
@@ -434,13 +459,15 @@ static int test_machine_interp_custom_step_cases(void) {
         0u,
         1,
         7u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 next-status=halted next-pc=- targets=[] return-imm=7\n");
 
     ok &= verify_interp_report(
         &interp_report,
         "interp-return-imm-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_INTERP_ACTION_HALT,
         0,
         0u,
@@ -450,10 +477,11 @@ static int test_machine_interp_custom_step_cases(void) {
         0u,
         1,
         7u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 next-status=halted next-pc=- targets=[] return-imm=7\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 targets=2 linear-next-pc=yes block-targets=yes\n"
         "  interp: action=halt next-status=halted next-pc=- targets=[] return-imm=7\n");
 
@@ -475,6 +503,8 @@ static int test_machine_interp_custom_step_cases(void) {
         &interp_file,
         "interp-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_INTERP_ACTION_CONTROL_TRANSFER,
         MACHINE_STEP_STATUS_READY,
@@ -486,13 +516,15 @@ static int test_machine_interp_custom_step_cases(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 next-status=ready next-pc=- targets=[1] return-imm=-\n");
 
     ok &= verify_interp_report(
         &interp_report,
         "interp-jump-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_INTERP_ACTION_CONTROL_TRANSFER,
         0,
         0u,
@@ -502,10 +534,11 @@ static int test_machine_interp_custom_step_cases(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 next-status=ready next-pc=- targets=[1] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 targets=2 linear-next-pc=yes block-targets=yes\n"
         "  interp: action=control-transfer next-status=ready next-pc=- targets=[1] return-imm=-\n");
 
@@ -527,6 +560,8 @@ static int test_machine_interp_custom_step_cases(void) {
         &interp_file,
         "interp-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x1000u,
         MACHINE_INTERP_ACTION_UNSUPPORTED,
         MACHINE_STEP_STATUS_READY,
@@ -538,7 +573,7 @@ static int test_machine_interp_custom_step_cases(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 next-status=ready next-pc=- targets=[] return-imm=-\n");
 
 cleanup:
@@ -586,6 +621,8 @@ static int test_machine_interp_i386_bridge(void) {
         &interp_file,
         "interp-i386-ir-file",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         0x08048000u,
         MACHINE_INTERP_ACTION_ADVANCE,
         MACHINE_STEP_STATUS_READY,
@@ -597,17 +634,18 @@ static int test_machine_interp_i386_bridge(void) {
         0u,
         0,
         0u,
-        "machine_interp profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 targets=[] return-imm=-\n");
 
     ok &= expect_text("interp i386 dump wrapper", dump_text,
-        "machine_interp profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 targets=[] return-imm=-\n");
     ok &= expect_text("interp i386 report dump wrapper", report_dump_text,
-        "machine_interp profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
+        "machine_interp profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
         "interp: action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview targets=2 linear-next-pc=yes block-targets=yes\n"
         "  interp: action=advance next-status=ready next-pc=0x8048001 targets=[] return-imm=-\n");
 

@@ -138,6 +138,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_state_file(const MachineStateFile *state_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineStateResolutionKind resolution_kind,
     int has_state,
     MachineStepStatus state_status,
@@ -151,6 +153,7 @@ static int verify_state_file(const MachineStateFile *state_file,
     MachineStateTargetPolicySummary target_policy_summary;
     MachineStateSummary state_summary;
     MachineStateCurrentFetchSummary current_fetch_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineStateError state_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -159,9 +162,14 @@ static int verify_state_file(const MachineStateFile *state_file,
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&state_summary, 0, sizeof(state_summary));
     memset(&current_fetch_summary, 0, sizeof(current_fetch_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&state_error, 0, sizeof(state_error));
 
     if (!machine_state_verify_file(state_file, &state_error) ||
+        !machine_state_file_get_source_elf_artifact_summary(state_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_state_file_get_header_summary(state_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_state_file_get_target_policy_summary(state_file, &target_policy_summary) ||
@@ -195,6 +203,8 @@ cleanup:
 static int verify_state_report(const MachineStateReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineStateResolutionKind resolution_kind,
     int has_state,
     size_t program_counter,
@@ -206,6 +216,7 @@ static int verify_state_report(const MachineStateReport *report,
     const MachineStateTargetPolicySummary *target_policy_summary = NULL;
     const MachineStateSummary *state_summary = NULL;
     const MachineStateCurrentFetchSummary *current_fetch_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineStateError state_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -216,8 +227,13 @@ static int verify_state_report(const MachineStateReport *report,
     if (!machine_state_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_state_report_get_file(report, &state_file) || !state_file ||
         !machine_state_report_get_transition_report(report, &transition_report) || !transition_report ||
+        !machine_state_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_state_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_state_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->defers_control_transfer_state ||
         !machine_state_report_get_state_summary_artifact(report, &state_summary) ||
@@ -272,6 +288,8 @@ static int test_machine_state_mainline(void) {
         &state_file,
         "state-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_STATE_RESOLUTION_READY,
         1,
         MACHINE_STEP_STATUS_READY,
@@ -280,7 +298,7 @@ static int test_machine_state_mainline(void) {
         1,
         0u,
         0x8au,
-        "machine_state profile=generic-elf32 origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=ready transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 sp=0x4000 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_state_clone_file(&state_file, &cloned_state_file, &state_error) ||
@@ -295,13 +313,16 @@ static int test_machine_state_mainline(void) {
         &state_report,
         "state-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_STATE_RESOLUTION_READY,
         1,
         0x1001u,
-        "machine_state profile=generic-elf32 origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=ready transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 sp=0x4000 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 ready=yes halt=yes deferred-control=yes\n"
         "  state: resolution=ready has-state=yes status=ready pc=0x1001 targets=[] return-imm=-\n");
 
@@ -361,6 +382,8 @@ static int test_machine_state_custom_step_cases(void) {
         &state_file,
         "state-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_STATE_RESOLUTION_HALTED,
         1,
         MACHINE_STEP_STATUS_HALTED,
@@ -369,7 +392,7 @@ static int test_machine_state_custom_step_cases(void) {
         0,
         0u,
         0u,
-        "machine_state profile=generic-elf32 origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=halted transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 has-state=yes status=halted pc=0x1000 sp=0x4000 current-segment=- current-byte=- targets=[] return-imm=7\n");
 
     machine_state_report_free(&state_report);
@@ -390,6 +413,8 @@ static int test_machine_state_custom_step_cases(void) {
         &state_file,
         "state-deferred-control-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_STATE_RESOLUTION_DEFERRED_CONTROL_TRANSFER,
         0,
         MACHINE_STEP_STATUS_READY,
@@ -398,7 +423,7 @@ static int test_machine_state_custom_step_cases(void) {
         0,
         0u,
         0u,
-        "machine_state profile=generic-elf32 origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=deferred-control-transfer transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 has-state=no status=- pc=- sp=- current-segment=- current-byte=- targets=[1] return-imm=-\n");
 
     machine_state_report_free(&state_report);
@@ -419,6 +444,8 @@ static int test_machine_state_custom_step_cases(void) {
         &state_file,
         "state-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_STATE_RESOLUTION_UNSUPPORTED,
         0,
         MACHINE_STEP_STATUS_READY,
@@ -427,7 +454,7 @@ static int test_machine_state_custom_step_cases(void) {
         0,
         0u,
         0u,
-        "machine_state profile=generic-elf32 origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=unsupported transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 has-state=no status=- pc=- sp=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
 cleanup:
@@ -472,13 +499,14 @@ static int test_machine_state_i386_bridge(void) {
     }
 
     ok &= expect_text("state i386 dump wrapper", dump_text,
-        "machine_state profile=i386-preview origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=ready transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 sp=0x804b000 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("state i386 report dump wrapper", report_dump_text,
-        "machine_state profile=i386-preview origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_state profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "state: resolution=ready transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 sp=0x804b000 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview ready=yes halt=yes deferred-control=yes\n"
         "  state: resolution=ready has-state=yes status=ready pc=0x8048001 targets=[] return-imm=-\n");
 

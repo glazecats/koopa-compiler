@@ -8,6 +8,9 @@ static int machine_select_lower_value_instruction(const MachineIrInstruction *sr
     MachineSelectOp *dest_op,
     int *out_handled) {
     long long folded_value;
+    MachineIrBinaryOp binary_op;
+    MachineIrOperand lhs;
+    MachineIrOperand rhs;
 
     if (out_handled) {
         *out_handled = 1;
@@ -24,33 +27,37 @@ static int machine_select_lower_value_instruction(const MachineIrInstruction *sr
             dest_op->as.copy_value = machine_select_lower_operand(src_op->as.mov_value);
             return 1;
         case MACHINE_IR_INSTR_BINARY:
+            binary_op = src_op->as.binary.op;
+            lhs = src_op->as.binary.lhs;
+            rhs = src_op->as.binary.rhs;
+            machine_select_canonicalize_binary_immediate_side(&binary_op, &lhs, &rhs);
             if (machine_select_try_eval_binary_immediate(
-                    src_op->as.binary.op,
-                    src_op->as.binary.lhs,
-                    src_op->as.binary.rhs,
+                    binary_op,
+                    lhs,
+                    rhs,
                     &folded_value)) {
                 dest_op->kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
                 dest_op->as.copy_value = machine_select_operand_immediate(folded_value);
                 return 1;
             }
-            if (machine_select_binary_is_compare(src_op->as.binary.op)) {
+            if (machine_select_binary_is_compare(binary_op)) {
                 dest_op->kind = machine_select_binary_uses_immediate_form(
-                    src_op->as.binary.op,
-                    src_op->as.binary.lhs,
-                    src_op->as.binary.rhs)
+                    binary_op,
+                    lhs,
+                    rhs)
                     ? MACHINE_SELECT_OP_CMP_IMM
                     : MACHINE_SELECT_OP_CMP;
             } else {
                 dest_op->kind = machine_select_binary_uses_immediate_form(
-                    src_op->as.binary.op,
-                    src_op->as.binary.lhs,
-                    src_op->as.binary.rhs)
+                    binary_op,
+                    lhs,
+                    rhs)
                     ? MACHINE_SELECT_OP_ALU_IMM
                     : MACHINE_SELECT_OP_ALU;
             }
-            dest_op->as.binary.op = src_op->as.binary.op;
-            dest_op->as.binary.lhs = machine_select_lower_operand(src_op->as.binary.lhs);
-            dest_op->as.binary.rhs = machine_select_lower_operand(src_op->as.binary.rhs);
+            dest_op->as.binary.op = binary_op;
+            dest_op->as.binary.lhs = machine_select_lower_operand(lhs);
+            dest_op->as.binary.rhs = machine_select_lower_operand(rhs);
             return 1;
         default:
             *out_handled = 0;

@@ -1,4 +1,5 @@
 #include "machine/encode.h"
+#include "machine/bytes.h"
 
 #include <stdarg.h>
 #include <stdio.h>

@@ -495,10 +495,13 @@ static int test_machine_encode_clone_and_report_from_program(void) {
     MachineEncodeProgram cloned_program;
     MachineEncodeReport report;
     MachineEncodeError encode_error;
+    MachineEncodeTargetPolicySummary program_policy_summary;
+    const MachineEncodeTargetPolicySummary *report_policy_summary = NULL;
     char *actual_text = NULL;
     int ok = 1;
 
     memset(&encode_error, 0, sizeof(encode_error));
+    memset(&program_policy_summary, 0, sizeof(program_policy_summary));
     machine_emit_program_init(&emit_program);
     machine_encode_program_init(&encode_program);
     machine_encode_program_init(&cloned_program);
@@ -542,8 +545,25 @@ static int test_machine_encode_clone_and_report_from_program(void) {
         return 0;
     }
 
-    if (!machine_encode_build_report_from_program_dump(&cloned_program, &actual_text, &encode_error) || !actual_text ||
+    if (!machine_encode_program_get_target_policy_summary(&cloned_program, &program_policy_summary) ||
+        !machine_encode_report_get_target_policy_summary_artifact(&report, &report_policy_summary) ||
+        !machine_encode_verify_current_riscv32_preview_compatibility(&cloned_program, &encode_error) ||
+        !machine_encode_report_verify_current_riscv32_preview_compatibility(&report, &encode_error) ||
+        !machine_encode_verify_current_riscv32_preview_bytes_compatibility(&cloned_program, &encode_error) ||
+        !machine_encode_report_verify_current_riscv32_preview_bytes_compatibility(&report, &encode_error) ||
+        program_policy_summary.emit_policy.select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !program_policy_summary.emit_policy.preserves_spill_operands_for_later_materialization ||
+        !program_policy_summary.emit_policy.preserves_global_slot_ops_for_later_address_formation ||
+        !program_policy_summary.emit_policy.preserves_fallthrough_terminator_shapes ||
+        !program_policy_summary.preserves_block_unit_offsets ||
+        !program_policy_summary.preserves_fallthrough_terminator_shapes ||
+        !report_policy_summary ||
+        report_policy_summary->emit_policy.select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !report_policy_summary->preserves_block_unit_offsets ||
+        !report_policy_summary->preserves_fallthrough_terminator_shapes ||
+        !machine_encode_build_report_from_program_dump(&cloned_program, &actual_text, &encode_error) || !actual_text ||
         strstr(actual_text, "machine_encode-report call_funcs=0 fallthrough_funcs=0 branch_funcs=0 total_block_summaries=1\n") != actual_text ||
+        strstr(actual_text, "target_policy preview_reg_cap=8 preserves_spills=1 preserves_global_slots=1 preserves_fallthrough=1 preserves_offsets=1\n") == NULL ||
         strstr(actual_text, "functions-with-calls:\nfunctions-with-fallthrough:\nfunctions-with-branches:\nfunction-summaries:\n") == NULL ||
         strstr(actual_text, "emit.0 label=F0.L0 layout.0 bb.0 start=0 term=0 end=1\n") == NULL) {
         fprintf(stderr, "[machine-encode] FAIL: clone/report dump mismatch\nactual:\n%s\n", actual_text ? actual_text : "<null>");
@@ -554,6 +574,201 @@ static int test_machine_encode_clone_and_report_from_program(void) {
     machine_emit_program_free(&emit_program);
     machine_encode_program_free(&encode_program);
     machine_encode_program_free(&cloned_program);
+    machine_encode_report_free(&report);
+    return ok;
+}
+
+static int test_machine_encode_rejects_riscv32_preview_incompatible_register_bank(void) {
+    MachineEncodeProgram program;
+    MachineEncodeError error;
+    size_t register_index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    machine_encode_program_init(&program);
+
+    program.register_bank.register_count = 9u;
+    program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(9u, sizeof(MachineEmitRegisterDesc));
+    program.function_count = 1u;
+    program.function_capacity = 1u;
+    program.functions = (MachineEncodeFunction *)calloc(1u, sizeof(MachineEncodeFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+    for (register_index = 0u; register_index < 9u; ++register_index) {
+        program.register_bank.registers[register_index].register_id = register_index;
+        program.register_bank.registers[register_index].name = dup_text("r");
+        program.register_bank.registers[register_index].allocatable = 1u;
+        if (!program.register_bank.registers[register_index].name) {
+            machine_encode_program_free(&program);
+            return 0;
+        }
+    }
+
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].block_count = 1u;
+    program.functions[0].block_capacity = 1u;
+    program.functions[0].blocks = (MachineEncodeBlock *)calloc(1u, sizeof(MachineEncodeBlock));
+    if (!program.functions[0].name || !program.functions[0].blocks) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].emit_index = 0u;
+    program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program.functions[0].blocks[0].start_offset = 0u;
+    program.functions[0].blocks[0].terminator_offset = 1u;
+    program.functions[0].blocks[0].end_offset = 2u;
+    program.functions[0].blocks[0].span.start_offset = 0u;
+    program.functions[0].blocks[0].span.terminator_offset = 1u;
+    program.functions[0].blocks[0].span.end_offset = 2u;
+    program.functions[0].blocks[0].block.op_count = 1u;
+    program.functions[0].blocks[0].block.op_capacity = 1u;
+    program.functions[0].blocks[0].block.ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    if (!program.functions[0].blocks[0].label_name || !program.functions[0].blocks[0].block.ops) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].block.ops[0].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    program.functions[0].blocks[0].block.ops[0].has_result = 1;
+    program.functions[0].blocks[0].block.ops[0].result = machine_select_operand_register(8u);
+    program.functions[0].blocks[0].block.ops[0].as.copy_value = machine_select_operand_immediate(5);
+    program.functions[0].blocks[0].block.has_terminator = 1;
+    program.functions[0].blocks[0].block.terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    program.functions[0].blocks[0].block.terminator.as.return_value = machine_select_operand_register(8u);
+
+    if (machine_encode_verify_current_riscv32_preview_compatibility(&program, &error) ||
+        strstr(error.message, "MACHINE-ENCODE-122") == NULL) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: oversized riscv32-preview register bank was not rejected: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    machine_encode_program_free(&program);
+    return ok;
+}
+
+static int test_machine_encode_rejects_riscv32_preview_bytes_incompatible_branch_range(void) {
+    MachineEmitProgram emit_program;
+    MachineEncodeProgram encode_program;
+    MachineEncodeReport report;
+    MachineEncodeError encode_error;
+    size_t op_index;
+    int ok = 1;
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_emit_program_init(&emit_program);
+    machine_encode_program_init(&encode_program);
+    machine_encode_report_init(&report);
+
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
+
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 3u;
+    emit_program.functions[0].block_capacity = 3u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(3u, sizeof(MachineEmitBlock));
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.functions[0].name ||
+        !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_BRANCH;
+    emit_program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_register(0u);
+    emit_program.functions[0].blocks[0].terminator.as.branch.then_target = 2u;
+    emit_program.functions[0].blocks[0].terminator.as.branch.else_target = 1u;
+
+    emit_program.functions[0].blocks[1].emit_index = 1u;
+    emit_program.functions[0].blocks[1].original_layout_index = 1u;
+    emit_program.functions[0].blocks[1].original_block_id = 1u;
+    emit_program.functions[0].blocks[1].label_name = dup_text("F0.L1");
+    emit_program.functions[0].blocks[1].op_count = 513u;
+    emit_program.functions[0].blocks[1].op_capacity = 513u;
+    emit_program.functions[0].blocks[1].ops = (MachineEmitOp *)calloc(513u, sizeof(MachineEmitOp));
+    emit_program.functions[0].blocks[1].has_terminator = 1;
+    emit_program.functions[0].blocks[1].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    if (!emit_program.functions[0].blocks[0].label_name ||
+        !emit_program.functions[0].blocks[1].label_name ||
+        !emit_program.functions[0].blocks[1].ops) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+    for (op_index = 0u; op_index < 513u; ++op_index) {
+        emit_program.functions[0].blocks[1].ops[op_index].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+        emit_program.functions[0].blocks[1].ops[op_index].has_result = 1;
+        emit_program.functions[0].blocks[1].ops[op_index].result = machine_select_operand_register(0u);
+        emit_program.functions[0].blocks[1].ops[op_index].as.copy_value = machine_select_operand_immediate(5000);
+    }
+
+    emit_program.functions[0].blocks[2].emit_index = 2u;
+    emit_program.functions[0].blocks[2].original_layout_index = 2u;
+    emit_program.functions[0].blocks[2].original_block_id = 2u;
+    emit_program.functions[0].blocks[2].label_name = dup_text("F0.L2");
+    emit_program.functions[0].blocks[2].has_terminator = 1;
+    emit_program.functions[0].blocks[2].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    if (!emit_program.functions[0].blocks[2].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+
+    if (!machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error) ||
+        !machine_encode_build_report_from_program(&encode_program, &report, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: bytes-compat setup failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+
+    if (machine_encode_verify_current_riscv32_preview_bytes_compatibility(&encode_program, &encode_error) ||
+        strstr(encode_error.message, "MACHINE-ENCODE-125") == NULL ||
+        strstr(encode_error.message, "MACHINE-BYTES-344") == NULL) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: preview bytes-compatibility branch-range reject mismatch: %s\n",
+            encode_error.message);
+        ok = 0;
+    }
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_report_verify_current_riscv32_preview_bytes_compatibility(&report, &encode_error) ||
+        strstr(encode_error.message, "MACHINE-ENCODE-125") == NULL ||
+        strstr(encode_error.message, "MACHINE-BYTES-344") == NULL) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: preview report bytes-compatibility branch-range reject mismatch: %s\n",
+            encode_error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_encode_program_free(&encode_program);
     machine_encode_report_free(&report);
     return ok;
 }
@@ -661,6 +876,7 @@ static int test_machine_encode_from_machine_emit_report(void) {
     if (!machine_encode_build_report_from_machine_emit_report_dump(&emit_report, &actual_text, &encode_error) ||
         !actual_text ||
         strstr(actual_text, "machine_encode-report call_funcs=0 fallthrough_funcs=1 branch_funcs=0 total_block_summaries=2\n") != actual_text ||
+        strstr(actual_text, "target_policy preview_reg_cap=8 preserves_spills=1 preserves_global_slots=1 preserves_fallthrough=1 preserves_offsets=1\n") == NULL ||
         strstr(actual_text, "emit.1 label=F0.L1 layout.1 bb.1 start=2 term=2 end=3\n") == NULL) {
         fprintf(stderr, "[machine-encode] FAIL: emit-report bridge dump mismatch\nactual:\n%s\n", actual_text ? actual_text : "<null>");
         ok = 0;
@@ -903,6 +1119,8 @@ int main(void) {
     ok &= test_machine_encode_from_machine_ir_report();
     ok &= test_machine_encode_verifier_rejects_bad_offsets();
     ok &= test_machine_encode_verifier_rejects_bad_targets();
+    ok &= test_machine_encode_rejects_riscv32_preview_incompatible_register_bank();
+    ok &= test_machine_encode_rejects_riscv32_preview_bytes_incompatible_branch_range();
 
     if (!ok) {
         return 1;

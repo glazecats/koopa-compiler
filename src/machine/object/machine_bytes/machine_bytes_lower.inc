@@ -11,6 +11,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
     size_t register_index;
     size_t global_index;
     size_t function_index;
+    size_t *function_byte_offsets = NULL;
 
     if (!source || !out_program || !machine_bytes_target_profile_is_valid(profile)) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-300: invalid lower contract");
@@ -20,11 +21,17 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
     machine_bytes_program_free(out_program);
     out_program->target_profile = profile;
 
+    if (!machine_bytes_profile_supports_register_bank(profile, source->register_bank.register_count, error)) {
+        machine_bytes_program_free(out_program);
+        return 0;
+    }
+
     if (source->register_bank.register_count > 0) {
         out_program->register_bank.registers =
             (MachineEmitRegisterDesc *)calloc(source->register_bank.register_count, sizeof(MachineEmitRegisterDesc));
         if (!out_program->register_bank.registers) {
             machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-301: out of memory copying registers");
+            free(function_byte_offsets);
             machine_bytes_program_free(out_program);
             return 0;
         }
@@ -36,6 +43,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
             if (source->register_bank.registers[register_index].name &&
                 !out_program->register_bank.registers[register_index].name) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-302: out of memory copying register name");
+                free(function_byte_offsets);
                 machine_bytes_program_free(out_program);
                 return 0;
             }
@@ -46,6 +54,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
         out_program->globals = (MachineEmitGlobal *)calloc(source->global_count, sizeof(MachineEmitGlobal));
         if (!out_program->globals) {
             machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-303: out of memory copying globals");
+            free(function_byte_offsets);
             machine_bytes_program_free(out_program);
             return 0;
         }
@@ -56,6 +65,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
             out_program->globals[global_index].name = machine_bytes_strdup(source->globals[global_index].name);
             if (source->globals[global_index].name && !out_program->globals[global_index].name) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-304: out of memory copying global name");
+                free(function_byte_offsets);
                 machine_bytes_program_free(out_program);
                 return 0;
             }
@@ -66,6 +76,13 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
         out_program->functions = (MachineBytesFunction *)calloc(source->function_count, sizeof(MachineBytesFunction));
         if (!out_program->functions) {
             machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-305: out of memory copying functions");
+            free(function_byte_offsets);
+            machine_bytes_program_free(out_program);
+            return 0;
+        }
+        function_byte_offsets = (size_t *)calloc(source->function_count, sizeof(size_t));
+        if (!function_byte_offsets) {
+            machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-340: out of memory allocating function byte offsets");
             machine_bytes_program_free(out_program);
             return 0;
         }
@@ -86,6 +103,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
         dest_function->name = machine_bytes_strdup(src_function->name);
         if (src_function->name && !dest_function->name) {
             machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-306: out of memory copying function name");
+            free(function_byte_offsets);
             machine_bytes_program_free(out_program);
             return 0;
         }
@@ -93,6 +111,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
             dest_function->blocks = (MachineBytesBlock *)calloc(src_function->block_count, sizeof(MachineBytesBlock));
             if (!dest_function->blocks) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-307: out of memory copying blocks");
+                free(function_byte_offsets);
                 machine_bytes_program_free(out_program);
                 return 0;
             }
@@ -108,6 +127,7 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
 
             if (!machine_bytes_clone_block_payload(dest_block, src_block)) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-308: out of memory cloning encoded block");
+                free(function_byte_offsets);
                 machine_bytes_program_free(out_program);
                 return 0;
             }
@@ -124,17 +144,49 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
             dest_block->bytes = (unsigned char *)malloc(dest_block->byte_count);
             if (!dest_block->bytes) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-309: out of memory allocating block bytes");
-                machine_bytes_program_free(out_program);
-                return 0;
-            }
-            if (!machine_bytes_write_block_bytes_for_profile(profile, dest_block)) {
-                machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-310: failed to materialize block bytes");
+                free(function_byte_offsets);
                 machine_bytes_program_free(out_program);
                 return 0;
             }
             running_offset = dest_block->end_byte_offset;
         }
     }
+
+    {
+        size_t running_function_offset = 0u;
+
+        for (function_index = 0u; function_index < out_program->function_count; ++function_index) {
+            function_byte_offsets[function_index] = running_function_offset;
+            running_function_offset += machine_bytes_function_total_byte_count(&out_program->functions[function_index]);
+        }
+    }
+
+    for (function_index = 0; function_index < out_program->function_count; ++function_index) {
+        MachineBytesFunction *dest_function = &out_program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0u; block_index < dest_function->block_count; ++block_index) {
+            MachineBytesBlock *dest_block = &dest_function->blocks[block_index];
+
+            if (!machine_bytes_write_block_bytes_for_profile(
+                    profile,
+                    out_program,
+                    dest_function,
+                    function_byte_offsets[function_index],
+                    function_byte_offsets,
+                    dest_block,
+                    error)) {
+                if (!error || error->message[0] == '\0') {
+                    machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-341: failed to materialize block bytes");
+                }
+                free(function_byte_offsets);
+                machine_bytes_program_free(out_program);
+                return 0;
+            }
+        }
+    }
+
+    free(function_byte_offsets);
 
     return machine_bytes_verify_program(out_program, error);
 }

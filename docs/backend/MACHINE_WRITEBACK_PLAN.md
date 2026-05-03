@@ -107,6 +107,11 @@ Do not start with:
     `MachineDecodeFile` / `MachineDecodeReport`, `MachineStepFile` /
     `MachineStepReport`, and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw writeback files, reports, direct dumps, and report dumps
+  - that same writeback bridge now also preserves upstream ELF provenance
+    instead of flattening it away at writeback-classification time: raw
+    writeback files, writeback reports, and dump/report-dump helpers surface
+    the embedded source-ELF artifact summary carried through
+    `machine_mutation`
 
 ## File Management Rules
 

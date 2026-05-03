@@ -63,6 +63,15 @@ int machine_load_report_get_file(const MachineLoadReport *report,
     return 1;
 }
 
+int machine_load_report_get_source_elf_artifact_summary_artifact(const MachineLoadReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_load_report_get_header_summary_artifact(const MachineLoadReport *report,
     const MachineLoadHeaderSummary **out_summary) {
     if (!report || !out_summary) {
@@ -383,6 +392,7 @@ int machine_load_dump_report(const MachineLoadReport *report,
             &builder,
             "report_overview:\n"
             "  segments=%zu file_bytes=%zu memory_bytes=%zu executable_segments=%zu non_executable_segments=%zu entry=0x%zx entry_segment=%zu\n"
+            "  elf_source: target=%s origin=%s semantics=%s\n"
             "  policy: profile=%s base=0x%zx align=%zu\n"
             "  memory: base=0x%zx end=0x%zx entry-offset=0x%zx\n",
             report->segment_summary_count,
@@ -392,6 +402,10 @@ int machine_load_dump_report(const MachineLoadReport *report,
             report->non_executable_segment_count,
             report->header_summary.entry_virtual_address,
             entry_segment_index,
+            machine_elf_target_profile_name(report->file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(report->file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_elf_target_profile_name(overview_artifact.target_policy_summary->target_profile),
             overview_artifact.target_policy_summary->base_virtual_address,
             overview_artifact.target_policy_summary->segment_alignment,

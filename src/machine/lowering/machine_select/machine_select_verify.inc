@@ -173,6 +173,13 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                             !machine_select_verify_operand(program, function, op->as.binary.rhs, "binary rhs", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_ALU_IMM || op->kind == MACHINE_SELECT_OP_CMP_IMM) &&
+                            (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                                op->as.binary.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                            machine_select_set_error(
+                                error, 0, 0, "MACHINE-SELECT-133: immediate binary families require rhs immediate only");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_CALL:
                     case MACHINE_SELECT_OP_CALL_IMM:
@@ -325,6 +332,13 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                         block->terminator.as.compare_branch.else_target >= function->block_count ||
                         !machine_select_binary_is_compare(block->terminator.as.compare_branch.op)) {
                         machine_select_set_error(error, 0, 0, "MACHINE-SELECT-126: invalid compare-branch terminator");
+                        return 0;
+                    }
+                    if (block->terminator.kind == MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM &&
+                        (block->terminator.as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                            block->terminator.as.compare_branch.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                        machine_select_set_error(
+                            error, 0, 0, "MACHINE-SELECT-134: compare-branch immediate family requires rhs immediate only");
                         return 0;
                     }
                     break;

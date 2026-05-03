@@ -668,8 +668,12 @@ int machine_payload_decode_dump_file(const MachinePayloadDecodeFile *decode_file
 
     if (!machine_payload_decode_append_format(
             &builder,
-            "machine_payload_decode profile=%s status=%s pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n",
+            "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=%s pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                decode_file->decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                decode_file->decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(header_summary.step_status),
             header_summary.program_counter,
             header_summary.stack_pointer,
@@ -812,6 +816,17 @@ int machine_payload_decode_report_get_summary(const MachinePayloadDecodeReport *
     return 1;
 }
 
+int machine_payload_decode_file_get_source_elf_artifact_summary(const MachinePayloadDecodeFile *decode_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!decode_file || !out_summary) {
+        return 0;
+    }
+    *out_summary =
+        decode_file->decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file
+            .source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_payload_decode_report_get_overview_artifact(const MachinePayloadDecodeReport *report,
     MachinePayloadDecodeReportOverviewArtifact *out_artifact) {
     if (!report || !out_artifact) {
@@ -846,6 +861,17 @@ int machine_payload_decode_report_get_decode_file(const MachinePayloadDecodeRepo
         return 0;
     }
     *out_decode_file = &report->file.decode_file;
+    return 1;
+}
+
+int machine_payload_decode_report_get_source_elf_artifact_summary_artifact(
+    const MachinePayloadDecodeReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file
+                         .source_elf_artifact_summary;
     return 1;
 }
 
@@ -1014,8 +1040,12 @@ int machine_payload_decode_dump_report(const MachinePayloadDecodeReport *report,
 
     if (!machine_payload_decode_append_format(
             &builder,
-            "machine_payload_decode profile=%s status=%s pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n",
+            "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=%s pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(report->header_summary.step_status),
             report->header_summary.program_counter,
             report->header_summary.stack_pointer,
@@ -1061,6 +1091,15 @@ int machine_payload_decode_dump_report(const MachinePayloadDecodeReport *report,
             report->header_summary.mapped_byte_count,
             report->header_summary.program_counter,
             report->header_summary.stack_pointer) ||
+        !machine_payload_decode_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_payload_decode_append_format(
             &builder,
             "  policy: profile=%s max-payload=%zu\n",

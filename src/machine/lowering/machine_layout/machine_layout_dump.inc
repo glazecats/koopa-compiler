@@ -362,4 +362,122 @@ int machine_layout_dump_program(const MachineLayoutProgram *program,
     return 1;
 }
 
+int machine_layout_dump_report(const MachineLayoutReport *report,
+    char **out_text,
+    MachineLayoutError *error) {
+    MachineLayoutStringBuilder builder;
+    char *program_text = NULL;
+    size_t function_index;
+    size_t index;
+
+    if (out_text) {
+        *out_text = NULL;
+    }
+    if (!report || !out_text) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-201: invalid report dump contract");
+        return 0;
+    }
+
+    memset(&builder, 0, sizeof(builder));
+    if (!machine_layout_append_format(
+            &builder,
+            "machine_layout-report registers=%zu globals=%zu functions=%zu total_block_summaries=%zu fallthrough_funcs=%zu branch_funcs=%zu\n",
+            report->program.register_bank.register_count,
+            report->program.global_count,
+            report->program.function_count,
+            report->total_block_summary_count,
+            report->functions_with_fallthrough_count,
+            report->functions_with_branches_count) ||
+        !machine_layout_append_format(
+            &builder,
+            "target_policy preview_reg_cap=%zu preserves_spills=%d preserves_global_slots=%d preserves_fallthrough=%d\n",
+            report->target_policy_summary.select_policy.current_riscv32_preview_logical_register_cap,
+            report->target_policy_summary.preserves_spill_operands_for_later_materialization,
+            report->target_policy_summary.preserves_global_slot_ops_for_later_address_formation,
+            report->target_policy_summary.preserves_fallthrough_terminator_shapes)) {
+        free(builder.data);
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-202: out of memory while dumping report");
+        return 0;
+    }
+    if (!machine_layout_append_format(&builder, "functions-with-fallthrough:")) {
+        free(builder.data);
+        return 0;
+    }
+    for (index = 0; index < report->functions_with_fallthrough_count; ++index) {
+        if (!machine_layout_append_format(&builder, " %zu", report->function_indices_with_fallthrough[index])) {
+            free(builder.data);
+            return 0;
+        }
+    }
+    if (!machine_layout_append_format(&builder, "\nfunctions-with-branches:")) {
+        free(builder.data);
+        return 0;
+    }
+    for (index = 0; index < report->functions_with_branches_count; ++index) {
+        if (!machine_layout_append_format(&builder, " %zu", report->function_indices_with_branches[index])) {
+            free(builder.data);
+            return 0;
+        }
+    }
+    if (!machine_layout_append_format(&builder, "\nfunction-summaries:\n")) {
+        free(builder.data);
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_summary_count; ++function_index) {
+        const MachineLayoutFunction *function = &report->program.functions[function_index];
+        const MachineLayoutFunctionSummary *summary = &report->function_summaries[function_index];
+        size_t block_offset = report->function_block_summary_offsets ? report->function_block_summary_offsets[function_index] : 0u;
+        size_t next_block_offset = function_index + 1u < report->program.function_count && report->function_block_summary_offsets
+            ? report->function_block_summary_offsets[function_index + 1u]
+            : report->total_block_summary_count;
+        size_t block_summary_index;
+
+        if (!machine_layout_append_format(
+                &builder,
+                "  fn.%zu %s blocks=%zu ops=%zu jump=%zu fallthrough=%zu br=%zu brft=%zu cmpbr=%zu cmpbri=%zu cmpbrft=%zu cmpbrift=%zu ret=%zu reti=%zu retspill=%zu\n",
+                function_index,
+                function->name ? function->name : "<unnamed>",
+                summary->block_count,
+                summary->op_count,
+                summary->jump_count,
+                summary->fallthrough_count,
+                summary->branch_count,
+                summary->branch_fallthrough_count,
+                summary->compare_branch_count,
+                summary->compare_branch_imm_count,
+                summary->compare_branch_fallthrough_count,
+                summary->compare_branch_imm_fallthrough_count,
+                summary->return_count,
+                summary->return_imm_count,
+                summary->return_spill_count)) {
+            free(builder.data);
+            return 0;
+        }
+        for (block_summary_index = block_offset; block_summary_index < next_block_offset; ++block_summary_index) {
+            const MachineLayoutBlockSummary *block_summary = &report->block_summaries[block_summary_index];
+
+            if (!machine_layout_append_format(
+                    &builder,
+                    "    layout.%zu bb.%zu ops=%zu has_term=%d term=%d\n",
+                    block_summary->layout_index,
+                    block_summary->original_block_id,
+                    block_summary->op_count,
+                    block_summary->has_terminator,
+                    (int)block_summary->terminator_kind)) {
+                free(builder.data);
+                return 0;
+            }
+        }
+    }
+    if (!machine_layout_dump_program(&report->program, &program_text, error) ||
+        !machine_layout_append_format(&builder, "\n%s", program_text ? program_text : "")) {
+        free(program_text);
+        free(builder.data);
+        return 0;
+    }
+    free(program_text);
+    *out_text = builder.data;
+    return 1;
+}
+
 #endif

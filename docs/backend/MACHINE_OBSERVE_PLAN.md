@@ -107,6 +107,10 @@ Do not start with:
     `MachineCommitReport`, `MachineStepFile` / `MachineStepReport`, and
     profile-aware `MachineIrAllocateRewriteReport` variants for raw observe
     files, reports, direct dumps, and report dumps
+  - that same observed-state bridge now also preserves upstream ELF
+    provenance instead of flattening it away at observe time: raw observe
+    files, observe reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_apply`
 
 ## File Management Rules
 

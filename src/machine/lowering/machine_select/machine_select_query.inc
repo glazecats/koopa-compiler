@@ -584,6 +584,35 @@ int machine_select_lower_report_get_summary(const MachineSelectLowerReport *repo
         &report->program, out_register_count, out_global_count, out_function_count);
 }
 
+int machine_select_lower_report_get_target_policy_summary_artifact(const MachineSelectLowerReport *report,
+    const MachineSelectTargetPolicySummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->target_policy_summary;
+    return 1;
+}
+
+int machine_select_lower_report_verify_current_riscv32_preview_compatibility(const MachineSelectLowerReport *report,
+    MachineSelectError *error) {
+    if (!report) {
+        machine_select_set_error(
+            error, 0, 0, "MACHINE-SELECT-421: invalid lower-report compatibility contract");
+        return 0;
+    }
+    return machine_select_verify_current_riscv32_preview_compatibility(&report->program, error);
+}
+
+int machine_select_lower_report_verify_current_riscv32_preview_bytes_compatibility(const MachineSelectLowerReport *report,
+    MachineSelectError *error) {
+    if (!report) {
+        machine_select_set_error(
+            error, 0, 0, "MACHINE-SELECT-424: invalid lower-report bytes-compatibility contract");
+        return 0;
+    }
+    return machine_select_verify_current_riscv32_preview_bytes_compatibility(&report->program, error);
+}
+
 int machine_select_lower_report_get_program(const MachineSelectLowerReport *report,
     const MachineSelectProgram **out_program) {
     if (!report || !out_program) {

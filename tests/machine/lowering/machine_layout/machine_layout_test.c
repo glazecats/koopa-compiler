@@ -40,6 +40,24 @@ static int expect_dump(const MachineLayoutProgram *program, const char *expected
     return ok;
 }
 
+static int expect_report_dump(const MachineLayoutReport *report, const char *expected_text) {
+    char *actual_text = NULL;
+    MachineLayoutError error;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!machine_layout_dump_report(report, &actual_text, &error)) {
+        fprintf(stderr, "[machine-layout] FAIL: report dump failed: %s\n", error.message);
+        return 0;
+    }
+    if (!actual_text || strcmp(actual_text, expected_text) != 0) {
+        fprintf(stderr, "[machine-layout] FAIL: report dump mismatch\nactual:\n%s\n", actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+    free(actual_text);
+    return ok;
+}
+
 static int test_machine_layout_lowers_fallthrough_branch_from_machine_ir(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -469,6 +487,426 @@ static int test_machine_layout_lowers_ops_and_fallthrough_from_machine_select(vo
 
     machine_select_program_free(&select_program);
     machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_query_surface(void) {
+    MachineSelectProgram select_program;
+    MachineLayoutProgram layout_program;
+    MachineLayoutError layout_error;
+    MachineLayoutTargetPolicySummary policy_summary;
+    const MachineLayoutFunction *function = NULL;
+    const MachineLayoutFunction *named_function = NULL;
+    const MachineLayoutBlock *block = NULL;
+    MachineLayoutBlockSummary block_summary;
+    const char *name = NULL;
+    int has_body = 0;
+    size_t register_count = 0;
+    size_t global_count = 0;
+    size_t function_count = 0;
+    size_t function_index = 0;
+    size_t parameter_count = 0;
+    size_t local_count = 0;
+    size_t block_count = 0;
+    size_t spill_slot_count = 0;
+    int ok = 1;
+
+    memset(&layout_error, 0, sizeof(layout_error));
+    memset(&policy_summary, 0, sizeof(policy_summary));
+    memset(&block_summary, 0, sizeof(block_summary));
+    machine_select_program_init(&select_program);
+    machine_layout_program_init(&layout_program);
+
+    select_program.global_count = 1;
+    select_program.global_capacity = 1;
+    select_program.globals = (MachineSelectGlobal *)calloc(1, sizeof(MachineSelectGlobal));
+    select_program.function_count = 1;
+    select_program.function_capacity = 1;
+    select_program.functions = (MachineSelectFunction *)calloc(1, sizeof(MachineSelectFunction));
+    if (!select_program.globals || !select_program.functions) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    select_program.globals[0].id = 0u;
+    select_program.globals[0].name = dup_text("g");
+    select_program.functions[0].name = dup_text("main");
+    select_program.functions[0].has_body = 1;
+    select_program.functions[0].parameter_count = 1u;
+    select_program.functions[0].local_count = 1u;
+    select_program.functions[0].local_capacity = 1u;
+    select_program.functions[0].locals = (MachineSelectLocal *)calloc(1u, sizeof(MachineSelectLocal));
+    select_program.functions[0].block_count = 2u;
+    select_program.functions[0].block_capacity = 2u;
+    select_program.functions[0].blocks = (MachineSelectBasicBlock *)calloc(2u, sizeof(MachineSelectBasicBlock));
+    if (!select_program.globals[0].name ||
+        !select_program.functions[0].name ||
+        !select_program.functions[0].locals ||
+        !select_program.functions[0].blocks) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    select_program.functions[0].locals[0].id = 0u;
+    select_program.functions[0].locals[0].source_name = dup_text("a");
+    select_program.functions[0].locals[0].is_parameter = 1;
+    if (!select_program.functions[0].locals[0].source_name) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    select_program.functions[0].blocks[0].id = 0u;
+    select_program.functions[0].blocks[0].op_count = 1u;
+    select_program.functions[0].blocks[0].op_capacity = 1u;
+    select_program.functions[0].blocks[0].ops = (MachineSelectOp *)calloc(1u, sizeof(MachineSelectOp));
+    if (!select_program.functions[0].blocks[0].ops) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    select_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_STORE_GLOBAL_IMM;
+    select_program.functions[0].blocks[0].ops[0].as.store.slot = machine_select_slot_global(0);
+    select_program.functions[0].blocks[0].ops[0].as.store.value = machine_select_operand_immediate(9);
+    select_program.functions[0].blocks[0].has_terminator = 1;
+    select_program.functions[0].blocks[0].terminator.kind = MACHINE_SELECT_TERM_JUMP;
+    select_program.functions[0].blocks[0].terminator.as.jump_target = 1u;
+
+    select_program.functions[0].blocks[1].id = 1u;
+    select_program.functions[0].blocks[1].has_terminator = 1;
+    select_program.functions[0].blocks[1].terminator.kind = MACHINE_SELECT_TERM_RETURN_IMM;
+    select_program.functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(7);
+
+    if (!machine_layout_lower_program_from_machine_select(&select_program, &layout_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: query surface lowering failed: %s\n", layout_error.message);
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    if (!machine_layout_program_get_summary(&layout_program, &register_count, &global_count, &function_count) ||
+        register_count != 0u || global_count != 1u || function_count != 1u ||
+        !machine_layout_program_get_target_policy_summary(&layout_program, &policy_summary) ||
+        policy_summary.select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !policy_summary.preserves_spill_operands_for_later_materialization ||
+        !policy_summary.preserves_global_slot_ops_for_later_address_formation ||
+        !policy_summary.preserves_fallthrough_terminator_shapes ||
+        !machine_layout_program_get_function(&layout_program, 0u, &function) || !function ||
+        !machine_layout_program_get_function_by_name(&layout_program, "main", &function_index, &named_function) ||
+        function_index != 0u || !named_function ||
+        !machine_layout_function_get_summary(
+            function, &name, &has_body, &parameter_count, &local_count, &block_count, &spill_slot_count) ||
+        !name || strcmp(name, "main") != 0 || !has_body || parameter_count != 1u ||
+        local_count != 1u || block_count != 2u || spill_slot_count != 0u ||
+        !machine_layout_function_get_block(function, 0u, &block) || !block ||
+        !machine_layout_block_get_summary(block, &block_summary) ||
+        block_summary.layout_index != 0u ||
+        block_summary.original_block_id != 0u ||
+        block_summary.op_count != 1u ||
+        !block_summary.has_terminator ||
+        block_summary.terminator_kind != MACHINE_LAYOUT_TERM_FALLTHROUGH) {
+        fprintf(stderr, "[machine-layout] FAIL: query surface mismatch\n");
+        ok = 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_report_surface(void) {
+    MachineSelectProgram select_program;
+    MachineLayoutProgram layout_program;
+    MachineLayoutReport report;
+    MachineLayoutError layout_error;
+    MachineLayoutTargetPolicySummary policy_summary;
+    const MachineLayoutTargetPolicySummary *report_policy_summary = NULL;
+    const MachineLayoutProgram *report_program = NULL;
+    const MachineLayoutFunction *report_function = NULL;
+    const MachineLayoutFunctionSummary *function_summary = NULL;
+    const MachineLayoutBlockSummary *block_summary = NULL;
+    const size_t *function_indices = NULL;
+    size_t register_count = 0;
+    size_t global_count = 0;
+    size_t function_count = 0;
+    size_t total_block_summary_count = 0;
+    size_t functions_with_fallthrough = 0;
+    size_t functions_with_branches = 0;
+    int ok = 1;
+
+    memset(&layout_error, 0, sizeof(layout_error));
+    memset(&policy_summary, 0, sizeof(policy_summary));
+    machine_select_program_init(&select_program);
+    machine_layout_program_init(&layout_program);
+    machine_layout_report_init(&report);
+
+    select_program.global_count = 1;
+    select_program.global_capacity = 1;
+    select_program.globals = (MachineSelectGlobal *)calloc(1u, sizeof(MachineSelectGlobal));
+    select_program.function_count = 1;
+    select_program.function_capacity = 1;
+    select_program.functions = (MachineSelectFunction *)calloc(1u, sizeof(MachineSelectFunction));
+    if (!select_program.globals || !select_program.functions) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        machine_layout_report_free(&report);
+        return 0;
+    }
+    select_program.globals[0].id = 0u;
+    select_program.globals[0].name = dup_text("g");
+    select_program.functions[0].name = dup_text("main");
+    select_program.functions[0].has_body = 1;
+    select_program.functions[0].block_count = 2u;
+    select_program.functions[0].block_capacity = 2u;
+    select_program.functions[0].blocks = (MachineSelectBasicBlock *)calloc(2u, sizeof(MachineSelectBasicBlock));
+    if (!select_program.globals[0].name || !select_program.functions[0].name || !select_program.functions[0].blocks) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        machine_layout_report_free(&report);
+        return 0;
+    }
+
+    select_program.functions[0].blocks[0].id = 0u;
+    select_program.functions[0].blocks[0].op_count = 1u;
+    select_program.functions[0].blocks[0].op_capacity = 1u;
+    select_program.functions[0].blocks[0].ops = (MachineSelectOp *)calloc(1u, sizeof(MachineSelectOp));
+    if (!select_program.functions[0].blocks[0].ops) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        machine_layout_report_free(&report);
+        return 0;
+    }
+    select_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_STORE_GLOBAL_IMM;
+    select_program.functions[0].blocks[0].ops[0].as.store.slot = machine_select_slot_global(0u);
+    select_program.functions[0].blocks[0].ops[0].as.store.value = machine_select_operand_immediate(9);
+    select_program.functions[0].blocks[0].has_terminator = 1;
+    select_program.functions[0].blocks[0].terminator.kind = MACHINE_SELECT_TERM_JUMP;
+    select_program.functions[0].blocks[0].terminator.as.jump_target = 1u;
+
+    select_program.functions[0].blocks[1].id = 1u;
+    select_program.functions[0].blocks[1].has_terminator = 1;
+    select_program.functions[0].blocks[1].terminator.kind = MACHINE_SELECT_TERM_RETURN_IMM;
+    select_program.functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(7);
+
+    if (!machine_layout_lower_program_from_machine_select(&select_program, &layout_program, &layout_error) ||
+        !machine_layout_build_report_from_program(&layout_program, &report, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: report surface setup failed: %s\n", layout_error.message);
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        machine_layout_report_free(&report);
+        return 0;
+    }
+
+    if (!machine_layout_program_get_target_policy_summary(&layout_program, &policy_summary) ||
+        !machine_layout_report_get_summary(
+            &report,
+            &register_count,
+            &global_count,
+            &function_count,
+            &total_block_summary_count,
+            &functions_with_fallthrough,
+            &functions_with_branches) ||
+        register_count != 0u || global_count != 1u || function_count != 1u ||
+        total_block_summary_count != 2u || functions_with_fallthrough != 1u || functions_with_branches != 0u ||
+        !machine_layout_report_get_target_policy_summary_artifact(&report, &report_policy_summary) ||
+        !report_policy_summary ||
+        report_policy_summary->select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !machine_layout_report_verify_current_riscv32_preview_compatibility(&report, &layout_error) ||
+        !machine_layout_report_get_program(&report, &report_program) || !report_program ||
+        !machine_layout_report_get_function_by_name(&report, "main", NULL, &report_function) || !report_function ||
+        !machine_layout_report_get_function_summary_artifact(&report, 0u, &function_summary) || !function_summary ||
+        function_summary->fallthrough_count != 1u || function_summary->return_imm_count != 1u ||
+        !machine_layout_report_get_block_summary(&report, 0u, 0u, &block_summary) || !block_summary ||
+        block_summary->layout_index != 0u ||
+        !machine_layout_report_get_functions_with_fallthrough(&report, &function_count, &function_indices) ||
+        function_count != 1u || !function_indices || function_indices[0] != 0u ||
+        !machine_layout_report_get_functions_with_branches(&report, &function_count, &function_indices) ||
+        function_count != 0u ||
+        !expect_report_dump(
+            &report,
+            "machine_layout-report registers=0 globals=1 functions=1 total_block_summaries=2 fallthrough_funcs=1 branch_funcs=0\n"
+            "target_policy preview_reg_cap=8 preserves_spills=1 preserves_global_slots=1 preserves_fallthrough=1\n"
+            "functions-with-fallthrough: 0\n"
+            "functions-with-branches:\n"
+            "function-summaries:\n"
+            "  fn.0 main blocks=2 ops=1 jump=0 fallthrough=1 br=0 brft=0 cmpbr=0 cmpbri=0 cmpbrft=0 cmpbrift=0 ret=0 reti=1 retspill=0\n"
+            "    layout.0 bb.0 ops=1 has_term=1 term=3\n"
+            "    layout.1 bb.1 ops=0 has_term=1 term=1\n"
+            "\n"
+            "machine_layout\n"
+            "function main params=0 locals=0 spills=0\n"
+            "  layout.0 -> bb.0:\n"
+            "    store_globali global.0, 9\n"
+            "    fallthrough layout.1\n"
+            "  layout.1 -> bb.1:\n"
+            "    reti 7\n")) {
+        fprintf(stderr, "[machine-layout] FAIL: report surface mismatch\n");
+        ok = 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_layout_program_free(&layout_program);
+    machine_layout_report_free(&report);
+    return ok;
+}
+
+static int test_machine_layout_rejects_riscv32_preview_incompatible_register_bank(void) {
+    MachineLayoutProgram program;
+    MachineLayoutError error;
+    MachineLayoutTargetPolicySummary policy_summary;
+    size_t register_index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    memset(&policy_summary, 0, sizeof(policy_summary));
+    machine_layout_program_init(&program);
+
+    program.register_bank.register_count = 9u;
+    program.register_bank.registers =
+        (MachineLayoutRegisterDesc *)calloc(9u, sizeof(MachineLayoutRegisterDesc));
+    program.function_count = 1u;
+    program.function_capacity = 1u;
+    program.functions = (MachineLayoutFunction *)calloc(1u, sizeof(MachineLayoutFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+    for (register_index = 0u; register_index < 9u; ++register_index) {
+        program.register_bank.registers[register_index].register_id = register_index;
+        program.register_bank.registers[register_index].name = dup_text("r");
+        program.register_bank.registers[register_index].allocatable = 1u;
+        if (!program.register_bank.registers[register_index].name) {
+            machine_layout_program_free(&program);
+            return 0;
+        }
+    }
+
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].block_count = 1u;
+    program.functions[0].block_capacity = 1u;
+    program.functions[0].blocks = (MachineLayoutBlock *)calloc(1u, sizeof(MachineLayoutBlock));
+    if (!program.functions[0].name || !program.functions[0].blocks) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].layout_index = 0u;
+    program.functions[0].blocks[0].op_count = 1u;
+    program.functions[0].blocks[0].op_capacity = 1u;
+    program.functions[0].blocks[0].ops = (MachineLayoutOp *)calloc(1u, sizeof(MachineLayoutOp));
+    if (!program.functions[0].blocks[0].ops) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    program.functions[0].blocks[0].ops[0].has_result = 1;
+    program.functions[0].blocks[0].ops[0].result = machine_select_operand_register(8u);
+    program.functions[0].blocks[0].ops[0].as.copy_value = machine_select_operand_immediate(4);
+    program.functions[0].blocks[0].has_terminator = 1;
+    program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_register(8u);
+
+    if (!machine_layout_program_get_target_policy_summary(&program, &policy_summary) ||
+        policy_summary.select_policy.current_riscv32_preview_logical_register_cap != 8u ||
+        !policy_summary.preserves_spill_operands_for_later_materialization ||
+        !policy_summary.preserves_global_slot_ops_for_later_address_formation ||
+        !policy_summary.preserves_fallthrough_terminator_shapes) {
+        fprintf(stderr, "[machine-layout] FAIL: target policy summary mismatch\n");
+        ok = 0;
+    }
+    if (machine_layout_verify_current_riscv32_preview_compatibility(&program, &error) ||
+        strstr(error.message, "MACHINE-LAYOUT-138") == NULL) {
+        fprintf(stderr,
+            "[machine-layout] FAIL: oversized riscv32-preview register bank was not rejected: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    machine_layout_program_free(&program);
+    return ok;
+}
+
+static int test_machine_layout_rejects_riscv32_preview_bytes_incompatible_branch_range(void) {
+    MachineLayoutProgram program;
+    MachineLayoutError error;
+    size_t op_index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    machine_layout_program_init(&program);
+
+    program.register_bank.register_count = 1u;
+    program.register_bank.registers =
+        (MachineLayoutRegisterDesc *)calloc(1u, sizeof(MachineLayoutRegisterDesc));
+    program.function_count = 1u;
+    program.function_capacity = 1u;
+    program.functions = (MachineLayoutFunction *)calloc(1u, sizeof(MachineLayoutFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+    program.register_bank.registers[0].register_id = 0u;
+    program.register_bank.registers[0].name = dup_text("r0");
+    program.register_bank.registers[0].allocatable = 1u;
+
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].block_count = 3u;
+    program.functions[0].block_capacity = 3u;
+    program.functions[0].blocks = (MachineLayoutBlock *)calloc(3u, sizeof(MachineLayoutBlock));
+    if (!program.register_bank.registers[0].name ||
+        !program.functions[0].name ||
+        !program.functions[0].blocks) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+
+    program.functions[0].blocks[0].layout_index = 0u;
+    program.functions[0].blocks[0].original_block_id = 0u;
+    program.functions[0].blocks[0].has_terminator = 1;
+    program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_BRANCH;
+    program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_register(0u);
+    program.functions[0].blocks[0].terminator.as.branch.then_target = 2u;
+    program.functions[0].blocks[0].terminator.as.branch.else_target = 1u;
+
+    program.functions[0].blocks[1].layout_index = 1u;
+    program.functions[0].blocks[1].original_block_id = 1u;
+    program.functions[0].blocks[1].op_count = 513u;
+    program.functions[0].blocks[1].op_capacity = 513u;
+    program.functions[0].blocks[1].ops = (MachineLayoutOp *)calloc(513u, sizeof(MachineLayoutOp));
+    program.functions[0].blocks[1].has_terminator = 1;
+    program.functions[0].blocks[1].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program.functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(0u);
+    if (!program.functions[0].blocks[1].ops) {
+        machine_layout_program_free(&program);
+        return 0;
+    }
+    for (op_index = 0u; op_index < 513u; ++op_index) {
+        program.functions[0].blocks[1].ops[op_index].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+        program.functions[0].blocks[1].ops[op_index].has_result = 1;
+        program.functions[0].blocks[1].ops[op_index].result = machine_select_operand_register(0u);
+        program.functions[0].blocks[1].ops[op_index].as.copy_value = machine_select_operand_immediate(5000);
+    }
+
+    program.functions[0].blocks[2].layout_index = 2u;
+    program.functions[0].blocks[2].original_block_id = 2u;
+    program.functions[0].blocks[2].has_terminator = 1;
+    program.functions[0].blocks[2].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program.functions[0].blocks[2].terminator.as.return_value = machine_select_operand_immediate(0u);
+
+    if (machine_layout_verify_current_riscv32_preview_bytes_compatibility(&program, &error) ||
+        strstr(error.message, "MACHINE-LAYOUT-140") == NULL ||
+        strstr(error.message, "MACHINE-EMIT-140") == NULL ||
+        strstr(error.message, "MACHINE-ENCODE-125") == NULL ||
+        strstr(error.message, "MACHINE-BYTES-344") == NULL) {
+        fprintf(stderr,
+            "[machine-layout] FAIL: preview bytes-compatibility branch-range reject mismatch: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    machine_layout_program_free(&program);
     return ok;
 }
 
@@ -4995,6 +5433,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_layout_lowers_ops_and_fallthrough_from_machine_select()) {
+        return 1;
+    }
+    if (!test_machine_layout_query_surface()) {
+        return 1;
+    }
+    if (!test_machine_layout_report_surface()) {
+        return 1;
+    }
+    if (!test_machine_layout_rejects_riscv32_preview_incompatible_register_bank()) {
+        return 1;
+    }
+    if (!test_machine_layout_rejects_riscv32_preview_bytes_incompatible_branch_range()) {
         return 1;
     }
     if (!test_machine_layout_reorders_blocks_to_create_branch_fallthrough()) {

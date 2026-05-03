@@ -31,8 +31,10 @@ int machine_image_dump_file(const MachineImageFile *image_file,
     }
     if (!machine_image_append_format(
             &builder,
-            "machine_image profile=%s base=0x%zx bytes=%zu segments=%zu symbols=%zu relocations=%zu entry=%s\n",
+            "machine_image profile=%s elf_origin=%s elf_semantics=%s base=0x%zx bytes=%zu segments=%zu symbols=%zu relocations=%zu entry=%s\n",
             machine_elf_target_profile_name(image_file->target_profile),
+            machine_elf_target_profile_name(image_file->source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(image_file->source_elf_artifact_summary.relocation_semantics),
             image_file->base_virtual_address,
             image_file->byte_count,
             image_file->segment_count,
@@ -238,6 +240,15 @@ int machine_image_report_get_file(const MachineImageReport *report,
         return 0;
     }
     *out_file = &report->file;
+    return 1;
+}
+
+int machine_image_report_get_source_elf_artifact_summary_artifact(const MachineImageReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->source_elf_artifact_summary;
     return 1;
 }
 
@@ -1487,6 +1498,7 @@ int machine_image_dump_report(const MachineImageReport *report,
             &builder,
             "report_overview:\n"
             "  segments=%zu symbols=%zu relocations=%zu bytes=%zu resolved=%zu unresolved=%zu\n"
+            "  elf_source: target=%s origin=%s semantics=%s\n"
             "  policy: profile=%s base=0x%zx align=%zu\n",
             overview_artifact.segment_count,
             overview_artifact.symbol_count,
@@ -1494,6 +1506,9 @@ int machine_image_dump_report(const MachineImageReport *report,
             overview_artifact.byte_count,
             overview_artifact.resolved_relocation_count,
             overview_artifact.unresolved_relocation_count,
+            machine_elf_target_profile_name(report->source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(report->source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(report->source_elf_artifact_summary.relocation_semantics),
             machine_elf_target_profile_name(overview_artifact.target_policy_summary->target_profile),
             overview_artifact.target_policy_summary->base_virtual_address,
             overview_artifact.target_policy_summary->segment_alignment)) {

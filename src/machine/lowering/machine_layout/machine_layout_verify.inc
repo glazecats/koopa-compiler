@@ -342,4 +342,65 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
     return 1;
 }
 
+int machine_layout_verify_current_riscv32_preview_compatibility(const MachineLayoutProgram *program,
+    MachineLayoutError *error) {
+    MachineLayoutTargetPolicySummary policy_summary;
+
+    if (!program) {
+        machine_layout_set_error(
+            error, 0, 0, "MACHINE-LAYOUT-136: invalid riscv32-preview compatibility contract");
+        return 0;
+    }
+    if (!machine_layout_verify_program(program, error)) {
+        return 0;
+    }
+    if (!machine_layout_program_get_target_policy_summary(program, &policy_summary)) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-137: missing layout target policy summary");
+        return 0;
+    }
+    if (program->register_bank.register_count >
+        policy_summary.select_policy.current_riscv32_preview_logical_register_cap) {
+        machine_layout_set_error(
+            error,
+            0,
+            0,
+            "MACHINE-LAYOUT-138: current riscv32-preview lane supports at most %zu logical machine registers",
+            policy_summary.select_policy.current_riscv32_preview_logical_register_cap);
+        return 0;
+    }
+    return 1;
+}
+
+int machine_layout_verify_current_riscv32_preview_bytes_compatibility(const MachineLayoutProgram *program,
+    MachineLayoutError *error) {
+    MachineEmitProgram emit_program;
+    MachineEmitError emit_error;
+    int ok;
+
+    if (!program) {
+        machine_layout_set_error(
+            error, 0, 0, "MACHINE-LAYOUT-139: invalid riscv32-preview bytes-compatibility contract");
+        return 0;
+    }
+    if (!machine_layout_verify_current_riscv32_preview_compatibility(program, error)) {
+        return 0;
+    }
+
+    memset(&emit_error, 0, sizeof(emit_error));
+    machine_emit_program_init(&emit_program);
+    ok = machine_emit_lower_program_from_machine_layout(program, &emit_program, &emit_error) &&
+        machine_emit_verify_current_riscv32_preview_bytes_compatibility(&emit_program, &emit_error);
+    machine_emit_program_free(&emit_program);
+    if (!ok) {
+        machine_layout_set_error(
+            error,
+            emit_error.line,
+            emit_error.column,
+            "MACHINE-LAYOUT-140: current riscv32-preview bytes bridge rejected layout program: %s",
+            emit_error.message);
+        return 0;
+    }
+    return 1;
+}
+
 #endif

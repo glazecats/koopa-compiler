@@ -916,8 +916,12 @@ int machine_apply_dump_file(const MachineApplyFile *apply_file,
 
     if (!machine_apply_append_format(
             &builder,
-            "machine_apply profile=%s commit=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_apply profile=%s elf_origin=%s elf_semantics=%s commit=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                apply_file->commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                apply_file->commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_commit_resolution_kind_name(header_summary.commit_resolution_kind),
             machine_step_status_name(header_summary.origin_step_status),
             header_summary.origin_program_counter,
@@ -1028,6 +1032,18 @@ int machine_apply_report_get_summary(const MachineApplyReport *report,
     return 1;
 }
 
+int machine_apply_file_get_source_elf_artifact_summary(const MachineApplyFile *apply_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!apply_file || !out_summary) {
+        return 0;
+    }
+    *out_summary =
+        apply_file->commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file
+            .payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file
+            .source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_apply_report_get_overview_artifact(const MachineApplyReport *report,
     MachineApplyReportOverviewArtifact *out_artifact) {
     if (!report || !out_artifact) {
@@ -1066,6 +1082,18 @@ int machine_apply_report_get_commit_report(const MachineApplyReport *report,
         return 0;
     }
     *out_commit_report = &report->commit_report;
+    return 1;
+}
+
+int machine_apply_report_get_source_elf_artifact_summary_artifact(
+    const MachineApplyReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file
+                         .payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file
+                         .image_file.source_elf_artifact_summary;
     return 1;
 }
 
@@ -1121,8 +1149,12 @@ int machine_apply_dump_report(const MachineApplyReport *report,
 
     if (!machine_apply_append_format(
             &builder,
-            "machine_apply profile=%s commit=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
+            "machine_apply profile=%s elf_origin=%s elf_semantics=%s commit=%s origin-status=%s origin-pc=0x%zx origin-sp=0x%zx origin-segment=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_commit_resolution_kind_name(report->header_summary.commit_resolution_kind),
             machine_step_status_name(report->header_summary.origin_step_status),
             report->header_summary.origin_program_counter,
@@ -1179,6 +1211,15 @@ int machine_apply_dump_report(const MachineApplyReport *report,
             report->header_summary.mapped_byte_count,
             report->header_summary.origin_program_counter,
             report->header_summary.origin_stack_pointer) ||
+        !machine_apply_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_apply_append_format(
             &builder,
             "  policy: profile=%s state=%s register=%s slot=%s call=%s preview=%s\n",

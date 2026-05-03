@@ -152,6 +152,8 @@ int machine_log_file_get_target_policy_summary(const MachineLogFile *log_file,
     MachineLogTargetPolicySummary *out_summary);
 int machine_log_file_get_summary(const MachineLogFile *log_file,
     size_t *out_mapped_byte_count);
+int machine_log_file_get_source_elf_artifact_summary(const MachineLogFile *log_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_log_file_get_header_summary(const MachineLogFile *log_file,
     MachineLogHeaderSummary *out_summary);
 int machine_log_file_get_timeline_summary(const MachineLogFile *log_file,
@@ -389,6 +391,9 @@ int machine_log_report_get_timeline_file(const MachineLogReport *report,
     const MachineTimelineFile **out_timeline_file);
 int machine_log_report_get_timeline_report(const MachineLogReport *report,
     const MachineTimelineReport **out_timeline_report);
+int machine_log_report_get_source_elf_artifact_summary_artifact(
+    const MachineLogReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_log_report_get_header_summary_artifact(const MachineLogReport *report,
     const MachineLogHeaderSummary **out_summary);
 int machine_log_report_get_target_policy_summary_artifact(const MachineLogReport *report,

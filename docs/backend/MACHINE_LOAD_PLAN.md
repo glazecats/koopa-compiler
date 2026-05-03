@@ -118,6 +118,10 @@ Do not start with:
     `MachineImageReport`, `MachineElfFile`, `MachineElfReport`, ELF bytes,
     and profile-aware `machine_ir` bridge variants for raw load files, load
     reports, direct dumps, and report dumps
+  - that same bridged consumer line now also preserves upstream ELF
+    provenance instead of flattening it away at load-prep time: raw load
+    files, load reports, and dump/report-dump helpers surface the source ELF
+    artifact summary carried through `machine_image`
   - that same bridged report boundary is now also more consumer-facing than
     the first summary-only cut: callers can start from a load overview
     artifact, recover the entry segment directly, query segment artifacts by

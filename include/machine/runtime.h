@@ -245,6 +245,8 @@ int machine_runtime_file_get_summary(const MachineRuntimeFile *runtime_file,
     size_t *out_segment_count,
     size_t *out_mapped_byte_count,
     size_t *out_executable_segment_count);
+int machine_runtime_file_get_source_elf_artifact_summary(const MachineRuntimeFile *runtime_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_runtime_file_get_header_summary(const MachineRuntimeFile *runtime_file,
     MachineRuntimeHeaderSummary *out_summary);
 int machine_runtime_file_get_memory_summary(const MachineRuntimeFile *runtime_file,
@@ -527,6 +529,8 @@ int machine_runtime_report_get_overview_artifact(const MachineRuntimeReport *rep
     MachineRuntimeReportOverviewArtifact *out_artifact);
 int machine_runtime_report_get_file(const MachineRuntimeReport *report,
     const MachineRuntimeFile **out_file);
+int machine_runtime_report_get_source_elf_artifact_summary_artifact(const MachineRuntimeReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_runtime_report_get_header_summary_artifact(const MachineRuntimeReport *report,
     const MachineRuntimeHeaderSummary **out_summary);
 int machine_runtime_report_get_target_policy_summary_artifact(const MachineRuntimeReport *report,

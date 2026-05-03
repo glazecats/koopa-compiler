@@ -151,6 +151,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_mutation_file(const MachineMutationFile *mutation_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineMutationResolutionKind resolution_kind,
     MachineMutationEffectKind effect_kind,
     int has_state,
@@ -159,6 +161,7 @@ static int verify_mutation_file(const MachineMutationFile *mutation_file,
     MachineMutationHeaderSummary header_summary;
     MachineMutationTargetPolicySummary target_policy_summary;
     MachineMutationSummary mutation_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineMutationError mutation_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -166,9 +169,14 @@ static int verify_mutation_file(const MachineMutationFile *mutation_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&mutation_summary, 0, sizeof(mutation_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&mutation_error, 0, sizeof(mutation_error));
 
     if (!machine_mutation_verify_file(mutation_file, &mutation_error) ||
+        !machine_mutation_file_get_source_elf_artifact_summary(mutation_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_mutation_file_get_header_summary(mutation_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_mutation_file_get_target_policy_summary(mutation_file, &target_policy_summary) ||
@@ -194,6 +202,8 @@ cleanup:
 static int verify_mutation_report(const MachineMutationReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineMutationResolutionKind resolution_kind,
     MachineMutationEffectKind effect_kind,
     const char *expected_dump) {
@@ -203,6 +213,7 @@ static int verify_mutation_report(const MachineMutationReport *report,
     const MachineMutationHeaderSummary *header_summary = NULL;
     const MachineMutationTargetPolicySummary *target_policy_summary = NULL;
     const MachineMutationSummary *mutation_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineMutationError mutation_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -213,8 +224,13 @@ static int verify_mutation_report(const MachineMutationReport *report,
     if (!machine_mutation_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_mutation_report_get_file(report, &mutation_file) || !mutation_file ||
         !machine_mutation_report_get_state_report(report, &state_report) || !state_report ||
+        !machine_mutation_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_mutation_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_mutation_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->defers_call_effect ||
         !machine_mutation_report_get_mutation_summary_artifact(report, &mutation_summary) ||
@@ -268,11 +284,13 @@ static int test_machine_mutation_mainline(void) {
         &mutation_file,
         "mutation-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_DEFERRED_REGISTER_RESULT,
         MACHINE_MUTATION_EFFECT_VALUE_RESULT,
         1,
         0x1001u,
-        "machine_mutation profile=generic-elf32 state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-register-result effect=value-result transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_mutation_clone_file(&mutation_file, &cloned_mutation_file, &mutation_error) ||
@@ -287,12 +305,15 @@ static int test_machine_mutation_mainline(void) {
         &mutation_report,
         "mutation-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_DEFERRED_REGISTER_RESULT,
         MACHINE_MUTATION_EFFECT_VALUE_RESULT,
-        "machine_mutation profile=generic-elf32 state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-register-result effect=value-result transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: state=ready status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 control-only=yes register=yes slot=yes call=yes\n"
         "  mutation: resolution=deferred-register-result effect=value-result has-state=yes status=ready pc=0x1001 targets=[] return-imm=-\n");
 
@@ -352,11 +373,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_NO_MUTATION,
         MACHINE_MUTATION_EFFECT_CONTROL_ONLY,
         1,
         0x1000u,
-        "machine_mutation profile=generic-elf32 state=halted origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=halted origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=no-mutation effect=control-only transition=halt action=halt payload-kind=terminator tag-class=terminator raw=0x81 value=0x01 known=yes name=return-imm bytes=2 has-state=yes status=halted pc=0x1000 current-segment=- current-byte=- targets=[] return-imm=7\n");
 
     machine_mutation_report_free(&mutation_report);
@@ -374,11 +397,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_MUTATION_EFFECT_CONTROL_ONLY,
         0,
         0u,
-        "machine_mutation profile=generic-elf32 state=deferred-control-transfer origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=deferred-control-transfer origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer payload-kind=terminator tag-class=terminator raw=0x84 value=0x04 known=yes name=jump bytes=2 has-state=no status=- pc=- current-segment=- current-byte=- targets=[1] return-imm=-\n");
 
     machine_mutation_report_free(&mutation_report);
@@ -396,11 +421,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_MUTATION_EFFECT_NONE,
         0,
         0u,
-        "machine_mutation profile=generic-elf32 state=unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=blocked-unsupported effect=none transition=unsupported action=unsupported payload-kind=none tag-class=none raw=0x00 value=0x00 known=no name=- bytes=1 has-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_mutation_report_free(&mutation_report);
@@ -417,11 +444,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_DEFERRED_LOCAL_SLOT,
         MACHINE_MUTATION_EFFECT_LOCAL_SLOT,
         1,
         0x1002u,
-        "machine_mutation profile=generic-elf32 state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-local-slot effect=local-slot transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xaa targets=[] return-imm=-\n");
 
     machine_mutation_file_free(&mutation_file);
@@ -437,11 +466,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_DEFERRED_GLOBAL_SLOT,
         MACHINE_MUTATION_EFFECT_GLOBAL_SLOT,
         1,
         0x1002u,
-        "machine_mutation profile=generic-elf32 state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-global-slot effect=global-slot transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xab targets=[] return-imm=-\n");
 
     machine_mutation_file_free(&mutation_file);
@@ -457,11 +488,13 @@ static int test_machine_mutation_custom_step_cases(void) {
         &mutation_file,
         "mutation-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_MUTATION_RESOLUTION_DEFERRED_CALL_EFFECT,
         MACHINE_MUTATION_EFFECT_CALL,
         1,
         0x1002u,
-        "machine_mutation profile=generic-elf32 state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-call-effect effect=call transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xac targets=[] return-imm=-\n");
 
 cleanup:
@@ -505,13 +538,14 @@ static int test_machine_mutation_i386_bridge(void) {
     }
 
     ok &= expect_text("mutation i386 dump wrapper", dump_text,
-        "machine_mutation profile=i386-preview state=ready origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-register-result effect=value-result transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("mutation i386 report dump wrapper", report_dump_text,
-        "machine_mutation profile=i386-preview state=ready origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_mutation profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans state=ready origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "mutation: resolution=deferred-register-result effect=value-result transition=next-fetch action=advance payload-kind=op tag-class=op raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: state=ready status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview control-only=yes register=yes slot=yes call=yes\n"
         "  mutation: resolution=deferred-register-result effect=value-result has-state=yes status=ready pc=0x8048001 targets=[] return-imm=-\n");
 

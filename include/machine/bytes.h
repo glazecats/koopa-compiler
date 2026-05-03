@@ -17,6 +17,15 @@ typedef enum {
     MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW,
 } MachineBytesTargetProfile;
 
+typedef struct {
+    MachineBytesTargetProfile target_profile;
+    size_t max_logical_machine_register_count;
+    int preserves_known_internal_pc_relative_targets;
+    int preserves_direct_fallthrough_honesty;
+    int uses_paired_global_data_addressing;
+    int supports_rv32m_alu_ops;
+} MachineBytesTargetPolicySummary;
+
 typedef MachineEncodeTerminatorKind MachineBytesTerminatorKind;
 
 typedef struct {
@@ -60,6 +69,9 @@ typedef enum {
     MACHINE_BYTES_REFERENCE_CALL = 0,
     MACHINE_BYTES_REFERENCE_CONTROL_PRIMARY,
     MACHINE_BYTES_REFERENCE_CONTROL_SECONDARY,
+    MACHINE_BYTES_REFERENCE_DATA_ADDR,
+    MACHINE_BYTES_REFERENCE_DATA_LOAD,
+    MACHINE_BYTES_REFERENCE_DATA_STORE,
 } MachineBytesReferenceKind;
 
 typedef struct {
@@ -86,6 +98,9 @@ typedef enum {
     MACHINE_BYTES_FIXUP_CALL_TARGET = 0,
     MACHINE_BYTES_FIXUP_CONTROL_PRIMARY,
     MACHINE_BYTES_FIXUP_CONTROL_SECONDARY,
+    MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET,
+    MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET,
+    MACHINE_BYTES_FIXUP_DATA_STORE_TARGET,
 } MachineBytesFixupKind;
 
 typedef enum {
@@ -117,6 +132,7 @@ typedef struct {
 typedef enum {
     MACHINE_BYTES_SYMBOL_FUNCTION = 0,
     MACHINE_BYTES_SYMBOL_BLOCK,
+    MACHINE_BYTES_SYMBOL_GLOBAL_OBJECT,
     MACHINE_BYTES_SYMBOL_EXTERNAL,
 } MachineBytesSymbolKind;
 
@@ -124,6 +140,8 @@ typedef struct {
     MachineBytesSymbolKind kind;
     const char *name;
     int is_defined;
+    int has_section_index;
+    size_t section_index;
     int has_function_index;
     size_t function_index;
     int has_emit_index;
@@ -136,6 +154,8 @@ typedef struct {
 
 typedef enum {
     MACHINE_BYTES_SECTION_TEXT = 0,
+    MACHINE_BYTES_SECTION_SBSS,
+    MACHINE_BYTES_SECTION_SDATA,
 } MachineBytesSectionKind;
 
 typedef struct {
@@ -189,6 +209,7 @@ typedef struct {
 
 typedef struct {
     MachineBytesProgram program;
+    MachineBytesTargetPolicySummary target_policy_summary;
     MachineBytesFunctionSummary *function_summaries;
     size_t *function_byte_offsets;
     size_t *function_block_summary_offsets;
@@ -218,8 +239,14 @@ void machine_bytes_program_free(MachineBytesProgram *program);
 void machine_bytes_report_init(MachineBytesReport *report);
 void machine_bytes_report_free(MachineBytesReport *report);
 
+int machine_bytes_get_target_policy_summary(MachineBytesTargetProfile profile,
+    MachineBytesTargetPolicySummary *out_summary);
 int machine_bytes_clone_program(const MachineBytesProgram *source,
     MachineBytesProgram *out_program,
+    MachineBytesError *error);
+int machine_bytes_program_get_target_policy_summary(const MachineBytesProgram *program,
+    MachineBytesTargetPolicySummary *out_summary);
+int machine_bytes_verify_current_riscv32_preview_compatibility(const MachineBytesProgram *program,
     MachineBytesError *error);
 int machine_bytes_program_get_summary(const MachineBytesProgram *program,
     size_t *out_register_count,
@@ -313,6 +340,10 @@ int machine_bytes_report_get_summary(const MachineBytesReport *report,
     size_t *out_global_count,
     size_t *out_function_count,
     size_t *out_total_block_summary_count);
+int machine_bytes_report_get_target_policy_summary_artifact(const MachineBytesReport *report,
+    const MachineBytesTargetPolicySummary **out_summary);
+int machine_bytes_report_verify_current_riscv32_preview_compatibility(const MachineBytesReport *report,
+    MachineBytesError *error);
 int machine_bytes_report_get_program(const MachineBytesReport *report,
     const MachineBytesProgram **out_program);
 int machine_bytes_report_get_function(const MachineBytesReport *report,

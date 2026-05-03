@@ -151,6 +151,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_trace_file(const MachineTraceFile *trace_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineTraceResolutionKind resolution_kind,
     MachineTraceChangeClass change_class,
     int is_exact_trace,
@@ -158,6 +160,7 @@ static int verify_trace_file(const MachineTraceFile *trace_file,
     MachineTraceHeaderSummary header_summary;
     MachineTraceTargetPolicySummary target_policy_summary;
     MachineTraceSummary trace_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineTraceError trace_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -165,9 +168,14 @@ static int verify_trace_file(const MachineTraceFile *trace_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&trace_summary, 0, sizeof(trace_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&trace_error, 0, sizeof(trace_error));
 
     if (!machine_trace_verify_file(trace_file, &trace_error) ||
+        !machine_trace_file_get_source_elf_artifact_summary(trace_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_trace_file_get_header_summary(trace_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_trace_file_get_target_policy_summary(trace_file, &target_policy_summary) ||
@@ -192,6 +200,8 @@ cleanup:
 static int verify_trace_report(const MachineTraceReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineTraceResolutionKind resolution_kind,
     const char *expected_dump) {
     MachineTraceReportOverviewArtifact overview_artifact;
@@ -200,6 +210,7 @@ static int verify_trace_report(const MachineTraceReport *report,
     const MachineTraceHeaderSummary *header_summary = NULL;
     const MachineTraceTargetPolicySummary *target_policy_summary = NULL;
     const MachineTraceSummary *trace_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineTraceError trace_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -210,8 +221,13 @@ static int verify_trace_report(const MachineTraceReport *report,
     if (!machine_trace_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_trace_report_get_file(report, &trace_file) || !trace_file ||
         !machine_trace_report_get_delta_report(report, &delta_report) || !delta_report ||
+        !machine_trace_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_trace_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_trace_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->surfaces_preview_trace ||
         !machine_trace_report_get_trace_summary_artifact(report, &trace_summary) ||
@@ -264,10 +280,12 @@ static int test_machine_trace_mainline(void) {
         &trace_file,
         "trace-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_PREVIEW_TRACE,
         MACHINE_TRACE_CHANGE_CLASS_PROGRAM_COUNTER_AND_FETCH,
         0,
-        "machine_trace profile=generic-elf32 delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_trace_clone_file(&trace_file, &cloned_trace_file, &trace_error) ||
@@ -282,11 +300,14 @@ static int test_machine_trace_mainline(void) {
         &trace_report,
         "trace-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_PREVIEW_TRACE,
-        "machine_trace profile=generic-elf32 delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: delta=preview-state-delta status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 exact=yes preview=yes class=yes\n"
         "  trace: resolution=preview-trace kind=state-record class=program-counter-and-fetch exact=no state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 
@@ -345,10 +366,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_EXACT_TRACE,
         MACHINE_TRACE_CHANGE_CLASS_STATUS_AND_FETCH,
         1,
-        "machine_trace profile=generic-elf32 delta=exact-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=exact-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=exact-trace kind=state-record change-class=status-and-fetch delta=exact-state-delta observe=exact-state apply=applied-state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 exact=yes origin-status=ready observed-status=halted status-changed=yes pc-changed=no stack-changed=no fetch-changed=yes targets=[] return-imm=7\n");
 
     machine_trace_report_free(&trace_report);
@@ -366,10 +389,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_TRACE_CHANGE_CLASS_NONE,
         0,
-        "machine_trace profile=generic-elf32 delta=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=blocked-on-control kind=none change-class=none delta=blocked-on-control observe=blocked-on-control apply=blocked-on-control commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 exact=no origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[1] return-imm=-\n");
 
     machine_trace_report_free(&trace_report);
@@ -387,10 +412,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_TRACE_CHANGE_CLASS_NONE,
         0,
-        "machine_trace profile=generic-elf32 delta=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=blocked-unsupported kind=none change-class=none delta=blocked-unsupported observe=blocked-unsupported apply=blocked-unsupported commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=- status-changed=- pc-changed=- stack-changed=- fetch-changed=- targets=[] return-imm=-\n");
 
     machine_trace_report_free(&trace_report);
@@ -407,10 +434,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_PREVIEW_TRACE,
         MACHINE_TRACE_CHANGE_CLASS_PROGRAM_COUNTER_AND_FETCH,
         0,
-        "machine_trace profile=generic-elf32 delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_trace_file_free(&trace_file);
@@ -426,10 +455,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_PREVIEW_TRACE,
         MACHINE_TRACE_CHANGE_CLASS_PROGRAM_COUNTER_AND_FETCH,
         0,
-        "machine_trace profile=generic-elf32 delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_trace_file_free(&trace_file);
@@ -445,10 +476,12 @@ static int test_machine_trace_custom_step_cases(void) {
         &trace_file,
         "trace-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_TRACE_RESOLUTION_PREVIEW_TRACE,
         MACHINE_TRACE_CHANGE_CLASS_PROGRAM_COUNTER_AND_FETCH,
         0,
-        "machine_trace profile=generic-elf32 delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-call-application commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
 cleanup:
@@ -492,13 +525,14 @@ static int test_machine_trace_i386_bridge(void) {
     }
 
     ok &= expect_text("trace i386 dump wrapper", dump_text,
-        "machine_trace profile=i386-preview delta=preview-state-delta origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("trace i386 report dump wrapper", report_dump_text,
-        "machine_trace profile=i386-preview delta=preview-state-delta origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_trace profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans delta=preview-state-delta origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "trace: resolution=preview-trace kind=state-record change-class=program-counter-and-fetch delta=preview-state-delta observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: delta=preview-state-delta status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview exact=yes preview=yes class=yes\n"
         "  trace: resolution=preview-trace kind=state-record class=program-counter-and-fetch exact=no state=yes status=no pc=yes fetch=yes targets=[] return-imm=-\n");
 

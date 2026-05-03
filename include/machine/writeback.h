@@ -118,6 +118,8 @@ int machine_writeback_file_get_target_policy_summary(const MachineWritebackFile 
     MachineWritebackTargetPolicySummary *out_summary);
 int machine_writeback_file_get_summary(const MachineWritebackFile *writeback_file,
     size_t *out_mapped_byte_count);
+int machine_writeback_file_get_source_elf_artifact_summary(const MachineWritebackFile *writeback_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_writeback_file_get_header_summary(const MachineWritebackFile *writeback_file,
     MachineWritebackHeaderSummary *out_summary);
 int machine_writeback_file_get_mutation_summary(const MachineWritebackFile *writeback_file,
@@ -301,6 +303,9 @@ int machine_writeback_report_get_mutation_file(const MachineWritebackReport *rep
     const MachineMutationFile **out_mutation_file);
 int machine_writeback_report_get_mutation_report(const MachineWritebackReport *report,
     const MachineMutationReport **out_mutation_report);
+int machine_writeback_report_get_source_elf_artifact_summary_artifact(
+    const MachineWritebackReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_writeback_report_get_header_summary_artifact(const MachineWritebackReport *report,
     const MachineWritebackHeaderSummary **out_summary);
 int machine_writeback_report_get_target_policy_summary_artifact(const MachineWritebackReport *report,

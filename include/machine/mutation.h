@@ -116,6 +116,8 @@ int machine_mutation_file_get_target_policy_summary(const MachineMutationFile *m
     MachineMutationTargetPolicySummary *out_summary);
 int machine_mutation_file_get_summary(const MachineMutationFile *mutation_file,
     size_t *out_mapped_byte_count);
+int machine_mutation_file_get_source_elf_artifact_summary(const MachineMutationFile *mutation_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_mutation_file_get_header_summary(const MachineMutationFile *mutation_file,
     MachineMutationHeaderSummary *out_summary);
 int machine_mutation_file_get_state_summary(const MachineMutationFile *mutation_file,
@@ -285,6 +287,9 @@ int machine_mutation_report_get_state_file(const MachineMutationReport *report,
     const MachineStateFile **out_state_file);
 int machine_mutation_report_get_state_report(const MachineMutationReport *report,
     const MachineStateReport **out_state_report);
+int machine_mutation_report_get_source_elf_artifact_summary_artifact(
+    const MachineMutationReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_mutation_report_get_header_summary_artifact(const MachineMutationReport *report,
     const MachineMutationHeaderSummary **out_summary);
 int machine_mutation_report_get_target_policy_summary_artifact(const MachineMutationReport *report,

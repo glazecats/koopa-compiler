@@ -14,6 +14,7 @@ static void machine_emit_lower_report_clear_shape(MachineEmitLowerReport *report
     free(report->function_indices_with_calls);
     free(report->function_indices_with_fallthrough);
     free(report->function_indices_with_branches);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_shape_summaries = NULL;
     report->function_block_summary_offsets = NULL;
     report->block_shape_summaries = NULL;
@@ -36,6 +37,11 @@ int machine_emit_lower_report_refresh_shape(MachineEmitLowerReport *report, Mach
     }
 
     machine_emit_lower_report_clear_shape(report);
+    if (!machine_emit_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-513: failed to compute emit target policy");
+        machine_emit_lower_report_clear_shape(report);
+        return 0;
+    }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
         total_block_summary_count += report->program.functions[function_index].block_count;
     }

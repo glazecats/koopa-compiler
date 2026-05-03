@@ -108,6 +108,10 @@ Do not start with:
     `MachineStepFile` / `MachineStepReport`, and profile-aware
     `MachineIrAllocateRewriteReport` variants for raw delta files, reports,
     direct dumps, and report dumps
+  - that same delta bridge now also preserves upstream ELF provenance instead
+    of flattening it away at delta time: raw delta files, delta reports, and
+    dump/report-dump helpers surface the embedded source-ELF artifact summary
+    carried through `machine_observe`
 
 ## File Management Rules
 

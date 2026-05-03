@@ -110,6 +110,10 @@ Do not start with:
     `MachineDecodeReport`, `MachineStepFile` / `MachineStepReport`, and
     profile-aware `MachineIrAllocateRewriteReport` variants for raw commit
     files, reports, direct dumps, and report dumps
+  - that same commit bridge now also preserves upstream ELF provenance
+    instead of flattening it away at committed-artifact time: raw commit
+    files, commit reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_writeback`
 
 ## File Management Rules
 

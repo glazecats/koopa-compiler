@@ -151,12 +151,15 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_writeback_file(const MachineWritebackFile *writeback_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineWritebackResolutionKind resolution_kind,
     MachineWritebackCommitKind commit_kind,
     const char *expected_dump) {
     MachineWritebackHeaderSummary header_summary;
     MachineWritebackTargetPolicySummary target_policy_summary;
     MachineWritebackSummary writeback_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineWritebackError writeback_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -164,9 +167,14 @@ static int verify_writeback_file(const MachineWritebackFile *writeback_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&writeback_summary, 0, sizeof(writeback_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&writeback_error, 0, sizeof(writeback_error));
 
     if (!machine_writeback_verify_file(writeback_file, &writeback_error) ||
+        !machine_writeback_file_get_source_elf_artifact_summary(writeback_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_writeback_file_get_header_summary(writeback_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_writeback_file_get_target_policy_summary(writeback_file, &target_policy_summary) ||
@@ -190,6 +198,8 @@ cleanup:
 static int verify_writeback_report(const MachineWritebackReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineWritebackResolutionKind resolution_kind,
     MachineWritebackCommitKind commit_kind,
     const char *expected_dump) {
@@ -199,6 +209,7 @@ static int verify_writeback_report(const MachineWritebackReport *report,
     const MachineWritebackHeaderSummary *header_summary = NULL;
     const MachineWritebackTargetPolicySummary *target_policy_summary = NULL;
     const MachineWritebackSummary *writeback_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineWritebackError writeback_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -209,8 +220,13 @@ static int verify_writeback_report(const MachineWritebackReport *report,
     if (!machine_writeback_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_writeback_report_get_file(report, &writeback_file) || !writeback_file ||
         !machine_writeback_report_get_mutation_report(report, &mutation_report) || !mutation_report ||
+        !machine_writeback_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_writeback_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_writeback_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->defers_call_writeback ||
         !machine_writeback_report_get_writeback_summary_artifact(report, &writeback_summary) ||
@@ -264,9 +280,11 @@ static int test_machine_writeback_mainline(void) {
         &writeback_file,
         "writeback-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_DEFERRED_REGISTER_WRITEBACK,
         MACHINE_WRITEBACK_COMMIT_KIND_REGISTER,
-        "machine_writeback profile=generic-elf32 mutation=deferred-register-result origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=deferred-register-result origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-register-writeback commit=register mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_writeback_clone_file(&writeback_file, &cloned_writeback_file, &writeback_error) ||
@@ -281,12 +299,15 @@ static int test_machine_writeback_mainline(void) {
         &writeback_report,
         "writeback-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_DEFERRED_REGISTER_WRITEBACK,
         MACHINE_WRITEBACK_COMMIT_KIND_REGISTER,
-        "machine_writeback profile=generic-elf32 mutation=deferred-register-result origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=deferred-register-result origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-register-writeback commit=register mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: mutation=deferred-register-result status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 no-op=yes register=yes slot=yes call=yes\n"
         "  writeback: resolution=deferred-register-writeback commit=register has-state=yes status=ready pc=0x1001 targets=[] return-imm=-\n");
 
@@ -346,9 +367,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_COMMITTED_NO_OP,
         MACHINE_WRITEBACK_COMMIT_KIND_NO_OP,
-        "machine_writeback profile=generic-elf32 mutation=no-mutation origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=no-mutation origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=committed-no-op commit=no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 has-state=yes status=halted pc=0x1000 current-segment=- current-byte=- targets=[] return-imm=7\n");
 
     machine_writeback_report_free(&writeback_report);
@@ -366,9 +389,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_BLOCKED_ON_CONTROL,
         MACHINE_WRITEBACK_COMMIT_KIND_NONE,
-        "machine_writeback profile=generic-elf32 mutation=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=blocked-on-control commit=none mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 has-state=no status=- pc=- current-segment=- current-byte=- targets=[1] return-imm=-\n");
 
     machine_writeback_report_free(&writeback_report);
@@ -386,9 +411,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_BLOCKED_UNSUPPORTED,
         MACHINE_WRITEBACK_COMMIT_KIND_NONE,
-        "machine_writeback profile=generic-elf32 mutation=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=blocked-unsupported commit=none mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 has-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_writeback_report_free(&writeback_report);
@@ -405,9 +432,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_DEFERRED_LOCAL_WRITEBACK,
         MACHINE_WRITEBACK_COMMIT_KIND_LOCAL_SLOT,
-        "machine_writeback profile=generic-elf32 mutation=deferred-local-slot origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=deferred-local-slot origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-local-writeback commit=local-slot mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xaa targets=[] return-imm=-\n");
 
     machine_writeback_file_free(&writeback_file);
@@ -423,9 +452,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_DEFERRED_GLOBAL_WRITEBACK,
         MACHINE_WRITEBACK_COMMIT_KIND_GLOBAL_SLOT,
-        "machine_writeback profile=generic-elf32 mutation=deferred-global-slot origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=deferred-global-slot origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-global-writeback commit=global-slot mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xab targets=[] return-imm=-\n");
 
     machine_writeback_file_free(&writeback_file);
@@ -441,9 +472,11 @@ static int test_machine_writeback_custom_step_cases(void) {
         &writeback_file,
         "writeback-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_WRITEBACK_RESOLUTION_DEFERRED_CALL_WRITEBACK,
         MACHINE_WRITEBACK_COMMIT_KIND_CALL,
-        "machine_writeback profile=generic-elf32 mutation=deferred-call-effect origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans mutation=deferred-call-effect origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-call-writeback commit=call mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xac targets=[] return-imm=-\n");
 
 cleanup:
@@ -487,13 +520,14 @@ static int test_machine_writeback_i386_bridge(void) {
     }
 
     ok &= expect_text("writeback i386 dump wrapper", dump_text,
-        "machine_writeback profile=i386-preview mutation=deferred-register-result origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans mutation=deferred-register-result origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-register-writeback commit=register mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("writeback i386 report dump wrapper", report_dump_text,
-        "machine_writeback profile=i386-preview mutation=deferred-register-result origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_writeback profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans mutation=deferred-register-result origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "writeback: resolution=deferred-register-writeback commit=register mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: mutation=deferred-register-result status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview no-op=yes register=yes slot=yes call=yes\n"
         "  writeback: resolution=deferred-register-writeback commit=register has-state=yes status=ready pc=0x8048001 targets=[] return-imm=-\n");
 

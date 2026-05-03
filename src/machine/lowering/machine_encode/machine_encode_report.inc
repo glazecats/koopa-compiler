@@ -14,6 +14,7 @@ static void machine_encode_report_clear_shape(MachineEncodeReport *report) {
     free(report->function_indices_with_calls);
     free(report->function_indices_with_fallthrough);
     free(report->function_indices_with_branches);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_summaries = NULL;
     report->function_block_summary_offsets = NULL;
     report->block_summaries = NULL;
@@ -36,6 +37,11 @@ int machine_encode_report_refresh(MachineEncodeReport *report, MachineEncodeErro
     }
 
     machine_encode_report_clear_shape(report);
+    if (!machine_encode_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-414: failed to compute encode target policy");
+        machine_encode_report_clear_shape(report);
+        return 0;
+    }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
         total_block_summary_count += report->program.functions[function_index].block_count;
     }

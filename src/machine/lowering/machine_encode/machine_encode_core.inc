@@ -23,6 +23,7 @@ void machine_encode_report_init(MachineEncodeReport *report) {
         return;
     }
     machine_encode_program_init(&report->program);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_summaries = NULL;
     report->function_block_summary_offsets = NULL;
     report->block_summaries = NULL;
@@ -71,6 +72,19 @@ void machine_encode_report_free(MachineEncodeReport *report) {
     free(report->function_indices_with_fallthrough);
     free(report->function_indices_with_branches);
     machine_encode_report_init(report);
+}
+
+int machine_encode_get_target_policy_summary(MachineEncodeTargetPolicySummary *out_summary) {
+    if (!out_summary) {
+        return 0;
+    }
+    memset(out_summary, 0, sizeof(*out_summary));
+    if (!machine_emit_get_target_policy_summary(&out_summary->emit_policy)) {
+        return 0;
+    }
+    out_summary->preserves_block_unit_offsets = 1;
+    out_summary->preserves_fallthrough_terminator_shapes = 1;
+    return 1;
 }
 
 int machine_encode_clone_program(const MachineEncodeProgram *source,
@@ -193,6 +207,14 @@ int machine_encode_clone_program(const MachineEncodeProgram *source,
     }
 
     return machine_encode_verify_program(out_program, error);
+}
+
+int machine_encode_program_get_target_policy_summary(const MachineEncodeProgram *program,
+    MachineEncodeTargetPolicySummary *out_summary) {
+    if (!program || !out_summary) {
+        return 0;
+    }
+    return machine_encode_get_target_policy_summary(out_summary);
 }
 
 #endif

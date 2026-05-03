@@ -339,6 +339,25 @@ than just "machine-ir with renamed opcodes".
   - that report lifecycle now also exposes total block-summary count directly
     on the report summary query surface, so report-oriented consumers can size
     later block-summary walks without reopening report internals
+  - that same selected-report surface now also carries one first explicit
+    downstream-compatibility policy summary instead of leaving current preview
+    lane expectations implicit: callers can query the current RISC-V preview
+    logical-register cap plus whether selected lowering already supports early
+    immediate legalization, compare-branch fusion, spill-operand preservation,
+    and global-slot preservation for later address formation
+  - that same selected-side compatibility surface now also has a first
+    explicit verifier entrypoint for the current preview lane instead of
+    deferring every incompatibility to `machine_bytes`: callers can now ask
+    `machine_select` directly whether a selected program/report is compatible
+    with the current `riscv32-preview` lane, and oversized logical register
+    banks fail at the selected boundary rather than only downstream
+  - that same selected-side compatibility surface now also has a first deeper
+    downstream bytes-bridge check instead of only local shape screening:
+    callers can now ask `machine_select` to validate current
+    `riscv32-preview` compatibility by actually attempting the downstream
+    `machine_select -> machine_layout -> machine_emit -> machine_encode ->
+    machine_bytes` preview path, so bytes-side range failures surface at the
+    earliest selected boundary
   - selected control flow now also has a first structured query surface above
     raw terminator unions and dump text: callers can ask one raw selected
     block or one report-owned selected block for a structured terminator
@@ -440,6 +459,16 @@ than just "machine-ir with renamed opcodes".
   - return shaping is now also split into explicit selected families, so the
     call/result line is no longer one-sided: immediate-return, spill-return,
     and register-return shapes now have their own verifier/dump/query surface
+  - immediate-side legalization now also begins earlier than the old
+    cleanup-only checkpoint: lowering itself canonicalizes commutative
+    immediate operands onto the rhs, flips ordered compares like `4 < x`
+    into rhs-immediate legal forms like `x > 4`, and keeps noncommutative
+    lhs-immediate cases out of `_IMM` families instead of letting later
+    consumers guess what the opcode spelling meant
+  - verifier authority now also locks that convention explicitly:
+    `alui`/`cmpi`/`cmpbri` families are only legal when the rhs is the
+    immediate side, so downstream RISC-V-facing consumers can treat selected
+    immediate families as structurally meaningful rather than as soft hints
   - lowering internals are now split by concern, which makes it much safer to
     keep widening selected families without turning one file into a sinkhole
 
@@ -467,6 +496,11 @@ In short:
   reopen it for confirmed selected-lowering/legalization regressions, a
   concrete downstream consumer need, or a deliberately chosen selected-form
   widening pass, not as the default backend mainline.
+- For the current reopened RISC-V correctness line specifically, this stage
+  is now best read as an upstream support sibling that is effectively
+  **~99% of the currently chosen immediate/call-shaping slice**: the next
+  likely work should stay downstream in `machine_bytes` / relocation / ELF
+  unless a newly exposed selected-form bug reopens `machine_select` again.
 - Default backend progress reporting should no longer fall back to `MS*`
   stage names once the active downstream checkpoint has moved to later sibling
   plans such as `machine_layout`, `machine_emit`, or `machine_elf`, unless

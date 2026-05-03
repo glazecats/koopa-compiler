@@ -107,6 +107,11 @@ Do not start with:
     `MachineStepReport`, and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw payload-decode files, reports, direct dumps, and report
     dumps
+  - that same payload-decode bridge now also preserves upstream ELF
+    provenance instead of flattening it away at payload-decode time: raw
+    payload-decode files, payload-decode reports, and dump/report-dump
+    helpers surface the embedded source-ELF artifact summary carried through
+    `machine_decode`
   - that same first bridge/lifecycle surface is now also regression-locked:
     clone, report refresh, raw/report dump wrappers, decode/step bridge
     entrypoints, and profiled `machine_ir` bridge entrypoints are all now

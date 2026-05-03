@@ -136,6 +136,10 @@ Do not start with:
   - that same bridged report/overview boundary now also exposes first-class
     initial-stack summary/artifact views, and report dumps now print the
     conservative initial-stack image shape directly
+  - that same bridge family now also preserves upstream ELF provenance
+    instead of flattening it away at runtime-prep time: raw runtime files,
+    runtime reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_load`
   - that same bridge/lifecycle surface is now also regression-locked across
     the current wrapper matrix instead of being only API-declared: raw-file,
     report, dump, and report-dump entrypoints are now exercised from

@@ -26,6 +26,7 @@ void machine_bytes_report_init(MachineBytesReport *report) {
         return;
     }
     machine_bytes_program_init(&report->program);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_summaries = NULL;
     report->function_byte_offsets = NULL;
     report->function_block_summary_offsets = NULL;
@@ -220,6 +221,14 @@ int machine_bytes_clone_program(const MachineBytesProgram *source,
     }
 
     return 1;
+}
+
+int machine_bytes_program_get_target_policy_summary(const MachineBytesProgram *program,
+    MachineBytesTargetPolicySummary *out_summary) {
+    if (!program || !out_summary) {
+        return 0;
+    }
+    return machine_bytes_get_target_policy_summary(program->target_profile, out_summary);
 }
 
 int machine_bytes_program_get_summary(const MachineBytesProgram *program,

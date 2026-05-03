@@ -139,6 +139,8 @@ int machine_outcome_file_get_target_policy_summary(const MachineOutcomeFile *out
     MachineOutcomeTargetPolicySummary *out_summary);
 int machine_outcome_file_get_summary(const MachineOutcomeFile *outcome_file,
     size_t *out_mapped_byte_count);
+int machine_outcome_file_get_source_elf_artifact_summary(const MachineOutcomeFile *outcome_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_outcome_file_get_header_summary(const MachineOutcomeFile *outcome_file,
     MachineOutcomeHeaderSummary *out_summary);
 int machine_outcome_file_get_event_summary(const MachineOutcomeFile *outcome_file,
@@ -322,6 +324,9 @@ int machine_outcome_report_get_event_file(const MachineOutcomeReport *report,
     const MachineEventFile **out_event_file);
 int machine_outcome_report_get_event_report(const MachineOutcomeReport *report,
     const MachineEventReport **out_event_report);
+int machine_outcome_report_get_source_elf_artifact_summary_artifact(
+    const MachineOutcomeReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_outcome_report_get_header_summary_artifact(const MachineOutcomeReport *report,
     const MachineOutcomeHeaderSummary **out_summary);
 int machine_outcome_report_get_target_policy_summary_artifact(const MachineOutcomeReport *report,

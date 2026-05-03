@@ -115,6 +115,8 @@ int machine_state_file_get_target_policy_summary(const MachineStateFile *state_f
     MachineStateTargetPolicySummary *out_summary);
 int machine_state_file_get_summary(const MachineStateFile *state_file,
     size_t *out_mapped_byte_count);
+int machine_state_file_get_source_elf_artifact_summary(const MachineStateFile *state_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_state_file_get_header_summary(const MachineStateFile *state_file,
     MachineStateHeaderSummary *out_summary);
 int machine_state_file_get_runtime_launch_summary(const MachineStateFile *state_file,
@@ -274,6 +276,8 @@ int machine_state_report_get_transition_file(const MachineStateReport *report,
     const MachineTransitionFile **out_transition_file);
 int machine_state_report_get_transition_report(const MachineStateReport *report,
     const MachineTransitionReport **out_transition_report);
+int machine_state_report_get_source_elf_artifact_summary_artifact(const MachineStateReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_state_report_get_header_summary_artifact(const MachineStateReport *report,
     const MachineStateHeaderSummary **out_summary);
 int machine_state_report_get_target_policy_summary_artifact(const MachineStateReport *report,

@@ -110,6 +110,10 @@ Do not start with:
     `MachineCommitReport`, `MachineStepFile` / `MachineStepReport`, and
     profile-aware `MachineIrAllocateRewriteReport` variants for raw event
     files, reports, direct dumps, and report dumps
+  - the event layer now also keeps `MachineElfArtifactSummary` queryable on
+    both raw files and report artifacts, and prints
+    `elf_origin` / `elf_semantics` / `elf_source` in dump surfaces so the
+    downstream provenance chain stays explicit past `machine_trace`
 
 ## File Management Rules
 

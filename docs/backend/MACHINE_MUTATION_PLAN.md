@@ -111,6 +111,10 @@ Do not start with:
     `MachineDecodeFile` / `MachineDecodeReport`, `MachineStepFile` /
     `MachineStepReport`, and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw mutation files, reports, direct dumps, and report dumps
+  - that same mutation bridge now also preserves upstream ELF provenance
+    instead of flattening it away at mutation-classification time: raw
+    mutation files, mutation reports, and dump/report-dump helpers surface
+    the embedded source-ELF artifact summary carried through `machine_state`
 
 ## File Management Rules
 

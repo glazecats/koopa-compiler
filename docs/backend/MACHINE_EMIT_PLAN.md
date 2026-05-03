@@ -127,6 +127,18 @@ Do not start with:
     report artifact and re-summarized, which makes later local
     emission-prep transforms much easier to stage without bouncing back to
     `machine_layout`
+  - that same emitted-program/report surface now also carries one first
+    explicit preview-lane compatibility summary plus an early compatibility
+    verifier entrypoint, so the current preview register-cap / spill-
+    preservation / global-slot-preservation / fallthrough-shape facts remain
+    visible and enforceable through `machine_emit`, not only above it in
+    `machine_select` or below it in `machine_bytes`
+  - that same emitted-side compatibility surface now also has a first deeper
+    downstream bytes-bridge check instead of only local shape screening:
+    callers can now ask `machine_emit` to validate current
+    `riscv32-preview` compatibility by actually attempting the
+    `machine_emit -> machine_encode -> machine_bytes` preview path, so
+    bytes-side range failures surface one stage earlier than before
 - `ME3 first upstream bridge`: now effectively **~95%**
   - the canonicalized `machine_ir -> machine_select -> machine_layout ->
     machine_emit` bridge is landed as a first real public entrypoint

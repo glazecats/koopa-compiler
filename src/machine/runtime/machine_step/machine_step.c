@@ -686,8 +686,12 @@ int machine_step_dump_file(const MachineStepFile *step_file,
 
     if (!machine_step_append_format(
             &builder,
-            "machine_step profile=%s status=%s pc=0x%zx sp=0x%zx launch_registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
+            "machine_step profile=%s elf_origin=%s elf_semantics=%s status=%s pc=0x%zx sp=0x%zx launch_registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(header_summary.target_profile),
+            machine_elf_target_profile_name(
+                step_file->launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                step_file->launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(header_summary.status),
             header_summary.program_counter,
             header_summary.stack_pointer,
@@ -845,6 +849,16 @@ int machine_step_report_get_summary(const MachineStepReport *report,
     return 1;
 }
 
+int machine_step_file_get_source_elf_artifact_summary(const MachineStepFile *step_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!step_file || !out_summary) {
+        return 0;
+    }
+    *out_summary =
+        step_file->launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_step_report_get_overview_artifact(const MachineStepReport *report,
     MachineStepReportOverviewArtifact *out_artifact) {
     if (!report || !out_artifact) {
@@ -877,6 +891,15 @@ int machine_step_report_get_launch_file(const MachineStepReport *report,
         return 0;
     }
     *out_launch_file = &report->file.launch_file;
+    return 1;
+}
+
+int machine_step_report_get_source_elf_artifact_summary_artifact(const MachineStepReport *report,
+    const MachineElfArtifactSummary **out_summary) {
+    if (!report || !out_summary) {
+        return 0;
+    }
+    *out_summary = &report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary;
     return 1;
 }
 
@@ -1013,8 +1036,12 @@ int machine_step_dump_report(const MachineStepReport *report,
 
     if (!machine_step_append_format(
             &builder,
-            "machine_step profile=%s status=%s pc=0x%zx sp=0x%zx launch_registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
+            "machine_step profile=%s elf_origin=%s elf_semantics=%s status=%s pc=0x%zx sp=0x%zx launch_registers=%zu runtime_segments=%zu mapped_bytes=%zu\n",
             machine_elf_target_profile_name(report->header_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics),
             machine_step_status_name(report->header_summary.status),
             report->header_summary.program_counter,
             report->header_summary.stack_pointer,
@@ -1043,6 +1070,15 @@ int machine_step_dump_report(const MachineStepReport *report,
             report->header_summary.current_segment_index,
             report->header_summary.program_counter,
             report->header_summary.stack_pointer) ||
+        !machine_step_append_format(
+            &builder,
+            "  elf_source: target=%s origin=%s semantics=%s\n",
+            machine_elf_target_profile_name(
+                report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.target_profile),
+            machine_elf_target_profile_name(
+                report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(
+                report->file.launch_file.runtime_file.load_file.exec_file.image_file.source_elf_artifact_summary.relocation_semantics)) ||
         !machine_step_append_format(
             &builder,
             "  policy: profile=%s pc-reg=%s sp-reg=%s fetch-bytes=%zu\n",

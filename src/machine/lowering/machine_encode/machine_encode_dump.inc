@@ -203,6 +203,17 @@ int machine_encode_dump_report(const MachineEncodeReport *report,
         machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-206: out of memory while dumping encode report");
         goto cleanup;
     }
+    if (!machine_encode_append_format(
+            &builder,
+            "target_policy preview_reg_cap=%zu preserves_spills=%d preserves_global_slots=%d preserves_fallthrough=%d preserves_offsets=%d\n",
+            report->target_policy_summary.emit_policy.select_policy.current_riscv32_preview_logical_register_cap,
+            report->target_policy_summary.emit_policy.preserves_spill_operands_for_later_materialization,
+            report->target_policy_summary.emit_policy.preserves_global_slot_ops_for_later_address_formation,
+            report->target_policy_summary.emit_policy.preserves_fallthrough_terminator_shapes,
+            report->target_policy_summary.preserves_block_unit_offsets)) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-206: out of memory while dumping encode report");
+        goto cleanup;
+    }
 
     if (!machine_encode_append_format(&builder, "functions-with-calls:")) {
         machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-206: out of memory while dumping encode report");

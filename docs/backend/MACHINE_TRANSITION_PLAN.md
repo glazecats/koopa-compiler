@@ -112,6 +112,10 @@ Do not start with:
     `MachineStepFile`, `MachineStepReport`, and profile-aware
     `MachineIrAllocateRewriteReport` variants for raw transition files,
     reports, direct dumps, and report dumps
+  - that same next-state bridge now also preserves upstream ELF provenance
+    instead of flattening it away at transition time: raw transition files,
+    transition reports, and dump/report-dump helpers surface the embedded
+    source-ELF artifact summary carried through `machine_interp`
   - that same first bridge/lifecycle surface is now also regression-locked:
     clone, report refresh, raw/report dump wrappers, interp/payload/decode/step
     bridge entrypoints, and profiled `machine_ir` bridge entrypoints are all

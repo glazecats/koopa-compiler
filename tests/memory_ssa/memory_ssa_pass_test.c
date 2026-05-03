@@ -347,6 +347,70 @@ static int build_lower_ir_memory_fold_program(LowerIrProgram *program, LowerIrEr
     return 1;
 }
 
+static int build_lower_ir_global_store_observed_by_caller_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *global = NULL;
+    LowerIrFunction *set_function = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *set_block = NULL;
+    LowerIrBasicBlock *main_block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "g", &global, error) ||
+        !lower_ir_program_append_function(program, "set", 1, &set_function, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(set_function, NULL, &set_block, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &main_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(main_function);
+    temp1 = lower_ir_function_allocate_temp(main_function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = lower_ir_slot_global(global->id);
+    instruction.as.store.value = lower_ir_value_immediate(5);
+    if (!lower_ir_block_append_instruction(set_block, &instruction, error) ||
+        !lower_ir_block_set_return(set_block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.call.callee_name = "set";
+    instruction.as.call.arg_count = 0;
+    instruction.as.call.args = NULL;
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_global(global->id);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error) ||
+        !lower_ir_block_set_return(main_block, lower_ir_value_temp(temp0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_invalid_input_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *block = NULL;
@@ -14533,6 +14597,25 @@ static int test_memory_ssa_pass_build_canonicalized_from_lower_ir_fold_program(v
         "}\n");
 }
 
+static int test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_global_store_observed_by_caller(void) {
+    return expect_built_canonicalized_dump("MEMORY-SSA-PASS-BUILD-CANONICALIZE-GLOBAL-STORE-CALLER",
+        build_lower_ir_global_store_observed_by_caller_program,
+        "global g.0\n"
+        "\n"
+        "func set() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 5\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call set()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
 static int test_memory_ssa_pass_pipeline_fold_exposed_constant(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -18412,6 +18495,7 @@ int main(void) {
     ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_local_join();
     ok &= test_memory_ssa_pass_build_memory_canonicalized_from_lower_ir_fold_program();
     ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_fold_program();
+    ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_global_store_observed_by_caller();
     ok &= test_memory_ssa_pass_pipeline_combo();
     ok &= test_memory_ssa_pass_pipeline_fold_exposed_constant();
     ok &= test_memory_ssa_pass_pipeline_eliminates_redundant_global_store_after_load();

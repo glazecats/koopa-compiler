@@ -19,10 +19,17 @@ typedef enum {
 } MachineElfTargetProfile;
 
 typedef enum {
+    MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN = 0,
+    MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
+    MACHINE_ELF_RELOCATION_SEMANTICS_IMPORTED_TABLE,
+} MachineElfRelocationSemantics;
+
+typedef enum {
     MACHINE_ELF_SECTION_NULL = 0,
     MACHINE_ELF_SECTION_PROGBITS = 1,
     MACHINE_ELF_SECTION_SYMTAB = 2,
     MACHINE_ELF_SECTION_STRTAB = 3,
+    MACHINE_ELF_SECTION_NOBITS = 8,
     MACHINE_ELF_SECTION_REL = 9,
 } MachineElfSectionType;
 
@@ -33,6 +40,7 @@ typedef enum {
 
 typedef enum {
     MACHINE_ELF_SYMBOL_NOTYPE = 0,
+    MACHINE_ELF_SYMBOL_OBJECT = 1,
     MACHINE_ELF_SYMBOL_FUNC = 2,
     MACHINE_ELF_SYMBOL_SECTION = 3,
     MACHINE_ELF_SYMBOL_FILE = 4,
@@ -71,6 +79,21 @@ typedef struct {
 
 typedef struct {
     MachineElfTargetProfile target_profile;
+    MachineElfTargetProfile origin_profile;
+    MachineElfRelocationSemantics relocation_semantics;
+} MachineElfArtifactSummary;
+
+typedef struct {
+    size_t call_relocation_count;
+    size_t primary_control_relocation_count;
+    size_t secondary_control_relocation_count;
+    size_t data_address_relocation_count;
+    size_t data_load_relocation_count;
+    size_t data_store_relocation_count;
+} MachineElfRelocationFamilySummary;
+
+typedef struct {
+    MachineElfTargetProfile target_profile;
     unsigned char elf_class;
     unsigned char data_encoding;
     unsigned char ident_version;
@@ -86,11 +109,15 @@ typedef struct {
 
 typedef struct {
     MachineElfTargetProfile target_profile;
+    MachineBytesTargetPolicySummary bytes_policy;
     uint16_t machine;
     uint32_t flags;
     uint32_t call_relocation_type;
     uint32_t primary_control_relocation_type;
     uint32_t secondary_control_relocation_type;
+    uint32_t data_address_relocation_type;
+    uint32_t data_load_relocation_type;
+    uint32_t data_store_relocation_type;
 } MachineElfTargetPolicySummary;
 
 typedef struct {
@@ -126,6 +153,8 @@ typedef struct {
 
 typedef struct {
     MachineElfTargetProfile target_profile;
+    MachineElfTargetProfile origin_profile;
+    MachineElfRelocationSemantics relocation_semantics;
     MachineElfSection *sections;
     size_t section_count;
     size_t section_capacity;
@@ -147,6 +176,8 @@ typedef struct {
 
 typedef struct {
     MachineElfFile file;
+    MachineElfArtifactSummary artifact_summary;
+    MachineElfRelocationFamilySummary relocation_family_summary;
     MachineElfHeaderSummary header_summary;
     MachineElfTargetPolicySummary target_policy_summary;
     MachineElfSectionSummary *section_summaries;
@@ -169,6 +200,7 @@ void machine_elf_report_init(MachineElfReport *report);
 void machine_elf_report_free(MachineElfReport *report);
 
 const char *machine_elf_target_profile_name(MachineElfTargetProfile profile);
+const char *machine_elf_relocation_semantics_name(MachineElfRelocationSemantics semantics);
 int machine_elf_get_target_policy_summary(MachineElfTargetProfile profile,
     MachineElfTargetPolicySummary *out_summary);
 
@@ -179,6 +211,10 @@ int machine_elf_file_get_summary(const MachineElfFile *elf_file,
     size_t *out_byte_count);
 int machine_elf_file_get_target_profile(const MachineElfFile *elf_file,
     MachineElfTargetProfile *out_profile);
+int machine_elf_file_get_artifact_summary(const MachineElfFile *elf_file,
+    MachineElfArtifactSummary *out_summary);
+int machine_elf_file_get_relocation_family_summary(const MachineElfFile *elf_file,
+    MachineElfRelocationFamilySummary *out_summary);
 int machine_elf_file_get_target_policy_summary(const MachineElfFile *elf_file,
     MachineElfTargetPolicySummary *out_summary);
 int machine_elf_file_get_header_summary(const MachineElfFile *elf_file,
@@ -340,6 +376,10 @@ int machine_elf_report_get_summary(const MachineElfReport *report,
     size_t *out_byte_count);
 int machine_elf_report_get_file(const MachineElfReport *report,
     const MachineElfFile **out_file);
+int machine_elf_report_get_artifact_summary_artifact(const MachineElfReport *report,
+    const MachineElfArtifactSummary **out_summary);
+int machine_elf_report_get_relocation_family_summary_artifact(const MachineElfReport *report,
+    const MachineElfRelocationFamilySummary **out_summary);
 int machine_elf_report_get_header_summary_artifact(const MachineElfReport *report,
     const MachineElfHeaderSummary **out_summary);
 int machine_elf_report_get_target_policy_summary_artifact(const MachineElfReport *report,

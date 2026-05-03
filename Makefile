@@ -49,6 +49,7 @@ MACHINE_HISTORY_BUILD_DIR := $(BUILD_DIR)/machine_history
 MACHINE_TIMELINE_BUILD_DIR := $(BUILD_DIR)/machine_timeline
 MACHINE_LOG_BUILD_DIR := $(BUILD_DIR)/machine_log
 MACHINE_JOURNAL_BUILD_DIR := $(BUILD_DIR)/machine_journal
+COMPILER_TEST_BUILD_DIR := $(BUILD_DIR)/compiler_tests
 
 LEXER_TEST_BIN := $(LEXER_BUILD_DIR)/lexer_test
 PARSER_TEST_BIN := $(PARSER_BUILD_DIR)/parser_test
@@ -102,6 +103,8 @@ MACHINE_HISTORY_BIN := $(MACHINE_HISTORY_BUILD_DIR)/machine_history_test
 MACHINE_TIMELINE_BIN := $(MACHINE_TIMELINE_BUILD_DIR)/machine_timeline_test
 MACHINE_LOG_BIN := $(MACHINE_LOG_BUILD_DIR)/machine_log_test
 MACHINE_JOURNAL_BIN := $(MACHINE_JOURNAL_BUILD_DIR)/machine_journal_test
+COMPILER_BIN := $(BUILD_DIR)/compiler
+COMPILER_DRIVER_TEST_BIN := $(COMPILER_TEST_BUILD_DIR)/compiler_driver_test
 MEMORY_SSA_REGRESSION_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_regression_test
 MEMORY_SSA_VERIFIER_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_verifier_test
 MEMORY_SSA_ANALYSIS_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_analysis_test
@@ -275,7 +278,7 @@ MACHINE_ENCODE_SPLIT_INCLUDES := \
 	src/machine/lowering/machine_encode/machine_encode_lower.inc \
 	src/machine/lowering/machine_encode/machine_encode_report.inc
 
-COMPILER_COMMON_SRCS := $(shell find src -name '*.c' | sort)
+COMPILER_COMMON_SRCS := $(filter-out src/compiler/main.c,$(shell find src -name '*.c' | sort))
 COMPILER_COMMON_BUILD_DEPS := $(shell find include -name '*.h' | sort) $(shell find src -name '*.inc' | sort)
 COMPILER_COMMON_OBJS := $(patsubst src/%.c,$(COMMON_OBJ_DIR)/%.o,$(COMPILER_COMMON_SRCS))
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -333,6 +336,7 @@ ALL_TEST_BINS := \
 	$(MACHINE_TIMELINE_BIN) \
 	$(MACHINE_LOG_BIN) \
 	$(MACHINE_JOURNAL_BIN) \
+	$(COMPILER_DRIVER_TEST_BIN) \
 	$(MEMORY_SSA_REGRESSION_BIN) \
 	$(MEMORY_SSA_VERIFIER_BIN) \
 	$(MEMORY_SSA_ANALYSIS_BIN) \
@@ -390,12 +394,15 @@ TEST_TARGETS := \
 	test-machine-timeline \
 	test-machine-log \
 	test-machine-journal \
+	test-compiler-driver \
+	test-compiler-cli \
+	test-compiler-asm \
 	test-memory-ssa-regression \
 	test-memory-ssa-verifier \
 	test-memory-ssa-analysis \
 	test-memory-ssa-pass
 
-.PHONY: all dirs lexer parser test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all check dirs force lexer parser compiler test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-compiler-driver test-compiler-cli test-compiler-asm test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -408,10 +415,14 @@ SEMANTIC_REGRESSION_INCLUDES := \
 	tests/semantic/semantic_regression_callable_flow.inc \
 	tests/semantic/semantic_regression_scope_cf.inc
 
-all: test
+all: compiler
+
+check: test
+
+force:
 
 dirs:
-	@mkdir -p $(COMMON_LIB_DIR) $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR) $(IR_BUILD_DIR) $(LOWER_IR_BUILD_DIR) $(VALUE_SSA_BUILD_DIR) $(MEMORY_SSA_BUILD_DIR) $(MACHINE_IR_BUILD_DIR) $(MACHINE_SELECT_BUILD_DIR) $(MACHINE_LAYOUT_BUILD_DIR) $(MACHINE_EMIT_BUILD_DIR) $(MACHINE_ENCODE_BUILD_DIR) $(MACHINE_BYTES_BUILD_DIR) $(MACHINE_OBJECT_BUILD_DIR) $(MACHINE_RELOC_BUILD_DIR) $(MACHINE_CONTAINER_BUILD_DIR) $(MACHINE_ELF_BUILD_DIR) $(MACHINE_IMAGE_BUILD_DIR) $(MACHINE_EXEC_BUILD_DIR) $(MACHINE_LOAD_BUILD_DIR) $(MACHINE_RUNTIME_BUILD_DIR) $(MACHINE_LAUNCH_BUILD_DIR) $(MACHINE_STEP_BUILD_DIR) $(MACHINE_DECODE_BUILD_DIR) $(MACHINE_PAYLOAD_DECODE_BUILD_DIR) $(MACHINE_INTERP_BUILD_DIR) $(MACHINE_TRANSITION_BUILD_DIR) $(MACHINE_STATE_BUILD_DIR) $(MACHINE_MUTATION_BUILD_DIR) $(MACHINE_WRITEBACK_BUILD_DIR) $(MACHINE_COMMIT_BUILD_DIR) $(MACHINE_APPLY_BUILD_DIR) $(MACHINE_OBSERVE_BUILD_DIR) $(MACHINE_DELTA_BUILD_DIR) $(MACHINE_TRACE_BUILD_DIR) $(MACHINE_EVENT_BUILD_DIR) $(MACHINE_OUTCOME_BUILD_DIR) $(MACHINE_HISTORY_BUILD_DIR) $(MACHINE_TIMELINE_BUILD_DIR) $(MACHINE_LOG_BUILD_DIR) $(MACHINE_JOURNAL_BUILD_DIR)
+	@mkdir -p $(COMMON_LIB_DIR) $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR) $(IR_BUILD_DIR) $(LOWER_IR_BUILD_DIR) $(VALUE_SSA_BUILD_DIR) $(MEMORY_SSA_BUILD_DIR) $(MACHINE_IR_BUILD_DIR) $(MACHINE_SELECT_BUILD_DIR) $(MACHINE_LAYOUT_BUILD_DIR) $(MACHINE_EMIT_BUILD_DIR) $(MACHINE_ENCODE_BUILD_DIR) $(MACHINE_BYTES_BUILD_DIR) $(MACHINE_OBJECT_BUILD_DIR) $(MACHINE_RELOC_BUILD_DIR) $(MACHINE_CONTAINER_BUILD_DIR) $(MACHINE_ELF_BUILD_DIR) $(MACHINE_IMAGE_BUILD_DIR) $(MACHINE_EXEC_BUILD_DIR) $(MACHINE_LOAD_BUILD_DIR) $(MACHINE_RUNTIME_BUILD_DIR) $(MACHINE_LAUNCH_BUILD_DIR) $(MACHINE_STEP_BUILD_DIR) $(MACHINE_DECODE_BUILD_DIR) $(MACHINE_PAYLOAD_DECODE_BUILD_DIR) $(MACHINE_INTERP_BUILD_DIR) $(MACHINE_TRANSITION_BUILD_DIR) $(MACHINE_STATE_BUILD_DIR) $(MACHINE_MUTATION_BUILD_DIR) $(MACHINE_WRITEBACK_BUILD_DIR) $(MACHINE_COMMIT_BUILD_DIR) $(MACHINE_APPLY_BUILD_DIR) $(MACHINE_OBSERVE_BUILD_DIR) $(MACHINE_DELTA_BUILD_DIR) $(MACHINE_TRACE_BUILD_DIR) $(MACHINE_EVENT_BUILD_DIR) $(MACHINE_OUTCOME_BUILD_DIR) $(MACHINE_HISTORY_BUILD_DIR) $(MACHINE_TIMELINE_BUILD_DIR) $(MACHINE_LOG_BUILD_DIR) $(MACHINE_JOURNAL_BUILD_DIR) $(COMPILER_TEST_BUILD_DIR)
 
 $(COMMON_OBJ_DIR)/%.o: src/%.c $(COMPILER_COMMON_BUILD_DEPS) | dirs
 	@mkdir -p $(dir $@)
@@ -425,6 +436,8 @@ $(ALL_TEST_BINS): $(COMPILER_COMMON_LIB)
 lexer: $(LEXER_TEST_BIN)
 
 parser: $(PARSER_TEST_BIN)
+
+compiler: $(COMPILER_BIN)
 
 $(LEXER_TEST_BIN): src/lexer/lexer.c tests/lexer/lexer_test.c include/lexer.h | dirs
 	$(TEST_LINK_CMD)
@@ -592,6 +605,14 @@ $(MEMORY_SSA_ANALYSIS_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/valu
 	$(TEST_LINK_CMD)
 
 $(MEMORY_SSA_PASS_BIN): src/lexer/lexer.c src/ast/ast.c src/ir/ir.c src/value_ssa/value_ssa.c src/value_ssa_pass/value_ssa_pass.c src/memory_ssa/memory_ssa.c src/memory_ssa_pass/memory_ssa_pass.c src/lower_ir/lower_ir.c tests/memory_ssa/memory_ssa_pass_test.c $(IR_SPLIT_INCLUDES) $(LOWER_IR_SPLIT_INCLUDES) $(VALUE_SSA_SPLIT_INCLUDES) $(VALUE_SSA_PASS_SPLIT_INCLUDES) $(MEMORY_SSA_SPLIT_INCLUDES) $(MEMORY_SSA_PASS_SPLIT_INCLUDES) include/lexer.h include/ast.h include/ast_internal.h include/ast_lifecycle_template.h include/ir.h include/lower_ir.h include/value_ssa.h include/value_ssa_pass.h include/memory_ssa.h include/memory_ssa_pass.h | dirs
+	$(TEST_LINK_CMD)
+
+$(COMPILER_BIN): force src/compiler/main.c $(COMPILER_COMMON_LIB) include/compiler.h | dirs
+	@if [ -d "$@" ]; then rm -rf "$@"; fi
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) src/compiler/main.c $(COMPILER_COMMON_LIB) -o $@
+
+$(COMPILER_DRIVER_TEST_BIN): tests/compiler/compiler_driver_test.c $(COMPILER_COMMON_LIB) include/compiler.h | dirs
 	$(TEST_LINK_CMD)
 
 test-lexer: $(LEXER_TEST_BIN)
@@ -1008,6 +1029,54 @@ test-machine-journal: $(MACHINE_JOURNAL_BIN)
 	cp "./$(MACHINE_JOURNAL_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
+	exit $$status
+
+test-compiler-driver: $(COMPILER_DRIVER_TEST_BIN)
+	@echo "[compiler] running driver regression tests"
+	@tmp="./$(COMPILER_DRIVER_TEST_BIN).run.$$$$"; \
+	cp "./$(COMPILER_DRIVER_TEST_BIN)" "$$tmp" && "$$tmp"; \
+	status=$$?; \
+	rm -f "$$tmp"; \
+	exit $$status
+
+test-compiler-cli: $(COMPILER_BIN)
+	@echo "[compiler] running cli smoke test"
+	@tmpbin="./$(COMPILER_BIN).cli.run.$$$$"; \
+	tmpdir="./$(COMPILER_TEST_BUILD_DIR)/cli-smoke.$$$$"; \
+	mkdir -p "$$tmpdir" && \
+	cp "./$(COMPILER_BIN)" "$$tmpbin" && \
+	printf '%s\n' 'int main(){return 0;}' > "$$tmpdir/input.sy" && \
+	"$$tmpbin" -riscv "$$tmpdir/input.sy" -o "$$tmpdir/output.s" && \
+	test "$$(sed -n '1p' "$$tmpdir/output.s")" = ".attribute arch, \"rv32im\"" && \
+	test "$$(sed -n '2p' "$$tmpdir/output.s")" = ".text" && \
+	test "$$(sed -n '7p' "$$tmpdir/output.s")" = "main:" && \
+	test "$$(sed -n '9p' "$$tmpdir/output.s")" = "  li a0, 0"; \
+	status=$$?; \
+	rm -f "$$tmpbin"; \
+	rm -rf "$$tmpdir"; \
+	exit $$status
+
+test-compiler-asm: $(COMPILER_BIN)
+	@echo "[compiler] running asm acceptance test"
+	@tmpbin="./$(COMPILER_BIN).asm.run.$$$$"; \
+	tmpdir="./$(COMPILER_TEST_BUILD_DIR)/asm-smoke.$$$$"; \
+	mkdir -p "$$tmpdir" && \
+	cp "./$(COMPILER_BIN)" "$$tmpbin" && \
+	printf '%s\n' 'int choose(int x){ if (x) return 2; return 3; } int ext(int a); int main(){ return ext(choose(1)); }' > "$$tmpdir/control.sy" && \
+	printf '%s\n' 'int g; int main(){ return g; }' > "$$tmpdir/global_bss.sy" && \
+	printf '%s\n' 'int g = 7; int main(){ return g; }' > "$$tmpdir/global_data.sy" && \
+	printf '%s\n' 'int g; int set(){ g = 5; return 0; } int main(){ set(); return g; }' > "$$tmpdir/global_store.sy" && \
+	"$$tmpbin" -riscv "$$tmpdir/control.sy" -o "$$tmpdir/control.s" && \
+	"$$tmpbin" -riscv "$$tmpdir/global_bss.sy" -o "$$tmpdir/global_bss.s" && \
+	"$$tmpbin" -riscv "$$tmpdir/global_data.sy" -o "$$tmpdir/global_data.s" && \
+	"$$tmpbin" -riscv "$$tmpdir/global_store.sy" -o "$$tmpdir/global_store.s" && \
+	llvm-mc -triple=riscv32 -filetype=obj "$$tmpdir/control.s" -o "$$tmpdir/control.o" && \
+	llvm-mc -triple=riscv32 -filetype=obj "$$tmpdir/global_bss.s" -o "$$tmpdir/global_bss.o" && \
+	llvm-mc -triple=riscv32 -filetype=obj "$$tmpdir/global_data.s" -o "$$tmpdir/global_data.o" && \
+	llvm-mc -triple=riscv32 -filetype=obj "$$tmpdir/global_store.s" -o "$$tmpdir/global_store.o"; \
+	status=$$?; \
+	rm -f "$$tmpbin"; \
+	rm -rf "$$tmpdir"; \
 	exit $$status
 
 test-memory-ssa-regression: $(MEMORY_SSA_REGRESSION_BIN)

@@ -123,6 +123,8 @@ int machine_transition_file_get_target_policy_summary(const MachineTransitionFil
     MachineTransitionTargetPolicySummary *out_summary);
 int machine_transition_file_get_summary(const MachineTransitionFile *transition_file,
     size_t *out_mapped_byte_count);
+int machine_transition_file_get_source_elf_artifact_summary(const MachineTransitionFile *transition_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_transition_file_get_header_summary(const MachineTransitionFile *transition_file,
     MachineTransitionHeaderSummary *out_summary);
 int machine_transition_file_get_runtime_launch_summary(const MachineTransitionFile *transition_file,
@@ -266,6 +268,9 @@ int machine_transition_report_get_file(const MachineTransitionReport *report,
     const MachineTransitionFile **out_file);
 int machine_transition_report_get_interp_file(const MachineTransitionReport *report,
     const MachineInterpFile **out_interp_file);
+int machine_transition_report_get_source_elf_artifact_summary_artifact(
+    const MachineTransitionReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_transition_report_get_header_summary_artifact(const MachineTransitionReport *report,
     const MachineTransitionHeaderSummary **out_summary);
 int machine_transition_report_get_target_policy_summary_artifact(const MachineTransitionReport *report,

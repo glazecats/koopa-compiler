@@ -15,6 +15,22 @@ typedef MachineObjectFixupKind MachineRelocKind;
 typedef MachineObjectFixupTargetKind MachineRelocTargetKind;
 
 typedef struct {
+    MachineBytesTargetProfile target_profile;
+    MachineBytesTargetPolicySummary bytes_policy;
+    int preserves_preview_pc_relative_addends;
+    int preserves_direct_fallthrough_honesty;
+} MachineRelocTargetPolicySummary;
+
+typedef struct {
+    size_t call_relocation_count;
+    size_t primary_control_relocation_count;
+    size_t secondary_control_relocation_count;
+    size_t data_address_relocation_count;
+    size_t data_load_relocation_count;
+    size_t data_store_relocation_count;
+} MachineRelocRelocationFamilySummary;
+
+typedef struct {
     size_t object_section_index;
     const char *name;
     size_t start_byte_offset;
@@ -81,8 +97,20 @@ typedef struct {
     size_t relocation_capacity;
 } MachineRelocFile;
 
+typedef struct {
+    MachineRelocFile file;
+    MachineRelocTargetPolicySummary target_policy_summary;
+    MachineRelocRelocationFamilySummary relocation_family_summary;
+    MachineRelocSectionSummary *section_summaries;
+    size_t section_summary_count;
+    MachineRelocationSummary *relocation_summaries;
+    size_t relocation_summary_count;
+} MachineRelocReport;
+
 void machine_reloc_file_init(MachineRelocFile *reloc_file);
 void machine_reloc_file_free(MachineRelocFile *reloc_file);
+void machine_reloc_report_init(MachineRelocReport *report);
+void machine_reloc_report_free(MachineRelocReport *report);
 
 int machine_reloc_file_get_summary(const MachineRelocFile *reloc_file,
     size_t *out_total_byte_count,
@@ -90,6 +118,12 @@ int machine_reloc_file_get_summary(const MachineRelocFile *reloc_file,
     size_t *out_symbol_count,
     size_t *out_relocation_section_count,
     size_t *out_relocation_count);
+int machine_reloc_get_target_policy_summary(MachineBytesTargetProfile profile,
+    MachineRelocTargetPolicySummary *out_summary);
+int machine_reloc_file_get_target_policy_summary(const MachineRelocFile *reloc_file,
+    MachineRelocTargetPolicySummary *out_summary);
+int machine_reloc_file_get_relocation_family_summary(const MachineRelocFile *reloc_file,
+    MachineRelocRelocationFamilySummary *out_summary);
 int machine_reloc_file_get_object_file(const MachineRelocFile *reloc_file,
     const MachineObjectFile **out_object_file);
 int machine_reloc_file_get_section(const MachineRelocFile *reloc_file,
@@ -122,15 +156,55 @@ int machine_reloc_build_from_machine_ir_report_with_profile(const MachineIrAlloc
 int machine_reloc_build_from_machine_ir_report(const MachineIrAllocateRewriteReport *report,
     MachineRelocFile *out_reloc_file,
     MachineRelocError *error);
+int machine_reloc_build_report_from_file(const MachineRelocFile *source,
+    MachineRelocReport *out_report,
+    MachineRelocError *error);
+int machine_reloc_build_report_from_machine_object_file(const MachineObjectFile *object_file,
+    MachineRelocReport *out_report,
+    MachineRelocError *error);
+int machine_reloc_build_report_from_machine_ir_report(const MachineIrAllocateRewriteReport *report,
+    MachineRelocReport *out_report,
+    MachineRelocError *error);
 
 int machine_reloc_verify_file(const MachineRelocFile *reloc_file, MachineRelocError *error);
+int machine_reloc_report_get_summary(const MachineRelocReport *report,
+    size_t *out_total_byte_count,
+    size_t *out_object_section_count,
+    size_t *out_symbol_count,
+    size_t *out_relocation_section_count,
+    size_t *out_relocation_count);
+int machine_reloc_report_get_file(const MachineRelocReport *report,
+    const MachineRelocFile **out_file);
+int machine_reloc_report_get_target_policy_summary_artifact(const MachineRelocReport *report,
+    const MachineRelocTargetPolicySummary **out_summary);
+int machine_reloc_report_get_relocation_family_summary_artifact(const MachineRelocReport *report,
+    const MachineRelocRelocationFamilySummary **out_summary);
+int machine_reloc_report_get_section_summary(const MachineRelocReport *report,
+    size_t section_index,
+    const MachineRelocSectionSummary **out_summary);
+int machine_reloc_report_find_section_summary_by_name(const MachineRelocReport *report,
+    const char *section_name,
+    size_t *out_section_index,
+    const MachineRelocSectionSummary **out_summary);
+int machine_reloc_report_get_relocation_summary(const MachineRelocReport *report,
+    size_t relocation_index,
+    const MachineRelocationSummary **out_summary);
 int machine_reloc_dump_file(const MachineRelocFile *reloc_file,
+    char **out_text,
+    MachineRelocError *error);
+int machine_reloc_dump_report(const MachineRelocReport *report,
     char **out_text,
     MachineRelocError *error);
 int machine_reloc_build_dump_from_machine_object_file(const MachineObjectFile *object_file,
     char **out_text,
     MachineRelocError *error);
 int machine_reloc_build_dump_from_machine_ir_report(const MachineIrAllocateRewriteReport *report,
+    char **out_text,
+    MachineRelocError *error);
+int machine_reloc_build_report_dump_from_machine_object_file(const MachineObjectFile *object_file,
+    char **out_text,
+    MachineRelocError *error);
+int machine_reloc_build_report_dump_from_machine_ir_report(const MachineIrAllocateRewriteReport *report,
     char **out_text,
     MachineRelocError *error);
 

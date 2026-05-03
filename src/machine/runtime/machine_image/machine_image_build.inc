@@ -8,6 +8,7 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
     MachineImageFile *out_image_file,
     MachineImageError *error) {
     MachineElfError elf_error;
+    MachineElfArtifactSummary artifact_summary;
     MachineElfTargetProfile profile;
     size_t text_section_index = 0u;
     const MachineElfSection *text_section = NULL;
@@ -16,6 +17,7 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
     int entry_found = 0;
 
     memset(&elf_error, 0, sizeof(elf_error));
+    memset(&artifact_summary, 0, sizeof(artifact_summary));
     if (!elf_file || !out_image_file) {
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-106: invalid image build contract");
         return 0;
@@ -25,6 +27,7 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
         return 0;
     }
     if (!machine_elf_file_get_target_profile(elf_file, &profile) ||
+        !machine_elf_file_get_artifact_summary(elf_file, &artifact_summary) ||
         !machine_elf_file_get_text_section(elf_file, NULL, &text_section) ||
         !text_section || !elf_file->bytes ||
         text_section->file_offset + text_section->byte_count > elf_file->byte_count) {
@@ -35,6 +38,7 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
 
     machine_image_file_free(out_image_file);
     out_image_file->target_profile = profile;
+    out_image_file->source_elf_artifact_summary = artifact_summary;
     out_image_file->base_virtual_address = machine_image_base_virtual_address(profile);
     out_image_file->segment_count = 1u;
     out_image_file->segment_capacity = 1u;
@@ -339,6 +343,7 @@ int machine_image_build_report_from_file(const MachineImageFile *source,
     machine_image_report_free(out_report);
     machine_image_file_free(&out_report->file);
     out_report->file.target_profile = source->target_profile;
+    out_report->file.source_elf_artifact_summary = source->source_elf_artifact_summary;
     out_report->file.base_virtual_address = source->base_virtual_address;
     out_report->file.has_entry = source->has_entry;
     out_report->file.entry_symbol_index = source->entry_symbol_index;
@@ -435,6 +440,7 @@ int machine_image_build_report_from_file(const MachineImageFile *source,
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-136: failed to summarize image header");
         return 0;
     }
+    out_report->source_elf_artifact_summary = out_report->file.source_elf_artifact_summary;
     if (!machine_image_file_get_target_policy_summary(&out_report->file, &out_report->target_policy_summary)) {
         machine_image_report_free(out_report);
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-156: failed to summarize image target policy");
@@ -734,6 +740,10 @@ int machine_image_build_report_from_file(const MachineImageFile *source,
             case MACHINE_BYTES_FIXUP_CONTROL_SECONDARY:
                 out_report->control_secondary_relocation_indices[control_secondary_relocation_count++] =
                     relocation_index;
+                break;
+            case MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET:
+            case MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET:
+            case MACHINE_BYTES_FIXUP_DATA_STORE_TARGET:
                 break;
         }
     }

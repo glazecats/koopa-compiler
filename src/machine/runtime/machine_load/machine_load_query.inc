@@ -50,6 +50,15 @@ int machine_load_file_get_header_summary(const MachineLoadFile *load_file,
     return 1;
 }
 
+int machine_load_file_get_source_elf_artifact_summary(const MachineLoadFile *load_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!load_file || !out_summary) {
+        return 0;
+    }
+    *out_summary = load_file->exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_load_file_get_memory_summary(const MachineLoadFile *load_file,
     MachineLoadMemorySummary *out_summary) {
     size_t segment_index;

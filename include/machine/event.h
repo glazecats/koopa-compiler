@@ -137,6 +137,8 @@ int machine_event_file_get_target_policy_summary(const MachineEventFile *event_f
     MachineEventTargetPolicySummary *out_summary);
 int machine_event_file_get_summary(const MachineEventFile *event_file,
     size_t *out_mapped_byte_count);
+int machine_event_file_get_source_elf_artifact_summary(const MachineEventFile *event_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_event_file_get_header_summary(const MachineEventFile *event_file,
     MachineEventHeaderSummary *out_summary);
 int machine_event_file_get_trace_summary(const MachineEventFile *event_file,
@@ -302,6 +304,9 @@ int machine_event_report_get_trace_file(const MachineEventReport *report,
     const MachineTraceFile **out_trace_file);
 int machine_event_report_get_trace_report(const MachineEventReport *report,
     const MachineTraceReport **out_trace_report);
+int machine_event_report_get_source_elf_artifact_summary_artifact(
+    const MachineEventReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_event_report_get_header_summary_artifact(const MachineEventReport *report,
     const MachineEventHeaderSummary **out_summary);
 int machine_event_report_get_target_policy_summary_artifact(const MachineEventReport *report,

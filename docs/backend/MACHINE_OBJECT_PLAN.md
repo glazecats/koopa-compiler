@@ -99,6 +99,24 @@ Do not start with:
   - the first full-repo integration checkpoint is now landed too: the module
     is wired into `Makefile`, included in `make test`, and the bridge path is
     covered by isolated regression tests
+  - the object artifact now also preserves the upstream
+    `MachineBytesTargetProfile`, so later relocation/container/image layers
+    can tell whether they are consuming generic bytes or the current
+    `riscv32-preview` lane instead of silently dropping that backend choice
+  - that same object-facing surface now also includes one first target-policy
+    summary plus one first fixup-family summary above the raw object fixup
+    array, so consumers can recover preview-honesty policy and direct
+    `call` / `primary-control` / `secondary-control` / data-side fixup counts
+    without hand-restaging those scans outside `machine_object`
+  - that same consumer-facing surface now also has one first structured
+    report artifact above the raw object file, so later consumers can stay on
+    cached target-policy / family / section / symbol / fixup summaries
+    instead of rewalking raw object tables every time
+  - preview target-byte-offset / fallthrough honesty is now also verifier-
+    backed at the object boundary itself instead of being only an upstream
+    bytes-layer convention: malformed preview object artifacts with drifted
+    target byte offsets or fake zero-patch secondary control fixups are now
+    rejected directly by `machine_object_verify_file(...)`
 
 ## File Management Rules
 

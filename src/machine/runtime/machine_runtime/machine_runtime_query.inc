@@ -32,6 +32,15 @@ int machine_runtime_file_get_summary(const MachineRuntimeFile *runtime_file,
     return 1;
 }
 
+int machine_runtime_file_get_source_elf_artifact_summary(const MachineRuntimeFile *runtime_file,
+    MachineElfArtifactSummary *out_summary) {
+    if (!runtime_file || !out_summary) {
+        return 0;
+    }
+    *out_summary = runtime_file->load_file.exec_file.image_file.source_elf_artifact_summary;
+    return 1;
+}
+
 int machine_runtime_file_get_header_summary(const MachineRuntimeFile *runtime_file,
     MachineRuntimeHeaderSummary *out_summary) {
     size_t base_virtual_address = 0u;

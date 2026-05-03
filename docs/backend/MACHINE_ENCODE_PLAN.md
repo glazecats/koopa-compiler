@@ -153,6 +153,18 @@ Do not start with:
     sets for call-bearing, fallthrough-bearing, and branch-bearing encoded
     functions, so later consumers can stay on one structured report artifact
     instead of rescanning all function summaries by hand
+  - that same encoded-program/report surface now also carries one first
+    explicit preview-lane compatibility summary plus an early compatibility
+    verifier entrypoint, so the current preview register-cap and middle-layer
+    preservation facts stay visible and enforceable across the full
+    `machine_emit -> machine_encode` bridge rather than reappearing only
+    again at `machine_bytes`
+  - that same preview-lane compatibility surface now also has a first deeper
+    downstream bytes-bridge check instead of only local shape screening:
+    callers can now ask `machine_encode` to validate current
+    `riscv32-preview` compatibility by actually attempting the preview bytes
+    bridge, which lets out-of-range branch/jump/call-style failures surface
+    one stage earlier than `machine_bytes`
 
 ## File Management Rules
 

@@ -107,6 +107,10 @@ Do not start with:
     `MachineCommitFile` / `MachineCommitReport`, `MachineStepFile` /
     `MachineStepReport`, and profile-aware `MachineIrAllocateRewriteReport`
     variants for raw trace files, reports, direct dumps, and report dumps
+  - the trace layer now also keeps `MachineElfArtifactSummary` queryable on
+    both raw files and report artifacts, and prints
+    `elf_origin` / `elf_semantics` / `elf_source` in dump surfaces so the
+    downstream provenance chain stays explicit past `machine_delta`
 
 ## File Management Rules
 

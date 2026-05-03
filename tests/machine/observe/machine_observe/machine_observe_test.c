@@ -151,6 +151,8 @@ static int overwrite_step_bytes(MachineStepFile *step_file,
 static int verify_observe_file(const MachineObserveFile *observe_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineObserveResolutionKind resolution_kind,
     int is_exact_state,
     int has_observed_state,
@@ -158,6 +160,7 @@ static int verify_observe_file(const MachineObserveFile *observe_file,
     MachineObserveHeaderSummary header_summary;
     MachineObserveTargetPolicySummary target_policy_summary;
     MachineObserveSummary observe_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineObserveError observe_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -165,9 +168,14 @@ static int verify_observe_file(const MachineObserveFile *observe_file,
     memset(&header_summary, 0, sizeof(header_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
     memset(&observe_summary, 0, sizeof(observe_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&observe_error, 0, sizeof(observe_error));
 
     if (!machine_observe_verify_file(observe_file, &observe_error) ||
+        !machine_observe_file_get_source_elf_artifact_summary(observe_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_observe_file_get_header_summary(observe_file, &header_summary) ||
         header_summary.target_profile != profile ||
         !machine_observe_file_get_target_policy_summary(observe_file, &target_policy_summary) ||
@@ -192,6 +200,8 @@ cleanup:
 static int verify_observe_report(const MachineObserveReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     MachineObserveResolutionKind resolution_kind,
     const char *expected_dump) {
     MachineObserveReportOverviewArtifact overview_artifact;
@@ -200,6 +210,7 @@ static int verify_observe_report(const MachineObserveReport *report,
     const MachineObserveHeaderSummary *header_summary = NULL;
     const MachineObserveTargetPolicySummary *target_policy_summary = NULL;
     const MachineObserveSummary *observe_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     MachineObserveError observe_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -210,8 +221,13 @@ static int verify_observe_report(const MachineObserveReport *report,
     if (!machine_observe_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_observe_report_get_file(report, &observe_file) || !observe_file ||
         !machine_observe_report_get_apply_report(report, &apply_report) || !apply_report ||
+        !machine_observe_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_observe_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_observe_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary || !target_policy_summary->surfaces_exact_state ||
         !machine_observe_report_get_observe_summary_artifact(report, &observe_summary) ||
@@ -264,10 +280,12 @@ static int test_machine_observe_mainline(void) {
         &observe_file,
         "observe-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_PREVIEW_STATE,
         0,
         1,
-        "machine_observe profile=generic-elf32 apply=pending-register-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=pending-register-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_observe_clone_file(&observe_file, &cloned_observe_file, &observe_error) ||
@@ -282,11 +300,14 @@ static int test_machine_observe_mainline(void) {
         &observe_report,
         "observe-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_PREVIEW_STATE,
-        "machine_observe profile=generic-elf32 apply=pending-register-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=pending-register-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no has-state=yes status=ready pc=0x1001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: apply=pending-register-application status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 exact=yes preview=yes\n"
         "  observe: resolution=preview-state kind=state exact=no state=yes imm=- pc=0x1001 targets=[] return-imm=-\n");
 
@@ -345,10 +366,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-halt-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_EXACT_STATE,
         1,
         1,
-        "machine_observe profile=generic-elf32 apply=applied-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=applied-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=exact-state kind=state apply=applied-state commit=committed-state writeback=committed-no-op mutation=no-mutation effect=control-only transition=halt action=halt raw=0x81 value=0x01 known=yes name=return-imm bytes=2 payload=[0x17] imm=7 exact=yes has-state=yes status=halted pc=0x1000 current-segment=- current-byte=- targets=[] return-imm=7\n");
 
     machine_observe_report_free(&observe_report);
@@ -366,10 +389,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-jump-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_BLOCKED_ON_CONTROL,
         0,
         0,
-        "machine_observe profile=generic-elf32 apply=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=blocked-on-control origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=blocked-on-control kind=none apply=blocked-on-control commit=blocked-on-control writeback=blocked-on-control mutation=blocked-on-control effect=control-only transition=deferred-control-transfer action=control-transfer raw=0x84 value=0x04 known=yes name=jump bytes=2 payload=[0x01] imm=1 exact=no has-state=no status=- pc=- current-segment=- current-byte=- targets=[1] return-imm=-\n");
 
     machine_observe_report_free(&observe_report);
@@ -387,10 +412,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-unsupported-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_BLOCKED_UNSUPPORTED,
         0,
         0,
-        "machine_observe profile=generic-elf32 apply=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=blocked-unsupported origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=blocked-unsupported kind=none apply=blocked-unsupported commit=blocked-unsupported writeback=blocked-unsupported mutation=blocked-unsupported effect=none transition=unsupported action=unsupported raw=0x00 value=0x00 known=no name=- bytes=1 payload=[] imm=- exact=no has-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_observe_report_free(&observe_report);
@@ -407,10 +434,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-store-local-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_PREVIEW_STATE,
         0,
         1,
-        "machine_observe profile=generic-elf32 apply=pending-local-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=pending-local-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xaa targets=[] return-imm=-\n");
 
     machine_observe_file_free(&observe_file);
@@ -426,10 +455,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-store-global-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_PREVIEW_STATE,
         0,
         1,
-        "machine_observe profile=generic-elf32 apply=pending-global-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=pending-global-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xab targets=[] return-imm=-\n");
 
     machine_observe_file_free(&observe_file);
@@ -445,10 +476,12 @@ static int test_machine_observe_custom_step_cases(void) {
         &observe_file,
         "observe-call-void-imm-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_OBSERVE_RESOLUTION_PREVIEW_STATE,
         0,
         1,
-        "machine_observe profile=generic-elf32 apply=pending-call-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans apply=pending-call-application origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-call-application commit=deferred-call-commit writeback=deferred-call-writeback mutation=deferred-call-effect effect=call transition=next-fetch action=advance raw=0x1b value=0x0b known=yes name=call-void-imm bytes=2 payload=[0x02] imm=2 exact=no has-state=yes status=ready pc=0x1002 current-segment=0 current-byte=0xac targets=[] return-imm=-\n");
 
 cleanup:
@@ -492,13 +525,14 @@ static int test_machine_observe_i386_bridge(void) {
     }
 
     ok &= expect_text("observe i386 dump wrapper", dump_text,
-        "machine_observe profile=i386-preview apply=pending-register-application origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans apply=pending-register-application origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("observe i386 report dump wrapper", report_dump_text,
-        "machine_observe profile=i386-preview apply=pending-register-application origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
+        "machine_observe profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans apply=pending-register-application origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
         "observe: resolution=preview-state kind=state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no has-state=yes status=ready pc=0x8048001 current-segment=0 current-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: apply=pending-register-application status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview exact=yes preview=yes\n"
         "  observe: resolution=preview-state kind=state exact=no state=yes imm=- pc=0x8048001 targets=[] return-imm=-\n");
 

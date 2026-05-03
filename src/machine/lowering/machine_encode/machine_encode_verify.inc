@@ -144,4 +144,67 @@ int machine_encode_verify_program(const MachineEncodeProgram *program, MachineEn
     return 1;
 }
 
+int machine_encode_verify_current_riscv32_preview_compatibility(const MachineEncodeProgram *program,
+    MachineEncodeError *error) {
+    MachineEncodeTargetPolicySummary policy_summary;
+
+    if (!program) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-120: invalid riscv32-preview compatibility contract");
+        return 0;
+    }
+    if (!machine_encode_verify_program(program, error)) {
+        return 0;
+    }
+    if (!machine_encode_program_get_target_policy_summary(program, &policy_summary)) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-121: missing encode target policy summary");
+        return 0;
+    }
+    if (program->register_bank.register_count >
+        policy_summary.emit_policy.select_policy.current_riscv32_preview_logical_register_cap) {
+        machine_encode_set_error(
+            error,
+            0,
+            0,
+            "MACHINE-ENCODE-122: current riscv32-preview lane supports at most %zu logical machine registers",
+            policy_summary.emit_policy.select_policy.current_riscv32_preview_logical_register_cap);
+        return 0;
+    }
+    return 1;
+}
+
+int machine_encode_verify_current_riscv32_preview_bytes_compatibility(const MachineEncodeProgram *program,
+    MachineEncodeError *error) {
+    MachineBytesProgram bytes_program;
+    MachineBytesError bytes_error;
+    int ok;
+
+    if (!program) {
+        machine_encode_set_error(
+            error, 0, 0, "MACHINE-ENCODE-124: invalid riscv32-preview bytes-compatibility contract");
+        return 0;
+    }
+    if (!machine_encode_verify_current_riscv32_preview_compatibility(program, error)) {
+        return 0;
+    }
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_bytes_program_init(&bytes_program);
+    ok = machine_bytes_lower_program_from_machine_encode_with_profile(
+        program,
+        MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
+        &bytes_program,
+        &bytes_error);
+    machine_bytes_program_free(&bytes_program);
+    if (!ok) {
+        machine_encode_set_error(
+            error,
+            bytes_error.line,
+            bytes_error.column,
+            "MACHINE-ENCODE-125: current riscv32-preview bytes bridge rejected encoded program: %s",
+            bytes_error.message);
+        return 0;
+    }
+    return 1;
+}
+
 #endif

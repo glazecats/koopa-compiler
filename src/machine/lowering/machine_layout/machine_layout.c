@@ -1,5 +1,6 @@
 #include "machine/layout.h"
 
+#include "machine/emit.h"
 #include "machine/select.h"
 
 #include <stdarg.h>
@@ -114,6 +115,28 @@ static int machine_layout_op_has_call_payload(MachineSelectOpKind kind) {
     }
 }
 
+int machine_layout_get_target_policy_summary(MachineLayoutTargetPolicySummary *out_summary) {
+    if (!out_summary) {
+        return 0;
+    }
+    memset(out_summary, 0, sizeof(*out_summary));
+    if (!machine_select_get_target_policy_summary(&out_summary->select_policy)) {
+        return 0;
+    }
+    out_summary->preserves_spill_operands_for_later_materialization = 1;
+    out_summary->preserves_global_slot_ops_for_later_address_formation = 1;
+    out_summary->preserves_fallthrough_terminator_shapes = 1;
+    return 1;
+}
+
+int machine_layout_program_get_target_policy_summary(const MachineLayoutProgram *program,
+    MachineLayoutTargetPolicySummary *out_summary) {
+    if (!program || !out_summary) {
+        return 0;
+    }
+    return machine_layout_get_target_policy_summary(out_summary);
+}
+
 static int machine_layout_op_clone(MachineLayoutOp *dest, const MachineLayoutOp *src) {
     if (!dest || !src) {
         return 0;
@@ -210,6 +233,8 @@ static void machine_layout_register_desc_free(MachineLayoutRegisterDesc *desc) {
 
 #define MACHINE_LAYOUT_SPLIT_AGGREGATOR
 #include "machine_layout_core.inc"
+#include "machine_layout_query.inc"
 #include "machine_layout_verify.inc"
 #include "machine_layout_dump.inc"
+#include "machine_layout_report.inc"
 #include "machine_layout_lower.inc"

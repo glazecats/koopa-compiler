@@ -161,6 +161,18 @@ Do not start with:
     above the raw ELF file, so profile-aware import/normalize flows can hand
     later consumers one stable summary object instead of forcing every caller
     back through ad hoc header/section/symbol/relocation scans
+  - that same consumer-facing summary layer now also includes one first
+    relocation-family summary above raw relocation-table iteration: callers
+    can ask raw files and report artifacts for direct counts of
+    `call` / `primary-control` / `secondary-control` relocation families, so
+    consumers can distinguish direct preview artifacts from
+    imported/reprofiled artifacts without rescanning `.rel.text` manually
+  - preview direct-versus-imported relocation semantics are now also verifier-
+    backed at the ELF boundary itself instead of staying only as dump/query
+    decoration: canonical direct preview ELF artifacts are no longer allowed
+    to keep secondary control relocations under `direct-patch-spans`, while
+    generic-origin reprofiled helpers still remain legal because that
+    provenance now stays explicit as `origin_profile != target_profile`
   - that same target-policy surface is now also explicit as public structured
     data rather than remaining an internal helper only: callers can ask for a
     direct target-policy summary from one profile, from one owned ELF file,
@@ -184,11 +196,45 @@ Do not start with:
     threads a profile-aware bytes/object/container chain so `riscv32-preview`
     can change `.text` bytes for the landed subset rather than only changing
     `e_machine` and relocation opcode policy
+  - that same direct preview bridge is now also more honest about
+    fallthrough-shaped control relocations: when the direct
+    `riscv32-preview` bytes/object/reloc chain knows a secondary edge had no
+    concrete patch span, the resulting ELF artifact keeps only the one real
+    primary control relocation instead of reviving a second fake
+    fallthrough-edge relocation
   - this substage should now be read as complete for the current preview ABI
     tier: any further reopening is no longer about making target-policy
     plumbing itself visible or structured, but about deliberately deepening
     profile-specific ABI semantics beyond the current preview relocation
     policy
+- Reopened direct-build global-object honesty slice: now effectively
+  **~100% (checkpoint-ready / maintenance-first)**
+  - direct `machine_object -> machine_container -> machine_elf` builds may now
+    preserve optional `.sbss` / `.sdata` sections and `STT_OBJECT` globals
+    when those sections already exist upstream, instead of flattening every
+    direct-build object back to a strict `.text`-only ELF skeleton
+  - verifier-side canonical direct-build checks now also accept that specific
+    optional section family (`.sbss` as `SHT_NOBITS`, `.sdata` as writable
+    `SHT_PROGBITS`) without weakening the existing `.text/.strtab/.symtab/
+    .rel.text/.shstrtab` core invariants
+  - that same reopened import side now also accepts and round-trips the same
+    optional data-section family: parse/normalize/refresh may now preserve
+    `.sbss` / `.sdata` plus their `STT_OBJECT` globals instead of forcing
+    those direct-build bytes back through a strict core-section-only shape
+  - that same reopened preview line now also reaches one first data-side
+    global-access relocation surface: when direct preview lowering preserves
+    small global load/store fixups downstream, direct preview ELF builds and
+    repository-side parse/refresh round-trips may now carry the matching
+    paired `R_RISCV_HI20 + R_RISCV_LO12_I/S` relocation kinds instead of
+    collapsing those accesses back to relocation-free code bytes only
+  - that same data-side relocation slice is now also visible through
+    consumer-facing query helpers instead of only raw ELF relocation rows:
+    target-policy summaries may expose the preview/global data relocation
+    opcodes directly, and relocation-family summaries may count data-addr /
+    data-load / data-store relocations alongside call/control families
+  - current stop boundary is still intentionally conservative: this slice is
+    scoped to the repository's own canonical direct-build optional data
+    sections, not to arbitrary broader ELF data-section import semantics
 - `MELF5 ELF parse / round-trip surface`: now effectively **~100% (checkpoint-ready / maintenance-first)**  
   - `machine_elf` can now parse one generated ELF byte image back into a fresh
     `MachineElfFile` instead of only building forward from `machine_container`
@@ -255,6 +301,33 @@ Do not start with:
     the canonical null section header in a nonzero header slot, or omit it and
     rely on `machine_elf` to synthesize the canonical null section back into
     the normalized 6-section output
+  - one intentional preview import asymmetry is now part of the current
+    contract: a direct `riscv32-preview` build may carry only one control
+    relocation for a fallthrough-shaped branch, while a generic ELF imported
+    and then normalized under `riscv32-preview` may still keep both control
+    relocations because the raw imported relocation table does not record
+    which original edge had `patch_byte_count == 0`
+  - that distinction is now also surfaced as first-class artifact metadata
+    instead of only being latent in relocation counts: `machine_elf` files
+    and reports now carry a small provenance/relocation-semantics summary so
+    downstream consumers can tell whether the current relocation table still
+    comes from direct patch-span-aware lowering or from imported ELF
+    relocation-table semantics
+  - that same provenance signal is now also locked through the module's
+    consumer-facing helper entrypoints rather than only the raw file/report
+    core: focused coverage now exercises the expected semantics class across
+    direct build helpers, bytes-to-file helpers, file-to-report helpers, and
+    dump/report-dump helpers
+  - that provenance summary now also records `origin_profile` alongside the
+    current target profile, so later consumers can distinguish a direct
+    profile-native artifact from one that only became preview-profiled at a
+    later in-memory helper boundary; after a byte round-trip, the importer
+    still only guarantees the origin that the ELF header itself can express
+  - helper-side authority is now slightly sharper than that one sentence
+    alone: in-memory `...with_profile(...)` helpers may preserve the source
+    artifact's origin while changing the current target profile, but once that
+    rebuilt byte image is parsed again the importer only recovers the origin
+    that the ELF header itself now states
   - symbol-table import is now also less coupled to the repository's own
     canonical local/global ordering: a self-consistent input may now carry
     non-canonical local/global `symtab` ordering, and `machine_elf` will

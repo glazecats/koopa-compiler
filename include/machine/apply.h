@@ -155,6 +155,8 @@ int machine_apply_file_get_target_policy_summary(const MachineApplyFile *apply_f
     MachineApplyTargetPolicySummary *out_summary);
 int machine_apply_file_get_summary(const MachineApplyFile *apply_file,
     size_t *out_mapped_byte_count);
+int machine_apply_file_get_source_elf_artifact_summary(const MachineApplyFile *apply_file,
+    MachineElfArtifactSummary *out_summary);
 int machine_apply_file_get_header_summary(const MachineApplyFile *apply_file,
     MachineApplyHeaderSummary *out_summary);
 int machine_apply_file_get_commit_summary(const MachineApplyFile *apply_file,
@@ -248,6 +250,9 @@ int machine_apply_report_get_commit_file(const MachineApplyReport *report,
     const MachineCommitFile **out_commit_file);
 int machine_apply_report_get_commit_report(const MachineApplyReport *report,
     const MachineCommitReport **out_commit_report);
+int machine_apply_report_get_source_elf_artifact_summary_artifact(
+    const MachineApplyReport *report,
+    const MachineElfArtifactSummary **out_summary);
 int machine_apply_report_get_header_summary_artifact(const MachineApplyReport *report,
     const MachineApplyHeaderSummary **out_summary);
 int machine_apply_report_get_target_policy_summary_artifact(const MachineApplyReport *report,

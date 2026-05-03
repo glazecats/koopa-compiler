@@ -98,6 +98,8 @@ static int build_resolved_machine_ir_report(
 static int verify_step_file_with_profile(const MachineStepFile *step_file,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
@@ -108,6 +110,7 @@ static int verify_step_file_with_profile(const MachineStepFile *step_file,
     MachineRuntimeMemorySummary runtime_memory_summary;
     MachineRuntimeSegmentSummary current_segment_summary;
     MachineStepFetchSummary fetch_summary;
+    MachineElfArtifactSummary source_artifact_summary;
     MachineStepError step_error;
     char *dump_text = NULL;
     int ok = 1;
@@ -120,14 +123,17 @@ static int verify_step_file_with_profile(const MachineStepFile *step_file,
     memset(&runtime_memory_summary, 0, sizeof(runtime_memory_summary));
     memset(&current_segment_summary, 0, sizeof(current_segment_summary));
     memset(&fetch_summary, 0, sizeof(fetch_summary));
+    memset(&source_artifact_summary, 0, sizeof(source_artifact_summary));
     memset(&step_error, 0, sizeof(step_error));
     memset(expected_dump, 0, sizeof(expected_dump));
 
     if (snprintf(expected_dump, sizeof(expected_dump),
-            "machine_step profile=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+            "machine_step profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
             "current_segment: rseg.0 .text\n"
             "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c\n",
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address,
             base_virtual_address + 0x3000u,
             base_virtual_address) <= 0) {
@@ -135,6 +141,10 @@ static int verify_step_file_with_profile(const MachineStepFile *step_file,
     }
 
     if (!machine_step_verify_file(step_file, &step_error) ||
+        !machine_step_file_get_source_elf_artifact_summary(step_file, &source_artifact_summary) ||
+        source_artifact_summary.target_profile != profile ||
+        source_artifact_summary.origin_profile != origin_profile ||
+        source_artifact_summary.relocation_semantics != semantics ||
         !machine_step_file_get_header_summary(step_file, &header_summary) ||
         header_summary.target_profile != profile ||
         header_summary.status != MACHINE_STEP_STATUS_READY ||
@@ -183,6 +193,8 @@ cleanup:
 static int verify_step_report_with_profile(const MachineStepReport *report,
     const char *context,
     MachineElfTargetProfile profile,
+    MachineElfTargetProfile origin_profile,
+    MachineElfRelocationSemantics semantics,
     const char *pc_register_name,
     const char *sp_register_name,
     size_t base_virtual_address) {
@@ -197,6 +209,7 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
     const MachineRuntimeMemorySummary *runtime_memory_summary = NULL;
     const MachineRuntimeSegmentSummary *current_segment_summary = NULL;
     const MachineStepFetchSummary *fetch_summary = NULL;
+    const MachineElfArtifactSummary *source_artifact_summary = NULL;
     char *dump_text = NULL;
     char expected_dump[2048];
     int ok = 1;
@@ -206,11 +219,12 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
     memset(expected_dump, 0, sizeof(expected_dump));
 
     if (snprintf(expected_dump, sizeof(expected_dump),
-            "machine_step profile=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+            "machine_step profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
             "current_segment: rseg.0 .text\n"
             "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c\n"
             "report_overview:\n"
             "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x%zx sp=0x%zx\n"
+            "  elf_source: target=%s origin=%s semantics=%s\n"
             "  policy: profile=%s pc-reg=%s sp-reg=%s fetch-bytes=1\n"
             "  runtime-launch: pc=0x%zx sp=0x%zx stack-segment=1 stack-base=0x%zx stack-end=0x%zx stack-bytes=4096\n"
             "  initial-stack: base=0x%zx end=0x%zx bytes=20 word=4 argc=0\n"
@@ -218,11 +232,16 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
             "  current-segment: rseg.0 .text perms=r-x\n"
             "  fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c segment=0 .text\n",
             machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             base_virtual_address,
             base_virtual_address + 0x3000u,
             base_virtual_address,
             base_virtual_address,
             base_virtual_address + 0x3000u,
+            machine_elf_target_profile_name(profile),
+            machine_elf_target_profile_name(origin_profile),
+            machine_elf_relocation_semantics_name(semantics),
             machine_elf_target_profile_name(profile),
             pc_register_name,
             sp_register_name,
@@ -241,9 +260,14 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
     if (!machine_step_report_get_overview_artifact(report, &overview_artifact) ||
         !machine_step_report_get_file(report, &step_file) || !step_file ||
         !machine_step_report_get_launch_file(report, &launch_file) || !launch_file ||
+        !machine_step_report_get_source_elf_artifact_summary_artifact(report, &source_artifact_summary) ||
+        !source_artifact_summary ||
         !machine_step_report_get_header_summary_artifact(report, &header_summary) || !header_summary ||
         header_summary->target_profile != profile ||
         header_summary->status != MACHINE_STEP_STATUS_READY ||
+        source_artifact_summary->target_profile != profile ||
+        source_artifact_summary->origin_profile != origin_profile ||
+        source_artifact_summary->relocation_semantics != semantics ||
         !machine_step_report_get_target_policy_summary_artifact(report, &target_policy_summary) ||
         !target_policy_summary ||
         strcmp(target_policy_summary->program_counter_register_name, pc_register_name) != 0 ||
@@ -332,6 +356,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-launch-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -346,6 +372,8 @@ static int test_machine_step_mainline(void) {
         &cloned_step,
         "step-generic-cloned-launch-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -360,6 +388,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-launch-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -374,6 +404,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-runtime-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -388,6 +420,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-runtime-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -402,6 +436,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-load-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -416,6 +452,8 @@ static int test_machine_step_mainline(void) {
         &step_file,
         "step-generic-load-report-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -429,6 +467,8 @@ static int test_machine_step_mainline(void) {
         &step_report,
         "step-generic-launch-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -444,6 +484,8 @@ static int test_machine_step_mainline(void) {
         &step_report,
         "step-generic-refreshed-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -458,6 +500,8 @@ static int test_machine_step_mainline(void) {
         &step_report,
         "step-generic-launch-report-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -509,6 +553,8 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         &step_file,
         "step-generic-ir-file",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
@@ -516,19 +562,22 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         &step_report,
         "step-generic-ir-report",
         MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "pc",
         "sp",
         0x1000u);
     ok &= expect_text("step ir dump wrapper", dump_text,
-        "machine_step profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_step profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
         "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c\n");
     ok &= expect_text("step ir report-dump wrapper", report_dump_text,
-        "machine_step profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_step profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
         "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c\n"
         "report_overview:\n"
         "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x1000 sp=0x4000\n"
+        "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 pc-reg=pc sp-reg=sp fetch-bytes=1\n"
         "  runtime-launch: pc=0x1000 sp=0x4000 stack-segment=1 stack-base=0x3000 stack-end=0x4000 stack-bytes=4096\n"
         "  initial-stack: base=0x3fec end=0x4000 bytes=20 word=4 argc=0\n"
@@ -563,6 +612,8 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         &step_file,
         "step-i386-ir-file",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "eip",
         "esp",
         0x08048000u);
@@ -570,19 +621,22 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         &step_report,
         "step-i386-ir-report",
         MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_TARGET_PROFILE_I386_PREVIEW,
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         "eip",
         "esp",
         0x08048000u);
     ok &= expect_text("step i386 dump wrapper", dump_text,
-        "machine_step profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_step profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
         "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c\n");
     ok &= expect_text("step i386 report-dump wrapper", report_dump_text,
-        "machine_step profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
+        "machine_step profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
         "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c\n"
         "report_overview:\n"
         "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x8048000 sp=0x804b000\n"
+        "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview pc-reg=eip sp-reg=esp fetch-bytes=1\n"
         "  runtime-launch: pc=0x8048000 sp=0x804b000 stack-segment=1 stack-base=0x804a000 stack-end=0x804b000 stack-bytes=4096\n"
         "  initial-stack: base=0x804afec end=0x804b000 bytes=20 word=4 argc=0\n"

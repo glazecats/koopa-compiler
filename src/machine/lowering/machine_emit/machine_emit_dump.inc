@@ -431,6 +431,16 @@ int machine_emit_dump_lower_report(const MachineEmitLowerReport *report,
         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-210: out of memory while dumping emit report header");
         goto cleanup;
     }
+    if (!machine_emit_append_format(
+            &builder,
+            "target_policy preview_reg_cap=%zu preserves_spills=%d preserves_global_slots=%d preserves_fallthrough=%d\n",
+            report->target_policy_summary.select_policy.current_riscv32_preview_logical_register_cap,
+            report->target_policy_summary.preserves_spill_operands_for_later_materialization,
+            report->target_policy_summary.preserves_global_slot_ops_for_later_address_formation,
+            report->target_policy_summary.preserves_fallthrough_terminator_shapes)) {
+        machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-210: out of memory while dumping emit report header");
+        goto cleanup;
+    }
 
     if (!machine_emit_append_format(&builder, "functions-with-calls:")) {
         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-211: out of memory while dumping emit report");

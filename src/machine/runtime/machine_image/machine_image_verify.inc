@@ -25,9 +25,23 @@ int machine_image_verify_file(const MachineImageFile *image_file,
     size_t segment_index;
     size_t symbol_index;
     size_t relocation_index;
+    MachineElfTargetPolicySummary source_target_policy;
+    MachineElfTargetPolicySummary source_origin_policy;
 
     if (!image_file) {
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-115: invalid image verify contract");
+        return 0;
+    }
+    if (!machine_elf_get_target_policy_summary(
+            image_file->source_elf_artifact_summary.target_profile,
+            &source_target_policy) ||
+        !machine_elf_get_target_policy_summary(
+            image_file->source_elf_artifact_summary.origin_profile,
+            &source_origin_policy) ||
+        image_file->source_elf_artifact_summary.relocation_semantics ==
+            MACHINE_ELF_RELOCATION_SEMANTICS_UNKNOWN ||
+        image_file->source_elf_artifact_summary.target_profile != image_file->target_profile) {
+        machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-115: invalid source elf artifact summary");
         return 0;
     }
     if (image_file->segment_count == 0u || !image_file->segments) {

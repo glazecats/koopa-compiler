@@ -23,6 +23,7 @@ void machine_emit_lower_report_init(MachineEmitLowerReport *report) {
         return;
     }
     machine_emit_program_init(&report->program);
+    memset(&report->target_policy_summary, 0, sizeof(report->target_policy_summary));
     report->function_shape_summaries = NULL;
     report->function_block_summary_offsets = NULL;
     report->block_shape_summaries = NULL;
@@ -70,6 +71,20 @@ void machine_emit_lower_report_free(MachineEmitLowerReport *report) {
     free(report->function_indices_with_fallthrough);
     free(report->function_indices_with_branches);
     machine_emit_lower_report_init(report);
+}
+
+int machine_emit_get_target_policy_summary(MachineEmitTargetPolicySummary *out_summary) {
+    if (!out_summary) {
+        return 0;
+    }
+    memset(out_summary, 0, sizeof(*out_summary));
+    if (!machine_select_get_target_policy_summary(&out_summary->select_policy)) {
+        return 0;
+    }
+    out_summary->preserves_spill_operands_for_later_materialization = 1;
+    out_summary->preserves_global_slot_ops_for_later_address_formation = 1;
+    out_summary->preserves_fallthrough_terminator_shapes = 1;
+    return 1;
 }
 
 int machine_emit_clone_program(const MachineEmitProgram *source,
@@ -205,6 +220,14 @@ int machine_emit_clone_program(const MachineEmitProgram *source,
     }
 
     return machine_emit_verify_program(out_program, error);
+}
+
+int machine_emit_program_get_target_policy_summary(const MachineEmitProgram *program,
+    MachineEmitTargetPolicySummary *out_summary) {
+    if (!program || !out_summary) {
+        return 0;
+    }
+    return machine_emit_get_target_policy_summary(out_summary);
 }
 
 #endif
