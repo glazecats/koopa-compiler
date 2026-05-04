@@ -39,6 +39,31 @@
 
 ---
 
+## 最近同步
+
+最近这层已经不只是“有 relocation rows”，还开始有：
+
+1. `relocation-family summary`
+   - 直接统计 `call / primary-control / secondary-control / data-addr / data-load / data-store`
+2. structured report artifact
+   - 不再只有 raw relocation file
+3. preview addend honesty
+   - verifier 会检查已知 internal target 的 addend 漂移
+4. zero-patch fallthrough honesty
+   - direct preview artifact 不再伪造 semantic fallthrough 的第二条假 relocation
+5. data relocation family
+   - 不再只有 call/control，global data 访问相关族也已经进来了
+
+所以这层现在除了：
+
+- `fixup -> relocation record`
+
+还要再加一句：
+
+- `relocation record -> 可直接被 ELF / consumer 查询的 relocation-family surface`
+
+---
+
 ## 导学
 
 `machine_object` 已经有：

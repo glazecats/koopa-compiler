@@ -271,6 +271,65 @@ static int test_compiler_emits_global_bss_and_data_sections(void) {
     return ok;
 }
 
+static int test_compiler_handles_complex_const_shadowing_scopes(void) {
+    static const char *source =
+        "int main() {\n"
+        "  int a = 1, sum = 0;\n"
+        "  {\n"
+        "    a = a + 2;\n"
+        "    int b = a + 3;\n"
+        "    b = b + 4;\n"
+        "    sum = sum + a + b;\n"
+        "    {\n"
+        "      b = b + 5;\n"
+        "      int c = b + 6;\n"
+        "      a = a + c;\n"
+        "      sum = sum + a + b + c;\n"
+        "      {\n"
+        "        b = b + a;\n"
+        "        int a = c + 7;\n"
+        "        a = a + 8;\n"
+        "        sum = sum + a + b + c;\n"
+        "        {\n"
+        "          b = b + a;\n"
+        "          int b = c + 9;\n"
+        "          a = a + 10;\n"
+        "          const int a = 11;\n"
+        "          b = b + 12;\n"
+        "          sum = sum + a + b + c;\n"
+        "          {\n"
+        "            c = c + b;\n"
+        "            int c = b + 13;\n"
+        "            c = c + a;\n"
+        "            sum = sum + a + b + c;\n"
+        "          }\n"
+        "          sum = sum - c;\n"
+        "        }\n"
+        "        sum = sum - b;\n"
+        "      }\n"
+        "      sum = sum - a;\n"
+        "    }\n"
+        "  }\n"
+        "  return sum % 77;\n"
+        "}\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, "  li a0, 46\n") == NULL ||
+        strstr(output, "  ret\n") == NULL ||
+        strstr(output, ".4byte") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: complex const shadowing output mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -284,6 +343,7 @@ int main(void) {
     ok &= test_compiler_pretty_prints_external_call_and_stack_spill();
     ok &= test_compiler_pretty_prints_immediate_compares_and_loop_control();
     ok &= test_compiler_emits_global_bss_and_data_sections();
+    ok &= test_compiler_handles_complex_const_shadowing_scopes();
 
     if (!ok) {
         return 1;

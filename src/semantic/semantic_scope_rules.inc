@@ -6,6 +6,7 @@
 
 typedef struct {
     const char **names;
+    unsigned char *is_const_flags;
     size_t count;
     size_t capacity;
 } ScopeFrame;
@@ -49,7 +50,9 @@ static void scope_frame_free(ScopeFrame *frame) {
     }
 
     free(frame->names);
+    free(frame->is_const_flags);
     frame->names = NULL;
+    frame->is_const_flags = NULL;
     frame->count = 0;
     frame->capacity = 0;
 }
@@ -95,6 +98,7 @@ static int scope_stack_push(ScopeStack *stack) {
     }
 
     stack->frames[stack->count].names = NULL;
+    stack->frames[stack->count].is_const_flags = NULL;
     stack->frames[stack->count].count = 0;
     stack->frames[stack->count].capacity = 0;
     stack->count++;
@@ -143,9 +147,10 @@ static int scope_stack_contains_local_name(const ScopeStack *stack, const char *
     return 0;
 }
 
-static int scope_stack_add_to_current(ScopeStack *stack, const char *name) {
+static int scope_stack_add_to_current(ScopeStack *stack, const char *name, int is_const_qualified) {
     ScopeFrame *frame;
     const char **new_names;
+    unsigned char *new_flags;
     size_t next_capacity;
 
     if (!stack || stack->count == 0 || !name || name[0] == '\0') {
@@ -164,13 +169,57 @@ static int scope_stack_add_to_current(ScopeStack *stack, const char *name) {
         if (!new_names) {
             return 0;
         }
+        new_flags = (unsigned char *)realloc(frame->is_const_flags, next_capacity * sizeof(unsigned char));
+        if (!new_flags) {
+            return 0;
+        }
         frame->names = new_names;
+        frame->is_const_flags = new_flags;
         frame->capacity = next_capacity;
     }
 
     frame->names[frame->count] = name;
+    frame->is_const_flags[frame->count] = (unsigned char)(is_const_qualified != 0);
     frame->count++;
     return 1;
+}
+
+static int scope_stack_lookup_local_const_flag(const ScopeStack *stack,
+    const char *name,
+    int *out_found,
+    int *out_is_const) {
+    size_t frame_index;
+    size_t name_index;
+
+    if (out_found) {
+        *out_found = 0;
+    }
+    if (out_is_const) {
+        *out_is_const = 0;
+    }
+    if (!stack || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        const ScopeFrame *frame = &stack->frames[frame_index - 1];
+
+        for (name_index = 0; name_index < frame->count; ++name_index) {
+            const char *candidate = frame->names[name_index];
+
+            if (candidate && strcmp(candidate, name) == 0) {
+                if (out_found) {
+                    *out_found = 1;
+                }
+                if (out_is_const) {
+                    *out_is_const = frame->is_const_flags && frame->is_const_flags[name_index] != 0;
+                }
+                return 1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 static int semantic_top_level_name_visible(const AstProgram *program,
@@ -219,11 +268,75 @@ static int semantic_scope_name_resolved(const AstProgram *program,
         name);
 }
 
+static int semantic_top_level_name_is_const(const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const char *name) {
+    size_t i;
+    size_t visible_external_count;
+
+    if (!program || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    visible_external_count = include_current_external ? (func_index + 1u) : func_index;
+    if (visible_external_count > program->count) {
+        visible_external_count = program->count;
+    }
+
+    for (i = visible_external_count; i > 0; --i) {
+        const AstExternal *ext = &program->externals[i - 1u];
+
+        if (!ext->name) {
+            continue;
+        }
+        if (strcmp(ext->name, name) == 0) {
+            return ext->is_const_qualified != 0;
+        }
+    }
+
+    return 0;
+}
+
+static int semantic_scope_name_is_const(const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    const char *name) {
+    int found = 0;
+    int is_const = 0;
+
+    if (scope_stack_lookup_local_const_flag(scopes, name, &found, &is_const) && found) {
+        return is_const;
+    }
+    return semantic_top_level_name_is_const(program, func_index, include_current_external, name);
+}
+
+static int semantic_binary_op_is_assignment(TokenType op) {
+    switch (op) {
+    case TOKEN_ASSIGN:
+    case TOKEN_PLUS_ASSIGN:
+    case TOKEN_MINUS_ASSIGN:
+    case TOKEN_STAR_ASSIGN:
+    case TOKEN_SLASH_ASSIGN:
+    case TOKEN_PERCENT_ASSIGN:
+    case TOKEN_AMP_ASSIGN:
+    case TOKEN_CARET_ASSIGN:
+    case TOKEN_PIPE_ASSIGN:
+    case TOKEN_SHIFT_LEFT_ASSIGN:
+    case TOKEN_SHIFT_RIGHT_ASSIGN:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
     const AstProgram *program,
     size_t func_index,
     ScopeStack *mutable_scopes,
     char *const *names,
+    const int *is_const_flags,
     size_t name_count,
     int line,
     int column,
@@ -262,7 +375,10 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
             return 0;
         }
 
-        if (!scope_stack_add_to_current(mutable_scopes, name)) {
+        if (!scope_stack_add_to_current(
+                mutable_scopes,
+                name,
+                is_const_flags ? is_const_flags[i] : 0)) {
             semantic_set_error(error,
                 line,
                 column,
@@ -301,6 +417,7 @@ static int semantic_scope_callee_shadowed_by_local_non_function(const AstExpress
 
 static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
     char *const *names,
+    const int *is_const_flags,
     size_t name_count,
     int line,
     int column,
@@ -330,7 +447,7 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
             continue;
         }
 
-        if (!scope_stack_add_to_current(scopes, name)) {
+        if (!scope_stack_add_to_current(scopes, name, is_const_flags ? is_const_flags[i] : 0)) {
             semantic_set_error(error,
                 line,
                 column,
@@ -510,6 +627,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
 
                 if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
                     &single_name,
+                    NULL,
                     1,
                     stmt->line,
                     stmt->column,
@@ -554,6 +672,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
 
             if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
                 &single_name,
+                NULL,
                 1,
                 stmt->line,
                 stmt->column,
@@ -629,6 +748,7 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
 
     if (!semantic_scope_add_declaration_names_shadow_pass(&scopes,
         func->parameter_names,
+        func->parameter_is_const,
         func->parameter_count,
         func->line,
         func->column,
@@ -727,6 +847,28 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 error,
                 depth + 1);
     case AST_EXPR_BINARY:
+        if (semantic_binary_op_is_assignment(expr->as.binary.op) &&
+            expr->as.binary.left &&
+            expr->as.binary.left->kind == AST_EXPR_IDENTIFIER &&
+            expr->as.binary.left->as.identifier.name &&
+            semantic_scope_name_is_const(
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                expr->as.binary.left->as.identifier.name)) {
+            if (error) {
+                char preview[128];
+                char msg[512];
+                format_callee_preview(expr->as.binary.left->as.identifier.name, preview, sizeof(preview));
+                snprintf(msg,
+                    sizeof(msg),
+                    "SEMA-CONST-001: identifier=%s; assignment to const object is not allowed",
+                    preview);
+                semantic_set_error(error, expr->line, expr->column, msg);
+            }
+            return 0;
+        }
         return semantic_scope_check_expression_with_visibility_impl(expr->as.binary.left,
                 program,
                 func_index,
@@ -921,6 +1063,21 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 const AstExpression *init_expr =
                     (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
 
+                if (stmt->declaration_is_const && !init_expr) {
+                    if (error) {
+                        char preview[128];
+                        char msg[512];
+                        format_callee_preview(single_name ? single_name : "<unnamed>", preview, sizeof(preview));
+                        snprintf(msg,
+                            sizeof(msg),
+                            "SEMA-CONST-002: identifier=%s; const declaration requires initializer",
+                            preview);
+                        semantic_set_error(error, stmt->line, stmt->column, msg);
+                    }
+                    scope_stack_pop(scopes);
+                    return 0;
+                }
+
                 if (!semantic_scope_check_expression(init_expr,
                     program,
                     func_index,
@@ -936,6 +1093,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     func_index,
                     scopes,
                     &single_name,
+                    stmt->declaration_is_const ? (const int[]){1} : NULL,
                     1,
                     stmt->line,
                     stmt->column,
@@ -983,6 +1141,20 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             const AstExpression *init_expr =
                 (stmt->expressions && i < stmt->expression_count) ? stmt->expressions[i] : NULL;
 
+            if (stmt->declaration_is_const && !init_expr) {
+                if (error) {
+                    char preview[128];
+                    char msg[512];
+                    format_callee_preview(single_name ? single_name : "<unnamed>", preview, sizeof(preview));
+                    snprintf(msg,
+                        sizeof(msg),
+                        "SEMA-CONST-002: identifier=%s; const declaration requires initializer",
+                        preview);
+                    semantic_set_error(error, stmt->line, stmt->column, msg);
+                }
+                return 0;
+            }
+
             if (!semantic_scope_check_expression(init_expr,
                 program,
                 func_index,
@@ -997,6 +1169,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 &single_name,
+                stmt->declaration_is_const ? (const int[]){1} : NULL,
                 1,
                 stmt->line,
                 stmt->column,
@@ -1101,6 +1274,7 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
                 func_index,
                 &scopes,
                 &single_name,
+                func->parameter_is_const ? &func->parameter_is_const[i] : NULL,
                 1,
                 declaration_line,
                 declaration_column,

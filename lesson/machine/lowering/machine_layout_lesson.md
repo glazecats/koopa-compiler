@@ -76,6 +76,31 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：`machine_layout` 不再只是“排块 heuristic”，它已经有了更完整的 **query/report/compatibility** 三件套。
+
+你现在最好把这层额外记成：
+
+1. **direct program/function/block query surface**
+   现在不必总跳到 emit/report 才能看 layout 结构，本层自己就能做更直接的结构化查询。
+
+2. **structured report artifact**
+   除了 raw layout program，本层现在也有缓存化的 function/block summary 与 policy facts。
+
+3. **preview compatibility chain 已经延伸到这里**
+   也就是说，某些本来要到 bytes 才爆的 preview-lane incompatibility，现在已经可以从 layout 边界更早失败。
+
+所以现在这层不只是：
+
+- `selected CFG -> block order + fallthrough`
+
+还要补一句：
+
+- `machine_layout` 已经开始承担 “selected 之后、emit 之前的结构化 inspection boundary”
+
+---
+
 ## 1. 为什么需要 `machine_layout`
 
 `machine_select` 已经回答了：

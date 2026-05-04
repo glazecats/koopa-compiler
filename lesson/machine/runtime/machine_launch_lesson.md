@@ -79,6 +79,34 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是 `pc/sp` 本身，而是它现在更明确地处在一条：
+
+- `compiler -riscv`
+- `compiler -perf`
+
+真实导出链中。
+
+你现在最好把这层再多记两点：
+
+1. **launch 不再只是“给测试看的寄存器快照”**
+   它现在更清楚地是后面：
+   - step
+   - decode
+   - interp
+   - state/apply/observe
+   整条主线的起跑寄存器 authority
+
+2. **target-policy naming 的重要性比以前更高**
+   既然整个 backend 正在往真实 `RISC-V` preview asm 收口，那这里的：
+   - `pc/sp`
+   - profile-owned register names
+   - register snapshot query/report
+   已经不是“只是 dump 好看一点”，而是后续 consumer surface 的一部分。
+
+---
+
 ## 1. 为什么需要 `machine_launch`
 
 `machine_runtime` 已经回答了：

@@ -39,6 +39,20 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为 event/outcome 这条链的固定 execution-record 壳。
+
+当前最好再多记两点：
+
+1. **trace 不是临时中间层**
+   后面的 event/outcome/history/... 现在都默认把 trace 当成稳定上游。
+
+2. **`MachineTraceChangeClass` 的价值比以前更高**
+   它现在不是“给 dump 看着方便”，而是后面 event/outcome 家族分类的重要背景事实之一。
+
+---
+
 ## 导学
 
 如果说：

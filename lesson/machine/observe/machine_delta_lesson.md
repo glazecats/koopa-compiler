@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为：
+
+- observe exact/preview state
+- 到 execution record / event / outcome / history
+
+之间的固定变化层。
+
+当前最好再多记两点：
+
+1. **delta 不再只是 observe 的附属 summary**
+   它现在更像后面 trace/event/outcome 整条语义收束链的标准 before/after 输入。
+
+2. **coarse change flags 的克制反而更像主动边界**
+   不是“暂时没做细 diff”，而是当前主线刻意只承诺 coarse delta。
+
+---
+
 ## 导学
 
 如果说：

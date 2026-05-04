@@ -39,6 +39,20 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：`machine_log` 现在已经更明确地变成了 journal 之前最后一层“单行 consumer artifact”。
+
+也就是说，当前最好再多记两句：
+
+1. **log 不只是 timeline 的命名改写**
+   它已经是 journal 最直接的上游 record surface。
+
+2. **这让 log 的单行 contract 也更像固定边界**
+   不是“以后也许删掉”，而是当前主线里 journal 之前一个很稳定的 consumer-facing壳。
+
+---
+
 ## 导学
 
 如果说：

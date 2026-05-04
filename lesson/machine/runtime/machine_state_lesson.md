@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为：
+
+- transition result
+- 到 mutation/writeback/commit/apply
+
+之间那份“可继续执行状态快照”的权威面。
+
+当前最好再多记两点：
+
+1. **state 的保守性现在更像主动设计**
+   它故意不去碰完整 register/memory mutation，好让后面的 mutation/writeback/... 分层保持干净。
+
+2. **后面的副作用链现在更稳定地建立在 state 之上**
+   lesson 里最好把它理解成整个 mutation-side family 的共同上游。
+
+---
+
 ## 导学
 
 如果说：

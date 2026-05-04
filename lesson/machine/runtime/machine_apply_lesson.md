@@ -39,6 +39,32 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为：
+
+- committed/deferred runtime result
+- 到 observe/delta/trace/event/...
+
+之间那层 application-plan authority。
+
+当前最好再多记两点：
+
+1. **payload/immediate hint 与 preview state 现在更像正式 contract**
+   它们不是“顺手多挂几个字段”，而是后面 observe chain 继续消费的事实。
+
+2. **apply 现在更值得被看成 runtime 主线跨进 observe 主线前的最后一层**
+
+也就是说，现在对这层的理解最好从：
+
+- “commit 之后多包一层”
+
+更新成：
+
+- “runtime 内部结果正式转成 downstream observation-ready plan 的最后闸门”
+
+---
+
 ## 导学
 
 如果说：

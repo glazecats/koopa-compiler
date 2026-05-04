@@ -76,6 +76,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是 outcome family 本身，而是它已经更明确地变成：
+
+- runtime/observe 结果语义
+- 到 single-entry history / timeline / log / journal
+
+之间的固定桥。
+
+你现在最好把这层再多记一点：
+
+1. **它不只是 event 的“更好听名字”**
+   outcome 现在更清楚地是后面整条 record-language 主线的语义起点。
+
+2. **后面的 history/timeline/log/journal 都默认把 outcome 当成稳定输入语言**
+   所以这层不再只是“event 的附属改写”，而是后面一串 consumer-facing artifact 的真实上游。
+
+---
+
 ## 1. 为什么需要 `machine_outcome`
 
 只看 `machine_event`，我们已经知道：

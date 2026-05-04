@@ -159,6 +159,17 @@ $$
 - `ExprList` 常有 3 项
 - 用 3 个 index 明确哪一个是 init/cond/step
 
+最近这一层还有一个很重要的新字段：
+
+- `declaration_is_const`
+
+这意味着 AST 现在不会把：
+
+- `int x = 1;`
+- `const int x = 1;`
+
+看成完全同一种 declaration statement，而是会把 const-qualification 稳定保留下来。
+
 ### 3.4 外部节点 `AstExternal`
 
 `AstExternal` 当前是“精简外部契约”：主要保存顶层声明/定义的必要结构信息：
@@ -170,6 +181,17 @@ $$
 - 不再在 external 上暴露 `called_function_*` 调用元数据数组
 
 semantic 的 return-flow、callable、scope 规则现在直接基于 `function_body`（语句/表达式 AST）进行分析，不依赖 external 附加调用元数据。
+
+最近这层还要记住和 `const` 直接相关的三组字段：
+
+- `is_const_qualified`
+  - 顶层 external 自己是不是 `const int ...`
+- `parameter_is_const`
+  - 每个参数是不是 `const int`
+- `declaration_is_const`
+  - statement-level declaration 是否是 `const`
+
+也就是说，`const` 现在已经不是 semantic 临时猜出来的事实，而是 AST 公开 contract 的一部分。
 
 
 ### 3.5 Program 容器 `AstProgram`

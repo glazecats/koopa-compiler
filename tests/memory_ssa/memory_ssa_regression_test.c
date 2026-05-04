@@ -624,13 +624,12 @@ int main(void) {
         "  bb.0:\n"
         "    br 1, bb.1, bb.2\n"
         "  bb.1:\n"
-        "    mem.1 = store_local a.0, 1\n"
+        "    mem.0 = store_local a.0, 1\n"
         "    jmp bb.3\n"
         "  bb.2:\n"
-        "    mem.2 = store_local a.0, 2\n"
+        "    mem.1 = store_local a.0, 2\n"
         "    jmp bb.3\n"
         "  bb.3:\n"
-        "    mem.0 = phi slot.0 [bb.1: mem.1], [bb.2: mem.2]\n"
         "    ret 0\n"
         "}\n");
     memory_ssa_program_free(&program);

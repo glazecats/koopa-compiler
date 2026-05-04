@@ -74,6 +74,24 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是 journal family 又多了什么，而是：
+
+- 它现在已经和 `docs/NEXT_STEPS.md` 里的当前 backend 默认最下游 snapshot 完全对齐
+
+也就是说，现在最好把这层额外记成：
+
+1. **当前 machine lesson 主线的正式终点**
+2. **回看整条 runtime/observe/backend 收束链时最稳定的观察窗**
+
+同时也要继续记住当前边界：
+
+- 这不代表已经有 multi-record replay ledger
+- 当前依然只是 single-record journal
+
+---
+
 ## 1. 为什么需要 `machine_journal`
 
 log 层已经很像日志了，但它还是偏：

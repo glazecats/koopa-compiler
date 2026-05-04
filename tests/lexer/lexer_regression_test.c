@@ -568,6 +568,94 @@ static int test_compound_assignment_boundary_token_sequence(void) {
     return 1;
 }
 
+static int test_integer_literal_bases(void) {
+    const char *source = "0 01234 0x133fAb 42";
+    const long long expected_values[] = {0ll, 668ll, 0x133fAbll, 42ll};
+    TokenArray tokens;
+    size_t token_index;
+    size_t number_index = 0u;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on integer-literal base input\n");
+        return 0;
+    }
+
+    for (token_index = 0u; token_index < tokens.size; ++token_index) {
+        if (tokens.data[token_index].type != TOKEN_NUMBER) {
+            continue;
+        }
+        if (number_index >= sizeof(expected_values) / sizeof(expected_values[0]) ||
+            tokens.data[token_index].number_value != expected_values[number_index]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: integer literal value mismatch at number %zu: expected %lld got %lld\n",
+                    number_index,
+                    expected_values[number_index],
+                    tokens.data[token_index].number_value);
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+        number_index += 1u;
+    }
+
+    if (number_index != sizeof(expected_values) / sizeof(expected_values[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu integer literals, got %zu\n",
+                sizeof(expected_values) / sizeof(expected_values[0]),
+                number_index);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_const_keyword_tokenization(void) {
+    const char *source = "const int x = 1;";
+    TokenArray tokens;
+    const TokenType expected[] = {
+        TOKEN_KW_CONST,
+        TOKEN_KW_INT,
+        TOKEN_IDENTIFIER,
+        TOKEN_ASSIGN,
+        TOKEN_NUMBER,
+        TOKEN_SEMICOLON,
+        TOKEN_EOF,
+    };
+    size_t token_index;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on const-keyword input\n");
+        return 0;
+    }
+
+    if (tokens.size != sizeof(expected) / sizeof(expected[0])) {
+        fprintf(stderr,
+                "[lexer-reg] FAIL: expected %zu tokens for const-keyword input, got %zu\n",
+                sizeof(expected) / sizeof(expected[0]),
+                tokens.size);
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    for (token_index = 0u; token_index < tokens.size; ++token_index) {
+        if (tokens.data[token_index].type != expected[token_index]) {
+            fprintf(stderr,
+                    "[lexer-reg] FAIL: const-keyword token %zu mismatch: expected %s got %s\n",
+                    token_index,
+                    lexer_token_type_name(expected[token_index]),
+                    lexer_token_type_name(tokens.data[token_index].type));
+            lexer_free_tokens(&tokens);
+            return 0;
+        }
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -584,6 +672,8 @@ int main(void) {
     ok &= test_ternary_operator_token_sequence();
     ok &= test_prefix_increment_decrement_token_sequence();
     ok &= test_compound_assignment_boundary_token_sequence();
+    ok &= test_integer_literal_bases();
+    ok &= test_const_keyword_tokenization();
 
     if (!ok) {
         return 1;

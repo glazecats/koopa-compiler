@@ -75,6 +75,36 @@
 
 ---
 
+## 最近同步
+
+最近 `machine_elf` 最值得同步到 lesson 里的，是它现在已经开始显式表达：
+
+- 这份 ELF 是 direct preview build 来的
+- 还是 imported / reparsed / reprofiled 来的
+
+几个关键新增点如下：
+
+1. `MachineElfArtifactSummary`
+   - raw file 和 report artifact 现在都能区分 `direct-patch-spans` 与 `imported-relocation-table`
+2. `origin_profile`
+   - 除了当前 `target_profile`，现在还有显式 `origin_profile`
+3. relocation-family summary
+   - ELF 这层也能直接给出 `call / primary-control / secondary-control` family 计数
+4. verifier-backed direct-vs-imported honesty
+   - canonical direct preview ELF artifact 不允许偷偷带不该存在的 secondary control relocation
+5. global-object section slice
+   - `.sbss` / `.sdata` 与 `STT_OBJECT` globals 现在也能一路保留下来
+
+所以现在对这层的印象最好从：
+
+- “标准 ELF object”
+
+更新成：
+
+- “带 provenance / relocation-family / global-object slice 的标准 ELF object”
+
+---
+
 ## 1. 为什么需要 `machine_elf`
 
 `machine_container` 已经回答了：

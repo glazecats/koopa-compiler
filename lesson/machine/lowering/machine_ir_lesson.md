@@ -73,6 +73,32 @@
 
 ---
 
+## 最近同步
+
+最近 `machine_ir` 最值得同步进 lesson 的，不是“又多了一组 cleanup”，而是它现在更明确地服务于：
+
+- selected-side compatibility chain
+- preview bytes/object 诚实边界
+
+当前最好再多记三点：
+
+1. **它已经不是孤立的 machine-facing CFG IR**
+   后面的 `machine_select -> machine_layout -> machine_emit -> machine_encode -> machine_bytes` 现在越来越把它当成一条真实 `RISC-V` preview 主链的上游入口。
+
+2. **machine-facing consumer/report surface 比以前更强了**
+   lesson 里现在最好把它理解成：
+   - 不只是 IR 本体
+   - 也是后面 selected/report/query surface 的稳定起点
+
+3. **它的价值现在更偏“为后面的 honesty chain 立好 program/block/instruction ground truth”**
+
+一句话压缩：
+
+- 以前：`value_ssa_machine -> machine_ir`
+- 现在：`value_ssa_machine -> machine_ir -> selected/report/preview bytes/object` 这条链已经更完整了
+
+---
+
 ## 1. 为什么需要 `machine_ir`
 
 在 `value_ssa` 里，我们关注的是：

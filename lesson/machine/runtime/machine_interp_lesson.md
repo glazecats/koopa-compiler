@@ -39,6 +39,20 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为了 transition/state/mutation 那条链的动作语义入口。
+
+当前最好再多记两点：
+
+1. **interp 不是 payload 层的附属解释注释**
+   它现在更像 runtime 主线里一个正式的 action authority。
+
+2. **它和后面的 transition/state 分工更清楚了**
+   interp 定动作类目，transition 解下一 fetch-state，state/mutation 再分别处理可继续执行的快照和副作用族。
+
+---
+
 ## 导学
 
 如果说：

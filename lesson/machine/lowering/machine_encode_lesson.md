@@ -39,6 +39,29 @@
 
 ---
 
+## 最近同步
+
+最近 `machine_encode` 最值得同步的不是“又多几个 offset helper”，而是它现在已经开始承接 **更深一层 preview-bridge compatibility check**。
+
+你现在最好把这层再多记三件事：
+
+1. **不仅算 offset，还会更早筛 preview bytes-range failure**
+   比如某些 branch/jump/call 形状如果对当前 preview lane 根本不诚实，现在已经可以在 encode 边界拒绝。
+
+2. **这类 deeper compatibility check 还会继续往上游回流**
+   当前 lesson 主线里要理解成：
+   - `select/layout/emit/encode`
+   正在逐步形成一条更一致的 preview-compatibility chain。
+
+3. **所以 encode 现在不只是“算位置”，还是“bytes 之前最后一层大门”**
+
+一句话压缩就是：
+
+- 以前：`emit -> encode -> bytes`，encode 更偏位置
+- 现在：`emit -> encode -> bytes`，encode 也开始承担 preview-lane honesty screening
+
+---
+
 ## 导学
 
 `machine_emit` 之后，我们已经有：

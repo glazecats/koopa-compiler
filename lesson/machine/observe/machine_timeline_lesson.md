@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：timeline 现在更明确地不只是 history 的“加两个字段版”，而是后面：
+
+- log
+- journal
+
+这条 consumer-facing 记录链的固定时间容器层。
+
+当前最好再多记两点：
+
+1. **single-tick contract 现在更像主动设计，不只是暂时没做多 entry**
+   因为后面的 log/journal 都已经基于这个时间容器 contract 稳定往下接了。
+
+2. **timeline 现在更值得被看成“记录收束链的一层标准壳”**
+   而不是 history 的可选 embellishment。
+
+---
+
 ## 导学
 
 如果说：

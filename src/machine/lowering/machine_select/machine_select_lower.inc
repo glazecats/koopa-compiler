@@ -192,7 +192,8 @@ static int machine_select_lower_memory_instruction(const MachineIrInstruction *s
 static int machine_select_lower_call_instruction(const MachineIrInstruction *src_op,
     MachineSelectOp *dest_op,
     MachineSelectError *error);
-static int machine_select_lower_terminator(const MachineIrBasicBlock *src_block,
+static int machine_select_lower_terminator(const MachineIrFunction *src_function,
+    const MachineIrBasicBlock *src_block,
     MachineSelectBasicBlock *dest_block,
     MachineSelectError *error);
 static int machine_select_cleanup_program(MachineSelectProgram *program, MachineSelectError *error);
@@ -405,7 +406,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             }
 
             if (src_block->has_terminator) {
-                if (!machine_select_lower_terminator(src_block, dest_block, error)) {
+                if (!machine_select_lower_terminator(src_function, src_block, dest_block, error)) {
                     machine_select_program_free(out_program);
                     return 0;
                 }

@@ -39,6 +39,30 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：`machine_emit` 已经不只是“起 label 名字”，它也开始承接 preview-lane compatibility facts。
+
+你现在最好把这层额外记成：
+
+1. **emit report 现在会继续带 policy/compatibility surface**
+   所以下游不需要每次回到 `machine_select`，也能知道当前 preview-lane 依赖哪些前置事实。
+
+2. **`riscv32-preview` verifier 现在也已经延伸到 emit 层**
+   这意味着某些 compatibility failure 不会再拖到 encode/bytes 才发现。
+
+3. **它已经从“标签分配层”变成“带稳定 emitted identity + policy carry-through 的 artifact 层”**
+
+所以现在对这层的理解最好从：
+
+- `layout -> emitted labels`
+
+更新成：
+
+- `layout -> emitted labels + downstream carry-through surface`
+
+---
+
 ## 导学
 
 `machine_layout` 已经决定了：

@@ -625,7 +625,12 @@ static size_t machine_bytes_terminator_encoded_size_for_profile(
     if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
         switch (terminator->kind) {
             case MACHINE_LAYOUT_TERM_RETURN:
-                case MACHINE_LAYOUT_TERM_JUMP:
+                if (terminator->as.return_value.kind == MACHINE_SELECT_OPERAND_REGISTER &&
+                    machine_bytes_riscv_map_operand_register(&terminator->as.return_value) != 10u) {
+                    return 8u;
+                }
+                return 4u;
+            case MACHINE_LAYOUT_TERM_JUMP:
                 return 4u;
             case MACHINE_LAYOUT_TERM_FALLTHROUGH:
                 return 0u;
@@ -2131,6 +2136,15 @@ static int machine_bytes_write_block_bytes_for_profile(
 
         switch (dest_block->block.terminator.kind) {
             case MACHINE_LAYOUT_TERM_RETURN:
+                if (dest_block->block.terminator.as.return_value.kind == MACHINE_SELECT_OPERAND_REGISTER) {
+                    uint32_t return_reg =
+                        machine_bytes_riscv_map_operand_register(&dest_block->block.terminator.as.return_value);
+
+                    if (return_reg != 10u) {
+                        byte_index += machine_bytes_riscv_emit_copy_register(
+                            dest_block->bytes, byte_index, 10u, return_reg);
+                    }
+                }
                 machine_bytes_write_u32_le(dest_block->bytes, byte_index, machine_bytes_riscv_encode_return_word());
                 byte_index += 4u;
                 break;

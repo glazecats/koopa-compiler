@@ -4,6 +4,8 @@
 #include "memory_ssa_pass.c"
 #else
 
+#define MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS 256
+
 static int memory_ssa_pass_binary_op_is_join_gvn_safe(ValueSsaBinaryOp op) {
     switch (op) {
     case VALUE_SSA_BINARY_DIV:
@@ -143,6 +145,7 @@ static int memory_ssa_pass_fold_join_binary_immediates(ValueSsaBinaryOp op,
 typedef struct {
     ValueSsaFunction *function;
     const ValueSsaDefUseAnalysis *def_use;
+    const ValueSsaCfgAnalysis *cfg_analysis;
     size_t block_id;
     size_t predecessor_block_id;
     int allow_materialize;
@@ -207,6 +210,7 @@ static int memory_ssa_pass_binary_operand_for_predecessor(ValueSsaFunction *func
 
     context.function = function;
     context.def_use = def_use;
+    context.cfg_analysis = NULL;
     context.block_id = block_id;
     context.predecessor_block_id = predecessor_block_id;
     context.allow_materialize = 1;
@@ -337,6 +341,13 @@ static int memory_ssa_pass_try_materialize_join_binary_in_predecessor(const Memo
     }
 
     block = &context->function->blocks[context->predecessor_block_id];
+    if (context->cfg_analysis && context->cfg_analysis->dominates &&
+        context->block_id < context->cfg_analysis->block_count &&
+        context->predecessor_block_id < context->cfg_analysis->block_count &&
+        context->cfg_analysis
+            ->dominates[context->block_id * context->cfg_analysis->block_count + context->predecessor_block_id]) {
+        return 1;
+    }
     if (!block->has_terminator) {
         return 1;
     }
@@ -516,7 +527,7 @@ static int memory_ssa_pass_expose_memory_values_for_cse(ValueSsaProgram *program
         return 0;
     }
 
-    for (iteration = 0; iteration < 8; ++iteration) {
+    for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
         free(before_text);
         free(after_text);
         before_text = NULL;
@@ -544,7 +555,37 @@ static int memory_ssa_pass_expose_memory_values_for_cse(ValueSsaProgram *program
         0,
         0,
         "MEMORY-SSA-PASS-073: scalar-replace expose did not converge within %d iterations",
-        8);
+        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
+
+cleanup:
+    free(before_text);
+    free(after_text);
+    return ok;
+}
+
+static int memory_ssa_pass_run_detectable_step(const char *step_name,
+    int (*pass_fn)(ValueSsaProgram *, ValueSsaError *),
+    ValueSsaProgram *program,
+    int *out_changed,
+    ValueSsaError *error) {
+    char *before_text = NULL;
+    char *after_text = NULL;
+    int ok = 0;
+
+    if (!step_name || !pass_fn || !program || !out_changed) {
+        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-084: invalid detectable-step contract");
+        return 0;
+    }
+
+    *out_changed = 0;
+    if (!memory_ssa_pass_dump_program_copy(program, &before_text, error) ||
+        !memory_ssa_pass_run_one_step(step_name, pass_fn, program, error) ||
+        !memory_ssa_pass_dump_program_copy(program, &after_text, error)) {
+        goto cleanup;
+    }
+
+    *out_changed = strcmp(before_text, after_text) != 0;
+    ok = 1;
 
 cleanup:
     free(before_text);
@@ -563,7 +604,7 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
         return 0;
     }
 
-    for (iteration = 0; iteration < 8; ++iteration) {
+    for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
         size_t function_index;
         int changed = 0;
 
@@ -637,9 +678,11 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
 
                         projection_context.function = function;
                         projection_context.def_use = &def_use;
+                        projection_context.cfg_analysis = &cfg;
                         projection_context.block_id = block_index;
                         projection_context.predecessor_block_id = predecessor_block_id;
-                        projection_context.allow_materialize = 1;
+                        projection_context.allow_materialize =
+                            !cfg.dominates[block_index * cfg.block_count + predecessor_block_id];
 
                         if (!memory_ssa_pass_binary_operand_for_predecessor(function,
                                 &def_use,
@@ -775,26 +818,33 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
         }
     }
 
-    memory_ssa_pass_set_error(
-        error, 0, 0, "MEMORY-SSA-PASS-076: join-binary GVN did not converge within %d iterations", 8);
+    memory_ssa_pass_set_error(error,
+        0,
+        0,
+        "MEMORY-SSA-PASS-076: join-binary GVN did not converge within %d iterations",
+        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
     return 0;
 }
 
-int memory_ssa_pass_eliminate_redundant_memory_binaries(ValueSsaProgram *program, ValueSsaError *error) {
+static int memory_ssa_pass_run_value_cleanup_closure(ValueSsaProgram *program,
+    int *out_changed,
+    ValueSsaError *error) {
     char *before_text = NULL;
     char *after_text = NULL;
     size_t iteration;
+    int changed_any = 0;
     int ok = 0;
 
-    if (!program) {
-        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-066: invalid memory-binary-cse contract");
+    if (!program || !out_changed) {
+        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-085: invalid value-cleanup closure contract");
         return 0;
     }
     if (!value_ssa_verify_program(program, error)) {
         return 0;
     }
 
-    for (iteration = 0; iteration < 8; ++iteration) {
+    *out_changed = 0;
+    for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
         free(before_text);
         free(after_text);
         before_text = NULL;
@@ -802,17 +852,11 @@ int memory_ssa_pass_eliminate_redundant_memory_binaries(ValueSsaProgram *program
 
         if (!memory_ssa_pass_dump_program_copy(program, &before_text, error) ||
             !memory_ssa_pass_run_one_step(
-                "scalar-replace-expose-values", memory_ssa_pass_expose_memory_values_for_cse, program, error) ||
-            !memory_ssa_pass_run_one_step(
                 "simplify-trivial-values-pre-fold", value_ssa_simplify_trivial_values, program, error) ||
             !memory_ssa_pass_run_one_step(
                 "normalize-binary-operands", value_ssa_normalize_binary_operands, program, error) ||
             !memory_ssa_pass_run_one_step(
                 "simplify-trivial-values-mid-fold", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "eliminate-redundant-join-binaries", memory_ssa_pass_eliminate_redundant_join_binaries, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-post-join-gvn", value_ssa_simplify_trivial_values, program, error) ||
             !memory_ssa_pass_run_one_step("fold-constants", value_ssa_fold_constants, program, error) ||
             !memory_ssa_pass_run_one_step(
                 "simplify-algebraic-identities", value_ssa_simplify_algebraic_identities, program, error) ||
@@ -831,7 +875,104 @@ int memory_ssa_pass_eliminate_redundant_memory_binaries(ValueSsaProgram *program
         }
 
         if (strcmp(before_text, after_text) == 0) {
+            *out_changed = changed_any;
             ok = 1;
+            goto cleanup;
+        }
+
+        changed_any = 1;
+    }
+
+    memory_ssa_pass_set_error(error,
+        0,
+        0,
+        "MEMORY-SSA-PASS-086: value-cleanup closure did not converge within %d iterations",
+        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
+
+cleanup:
+    free(before_text);
+    free(after_text);
+    return ok;
+}
+
+int memory_ssa_pass_eliminate_redundant_memory_binaries(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t iteration;
+    int pending_expose = 1;
+    int pending_join_gvn = 1;
+    int pending_value_cleanup = 1;
+    char *before_text = NULL;
+    char *after_text = NULL;
+    int ok = 0;
+
+    if (!program) {
+        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-066: invalid memory-binary-cse contract");
+        return 0;
+    }
+    if (!value_ssa_verify_program(program, error)) {
+        return 0;
+    }
+
+    for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
+        free(before_text);
+        free(after_text);
+        before_text = NULL;
+        after_text = NULL;
+        if (!memory_ssa_pass_dump_program_copy(program, &before_text, error)) {
+            goto cleanup;
+        }
+
+        if (pending_expose) {
+            int step_changed = 0;
+
+            pending_expose = 0;
+            if (!memory_ssa_pass_run_detectable_step("scalar-replace-expose-values",
+                    memory_ssa_pass_expose_memory_values_for_cse,
+                    program,
+                    &step_changed,
+                    error)) {
+                return 0;
+            }
+            if (step_changed) {
+                pending_join_gvn = 1;
+                pending_value_cleanup = 1;
+            }
+        }
+
+        if (pending_join_gvn) {
+            int step_changed = 0;
+
+            pending_join_gvn = 0;
+            if (!memory_ssa_pass_run_detectable_step("eliminate-redundant-join-binaries",
+                    memory_ssa_pass_eliminate_redundant_join_binaries,
+                    program,
+                    &step_changed,
+                    error)) {
+                return 0;
+            }
+            if (step_changed) {
+                pending_value_cleanup = 1;
+            }
+        }
+
+        if (pending_value_cleanup) {
+            int step_changed = 0;
+
+            pending_value_cleanup = 0;
+            if (!memory_ssa_pass_run_value_cleanup_closure(program, &step_changed, error)) {
+                return 0;
+            }
+            if (step_changed) {
+                pending_expose = 1;
+                pending_join_gvn = 1;
+            }
+        }
+
+        if (!memory_ssa_pass_dump_program_copy(program, &after_text, error)) {
+            goto cleanup;
+        }
+
+        if (strcmp(before_text, after_text) == 0) {
+            ok = value_ssa_verify_program(program, error);
             goto cleanup;
         }
     }
@@ -840,8 +981,7 @@ int memory_ssa_pass_eliminate_redundant_memory_binaries(ValueSsaProgram *program
         0,
         0,
         "MEMORY-SSA-PASS-067: memory-binary CSE did not converge within %d iterations",
-        8);
-
+        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
 cleanup:
     free(before_text);
     free(after_text);

@@ -39,6 +39,32 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得记住的新增点是：
+
+`machine_image` 不再只是“从 ELF 看地址”，它现在还会把上游 ELF provenance 一路带下来。`
+
+具体来说：
+
+1. `source_elf_artifact_summary`
+   - image raw file / report / dump 现在都会承接上游 `MachineElfArtifactSummary`
+2. direct build vs imported/reprofiled 区分继续保留
+   - 后面的 load/runtime/observe 不用回到 `machine_elf`，也能知道 image 的来源语义
+3. image 现在不只是一层地址视图，也开始承接 provenance-aware consumer surface
+
+所以现在这层除了：
+
+- base virtual address
+- entry symbol
+- resolved / unresolved relocation
+
+还要再加一句：
+
+- `image` 现在也开始承接“这份东西是怎么从 ELF 来的”这一层 artifact provenance
+
+---
+
 ## 导学
 
 如果说：

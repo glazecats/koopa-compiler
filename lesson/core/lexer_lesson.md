@@ -79,9 +79,17 @@ $$
 
 - 控制类：`TOKEN_EOF`, `TOKEN_INVALID`
 - 基础类：`TOKEN_IDENTIFIER`, `TOKEN_NUMBER`
-- 关键字：`int/return/if/else/while/for/break/continue`
+- 关键字：`int/const/return/if/else/while/for/break/continue`
 - 运算符：`+ - * / % ! ~ & ^ | && || = == != < <= > >= << >>` 及复合赋值
 - 符号：`() {} ; , ? :`
+
+最近还要记住一个非常具体的新点：
+
+- 数字字面量现在已经不只是十进制
+  - `0`
+  - `01234`（八进制）
+  - `0x133fAb`（十六进制）
+  都会进入 `TOKEN_NUMBER`，并把数值统一写进 `number_value`
 
 分类函数：
 
@@ -105,6 +113,16 @@ $$
 \mathrm{span}(t)=[t.\text{lexeme},\ t.\text{lexeme}+t.\text{length})
 $$
 
+所以像：
+
+- `01234`
+- `0x133fAb`
+
+虽然原始拼写不同，但过了 lexer 以后都会被统一成：
+
+- `type = TOKEN_NUMBER`
+- `number_value = 真实整数值`
+
 ### 2.3 `TokenArray`（动态数组 + 合法性哨兵）
 
 - `magic`: 初始化哨兵，防止未初始化对象被误用
@@ -116,6 +134,13 @@ $$
 - `lexer_tokenize`: 扫描源码并输出 token
 - `lexer_free_tokens`: 释放内存并重置
 - `lexer_token_type_name`: token 类型字符串映射
+
+这轮 front-end 里最值得直接记住的两个 regression 是：
+
+- `test_integer_literal_bases`
+  - 锁 `0 / 01234 / 0x133fAb / 42` 的数值结果
+- `test_const_keyword_tokenization`
+  - 锁 `const int x = 1;` 会切出 `TOKEN_KW_CONST`
 
 ---
 

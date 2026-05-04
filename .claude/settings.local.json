@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make clean *)",
+      "Bash(make)",
+      "Bash(make test-memory-ssa-analysis *)",
+      "Bash(make test *)",
+      "Bash(grep -E \"FAIL|PASS$\")",
+      "Bash(grep -n \"call_mod_ref\\\\|global.*summary\\\\|summary.*global\\\\|readonly\\\\|writeonly\" /workspaces/compiler_lab/src/memory_ssa_pass/*)",
+      "Bash(grep -A20 \"call.*modeling\\\\|call.*barrier\\\\|call.*kill\" /workspaces/compiler_lab/src/memory_ssa/*.c)",
+      "Bash(xargs ls *)",
+      "Bash(make test-memory-ssa-pass *)"
+    ]
+  }
+}

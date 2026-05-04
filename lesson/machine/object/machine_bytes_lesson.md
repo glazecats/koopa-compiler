@@ -78,6 +78,33 @@
 
 ---
 
+## 最近同步
+
+如果你之前脑子里还把 `machine_bytes` 记成“把 offset 落成字节”，现在要把它更新成：
+
+- “把 offset 落成字节，并开始承接当前 `riscv32-preview` lane 的真实 honesty boundary”
+
+最近这层最值得记住的新增点有：
+
+1. `target-policy summary`
+   - program/report 入口现在能直接查询 preview 能力事实
+2. preview register-bank honesty boundary
+   - 当前 `riscv32-preview` 只显式承诺 `reg.0..reg.7 -> a0..a7`
+3. large local/global slot offset honesty
+   - 大 offset 不再依赖 12-bit immediate 运气
+4. RV32M-shaped arithmetic slice
+   - `mul/div/mod` 的 preview lowering 已经被 regression 锁住
+5. global data reference slice
+   - `data-addr / data-load / data-store` 已经进入 bytes-side artifact
+6. global-object slice
+   - `.sbss` / `.sdata` / `global-object` symbols 现在也会在这层开始出现
+
+所以这层现在除了“第一次有 `unsigned char[]`”，还可以理解成：
+
+- “第一层真正开始为直达 `RISC-V` preview asm / object / reloc / elf 提供现实物料的地方”
+
+---
+
 ## 1. 为什么需要 `machine_bytes`
 
 `machine_encode` 已经回答了：

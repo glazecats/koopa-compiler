@@ -48,6 +48,19 @@ static const AstExpression *statement_get_condition_expression(const AstStatemen
 static const AstExpression *statement_get_for_step_expression(const AstStatement *stmt);
 static int expression_is_constant_true_for_flow(const AstExpression *expr);
 static int expression_is_constant_false_for_flow(const AstExpression *expr);
+static int semantic_statement_flow_has_must_return_boundary(const AstStatement *stmt,
+    int *out_must_return);
+static int semantic_analyze_loop_statement_flow(const AstExpression *cond_expr,
+    int cond_present,
+    const AstStatement *body_stmt,
+    char **declaration_names,
+    size_t declaration_name_count,
+    const AstExpression *step_expr,
+    int *out_guaranteed_return,
+    int *out_may_fallthrough,
+    int *out_may_break,
+    int *out_may_continue_loop,
+    int *out_may_non_terminating);
 static int semantic_analyze_statement_flow(const AstStatement *stmt,
     int *out_guaranteed_return,
     int *out_may_fallthrough,

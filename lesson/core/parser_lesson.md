@@ -142,6 +142,21 @@ $$
 
 不满足直接失败（常见报错：`Empty token stream` 或 `Token stream missing EOF terminator`）。
 
+最近 parser 这层还要同步一个很重要的扩展：
+
+- declaration / parameter / top-level external 已经开始显式接受 `const int`
+
+也就是说，parser 现在不只认：
+
+- `int x;`
+- `int f(int a) {...}`
+
+还认：
+
+- `const int x = 1;`
+- `int f(const int a) {...}`
+- `for (const int i = 0; ... )`
+
 ---
 
 ## 3. `src/parser/parser.c` + `*.inc`：核心状态与基础设施
@@ -217,6 +232,19 @@ $$
 这个策略是为了解决“回溯分支污染错误”的问题（`parser_regression_test.c` 有专门 case）。
 
 ### 3.4 递归保护（防爆栈）
+
+### 3.5 `const int` declaration start 现在已经是 parser-side contract
+
+最近 `parser_stmt_decl_tu.inc` 里很值得 lesson 直接点名的 helper 有：
+
+- `parser_check_const_int_declaration_start(...)`
+- `parser_consume_optional_const_qualifier(...)`
+
+这说明当前 parser 对 `const` 的处理不是“先当标识符混过去”，而是已经把：
+
+`const int`
+
+正式纳入 declaration-start contract，并且会把这个事实继续挂进 AST。
 
 表达式和语句分别限制深度（默认 2048）：
 

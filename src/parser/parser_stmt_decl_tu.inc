@@ -77,6 +77,20 @@ static int expression_slice_is_constant_true(const TokenArray *tokens,
     return tok->type == TOKEN_NUMBER && tok->number_value != 0;
 }
 
+static int parser_check_const_int_declaration_start(const Parser *p) {
+    return p &&
+        check(p, TOKEN_KW_CONST) &&
+        p->current + 1u < p->tokens->size &&
+        p->tokens->data[p->current + 1u].type == TOKEN_KW_INT;
+}
+
+static void parser_consume_optional_const_qualifier(Parser *p) {
+    if (!p) {
+        return;
+    }
+    (void)match(p, TOKEN_KW_CONST);
+}
+
 /*
  * Parser-side flow values are used only for local parsing constraints and
  * statement-shape bookkeeping. Semantic return-path authority is implemented
@@ -114,8 +128,9 @@ static int parse_compound_statement_with_local_control(Parser *p,
     }
 
     while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
-        if (check(p, TOKEN_KW_INT)) {
+        if (check(p, TOKEN_KW_INT) || parser_check_const_int_declaration_start(p)) {
             const Token *decl_tok = peek(p);
+            int decl_is_const = 0;
             AstStatement *decl_stmt = NULL;
             char **decl_names = NULL;
             size_t decl_name_count = 0;
@@ -124,6 +139,7 @@ static int parse_compound_statement_with_local_control(Parser *p,
 
             if (!parse_declaration(p,
                 NULL,
+                &decl_is_const,
                 out_statement ? &decl_names : NULL,
                 out_statement ? &decl_name_count : NULL,
                 out_statement ? &decl_init_exprs : NULL,
@@ -139,6 +155,7 @@ static int parse_compound_statement_with_local_control(Parser *p,
                     free_ast_statement_array(children, child_count);
                     return 0;
                 }
+                decl_stmt->declaration_is_const = decl_is_const;
                 decl_stmt->declaration_names = decl_names;
                 decl_stmt->declaration_name_count = decl_name_count;
                 decl_stmt->expressions = decl_init_exprs;
@@ -429,6 +446,7 @@ static int parse_for_statement_with_local_control(Parser *p,
     AstExpression *init_expr = NULL;
     AstExpression *cond_expr = NULL;
     AstExpression *step_expr = NULL;
+    int for_init_decl_is_const = 0;
     AstExpression **for_init_decl_exprs = NULL;
     size_t for_init_decl_expr_count = 0;
     char **for_init_decl_names = NULL;
@@ -445,10 +463,10 @@ static int parse_for_statement_with_local_control(Parser *p,
         return 0;
     }
 
-    if (match(p, TOKEN_KW_INT)) {
-        p->current--;
+    if (check(p, TOKEN_KW_INT) || parser_check_const_int_declaration_start(p)) {
         if (!parse_declaration(p,
             NULL,
+            out_statement ? &for_init_decl_is_const : NULL,
             out_statement ? &for_init_decl_names : NULL,
             out_statement ? &for_init_decl_name_count : NULL,
             out_statement ? &for_init_decl_exprs : NULL,
@@ -623,6 +641,7 @@ static int parse_for_statement_with_local_control(Parser *p,
             for_stmt->has_for_step_expression = 1;
             for_stmt->for_step_expression_index = for_stmt->expression_count - 1;
         }
+        for_stmt->declaration_is_const = for_init_decl_is_const;
         for_stmt->declaration_names = for_init_decl_names;
         for_stmt->declaration_name_count = for_init_decl_name_count;
         for_stmt->children[0] = body_stmt;
@@ -936,11 +955,13 @@ static int parse_init_declarator(Parser *p,
 
 static int parse_declaration(Parser *p,
     AstProgram *top_level_program,
+    int *out_declaration_is_const,
     char ***out_decl_names,
     size_t *out_decl_name_count,
     AstExpression ***out_decl_initializer_exprs,
     size_t *out_decl_initializer_expr_count) {
     const Token *ident = NULL;
+    int declaration_is_const = 0;
     int has_initializer = 0;
     size_t initializer_start = 0;
     size_t initializer_end = 0;
@@ -958,6 +979,9 @@ static int parse_declaration(Parser *p,
     if (out_decl_name_count) {
         *out_decl_name_count = 0;
     }
+    if (out_declaration_is_const) {
+        *out_declaration_is_const = 0;
+    }
     if (out_decl_initializer_exprs) {
         *out_decl_initializer_exprs = NULL;
     }
@@ -965,6 +989,9 @@ static int parse_declaration(Parser *p,
         *out_decl_initializer_expr_count = 0;
     }
 
+    if (match(p, TOKEN_KW_CONST)) {
+        declaration_is_const = 1;
+    }
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
     }
@@ -1031,6 +1058,7 @@ static int parse_declaration(Parser *p,
         return 0;
     }
     if (top_level_program) {
+        top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
         top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
         top_level_program->externals[top_level_program->count - 1].declaration_initializer =
             external_initializer_expr;
@@ -1102,6 +1130,7 @@ static int parse_declaration(Parser *p,
             return 0;
         }
         if (top_level_program) {
+            top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
             top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
             top_level_program->externals[top_level_program->count - 1].declaration_initializer =
                 external_initializer_expr;
@@ -1132,6 +1161,9 @@ static int parse_declaration(Parser *p,
     } else {
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
     }
+    if (out_declaration_is_const) {
+        *out_declaration_is_const = declaration_is_const;
+    }
 
     return 1;
 }
@@ -1140,12 +1172,15 @@ static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
+    int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns) {
     size_t count = 0;
     size_t name_capacity = 0;
+    int *parameter_is_const = NULL;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
     char **parameter_names = NULL;
@@ -1161,6 +1196,9 @@ static int parse_parameter_list(Parser *p,
     if (out_parameter_names) {
         *out_parameter_names = NULL;
     }
+    if (out_parameter_is_const) {
+        *out_parameter_is_const = NULL;
+    }
     if (out_parameter_name_lines) {
         *out_parameter_name_lines = NULL;
     }
@@ -1171,6 +1209,9 @@ static int parse_parameter_list(Parser *p,
     if (check(p, TOKEN_RPAREN)) {
         if (out_parameter_names) {
             *out_parameter_names = parameter_names;
+        }
+        if (out_parameter_is_const) {
+            *out_parameter_is_const = parameter_is_const;
         }
         if (out_parameter_name_lines) {
             *out_parameter_name_lines = parameter_name_lines;
@@ -1183,11 +1224,16 @@ static int parse_parameter_list(Parser *p,
 
     do {
         const Token *parameter_name_tok = NULL;
+        int parameter_is_const_flag = 0;
         int parameter_line = 0;
         int parameter_column = 0;
 
+        if (match(p, TOKEN_KW_CONST)) {
+            parameter_is_const_flag = 1;
+        }
         if (!consume(p, TOKEN_KW_INT, "'int'")) {
             free_name_array(parameter_names, count);
+            free(parameter_is_const);
             free(parameter_name_lines);
             free(parameter_name_columns);
             return 0;
@@ -1212,6 +1258,7 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok,
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
                     return 0;
@@ -1224,9 +1271,31 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_copy,
                 parameter_name_tok)) {
                 free_name_array(parameter_names, count);
+                free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
                 return 0;
+            }
+            if (out_parameter_is_const) {
+                int *new_parameter_is_const;
+
+                if (!parameter_is_const) {
+                    new_parameter_is_const = (int *)malloc(name_capacity * sizeof(int));
+                } else {
+                    new_parameter_is_const = (int *)realloc(parameter_is_const, name_capacity * sizeof(int));
+                }
+                if (!new_parameter_is_const) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    return 0;
+                }
+                parameter_is_const = new_parameter_is_const;
+                parameter_is_const[count - 1] = parameter_is_const_flag;
             }
             if (out_parameter_name_lines) {
                 int *new_lines;
@@ -1241,6 +1310,7 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
                     return 0;
@@ -1262,6 +1332,7 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
                     return 0;
@@ -1289,6 +1360,11 @@ static int parse_parameter_list(Parser *p,
     } else {
         free_name_array(parameter_names, count);
     }
+    if (out_parameter_is_const) {
+        *out_parameter_is_const = parameter_is_const;
+    } else {
+        free(parameter_is_const);
+    }
     if (out_parameter_name_lines) {
         *out_parameter_name_lines = parameter_name_lines;
     } else {
@@ -1311,6 +1387,7 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
+    signature->parameter_is_const = NULL;
     signature->parameter_name_lines = NULL;
     signature->parameter_name_columns = NULL;
     signature->has_unnamed_parameter = 0;
@@ -1322,15 +1399,18 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
     }
 
     free_name_array(signature->parameter_names, signature->parameter_count);
+    free(signature->parameter_is_const);
     free(signature->parameter_name_lines);
     free(signature->parameter_name_columns);
     parsed_function_signature_init(signature);
 }
 
 static void parser_commit_parameter_names(char ***out_parameter_names,
+    int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
     char **parameter_names,
+    int *parameter_is_const,
     int *parameter_name_lines,
     int *parameter_name_columns,
     size_t parameter_count) {
@@ -1338,6 +1418,11 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
         *out_parameter_names = parameter_names;
     } else {
         free_name_array(parameter_names, parameter_count);
+    }
+    if (out_parameter_is_const) {
+        *out_parameter_is_const = parameter_is_const;
+    } else {
+        free(parameter_is_const);
     }
     if (out_parameter_name_lines) {
         *out_parameter_name_lines = parameter_name_lines;
@@ -1356,6 +1441,7 @@ static int parse_function_external_signature(Parser *p,
     ParsedFunctionSignature *out_signature) {
     parsed_function_signature_init(out_signature);
 
+    parser_consume_optional_const_qualifier(p);
     if (!consume(p, TOKEN_KW_INT, "'int'")) {
         return 0;
     }
@@ -1369,6 +1455,7 @@ static int parse_function_external_signature(Parser *p,
         &out_signature->parameter_count,
         &out_signature->has_unnamed_parameter,
         capture_parameter_names ? &out_signature->parameter_names : NULL,
+        capture_parameter_names ? &out_signature->parameter_is_const : NULL,
         capture_parameter_names ? &out_signature->parameter_name_lines : NULL,
         capture_parameter_names ? &out_signature->parameter_name_columns : NULL)) {
         return 0;
@@ -1420,6 +1507,7 @@ static int parse_function_external(Parser *p,
     const Token **out_name_token,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
     int *out_is_definition,
@@ -1428,6 +1516,7 @@ static int parse_function_external(Parser *p,
     ParsedFunctionSignature signature;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
     int body_ok;
@@ -1440,6 +1529,9 @@ static int parse_function_external(Parser *p,
     }
     if (out_parameter_names) {
         *out_parameter_names = NULL;
+    }
+    if (out_parameter_is_const) {
+        *out_parameter_is_const = NULL;
     }
     if (out_parameter_name_lines) {
         *out_parameter_name_lines = NULL;
@@ -1472,13 +1564,16 @@ static int parse_function_external(Parser *p,
 
     if (match(p, TOKEN_SEMICOLON)) {
         parser_commit_parameter_names(out_parameter_names,
+            out_parameter_is_const,
             out_parameter_name_lines,
             out_parameter_name_columns,
             signature.parameter_names,
+            signature.parameter_is_const,
             signature.parameter_name_lines,
             signature.parameter_name_columns,
             signature.parameter_count);
         signature.parameter_names = NULL;
+        signature.parameter_is_const = NULL;
         signature.parameter_name_lines = NULL;
         signature.parameter_name_columns = NULL;
         if (out_is_definition) {
@@ -1497,13 +1592,16 @@ static int parse_function_external(Parser *p,
             out_return_statement_count);
         if (body_ok) {
             parser_commit_parameter_names(out_parameter_names,
+                out_parameter_is_const,
                 out_parameter_name_lines,
                 out_parameter_name_columns,
                 signature.parameter_names,
+                signature.parameter_is_const,
                 signature.parameter_name_lines,
                 signature.parameter_name_columns,
                 signature.parameter_count);
             signature.parameter_names = NULL;
+            signature.parameter_is_const = NULL;
             signature.parameter_name_lines = NULL;
             signature.parameter_name_columns = NULL;
         } else {
@@ -1566,6 +1664,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     const Token *external_name = NULL;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
+    int *external_parameter_is_const = NULL;
     int *external_parameter_name_lines = NULL;
     int *external_parameter_name_columns = NULL;
     int external_is_definition = 0;
@@ -1576,13 +1675,14 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_name : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
+        out_program ? &external_parameter_is_const : NULL,
         out_program ? &external_parameter_name_lines : NULL,
         out_program ? &external_parameter_name_columns : NULL,
         out_program ? &external_is_definition : NULL,
         out_program ? &external_function_body : NULL,
         out_program ? &external_return_statement_count : NULL)) {
         p->current = start;
-        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL);
+        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL, NULL);
     }
 
     if (!out_program) {
@@ -1591,6 +1691,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     if (!parser_ast_program_add_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
         free_name_array(external_parameter_names, external_parameter_count);
+        free(external_parameter_is_const);
         free(external_parameter_name_lines);
         free(external_parameter_name_columns);
         parser_ast_statement_free(external_function_body);
@@ -1600,6 +1701,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
+    out_program->externals[out_program->count - 1].parameter_is_const = external_parameter_is_const;
     out_program->externals[out_program->count - 1].parameter_name_lines =
         external_parameter_name_lines;
     out_program->externals[out_program->count - 1].parameter_name_columns =

@@ -39,6 +39,20 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：`machine_step` 现在更明确地成为了 launch 之后整条 decode/interp/state 主线的正式起点。
+
+当前最好再多记两点：
+
+1. **step 不再只是“拿到 current byte”**
+   它现在更像后面 decode/payload/interp/transition 的统一 fetch-state authority。
+
+2. **它在真实 `compiler -riscv / -perf` 主链里的位置更稳了**
+   现在要把它理解成“launch 之后真正进入执行位置语境的第一层”，而不只是测试过渡态。
+
+---
+
 ## 导学
 
 如果说：

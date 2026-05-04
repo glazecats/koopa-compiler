@@ -1222,3 +1222,54 @@ static int run_deterministic_loop_rejects_group(void) {
             sizeof(kCfDeterministicLoopRejects[0]));
 }
 
+static int test_semantic_rejects_const_local_without_initializer(void) {
+    const CallableDiagCase c = {
+        "const-local-no-init",
+        "int f(){ const int x; return 0; }\n",
+        "SEMA-CONST-002",
+        "const declaration requires initializer",
+        1,
+        10,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_const_top_level_without_initializer(void) {
+    const CallableDiagCase c = {
+        "const-top-no-init",
+        "const int g;\nint main(){ return 0; }\n",
+        "SEMA-CONST-002",
+        "const declaration requires initializer",
+        1,
+        11,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_assignment_to_const(void) {
+    const CallableDiagCase c = {
+        "const-assign",
+        "int f(){ const int x = 1; x = 2; return x; }\n",
+        "SEMA-CONST-001",
+        "assignment to const object is not allowed",
+        1,
+        29,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_assignment_to_const_parameter(void) {
+    const CallableDiagCase c = {
+        "const-param-assign",
+        "int f(const int x){ x = 1; return x; }\n",
+        "SEMA-CONST-001",
+        "assignment to const object is not allowed",
+        1,
+        23,
+    };
+
+    return run_callable_diag_case(&c);
+}

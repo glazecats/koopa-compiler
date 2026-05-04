@@ -39,6 +39,23 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是 mutation family 现在更像：
+
+- state 之后的正式副作用分类面
+
+而不只是给 writeback 临时看的标签。
+
+当前最好再多记两点：
+
+1. **register/local/global/call/blocked 这几类 effect 现在更像固定 taxonomy**
+2. **后面的 writeback/commit/apply 都默认建立在这层 effect family 之上**
+
+所以它现在不只是“状态之后再分一层”，而是后面整条 deferred/committed/application 语义链的上游分类器。
+
+---
+
 ## 导学
 
 如果说：

@@ -3838,7 +3838,8 @@ static int test_machine_layout_bridge_prefers_fresher_ready_continuation_for_com
         "machine_layout\n"
         "function main params=0 locals=0 spills=0\n"
         "  layout.0 -> bb.0:\n"
-        "    cmpbrift.t.10 reg.0, 0, taken=layout.4, fallthrough=layout.1\n"
+        "    reg.0 = cmpi.10 reg.0, 0\n"
+        "    brft.t reg.0, taken=layout.4, fallthrough=layout.1\n"
         "  layout.1 -> bb.2:\n"
         "    cmpbrift.t.10 reg.0, 0, taken=layout.3, fallthrough=layout.2\n"
         "  layout.2 -> bb.4:\n"
@@ -3850,7 +3851,9 @@ static int test_machine_layout_bridge_prefers_fresher_ready_continuation_for_com
 
     if (!machine_layout_function_compute_summary(&layout_program.functions[0], &summary) ||
         summary.block_count != 5 ||
-        summary.compare_branch_imm_fallthrough_count != 2 ||
+        summary.op_count != 1 ||
+        summary.branch_fallthrough_count != 1 ||
+        summary.compare_branch_imm_fallthrough_count != 1 ||
         summary.fallthrough_count != 0 ||
         summary.return_imm_count != 3) {
         fprintf(stderr, "[machine-layout] FAIL: bridge compare ready-continuation freshness summary mismatch\n");
@@ -4702,7 +4705,8 @@ static int test_machine_layout_bridge_prefers_fresher_ready_shared_merge_for_com
         "    reti 0\n"
         "function main params=0 locals=0 spills=0\n"
         "  layout.0 -> bb.0:\n"
-        "    cmpbrift.t.10 reg.0, 0, taken=layout.4, fallthrough=layout.1\n"
+        "    reg.0 = cmpi.10 reg.0, 0\n"
+        "    brft.t reg.0, taken=layout.4, fallthrough=layout.1\n"
         "  layout.1 -> bb.4:\n"
         "    cmpbrift.t.10 reg.0, 0, taken=layout.3, fallthrough=layout.2\n"
         "  layout.2 -> bb.5:\n"
@@ -4728,8 +4732,9 @@ static int test_machine_layout_bridge_prefers_fresher_ready_shared_merge_for_com
 
     if (!machine_layout_function_compute_summary(&layout_program.functions[1], &summary) ||
         summary.block_count != 9 ||
-        summary.op_count != 6 ||
-        summary.compare_branch_imm_fallthrough_count != 3 ||
+        summary.op_count != 7 ||
+        summary.branch_fallthrough_count != 1 ||
+        summary.compare_branch_imm_fallthrough_count != 2 ||
         summary.fallthrough_count != 1 ||
         summary.jump_count != 3 ||
         summary.return_imm_count != 2) {
@@ -5382,9 +5387,11 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
         "    reti 0\n"
         "function main params=0 locals=0 spills=0\n"
         "  layout.0 -> bb.0:\n"
-        "    cmpbrift.t.10 reg.0, 0, taken=layout.6, fallthrough=layout.1\n"
+        "    reg.0 = cmpi.10 reg.0, 0\n"
+        "    brft.t reg.0, taken=layout.6, fallthrough=layout.1\n"
         "  layout.1 -> bb.2:\n"
-        "    cmpbrift.t.10 reg.0, 0, taken=layout.5, fallthrough=layout.2\n"
+        "    reg.0 = cmpi.10 reg.0, 0\n"
+        "    brft.t reg.0, taken=layout.5, fallthrough=layout.2\n"
         "  layout.2 -> bb.5:\n"
         "    cmpbrift.t.10 reg.0, 0, taken=layout.4, fallthrough=layout.3\n"
         "  layout.3 -> bb.6:\n"
@@ -5405,8 +5412,9 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
 
     if (!machine_layout_function_compute_summary(&layout_program.functions[1], &summary) ||
         summary.block_count != 8 ||
-        summary.op_count != 5 ||
-        summary.compare_branch_imm_fallthrough_count != 3 ||
+        summary.op_count != 7 ||
+        summary.branch_fallthrough_count != 2 ||
+        summary.compare_branch_imm_fallthrough_count != 1 ||
         summary.fallthrough_count != 0 ||
         summary.jump_count != 2 ||
         summary.return_imm_count != 3) {

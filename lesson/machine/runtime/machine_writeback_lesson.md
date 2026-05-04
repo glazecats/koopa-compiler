@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地立住了：
+
+- mutation family
+- 到 committed artifact
+
+之间那条“commit-vs-defer”判断边界。
+
+当前最好再多记两点：
+
+1. **writeback 的保守性现在更像稳定 contract**
+   当前不是“以后再说”，而是明确只在少数能诚实承诺的 case 上给 committed judgement。
+
+2. **它现在更像 commit/apply 的正式上游判定层**
+   lesson 里最好把它理解成 committed artifact 形成前的最后一道分类门。
+
+---
+
 ## 导学
 
 如果说：

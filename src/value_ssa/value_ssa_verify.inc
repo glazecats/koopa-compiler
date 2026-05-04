@@ -755,12 +755,14 @@ static int value_ssa_verify_value_availability(const ValueSsaFunction *function,
     const unsigned char *reachable,
     const unsigned char *predecessor_matrix,
     ValueSsaError *error) {
-    unsigned char *available_in = NULL;
-    unsigned char *available_out = NULL;
+    unsigned char *dominates = NULL;
     unsigned char *scratch = NULL;
+    size_t *def_block_ids = NULL;
+    size_t *def_instruction_indices = NULL;
+    unsigned char *def_is_phi = NULL;
     size_t block_count;
     size_t value_count;
-    size_t i;
+    size_t block_index;
     int changed;
 
     if (!function || !reachable || !predecessor_matrix) {
@@ -774,240 +776,261 @@ static int value_ssa_verify_value_availability(const ValueSsaFunction *function,
         return 1;
     }
 
-    available_in = (unsigned char *)calloc(block_count * value_count, sizeof(unsigned char));
-    available_out = (unsigned char *)calloc(block_count * value_count, sizeof(unsigned char));
-    scratch = (unsigned char *)malloc(value_count * sizeof(unsigned char));
-    if (!available_in || !available_out || !scratch) {
-        free(available_in);
-        free(available_out);
+    dominates = (unsigned char *)calloc(block_count * block_count, sizeof(unsigned char));
+    scratch = (unsigned char *)malloc(block_count * sizeof(unsigned char));
+    def_block_ids = (size_t *)malloc(value_count * sizeof(size_t));
+    def_instruction_indices = (size_t *)malloc(value_count * sizeof(size_t));
+    def_is_phi = (unsigned char *)calloc(value_count, sizeof(unsigned char));
+    if (!dominates || !scratch || !def_block_ids || !def_instruction_indices || !def_is_phi) {
+        free(dominates);
         free(scratch);
+        free(def_block_ids);
+        free(def_instruction_indices);
+        free(def_is_phi);
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-072: out of memory while computing SSA availability");
         return 0;
     }
 
-    for (i = 1; i < block_count; ++i) {
-        if (reachable[i]) {
-            memset(available_in + i * value_count, 1, value_count);
+    for (block_index = 0; block_index < block_count; ++block_index) {
+        size_t dom_index;
+
+        for (dom_index = 0; dom_index < block_count; ++dom_index) {
+            dominates[dom_index * block_count + block_index] = 0u;
+        }
+        if (!reachable[block_index]) {
+            continue;
+        }
+        if (block_index == 0) {
+            dominates[0] = 1u;
+        } else {
+            for (dom_index = 0; dom_index < block_count; ++dom_index) {
+                dominates[dom_index * block_count + block_index] = reachable[dom_index] ? 1u : 0u;
+            }
+            dominates[block_index * block_count + block_index] = 1u;
         }
     }
 
     do {
-        size_t block_index;
-
         changed = 0;
         for (block_index = 0; block_index < block_count; ++block_index) {
-            const ValueSsaBasicBlock *block = &function->blocks[block_index];
-            unsigned char *in_row = available_in + block_index * value_count;
-            unsigned char *out_row = available_out + block_index * value_count;
-            size_t j;
+            size_t dom_index;
 
             if (!reachable[block_index]) {
                 continue;
             }
-
             if (block_index == 0) {
-                memset(scratch, 0, value_count);
+                continue;
             } else {
                 int has_predecessor = 0;
                 size_t pred_index;
 
-                memset(scratch, 1, value_count);
+                for (dom_index = 0; dom_index < block_count; ++dom_index) {
+                    scratch[dom_index] = reachable[dom_index] ? 1u : 0u;
+                }
                 for (pred_index = 0; pred_index < block_count; ++pred_index) {
-                    const unsigned char *pred_out;
-
                     if (!predecessor_matrix[pred_index * block_count + block_index]) {
                         continue;
                     }
                     has_predecessor = 1;
-                    pred_out = available_out + pred_index * value_count;
-                    for (j = 0; j < value_count; ++j) {
-                        scratch[j] = (unsigned char)(scratch[j] && pred_out[j]);
+                    for (dom_index = 0; dom_index < block_count; ++dom_index) {
+                        scratch[dom_index] = (unsigned char)(
+                            scratch[dom_index] && dominates[dom_index * block_count + pred_index]);
                     }
                 }
                 if (!has_predecessor) {
-                    memset(scratch, 0, value_count);
+                    memset(scratch, 0, block_count);
                 }
-            }
-
-            if (memcmp(in_row, scratch, value_count) != 0) {
-                memcpy(in_row, scratch, value_count);
-                changed = 1;
-            }
-
-            memcpy(scratch, in_row, value_count);
-            for (j = 0; j < block->phi_count; ++j) {
-                scratch[block->phis[j].result_id] = 1;
-            }
-            for (j = 0; j < block->instruction_count; ++j) {
-                const ValueSsaInstruction *instruction = &block->instructions[j];
-
-                if (instruction->has_result) {
-                    scratch[instruction->result.value_id] = 1;
+                scratch[block_index] = 1u;
+                for (dom_index = 0; dom_index < block_count; ++dom_index) {
+                    if (dominates[dom_index * block_count + block_index] != scratch[dom_index]) {
+                        dominates[dom_index * block_count + block_index] = scratch[dom_index];
+                        changed = 1;
+                    }
                 }
-            }
-            if (memcmp(out_row, scratch, value_count) != 0) {
-                memcpy(out_row, scratch, value_count);
-                changed = 1;
             }
         }
     } while (changed);
 
-    for (i = 0; i < block_count; ++i) {
-        const ValueSsaBasicBlock *block = &function->blocks[i];
-        const unsigned char *in_row = available_in + i * value_count;
-        unsigned char *current = scratch;
-        size_t j;
+    for (block_index = 0; block_index < value_count; ++block_index) {
+        def_block_ids[block_index] = (size_t)-1;
+        def_instruction_indices[block_index] = (size_t)-1;
+    }
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t phi_index;
+        size_t instruction_index;
 
-        if (!reachable[i]) {
+        for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+            def_block_ids[block->phis[phi_index].result_id] = block_index;
+            def_instruction_indices[block->phis[phi_index].result_id] = 0u;
+            def_is_phi[block->phis[phi_index].result_id] = 1u;
+        }
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->has_result && instruction->result.kind == VALUE_SSA_VALUE_ID) {
+                def_block_ids[instruction->result.value_id] = block_index;
+                def_instruction_indices[instruction->result.value_id] = instruction_index;
+            }
+        }
+    }
+
+#define VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(_block_id, _instruction_index, _value, _role)                               \
+    do {                                                                                                                   \
+        if ((_value).kind == VALUE_SSA_VALUE_ID) {                                                                         \
+            size_t _required_value_id = (_value).value_id;                                                                 \
+            if (_required_value_id >= value_count || def_block_ids[_required_value_id] == (size_t)-1) {                  \
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as %s",                \
+                    (_block_id), _required_value_id, (_role));                                                             \
+                free(dominates);                                                                                           \
+                free(scratch);                                                                                             \
+                free(def_block_ids);                                                                                       \
+                free(def_instruction_indices);                                                                             \
+                free(def_is_phi);                                                                                          \
+                return 0;                                                                                                  \
+            }                                                                                                              \
+            if (def_block_ids[_required_value_id] == (_block_id)) {                                                       \
+                if (!def_is_phi[_required_value_id] && def_instruction_indices[_required_value_id] >= (_instruction_index)) { \
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as %s",            \
+                        (_block_id), _required_value_id, (_role));                                                         \
+                    free(dominates);                                                                                       \
+                    free(scratch);                                                                                         \
+                    free(def_block_ids);                                                                                   \
+                    free(def_instruction_indices);                                                                         \
+                    free(def_is_phi);                                                                                      \
+                    return 0;                                                                                              \
+                }                                                                                                          \
+            } else if (!dominates[def_block_ids[_required_value_id] * block_count + (_block_id)]) {                      \
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as %s",                \
+                    (_block_id), _required_value_id, (_role));                                                             \
+                free(dominates);                                                                                           \
+                free(scratch);                                                                                             \
+                free(def_block_ids);                                                                                       \
+                free(def_instruction_indices);                                                                             \
+                free(def_is_phi);                                                                                          \
+                return 0;                                                                                                  \
+            }                                                                                                              \
+        }                                                                                                                  \
+    } while (0)
+
+    for (block_index = 0; block_index < block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t phi_index;
+        size_t instruction_index;
+
+        if (!reachable[block_index]) {
             continue;
         }
 
-        for (j = 0; j < block->phi_count; ++j) {
-            const ValueSsaPhi *phi = &block->phis[j];
+        for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+            const ValueSsaPhi *phi = &block->phis[phi_index];
             size_t input_index;
 
             for (input_index = 0; input_index < phi->input_count; ++input_index) {
                 const ValueSsaPhiInput *input = &phi->inputs[input_index];
-                const unsigned char *pred_out =
-                    available_out + input->predecessor_block_id * value_count;
 
-                if (!value_ssa_check_available_value(input->value,
-                        pred_out,
-                        value_count,
-                        block->id,
-                        "phi input",
-                        error)) {
-                    free(available_in);
-                    free(available_out);
-                    free(scratch);
-                    return 0;
+                if (input->value.kind == VALUE_SSA_VALUE_ID) {
+                    size_t input_value_id = input->value.value_id;
+
+                    if (input_value_id >= value_count || def_block_ids[input_value_id] == (size_t)-1) {
+                        value_ssa_set_error(error,
+                            0,
+                            0,
+                            "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as phi input",
+                            block->id,
+                            input_value_id);
+                        free(dominates);
+                        free(scratch);
+                        free(def_block_ids);
+                        free(def_instruction_indices);
+                        free(def_is_phi);
+                        return 0;
+                    }
+                    if (def_block_ids[input_value_id] != input->predecessor_block_id &&
+                        !dominates[def_block_ids[input_value_id] * block_count + input->predecessor_block_id]) {
+                        value_ssa_set_error(error,
+                            0,
+                            0,
+                            "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as phi input",
+                            block->id,
+                            input_value_id);
+                        free(dominates);
+                        free(scratch);
+                        free(def_block_ids);
+                        free(def_instruction_indices);
+                        free(def_is_phi);
+                        return 0;
+                    }
                 }
             }
         }
 
-        memcpy(current, in_row, value_count);
-        for (j = 0; j < block->phi_count; ++j) {
-            current[block->phis[j].result_id] = 1;
-        }
-
-        for (j = 0; j < block->instruction_count; ++j) {
-            const ValueSsaInstruction *instruction = &block->instructions[j];
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
 
             switch (instruction->kind) {
             case VALUE_SSA_INSTR_MOV:
-                if (!value_ssa_check_available_value(instruction->as.mov_value,
-                        current,
-                        value_count,
-                        block->id,
-                        "mov operand",
-                        error)) {
-                    free(available_in);
-                    free(available_out);
-                    free(scratch);
-                    return 0;
-                }
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(block->id, instruction_index, instruction->as.mov_value, "mov operand");
                 break;
             case VALUE_SSA_INSTR_BINARY:
-                if (!value_ssa_check_available_value(instruction->as.binary.lhs,
-                        current,
-                        value_count,
-                        block->id,
-                        "binary lhs",
-                        error) ||
-                    !value_ssa_check_available_value(instruction->as.binary.rhs,
-                        current,
-                        value_count,
-                        block->id,
-                        "binary rhs",
-                        error)) {
-                    free(available_in);
-                    free(available_out);
-                    free(scratch);
-                    return 0;
-                }
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(block->id, instruction_index, instruction->as.binary.lhs, "binary lhs");
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(block->id, instruction_index, instruction->as.binary.rhs, "binary rhs");
                 break;
             case VALUE_SSA_INSTR_CALL:
                 {
                     size_t arg_index;
 
                     for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
-                        if (!value_ssa_check_available_value(instruction->as.call.args[arg_index],
-                                current,
-                                value_count,
-                                block->id,
-                                "call arg",
-                                error)) {
-                            free(available_in);
-                            free(available_out);
-                            free(scratch);
-                            return 0;
-                        }
+                        VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                            block->id, instruction_index, instruction->as.call.args[arg_index], "call arg");
                     }
                 }
                 break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
             case VALUE_SSA_INSTR_STORE_GLOBAL:
-                if (!value_ssa_check_available_value(instruction->as.store.value,
-                        current,
-                        value_count,
-                        block->id,
-                        "store value",
-                        error)) {
-                    free(available_in);
-                    free(available_out);
-                    free(scratch);
-                    return 0;
-                }
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(block->id, instruction_index, instruction->as.store.value, "store value");
                 break;
             case VALUE_SSA_INSTR_LOAD_LOCAL:
             case VALUE_SSA_INSTR_LOAD_GLOBAL:
                 break;
             default:
-                break;
-            }
-
-            if (instruction->has_result) {
-                current[instruction->result.value_id] = 1;
+                free(dominates);
+                free(scratch);
+                free(def_block_ids);
+                free(def_instruction_indices);
+                free(def_is_phi);
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-073: unknown instruction kind in availability verifier");
+                return 0;
             }
         }
 
         switch (block->terminator.kind) {
         case VALUE_SSA_TERM_RETURN:
-            if (!value_ssa_check_available_value(block->terminator.as.return_value,
-                    current,
-                    value_count,
-                    block->id,
-                    "return value",
-                    error)) {
-                free(available_in);
-                free(available_out);
-                free(scratch);
-                return 0;
-            }
+            VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                block->id, block->instruction_count, block->terminator.as.return_value, "return value");
             break;
         case VALUE_SSA_TERM_BRANCH:
-            if (!value_ssa_check_available_value(block->terminator.as.branch.condition,
-                    current,
-                    value_count,
-                    block->id,
-                    "branch condition",
-                    error)) {
-                free(available_in);
-                free(available_out);
-                free(scratch);
-                return 0;
-            }
+            VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                block->id, block->instruction_count, block->terminator.as.branch.condition, "branch condition");
             break;
         case VALUE_SSA_TERM_JUMP:
             break;
         default:
-            break;
+            free(dominates);
+            free(scratch);
+            free(def_block_ids);
+            free(def_instruction_indices);
+            free(def_is_phi);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-074: unknown terminator kind in availability verifier");
+            return 0;
         }
     }
 
-    free(available_in);
-    free(available_out);
+    free(dominates);
     free(scratch);
+    free(def_block_ids);
+    free(def_instruction_indices);
+    free(def_is_phi);
     return 1;
 }
 

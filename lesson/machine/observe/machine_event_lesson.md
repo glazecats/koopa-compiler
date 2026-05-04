@@ -39,6 +39,29 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是 event family 名字换了，而是：
+
+- 它现在已经更明确地处在一条会继续进入 `outcome -> history -> timeline -> log -> journal` 的稳定 taxonomy 链上
+
+当前最好再多记一句：
+
+1. **event 现在已经是 record-language 链上的正式中间站**
+   也就是说，后面 outcome/history/... 不是临时从 trace 再推一遍，而是稳定地接在 event family 之后。
+
+2. **这让 `control-halt / register-result / local-store / global-store / call-effect / blocked-*` 这套名字，不再只是 trace 的别名**
+
+所以现在 lesson 口径上，这层除了：
+
+- `trace record -> event family`
+
+还要再补一句：
+
+- `event family` 是后面整条结果/记录语言链的固定桥面
+
+---
+
 ## 导学
 
 如果说：

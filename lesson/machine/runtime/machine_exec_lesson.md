@@ -76,6 +76,31 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得补一句的是：`machine_exec` 现在更像一层 **稳定的 executable-candidate artifact**，而不只是 image 后面的一次检查。
+
+具体可以记成两点：
+
+1. **它和后面 runtime/load/report 的衔接已经更稳了**
+   lesson 里现在最好把它看成：
+   - image 的地址事实
+   - 到 load/runtime 所需 executable-ready 条件
+   之间的正式收口层
+
+2. **当前整个主线已经有真实 `compiler -riscv / -perf` CLI 入口**
+   所以 exec 这层不再只是“内部练习 artifact”，而是已经真的处在一条会导出 preview asm 的主链中间。
+
+因此现在对这层的理解最好从：
+
+- “检查一下 entry 和 unresolved relocation”
+
+更新成：
+
+- “为后面的 load/runtime/CLI export 真正立 executable-candidate contract”
+
+---
+
 ## 1. 为什么需要 `machine_exec`
 
 `machine_image` 已经回答了：

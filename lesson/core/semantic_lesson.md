@@ -112,6 +112,16 @@ $$
 \text{Top-level Init} \rightarrow \text{Callable} \rightarrow \text{Scope} \rightarrow \text{Flow} \rightarrow \text{Top-level Consistency}
 $$
 
+最近这条主线里还多了一组单独值得记住的规则族：
+
+- `const` rule family
+
+也就是：
+
+- `const` 声明必须带 initializer
+- 不能给 `const` 对象赋值
+- 不能给 `const` 形参赋值
+
 ---
 
 ## 3. Visitor 骨架怎么用
@@ -138,7 +148,72 @@ walk_expr(expr):
 
 这让“遍历逻辑”和“规则逻辑”解耦。
 
+## 3.1 最近同步：`const` 已经是 semantic 的正式规则面
+
+如果你之前还把 `const` 理解成“也许 parser 认了，但 semantic 还没真正处理”，现在要更新成：
+
+- semantic 已经把 `const` 纳入 scope / assignment rule contract
+
+当前最关键的两个诊断码是：
+
+- `SEMA-CONST-001`
+  - assignment to const object is not allowed
+- `SEMA-CONST-002`
+  - const declaration requires initializer
+
+这组规则覆盖的对象不只一种：
+
+1. local `const` declaration
+2. top-level `const` declaration
+3. `const` parameter
+
 最近的源码整理也让这个分工更明显了：`ExpressionPostVisitor`、`CallableRuleVisitCtx` 和 walker 原型现在都集中定义在 `semantic.c`，分片里的 `callable` / `scope` / `flow` 逻辑直接复用这些共享骨架，而不再各自保留一份局部 typedef/前置声明。
+
+---
+
+## 3.2 最近同步：`SEMA-CF-001` 这条线现在更接近“收口”
+
+如果你最近还停留在“semantic 的 return-flow 规则大概能用，但循环 case 还挺玄学”的印象，现在要更新成：
+
+- 当前 `SEMA-CF-001` 已经更明确地围绕
+  - `guaranteed_return`
+  - `!may_fallthrough`
+  这条函数级判定收口
+
+最近这轮 focused regression 主要锁了几类以前最容易飘的边界：
+
+1. **恒真 loop 里的 partial return 要拒绝**
+   - `while(1){ if(a){ return 1; } }`
+   - `for(;;){ if(a){ return 1; } }`
+
+2. **恒真 loop 里的 all-path return 要接受**
+   - `if(a){return 1;} else {return 2;}`
+
+3. **mixed nested family 两个方向都锁了**
+   - `while -> for`
+   - `for -> while`
+
+4. **break-guard 的两个分支极性都锁了**
+   - 不只是 `if(a) break;`
+   - 现在连 `if(a) ... else break;` 这类 mirrored polarity 也被锁住了
+
+5. **constant-true break-guard family 现在锁得更细了**
+   - 包括 body/step 会不会把 break guard 再压回 false
+   - 以及 `if(a) break;` 与 `if(a) ... else break;` 两种分支极性
+
+所以 lesson 口径上，现在最好把这条 semantic CF 线理解成：
+
+- 不是在做完全 path-sensitive symbolic execution
+- 但也已经不是“只靠几条 while/for 特判”的粗糙规则
+
+它当前更像一套：
+
+- guard-sensitive
+- binding-sensitive
+- polarity-aware
+- mixed-nesting-aware
+
+的保守 function-return 规则面。
 
 ---
 
@@ -165,7 +240,13 @@ $$
 
 ### 4.1 loop guard stability analysis
 
-最近这版 semantic 对 `while` / `for` 的核心变化，不是把循环做成完整符号执行器，而是加入了一个“稳定 guard 死循环”启发式。
+最近这版 semantic 对 `while` / `for` 的核心变化，不是把循环做成完整符号执行器，而是加入了一套更明确的：
+
+- guard dependency
+- guard mutation
+- break/return exit shape
+
+分析启发式。
 
 目标很明确：
 
@@ -209,13 +290,23 @@ $$
 \neg ProvedDeadLoop \Rightarrow may\_fallthrough = 1
 $$
 
-这就是为什么现在的策略是：
+这里我不建议再把它背成几条“凡是长这样就一定 accept / reject”的口号，因为最近这条线已经越来越依赖：
 
-- `while(a){}`：拒绝
-- `while(a){if(a){break;}}`：仍拒绝
-- `while(a){a=a-1; if(a==0) break;}`：接受
-- `for(;a;){continue;}`：拒绝
-- `for(;a; step_changes_a)`：倾向接受
+- guard 依赖
+- break/return 形状
+- body/step 对 guard 的影响
+- binding-sensitive 标识符解析
+
+也就是说，像：
+
+- `while(a){...}`
+- `for(;a; ... )`
+
+这类外形相近的程序，当前行为并不只由表面 syntax 决定，而是要看：
+
+- guard 是否稳定
+- break/return 是否真能在所有相关路径上触发
+- body 或 step 会不会把退出 guard 又压回去
 
 这里“可能改 guard”的判定范围也比旧文档宽，当前会把下面这些都算进去：
 
@@ -224,9 +315,14 @@ $$
 - 前后缀更新 `++a`、`a++`
 - 普通函数调用（保守视为可能改外部状态）
 
-所以现在的 “call-driven exits” / “step-driven exits” 之所以能被接受，不是靠特殊白名单，而是靠这套统一的 `may_change_guard_state` 启发式。
+所以现在的 “step-driven exit” / “body-driven exit” / “call barrier still conservative” 这些行为，不是靠特殊白名单，而是靠这套统一的 `may_change_guard_state` 启发式。
 
-### 4.2 shadow-sensitive guard tracking
+更稳的 lesson 口径应该是：
+
+- **不要把单个手写例子当规范**
+- **把 tests 明确锁住的 family 当规范**
+
+### 4.2 binding-sensitive guard tracking
 
 这套 guard 分析还有一个最近补上的关键细节：名字不仅按字符串看，还要按 binding 看。
 
@@ -255,6 +351,11 @@ while(a){
 ```
 
 这类“通过 per-iteration declaration initializer 重建 break guard”的形态现在会被接受，因为退出条件依赖的外层状态 `b` 的确在变化。
+
+但这里要注意 lesson 口径不要说得过头：
+
+- 这不是一般性的全路径路径敏感证明器
+- 只是当前这条 guard-tracking 线已经能稳定区分“同名但不同 binding 的标识符”
 
 ### 4.3 constant-if narrowing
 
@@ -314,6 +415,44 @@ while(a){
 - `while((1<<3)){continue;}`：拒绝
 - `while((1/0)){continue;}`：保守接受
 - `for(;(1<<63);){continue;}`：保守接受
+
+### 4.5 这条线现在真正被哪些 focused regressions 锁住
+
+如果你想把最近这条 semantic CF 修线记成“当前明确承诺了什么”，最值得直接记住的是这些 regression family：
+
+1. 恒真 loop 下的 partial return reject
+   - `while(1){ if(a){ return 1; } }`
+   - `for(;;){ if(a){ return 1; } }`
+
+2. 恒真 loop 下的 all-path return accept
+   - `if(a){return 1;} else {return 2;}`
+
+3. mixed nested accept/reject family
+   - `while -> for`
+   - `for -> while`
+
+4. break-guard reset/set family
+   - body 把 guard 压回 `0`
+   - step 把 guard 压回 `0`
+   - body/step 把 guard 拉成 `1`
+
+5. direct break polarity 两侧
+   - `if(a) break;`
+   - `if(a) ... else break;`
+
+所以现在这条 lesson 最稳的讲法不是：
+
+- “semantic 已经把所有 loop CF 都彻底解决了”
+
+而是：
+
+- “semantic 已经把当前最重要、最容易飘的恒真 loop / break-guard / mixed nesting family 用 focused regressions 锁得很细”
+
+这也是为什么这篇 lesson 现在更应该引用：
+
+- 哪类 family 被锁住了
+
+而不是继续给太多“表面看起来像这样，所以一定 accept/reject”的散例。
 
 ---
 

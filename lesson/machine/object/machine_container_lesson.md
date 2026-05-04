@@ -39,6 +39,31 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是“container 格式换了”，而是它现在更明确地处在：
+
+- object / reloc
+- 到 ELF / image
+
+之间的稳定过渡位置。
+
+结合最近提交，当前这层最好再多记两点：
+
+1. **container 已经不只是 `.text`-only 内部壳**
+   随着上游 object/reloc 开始承接 `.sbss` / `.sdata` / `global-object` / data-side relocation，这层也更应该被理解成“会承接这些结构化 section family 的内部最终容器”。
+
+2. **它现在更像 provenance 保持链的一环**
+   后面的 ELF / image lesson 已经开始讲 artifact summary / origin profile / source provenance，所以 container 现在最好别再理解成“随手序列化一下”，而是：
+   - 直达标准 ELF 之前的内部最终收口层
+
+一句话压缩就是：
+
+- 以前：`reloc -> container -> elf`，container 更像内部文件格式
+- 现在：`reloc -> container -> elf`，container 也开始承担“保住结构化 artifact 不丢层”的职责
+
+---
+
 ## 导学
 
 到了 `machine_reloc`，我们已经有：

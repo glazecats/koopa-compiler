@@ -27,6 +27,7 @@ typedef struct {
     const Token *name_tok;
     size_t parameter_count;
     char **parameter_names;
+    int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;
     int has_unnamed_parameter;
@@ -69,6 +70,7 @@ static int parse_compound_statement_with_local_control(Parser *p,
     AstStatement **out_statement);
 static int parse_declaration(Parser *p,
     AstProgram *top_level_program,
+    int *out_declaration_is_const,
     char ***out_decl_names,
     size_t *out_decl_name_count,
     AstExpression ***out_decl_initializer_exprs,
@@ -77,6 +79,7 @@ static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
+    int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns);
 static void parsed_function_signature_init(ParsedFunctionSignature *signature);
@@ -92,6 +95,7 @@ static int parse_function_external(Parser *p,
     const Token **out_name_token,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
     int *out_is_definition,

@@ -496,6 +496,121 @@ static int memory_ssa_push_history(MemorySsaBuildState *state,
     return 1;
 }
 
+static int memory_ssa_collect_slot_live_in_blocks(const ValueSsaFunction *input_function,
+    const MemorySsaBuildState *state,
+    size_t slot_index,
+    unsigned char *out_live_in_blocks,
+    MemorySsaError *error) {
+    const ValueSsaSlotRef tracked_slot = state->output_function->tracked_slots[slot_index].slot;
+    unsigned char *use_before_def_blocks = NULL;
+    unsigned char *def_before_end_blocks = NULL;
+    int changed = 1;
+    size_t block_index;
+
+    if (!input_function || !state || !out_live_in_blocks ||
+        slot_index >= state->output_function->tracked_slot_count) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-079: invalid slot live-in analysis contract");
+        return 0;
+    }
+
+    use_before_def_blocks = (unsigned char *)calloc(input_function->block_count, sizeof(unsigned char));
+    def_before_end_blocks = (unsigned char *)calloc(input_function->block_count, sizeof(unsigned char));
+    if (!use_before_def_blocks || !def_before_end_blocks) {
+        free(use_before_def_blocks);
+        free(def_before_end_blocks);
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-080: out of memory while computing slot live-in blocks");
+        return 0;
+    }
+
+    for (block_index = 0; block_index < input_function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &input_function->blocks[block_index];
+        int has_def = 0;
+        size_t instruction_index;
+
+        out_live_in_blocks[block_index] = 0;
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL ||
+                instruction->kind == VALUE_SSA_INSTR_LOAD_GLOBAL) {
+                if (memory_ssa_slot_ref_equal_for_build(tracked_slot, instruction->as.load_slot) && !has_def) {
+                    use_before_def_blocks[block_index] = 1;
+                }
+                continue;
+            }
+
+            if (instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL ||
+                instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL) {
+                if (memory_ssa_slot_ref_equal_for_build(tracked_slot, instruction->as.store.slot)) {
+                    has_def = 1;
+                    def_before_end_blocks[block_index] = 1;
+                }
+                continue;
+            }
+
+            if (instruction->kind == VALUE_SSA_INSTR_CALL && tracked_slot.kind == VALUE_SSA_SLOT_GLOBAL) {
+                int reads_global = 0;
+                int writes_global = 0;
+
+                if (!memory_ssa_get_call_global_effect(
+                        state, instruction->as.call.callee_name, slot_index, &reads_global, &writes_global)) {
+                    free(use_before_def_blocks);
+                    free(def_before_end_blocks);
+                    memory_ssa_set_error(
+                        error, 0, 0, "MEMORY-SSA-081: failed to classify call effects during slot liveness");
+                    return 0;
+                }
+                if (reads_global && !has_def) {
+                    use_before_def_blocks[block_index] = 1;
+                }
+                if (writes_global) {
+                    has_def = 1;
+                    def_before_end_blocks[block_index] = 1;
+                }
+            }
+        }
+    }
+
+    while (changed) {
+        changed = 0;
+        for (block_index = 0; block_index < input_function->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &input_function->blocks[block_index];
+            unsigned char live_in = use_before_def_blocks[block_index];
+
+            if (!def_before_end_blocks[block_index]) {
+                switch (block->terminator.kind) {
+                case VALUE_SSA_TERM_JUMP:
+                    if (block->terminator.as.jump_target < input_function->block_count &&
+                        out_live_in_blocks[block->terminator.as.jump_target]) {
+                        live_in = 1;
+                    }
+                    break;
+                case VALUE_SSA_TERM_BRANCH:
+                    if ((block->terminator.as.branch.then_target < input_function->block_count &&
+                            out_live_in_blocks[block->terminator.as.branch.then_target]) ||
+                        (block->terminator.as.branch.else_target < input_function->block_count &&
+                            out_live_in_blocks[block->terminator.as.branch.else_target])) {
+                        live_in = 1;
+                    }
+                    break;
+                case VALUE_SSA_TERM_RETURN:
+                default:
+                    break;
+                }
+            }
+
+            if (out_live_in_blocks[block_index] != live_in) {
+                out_live_in_blocks[block_index] = live_in;
+                changed = 1;
+            }
+        }
+    }
+
+    free(use_before_def_blocks);
+    free(def_before_end_blocks);
+    return 1;
+}
+
 static int memory_ssa_mark_phi_blocks(const ValueSsaFunction *input_function,
     const ValueSsaCfgAnalysis *cfg_analysis,
     MemorySsaBuildState *state,
@@ -505,13 +620,16 @@ static int memory_ssa_mark_phi_blocks(const ValueSsaFunction *input_function,
     for (slot_index = 0; slot_index < state->output_function->tracked_slot_count; ++slot_index) {
         unsigned char *definition_blocks;
         unsigned char *phi_blocks;
+        unsigned char *live_in_blocks;
         size_t block_index;
 
         definition_blocks = (unsigned char *)calloc(input_function->block_count, sizeof(unsigned char));
         phi_blocks = (unsigned char *)calloc(input_function->block_count, sizeof(unsigned char));
-        if (!definition_blocks || !phi_blocks) {
+        live_in_blocks = (unsigned char *)calloc(input_function->block_count, sizeof(unsigned char));
+        if (!definition_blocks || !phi_blocks || !live_in_blocks) {
             free(definition_blocks);
             free(phi_blocks);
+            free(live_in_blocks);
             memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-067: out of memory while computing slot phi placement");
             return 0;
         }
@@ -554,16 +672,24 @@ static int memory_ssa_mark_phi_blocks(const ValueSsaFunction *input_function,
                 (ValueSsaError *)error)) {
             free(definition_blocks);
             free(phi_blocks);
+            free(live_in_blocks);
+            return 0;
+        }
+        if (!memory_ssa_collect_slot_live_in_blocks(input_function, state, slot_index, live_in_blocks, error)) {
+            free(definition_blocks);
+            free(phi_blocks);
+            free(live_in_blocks);
             return 0;
         }
 
         for (block_index = 0; block_index < input_function->block_count; ++block_index) {
             state->has_phi_block[block_index * state->output_function->tracked_slot_count + slot_index] =
-                phi_blocks[block_index];
+                (unsigned char)(phi_blocks[block_index] && live_in_blocks[block_index]);
         }
 
         free(definition_blocks);
         free(phi_blocks);
+        free(live_in_blocks);
     }
 
     return 1;

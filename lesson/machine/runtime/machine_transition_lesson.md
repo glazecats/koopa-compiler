@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更清楚地立住了：
+
+- action intent
+- 到 applied state / mutation family
+
+之间的 next-fetch gate。
+
+当前最好再多记两点：
+
+1. **transition 不是 interp 的尾巴**
+   它现在是后面 state/mutation/writeback/... 那条链的正式前置层。
+
+2. **它让“动作语义”和“状态是否能落地”这两件事彻底分开了**
+   lesson 里最好把这条边界单独记牢。
+
+---
+
 ## 导学
 
 如果说：

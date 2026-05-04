@@ -1589,6 +1589,14 @@ static int machine_ir_cleanup_known_slot_values(MachineIrProgram *program,
         return 0;
     }
 
+    /*
+     * Keep the currently-disabled branch CFG folds compiled but explicitly
+     * referenced so future soundness work can re-enable them without losing
+     * the implementation to dead code churn.
+     */
+    (void)machine_ir_try_fold_known_slot_branch_tails;
+    (void)machine_ir_try_fold_known_slot_branch_branch_successors;
+
     machine_ir_global_call_effect_summary_init(&call_effects);
     if (!machine_ir_compute_global_call_effect_summary(program, &call_effects, error)) {
         return 0;
@@ -1843,25 +1851,23 @@ static int machine_ir_cleanup_known_slot_values(MachineIrProgram *program,
                 block,
                 error,
                 out_changed);
-            machine_ir_try_fold_known_slot_branch_tails(
-                program,
-                function,
-                resource_count,
-                slot_count,
-                block_exit_facts,
-                block,
-                error,
-                out_changed);
+            /*
+             * Keep known-slot CFG rewrites conservative here.
+             *
+             * The jump->branch and branch->branch-tail folds are intended as
+             * post-phi cleanup, but they can become unsound around
+             * short-circuit/loop-carried shapes where the known slot value is
+             * not the semantic branch predicate itself. Rewriting the CFG in
+             * those cases regresses correctness (for example turning a
+             * compare-based loop exit back into a raw truthiness branch on the
+             * carried integer).
+             *
+             * We still keep operand-level known-slot rewriting plus return-tail
+             * folding, but leave branch-shape CFG rewrites disabled until they
+             * are backed by a stricter proof than "the successor currently
+             * reads a known slot".
+             */
             machine_ir_try_fold_known_slot_return_branch_successors(
-                program,
-                function,
-                resource_count,
-                slot_count,
-                block_exit_facts,
-                block,
-                error,
-                out_changed);
-            machine_ir_try_fold_known_slot_branch_branch_successors(
                 program,
                 function,
                 resource_count,

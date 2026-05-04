@@ -39,6 +39,29 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得更新的，不是“又多了些 helper”，而是：
+
+`machine_object` 现在已经更像 downstream consumer 可以直接拿来问问题的 artifact 层。`
+
+具体可以记成四点：
+
+1. `target-policy summary`
+   - bytes 侧 preview honesty facts 现在会一路带到 object
+2. `fixup-family summary`
+   - 可以直接区分 `call / primary-control / secondary-control / data-side`
+3. structured report artifact
+   - 不再只有 raw object file
+4. global-object / data-fixup slice
+   - `.sbss` / `.sdata` / `global-object` / data-side fixup 也已经在这层保留
+
+所以现在这层除了“section/symbol/fixup 正式容器化”，还要记成：
+
+- “consumer-facing summary/query surface 也开始成形”
+
+---
+
 ## 导学
 
 `machine_bytes` 已经有：

@@ -83,6 +83,7 @@ struct AstStatement {
     AstStatementKind kind;
     int line;
     int column;
+    int declaration_is_const;
     char **declaration_names;
     size_t declaration_name_count;
     AstExpression **expressions;
@@ -103,10 +104,12 @@ typedef struct {
     AstExternalKind kind;
     char *name;
     size_t name_length;
+    int is_const_qualified;
     int has_initializer;
     AstExpression *declaration_initializer;
     size_t parameter_count;
     char **parameter_names;
+    int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;
     int is_function_definition;

@@ -39,6 +39,27 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在和上游 provenance 链接得更紧了。
+
+当前 observe 最好再多记两点：
+
+1. **它已经不是纯 runtime 内部视图的“外壳”**
+   结合最近 image/runtime 侧开始承接 ELF provenance，这里最好把 observe 理解成：
+   - exact / preview state 的外部观察边界
+   - 也是后面 delta/trace/event/outcome/... 整条记录链的正式起点
+
+2. **lesson 主线上它的“目录跨线意义”比以前更重了**
+   现在不只是“代码在 observe/ 目录”，而是：
+   - 这里开始，关注点真的从 runtime-internal state 转到 downstream consumer artifact
+
+所以这层现在除了“exact vs preview”，还要再补一句：
+
+- `machine_observe` 是当前 provenance-aware downstream observation chain 的第一层
+
+---
+
 ## 导学
 
 如果说：

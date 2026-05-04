@@ -51,6 +51,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
             }
         }
         free(program->externals[i].parameter_names);
+        free(program->externals[i].parameter_is_const);
         free(program->externals[i].parameter_name_lines);
         free(program->externals[i].parameter_name_columns);
         AST_LIFECYCLE_EXPRESSION_FREE_FN(program->externals[i].declaration_initializer);
@@ -97,10 +98,12 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.kind = kind;
     external.name = NULL;
     external.name_length = 0;
+    external.is_const_qualified = 0;
     external.has_initializer = 0;
     external.declaration_initializer = NULL;
     external.parameter_count = 0;
     external.parameter_names = NULL;
+    external.parameter_is_const = NULL;
     external.parameter_name_lines = NULL;
     external.parameter_name_columns = NULL;
     external.is_function_definition = 0;

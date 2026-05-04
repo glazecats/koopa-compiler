@@ -264,6 +264,7 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->kind = kind;
     stmt->line = anchor_tok ? anchor_tok->line : 0;
     stmt->column = anchor_tok ? anchor_tok->column : 0;
+    stmt->declaration_is_const = 0;
     stmt->declaration_names = NULL;
     stmt->declaration_name_count = 0;
     stmt->expressions = NULL;
@@ -1659,4 +1660,3 @@ static int parse_expression(Parser *p) {
 }
 
 #endif
-

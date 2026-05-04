@@ -96,6 +96,15 @@
 - `tests/machine/object/machine_container/machine_container_test.c`
 - `tests/machine/object/machine_elf/machine_elf_test.c`
 
+如果只看你刚提到的这轮 front-end 新增点，最值得单独记住的测试入口是：
+
+- `tests/lexer/lexer_regression_test.c`
+  - 锁整数字面量基数和 `const` keyword tokenization
+- `tests/parser/parser_regression_test.c`
+  - 锁 `const int` declaration / parameter 这类 AST 入口 contract
+- `tests/semantic/semantic_regression_test.c`
+  - 锁 `const` initializer / assignment rule
+
 当前拆分片段（11 个 `.inc`）：
 
 - `tests/ir/ir_pass_test_intellisense_prelude.inc`
@@ -123,6 +132,35 @@ $$
 $$
 
 当前 IR 测试也已经不只是“直线表达式”了，当前至少锁住了这些行为族：
+
+如果只看当前 frontend 最近新增的那条小线，也可以压成一张小表：
+
+- lexer
+  - `0`
+  - `01234`
+  - `0x133fAb`
+  - `const`
+- parser / AST
+  - `const int x = 1;`
+  - `int f(const int a) { ... }`
+- semantic
+  - `const` declaration 必须初始化
+  - 对 `const` 对象/参数赋值要拒绝
+
+如果只看最新这轮你们刚收口的两条线，tests 里现在还多了两组特别值得单独记住的东西：
+
+- semantic CF
+  - 恒真 `while(1)` / `for(;;)` 下的 partial-return reject
+  - all-path-return accept
+  - mixed nested `while -> for` / `for -> while`
+  - direct break-guard 两种极性
+  - body/step 会不会把 break guard 再压回 false
+  - binding-sensitive shadow / rebuilt-guard family
+- `machine_select` cleanup
+  - CFG live-out-aware cross-block copy/dead-def cleanup
+  - `call` barrier 下 caller-clobber vs spill persistence
+  - must-agree / disagreeing join
+  - mixed path / mixed resource precision
 
 如果只按最近几轮 IR / lower-IR 改动来归类，新增测试重点主要也是几组：
 
@@ -484,13 +522,19 @@ S3 之后建议把两类矩阵当成必选：
 2. 顶层 initializer 中的 callable 诊断顺序
 3. 重复带 initializer 的顶层定义应报 `SEMA-TOP-001`
 
-loop guard stability analysis 相关 case 现在也建议单独成组：
+loop guard / return-flow 这组 case 现在更建议按 **focused regression family** 去记，而不是背几条表面 shape：
 
-1. 稳定 guard 死循环：`while(a){}`, `while(a){if(a){break;}}`, `for(;a;){continue;}` 应继续拒绝
-2. mutation-driven exits：`a=a-1`、`step` 改 guard、或 body 里直接赋值改 guard 的形态应继续接受
-3. call-driven exits：循环体里有普通函数调用时，默认视为“可能改 guard”，应避免误报
-4. shadow-sensitive cases：内层 `int a=...` 不能伪装成修改外层 guard
-5. rebuilt-guard accepts：`int c=b; int a=c; if(a) break; b--;` 这类按 initializer 重建 guard 的路径应继续接受
+1. 恒真 loop 下的 partial return reject
+2. 恒真 loop 下的 all-path return accept
+3. mixed nested `while -> for` / `for -> while`
+4. direct break-guard 两种极性
+5. body/step 会不会把 break guard 再压回 false
+6. binding-sensitive shadow / rebuilt-guard family
+
+也就是说，现在 tests 这一块更稳的 lesson 口径是：
+
+- **别把单个手写例子当规则**
+- **把当前 tests 明确锁住的 family 当规则**
 
 constant-if narrowing 也值得固定锁一组：
 

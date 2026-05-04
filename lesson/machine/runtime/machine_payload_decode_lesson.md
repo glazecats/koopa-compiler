@@ -39,6 +39,23 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的是：payload-decode 现在更像一个稳定的“字节形状层”，而不是 decode/interp 之间的临时过渡。
+
+当前最好再多记两点：
+
+1. **payload length / bytes / immediate hint 这组事实现在更值得被单独记住**
+   因为后面的 interp/apply 也会继续消费其中一部分字段，而不是只在这一层一闪而过。
+
+2. **它让 decode 和 interp 的分层更干净**
+   现在 lesson 里最好把它理解成：
+   - decode 回答 tag
+   - payload_decode 回答 payload 形状
+   - interp 才回答动作语义
+
+---
+
 ## 导学
 
 如果说：

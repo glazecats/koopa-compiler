@@ -80,6 +80,39 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，不是“stack/gap 又多了个 helper”，而是它现在已经更明确地处在一条真实的：
+
+- `compiler -riscv`
+- `compiler -perf`
+
+导出链路中。
+
+你现在最好把这层再多记两件事：
+
+1. **runtime 已经不是纯内部视图**
+   它现在更明确地服务于后面的：
+   - launch
+   - step
+   - decode/interp/state
+   - 以及最终 preview asm / executable-path 主线
+
+2. **上游 image provenance 现在会继续往下游流**
+   也就是说，runtime 不只是“load map + stack”，还处在一条会继承上游 artifact provenance 的消费链上。
+
+所以 lesson 口径上，现在这层除了：
+
+- synthetic stack
+- initial SP
+- unified runtime memory
+
+还要再加一句：
+
+- `machine_runtime` 现在更像 “真实起跑前的 process-prep authority”，而不只是 loader 后面的中间态
+
+---
+
 ## 1. 为什么需要 `machine_runtime`
 
 `machine_load` 已经回答了：

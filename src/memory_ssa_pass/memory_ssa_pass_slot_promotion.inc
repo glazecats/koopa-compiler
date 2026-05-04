@@ -24,6 +24,7 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
     size_t phi_index;
     size_t result_id;
     size_t input_index;
+    size_t existing_phi_index;
 
     if (!value_function || !memory_function || !memory_def_use || !value_def_use || !cfg_analysis || !out_promoted) {
         memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-025: invalid dominating-memory-phi promotion contract");
@@ -180,6 +181,34 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
             *out_promoted = 1;
             return 1;
         }
+    }
+
+    for (existing_phi_index = 0; existing_phi_index < phi_block->phi_count; ++existing_phi_index) {
+        const ValueSsaPhi *existing_phi = &phi_block->phis[existing_phi_index];
+        int same_phi = 1;
+
+        if (existing_phi->input_count != memory_phi->input_count ||
+            existing_phi->result_id >= value_function->next_value_id) {
+            continue;
+        }
+        for (input_index = 0; input_index < memory_phi->input_count; ++input_index) {
+            if (existing_phi->inputs[input_index].predecessor_block_id !=
+                    memory_phi->inputs[input_index].predecessor_block_id ||
+                !memory_ssa_pass_value_refs_equal(
+                    existing_phi->inputs[input_index].value, phi_inputs[input_index].value)) {
+                same_phi = 0;
+                break;
+            }
+        }
+        if (!same_phi) {
+            continue;
+        }
+
+        free(phi_inputs);
+        instruction->kind = VALUE_SSA_INSTR_MOV;
+        instruction->as.mov_value = value_ssa_value_id(existing_phi->result_id);
+        *out_promoted = 1;
+        return 1;
     }
 
     result_id = value_ssa_function_allocate_value(value_function);

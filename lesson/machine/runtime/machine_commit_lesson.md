@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为：
+
+- committed judgement
+- 到 application/observation
+
+之间那层 committed artifact authority。
+
+当前最好再多记两点：
+
+1. **commit 不是 writeback 的重命名**
+   它现在更像一层专门负责“把可 committed 的东西正式落成 artifact”的边界。
+
+2. **后面的 apply/observe 都默认把 commit 当成固定上游**
+   所以它不只是 runtime 链里的一个中间词，而是 downstream observation chain 的重要前置层。
+
+---
+
 ## 导学
 
 如果说：

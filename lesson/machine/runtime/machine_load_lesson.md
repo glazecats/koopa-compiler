@@ -39,6 +39,37 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在不只是在 runtime 前做一张 load map，而是更明确地成为：
+
+- executable candidate
+- 到 process-prep / launch-ready runtime
+
+之间的正式桥。
+
+结合最近的主线变化，当前这层最好再多记两点：
+
+1. **load 现在更明确服务于真实 `compiler -riscv / -perf` 导出链**
+   也就是说，它不只是内部结构，而是在一条会继续导向 preview asm / downstream runtime 的真实主链中。
+
+2. **上游 image 的 provenance-aware 语义现在更值得往下游保留地理解**
+   lesson 里最好把 load 想成：
+   - 不只是 map bytes
+   - 也是后面 runtime/launch/observe 能继续建立 artifact provenance 语境的中间层
+
+所以这层现在除了：
+
+- file bytes
+- memory bytes
+- zero-fill
+
+还要再多记一句：
+
+- `machine_load` 现在更像 “exec 之后第一份真正可被 runtime 消费的内存布局权威面”
+
+---
+
 ## 导学
 
 如果说：

@@ -25,6 +25,13 @@ lesson 里会出现：
 
 这些更多是 staging / bridge / 验证 surface，不代表最终目标改成别的 ISA。
 
+如果按最近提交来理解“当前最该关注的项目收口点”，可以再额外记住两条：
+
+1. `core`
+   - `SEMA-CF-001` 的 function-return / loop-guard 边界正在按 focused regression family 收口
+2. `machine`
+   - `machine_select` 的 CFG live-out-aware cleanup 正在从 fallback 收口成更稳定的 selected-side dataflow line
+
 ---
 
 ## 1. 目录怎么分

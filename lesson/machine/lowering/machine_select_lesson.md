@@ -70,6 +70,69 @@
 
 ---
 
+## 最近同步
+
+最近 `machine_select` 最值得补进 lesson 的，不是“又多了几条 selected op”，而是它开始有了更明确的 **consumer-facing compatibility surface**。
+
+你现在最好把这层再多记三件事：
+
+1. **program/report policy summary 已经成形**
+   现在 selected artifact 不只是给你看 raw program，还会显式告诉你当前 preview lane 依赖哪些事实，比如：
+   - preview register cap
+   - immediate legalization
+   - compare-branch fusion
+   - spill preservation
+   - global-slot preservation
+
+2. **`riscv32-preview` verifier entrypoint 已经有了**
+   这意味着一些“反正后面 bytes 层会炸”的问题，现在可以更早在 selected 层失败。
+
+3. **它已经不只是 instruction selection 层，还是 preview-lane honesty 的第一道闸门**
+
+所以 lesson 口径上，这层除了：
+
+- generic machine-facing op -> selected op family
+
+还要再加一句：
+
+- `machine_select` 现在也是当前 `riscv32-preview` compatibility contract 的最早显式边界
+
+最近还要再补一个更新：这层的 cleanup line 现在已经不只是“保守 successor peeking fallback”，而是更明确地走向 **CFG live-out-aware selected cleanup**。
+
+当前最好再多记四件事：
+
+1. **block-entry must-agree alias propagation**
+   - `copy` / `materialize_imm` 这类事实现在已经能跨 CFG 边传播
+
+2. **`live_out` 决定 cross-block trivial-def / dead-def removal**
+   - 不再只是“看下一个块像不像会用”
+
+3. **`call` barrier 边界现在更明确**
+   - caller-clobbered register alias 会被杀
+   - spill-slot alias 则能继续活下去
+
+4. **这条线的 focused regression 已经锁到 mixed resource / mixed path family**
+   - 不是只有“寄存器会不会被删掉”
+   - 还包括 register 和 spill 在同一 successor region 下不同命运的情况
+
+所以现在这层除了“selected lowering”，还越来越像：
+
+- selected-side dataflow cleanup 的第一版正式实现
+
+而不是：
+
+- 一层只会做局部 peephole 的轻量清理
+
+结合最近最新那次提交，现在这条 cleanup 线还可以再更明确地理解成：
+
+- 当前已经是 **focused regressions 锁住、接近 checkpoint 的 selected-side cleanup 主线**
+
+也就是说，lesson 口径上最好不要再把它写成“还只是一个保守 fallback”，而是：
+
+- 一条已经有明确 dataflow、明确 call barrier、明确 mixed resource/path coverage 的 cleanup line
+
+---
+
 ## 1. 为什么需要 `machine_select`
 
 `machine_ir` 已经把这些问题变成显式信息：

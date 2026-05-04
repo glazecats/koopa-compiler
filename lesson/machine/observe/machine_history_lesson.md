@@ -66,6 +66,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地变成了：
+
+- `outcome`
+- 到 `timeline / log / journal`
+
+之间那条“记录语言起点”。
+
+当前最好再多记两点：
+
+1. **history 现在更像后面记录链的标准 entry-form**
+   timeline/log/journal 不是各自再从 outcome 推一遍，而是稳定接在 history 之后。
+
+2. **single-entry contract 现在更像主动设计**
+   因为后面的 timeline/log/journal 已经围绕这个 entry-form 一起长起来了。
+
+---
+
 ## 1. 为什么需要 `machine_history`
 
 `machine_outcome` 已经很有用了，因为它把：

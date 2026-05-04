@@ -135,6 +135,22 @@ static char peek_next(const Lexer *lx) {
     return lx->current[1];
 }
 
+static int digit_value_for_base(char c, int base) {
+    if (c >= '0' && c <= '9') {
+        int value = c - '0';
+        return value < base ? value : -1;
+    }
+    if (base == 16) {
+        if (c >= 'a' && c <= 'f') {
+            return 10 + (c - 'a');
+        }
+        if (c >= 'A' && c <= 'F') {
+            return 10 + (c - 'A');
+        }
+    }
+    return -1;
+}
+
 static bool match(Lexer *lx, char expected) {
     if (is_at_end(lx)) {
         return false;
@@ -159,6 +175,9 @@ static bool add_token(Lexer *lx, TokenType type, const char *lexeme, size_t leng
 }
 
 static TokenType keyword_or_identifier(const char *start, size_t len) {
+    if (len == 5 && strncmp(start, "const", 5) == 0) {
+        return TOKEN_KW_CONST;
+    }
     if (len == 2 && strncmp(start, "if", 2) == 0) {
         return TOKEN_KW_IF;
     }
@@ -193,14 +212,40 @@ enum {
 };
 
 static int scan_number(Lexer *lx, const char *start, int line, int column) {
-    long long value = (long long)(*start - '0');
-    while (isdigit((unsigned char)peek(lx))) {
-        int digit = advance(lx) - '0';
-        if (value > (LLONG_MAX - digit) / 10) {
+    long long value = 0;
+    int base = 10;
+
+    if (*start == '0') {
+        if (peek(lx) == 'x' || peek(lx) == 'X') {
+            base = 16;
+            advance(lx);
+            if (digit_value_for_base(peek(lx), base) < 0) {
+                fprintf(stderr, "Invalid hexadecimal literal at %d:%d\n", line, column);
+                return SCAN_ERROR;
+            }
+        } else {
+            base = 8;
+        }
+    } else {
+        value = (long long)(*start - '0');
+    }
+
+    while (1) {
+        int digit = digit_value_for_base(peek(lx), base);
+        if (digit < 0) {
+            break;
+        }
+        advance(lx);
+        if (value > (LLONG_MAX - digit) / base) {
             fprintf(stderr, "Integer literal out of range at %d:%d\n", line, column);
             return SCAN_ERROR;
         }
-        value = value * 10 + digit;
+        value = value * base + digit;
+    }
+
+    if (base == 8 && isdigit((unsigned char)peek(lx))) {
+        fprintf(stderr, "Invalid octal literal at %d:%d\n", line, column);
+        return SCAN_ERROR;
     }
 
     size_t len = (size_t)(lx->current - start);
@@ -503,6 +548,8 @@ const char *lexer_token_type_name(TokenType type) {
         return "IDENTIFIER";
     case TOKEN_NUMBER:
         return "NUMBER";
+    case TOKEN_KW_CONST:
+        return "KW_CONST";
     case TOKEN_KW_INT:
         return "KW_INT";
     case TOKEN_KW_RETURN:

@@ -6,6 +6,23 @@
 
 当前最终目标方向仍然是 `RISC-V`。
 
+最近这条 machine 主线还要额外记住一个同步点：
+
+- 仓库现在已经有真实 `compiler` CLI 入口：
+  - `compiler -riscv input.sy -o output`
+  - `compiler -perf input.sy -o output`
+- 当前导出的不再只是内部 dump，而是 assembler-accepted 的 `RISC-V` preview asm
+- 并且当前全局对象已经会显式落到 `.sbss` / `.sdata`
+
+同时也要记住当前边界：
+
+- `-koopa` 现在仍然是刻意不支持的
+- 当前 machine 主线优先级是 **RISC-V correctness before backend optimization**
+
+如果按最近提交再多记一条当前焦点，那就是：
+
+- `machine_select` 的 CFG live-out-aware cleanup 已经不再只是实验性 fallback，而是更接近 checkpoint 的 selected-side cleanup 主线
+
 lesson 里会经常出现：
 
 - `generic-elf32`
@@ -37,6 +54,21 @@ lesson 里会经常出现：
    - “如果真的加载/起跑/执行，这个机器状态怎么长”
 4. `observe`
    - “执行之后，怎么把结果整理成可消费记录”
+
+如果你现在想快速补最近 machine 新增的内容，最值得优先回看的几篇是：
+
+1. `object/machine_bytes_lesson.md`
+2. `object/machine_object_lesson.md`
+3. `object/machine_reloc_lesson.md`
+4. `object/machine_elf_lesson.md`
+5. `runtime/machine_image_lesson.md`
+
+因为最近最明显的新东西就在：
+
+- preview bytes honesty
+- object/fixup/relocation summary surface
+- ELF provenance / artifact summary
+- image 对上游 ELF provenance 的承接
 
 ---
 

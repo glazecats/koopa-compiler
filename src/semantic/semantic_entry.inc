@@ -28,6 +28,23 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             continue;
         }
 
+        if (lhs->kind == AST_EXTERNAL_DECLARATION &&
+            lhs->is_const_qualified &&
+            !lhs->has_initializer) {
+            if (error) {
+                char preview[128];
+                char msg[512];
+
+                format_callee_preview(lhs->name, preview, sizeof(preview));
+                snprintf(msg,
+                    sizeof(msg),
+                    "SEMA-CONST-002: identifier=%s; const declaration requires initializer",
+                    preview);
+                semantic_set_error(error, lhs->line, lhs->column, msg);
+            }
+            return 0;
+        }
+
         if (lhs->kind == AST_EXTERNAL_DECLARATION && lhs->has_initializer) {
             if (!lhs->declaration_initializer) {
                 semantic_set_error(

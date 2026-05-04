@@ -24,12 +24,182 @@ static int machine_select_try_lower_constant_branch(const MachineIrBasicBlock *s
     return 1;
 }
 
-static int machine_select_try_lower_materialized_boolean_branch(const MachineIrBasicBlock *src_block,
+static int machine_select_machine_ir_operand_matches_result(MachineIrOperand operand, MachineIrOperand result) {
+    if (operand.kind != result.kind) {
+        return 0;
+    }
+    switch (operand.kind) {
+        case MACHINE_IR_OPERAND_REGISTER:
+            return operand.machine_register_id == result.machine_register_id;
+        case MACHINE_IR_OPERAND_SPILL_SLOT:
+            return operand.spill_slot == result.spill_slot;
+        default:
+            return 0;
+    }
+}
+
+static int machine_select_machine_ir_instruction_uses_result(const MachineIrInstruction *instruction,
+    MachineIrOperand result) {
+    size_t arg_index;
+
+    if (!instruction) {
+        return 0;
+    }
+    switch (instruction->kind) {
+        case MACHINE_IR_INSTR_MOV:
+            return machine_select_machine_ir_operand_matches_result(instruction->as.mov_value, result);
+        case MACHINE_IR_INSTR_BINARY:
+            return machine_select_machine_ir_operand_matches_result(instruction->as.binary.lhs, result) ||
+                machine_select_machine_ir_operand_matches_result(instruction->as.binary.rhs, result);
+        case MACHINE_IR_INSTR_CALL:
+            for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
+                if (machine_select_machine_ir_operand_matches_result(instruction->as.call.args[arg_index], result)) {
+                    return 1;
+                }
+            }
+            return 0;
+        case MACHINE_IR_INSTR_STORE_LOCAL:
+        case MACHINE_IR_INSTR_STORE_GLOBAL:
+            return machine_select_machine_ir_operand_matches_result(instruction->as.store.value, result);
+        default:
+            return 0;
+    }
+}
+
+static int machine_select_machine_ir_terminator_uses_result(const MachineIrTerminator *terminator,
+    MachineIrOperand result) {
+    if (!terminator) {
+        return 0;
+    }
+    switch (terminator->kind) {
+        case MACHINE_IR_TERM_RETURN:
+            return machine_select_machine_ir_operand_matches_result(terminator->as.return_value, result);
+        case MACHINE_IR_TERM_BRANCH:
+            return machine_select_machine_ir_operand_matches_result(terminator->as.branch.condition, result);
+        default:
+            return 0;
+    }
+}
+
+static int machine_select_machine_ir_op_redefines_result(const MachineIrInstruction *instruction,
+    MachineIrOperand result) {
+    if (!instruction || !instruction->has_result) {
+        return 0;
+    }
+    return machine_select_machine_ir_operand_matches_result(instruction->result, result);
+}
+
+static int machine_select_machine_ir_block_result_live_out(const MachineIrFunction *function,
+    size_t block_id,
+    MachineIrOperand result) {
+    unsigned char *visited;
+    size_t *stack;
+    size_t stack_size = 0;
+    size_t block_count;
+    size_t successor_index;
+    const MachineIrBasicBlock *source_block;
+
+    if (!function || block_id >= function->block_count ||
+        (result.kind != MACHINE_IR_OPERAND_REGISTER && result.kind != MACHINE_IR_OPERAND_SPILL_SLOT)) {
+        return 0;
+    }
+
+    block_count = function->block_count;
+    visited = block_count > 0 ? (unsigned char *)calloc(block_count, sizeof(unsigned char)) : NULL;
+    stack = block_count > 0 ? (size_t *)malloc(block_count * sizeof(size_t)) : NULL;
+    if ((block_count > 0 && !visited) || (block_count > 0 && !stack)) {
+        free(stack);
+        free(visited);
+        return 1;
+    }
+
+    source_block = &function->blocks[block_id];
+    switch (source_block->terminator.kind) {
+        case MACHINE_IR_TERM_JUMP:
+            if (source_block->terminator.as.jump_target < block_count) {
+                stack[stack_size++] = source_block->terminator.as.jump_target;
+                visited[source_block->terminator.as.jump_target] = 1u;
+            }
+            break;
+        case MACHINE_IR_TERM_BRANCH:
+            if (source_block->terminator.as.branch.then_target < block_count) {
+                stack[stack_size++] = source_block->terminator.as.branch.then_target;
+                visited[source_block->terminator.as.branch.then_target] = 1u;
+            }
+            if (source_block->terminator.as.branch.else_target < block_count &&
+                !visited[source_block->terminator.as.branch.else_target]) {
+                stack[stack_size++] = source_block->terminator.as.branch.else_target;
+                visited[source_block->terminator.as.branch.else_target] = 1u;
+            }
+            break;
+        default:
+            break;
+    }
+
+    while (stack_size > 0) {
+        const MachineIrBasicBlock *block = &function->blocks[stack[--stack_size]];
+        int blocked = 0;
+        size_t instruction_index;
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const MachineIrInstruction *instruction = &block->instructions[instruction_index];
+
+            if (machine_select_machine_ir_instruction_uses_result(instruction, result)) {
+                free(stack);
+                free(visited);
+                return 1;
+            }
+            if (machine_select_machine_ir_op_redefines_result(instruction, result)) {
+                blocked = 1;
+                break;
+            }
+        }
+        if (!blocked && machine_select_machine_ir_terminator_uses_result(&block->terminator, result)) {
+            free(stack);
+            free(visited);
+            return 1;
+        }
+        if (blocked) {
+            continue;
+        }
+
+        switch (block->terminator.kind) {
+            case MACHINE_IR_TERM_JUMP:
+                successor_index = block->terminator.as.jump_target;
+                if (successor_index < block_count && !visited[successor_index]) {
+                    visited[successor_index] = 1u;
+                    stack[stack_size++] = successor_index;
+                }
+                break;
+            case MACHINE_IR_TERM_BRANCH:
+                successor_index = block->terminator.as.branch.then_target;
+                if (successor_index < block_count && !visited[successor_index]) {
+                    visited[successor_index] = 1u;
+                    stack[stack_size++] = successor_index;
+                }
+                successor_index = block->terminator.as.branch.else_target;
+                if (successor_index < block_count && !visited[successor_index]) {
+                    visited[successor_index] = 1u;
+                    stack[stack_size++] = successor_index;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    free(stack);
+    free(visited);
+    return 0;
+}
+
+static int machine_select_try_lower_materialized_boolean_branch(const MachineIrFunction *src_function,
+    const MachineIrBasicBlock *src_block,
     MachineSelectBasicBlock *dest_block) {
     const MachineIrInstruction *tail_op;
     long long condition_value;
 
-    if (!src_block || !dest_block ||
+    if (!src_function || !src_block || !dest_block ||
         !src_block->has_terminator ||
         src_block->terminator.kind != MACHINE_IR_TERM_BRANCH ||
         src_block->instruction_count == 0) {
@@ -43,6 +213,9 @@ static int machine_select_try_lower_materialized_boolean_branch(const MachineIrB
         src_block->terminator.as.branch.condition.kind != MACHINE_IR_OPERAND_REGISTER ||
         tail_op->result.kind != MACHINE_IR_OPERAND_REGISTER ||
         src_block->terminator.as.branch.condition.machine_register_id != tail_op->result.machine_register_id) {
+        return 0;
+    }
+    if (machine_select_machine_ir_block_result_live_out(src_function, src_block->id, tail_op->result)) {
         return 0;
     }
 
@@ -63,7 +236,8 @@ static int machine_select_try_lower_materialized_boolean_branch(const MachineIrB
     return 1;
 }
 
-static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *src_block,
+static int machine_select_try_lower_compare_branch(const MachineIrFunction *src_function,
+    const MachineIrBasicBlock *src_block,
     MachineSelectBasicBlock *dest_block) {
     const MachineIrInstruction *tail_op;
     long long folded_value;
@@ -71,7 +245,7 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
     MachineIrOperand lhs;
     MachineIrOperand rhs;
 
-    if (!src_block || !dest_block ||
+    if (!src_function || !src_block || !dest_block ||
         !src_block->has_terminator ||
         src_block->terminator.kind != MACHINE_IR_TERM_BRANCH ||
         src_block->instruction_count == 0) {
@@ -85,6 +259,9 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
         src_block->terminator.as.branch.condition.kind != MACHINE_IR_OPERAND_REGISTER ||
         tail_op->result.kind != MACHINE_IR_OPERAND_REGISTER ||
         src_block->terminator.as.branch.condition.machine_register_id != tail_op->result.machine_register_id) {
+        return 0;
+    }
+    if (machine_select_machine_ir_block_result_live_out(src_function, src_block->id, tail_op->result)) {
         return 0;
     }
 
@@ -137,7 +314,8 @@ static int machine_select_try_lower_compare_branch(const MachineIrBasicBlock *sr
     return 1;
 }
 
-static int machine_select_lower_terminator(const MachineIrBasicBlock *src_block,
+static int machine_select_lower_terminator(const MachineIrFunction *src_function,
+    const MachineIrBasicBlock *src_block,
     MachineSelectBasicBlock *dest_block,
     MachineSelectError *error) {
     MachineSelectOperand return_value;
@@ -165,8 +343,8 @@ static int machine_select_lower_terminator(const MachineIrBasicBlock *src_block,
             return 1;
         case MACHINE_IR_TERM_BRANCH:
             if (machine_select_try_lower_constant_branch(src_block, dest_block) ||
-                machine_select_try_lower_materialized_boolean_branch(src_block, dest_block) ||
-                machine_select_try_lower_compare_branch(src_block, dest_block)) {
+                machine_select_try_lower_materialized_boolean_branch(src_function, src_block, dest_block) ||
+                machine_select_try_lower_compare_branch(src_function, src_block, dest_block)) {
                 return 1;
             }
             dest_block->terminator.kind = MACHINE_SELECT_TERM_BRANCH;

@@ -39,6 +39,25 @@
 
 ---
 
+## 最近同步
+
+最近这层最值得同步的，是它现在更明确地成为了：
+
+- current fetch byte
+- 到 payload meaning / interp action
+
+之间的固定 tag gate。
+
+当前最好再多记两点：
+
+1. **decode 不是 payload/interp 的前置细节，而是正式层次**
+   lesson 里现在最好把它当成 byte-tag meaning 的单独 authority。
+
+2. **这让 step/decode/payload/interp 四层分工更清楚了**
+   不是一个大而糊的“decode+interp”阶段，而是逐层收束。
+
+---
+
 ## 导学
 
 如果说：
