@@ -173,6 +173,11 @@
   `data-store` relocations, and target-policy helpers may expose the current
   preview/global data relocation opcodes alongside the older call/control
   relocation policy.
+- That same `machine_reloc` consumer-facing layer now also has one first
+  section-local report-side relocation-summary slice instead of making later
+  consumers reopen the raw relocation file whenever they already know which
+  relocation section they care about: report helpers may now return the
+  cached relocation-summary rows for one section directly.
 - That same broader spill-backed preview slice now also includes selected
   compare-result producers themselves: `cmp` / `cmpi` no longer require
   register-only results to stay honest, because their operand prep and result

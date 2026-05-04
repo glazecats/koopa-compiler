@@ -53,6 +53,14 @@
    - direct preview artifact 不再伪造 semantic fallthrough 的第二条假 relocation
 5. data relocation family
    - 不再只有 call/control，global data 访问相关族也已经进来了
+6. section-local relocation-summary surface
+   - report 现在可以直接按 relocation section 取那一段 relocation summaries
+7. explicit profile-name dump
+   - dump/report-dump 里现在会打印
+     - `generic`
+     - `riscv32-preview`
+     - `i386-preview`
+     这类显式 profile 名，而不是只给一个数字枚举值
 
 所以这层现在除了：
 

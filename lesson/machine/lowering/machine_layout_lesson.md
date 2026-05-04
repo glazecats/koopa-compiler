@@ -99,6 +99,17 @@
 
 - `machine_layout` 已经开始承担 “selected 之后、emit 之前的结构化 inspection boundary”
 
+最近这层还要再补一个看起来小、但实际上会贯通到后面 bytes 的点：
+
+4. **void return 形状现在会原样保留**
+   - 也就是说，selected 里的 bare `ret`
+   - 到 layout 里仍然是 bare `ret`
+   - 不会被这里偷偷改写成 `reti 0`
+
+这条边界现在已经有直接回归：
+
+- `test_machine_layout_lowers_void_return_from_machine_select`
+
 ---
 
 ## 1. 为什么需要 `machine_layout`
@@ -629,6 +640,15 @@ layout.i -> layout.i+1
 所以这层真正新增的是：
 
 `fallthrough-aware control semantics`
+
+但它当前明确**不会**改的一件事是：
+
+- return shape semantics
+
+也就是：
+
+- 它会改 branch / jump 的 presentation
+- 但不会改 `ret` 到底有没有 value
 
 ---
 

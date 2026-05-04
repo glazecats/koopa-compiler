@@ -32,6 +32,7 @@ typedef struct {
 typedef struct {
     IrProgram *program;
     IrFunction *function;
+    AstFunctionReturnType function_return_type;
     size_t block_id;
     int has_block;
     IrLowerScopeStack scopes;
@@ -86,6 +87,7 @@ static int ir_block_prepend_instruction(IrBasicBlock *block,
     const IrInstruction *instruction,
     IrError *error);
 static int ir_block_set_return(IrBasicBlock *block, IrValueRef value, IrError *error);
+static int ir_block_set_void_return(IrBasicBlock *block, IrError *error);
 static int ir_block_set_jump(IrBasicBlock *block, size_t target_block_id, IrError *error);
 static int ir_block_set_branch(IrBasicBlock *block,
     IrValueRef condition,
@@ -116,6 +118,10 @@ static int ir_emit_call(IrLowerContext *ctx,
     const char *callee_name,
     const IrValueRef *args,
     size_t arg_count);
+static int ir_ensure_builtin_function_signature(IrProgram *program,
+    const char *name,
+    IrFunction **out_function,
+    IrError *error);
 static size_t ir_allocate_temp(IrFunction *function);
 
 static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *stmt);

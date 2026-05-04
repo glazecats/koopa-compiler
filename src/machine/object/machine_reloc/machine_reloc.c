@@ -20,6 +20,7 @@ static int machine_reloc_clone_object_file(const MachineObjectFile *source,
 static int machine_reloc_clone_file(const MachineRelocFile *source,
     MachineRelocFile *out_reloc_file,
     MachineRelocError *error);
+static const char *machine_reloc_target_profile_name(MachineBytesTargetProfile profile);
 static ptrdiff_t machine_reloc_preview_addend_for_fixup(const MachineObjectFile *object_file,
     const MachineObjectFixup *fixup);
 
@@ -96,6 +97,18 @@ static int machine_reloc_append_format(MachineRelocStringBuilder *builder, const
     builder->length += (size_t)needed;
     va_end(args);
     return 1;
+}
+
+static const char *machine_reloc_target_profile_name(MachineBytesTargetProfile profile) {
+    switch (profile) {
+        case MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW:
+            return "riscv32-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW:
+            return "i386-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_GENERIC:
+        default:
+            return "generic";
+    }
 }
 
 static ptrdiff_t machine_reloc_preview_addend_for_fixup(const MachineObjectFile *object_file,
@@ -986,6 +999,33 @@ int machine_reloc_report_find_section_summary_by_name(const MachineRelocReport *
     return 0;
 }
 
+int machine_reloc_report_get_section_relocation_summaries(const MachineRelocReport *report,
+    size_t section_index,
+    size_t *out_count,
+    const MachineRelocationSummary **out_summaries) {
+    const MachineRelocSection *section = NULL;
+
+    if (out_count) {
+        *out_count = 0u;
+    }
+    if (out_summaries) {
+        *out_summaries = NULL;
+    }
+    if (!report ||
+        !machine_reloc_file_get_section(&report->file, section_index, &section) ||
+        !section ||
+        !report->relocation_summaries) {
+        return 0;
+    }
+    if (out_count) {
+        *out_count = section->relocation_count;
+    }
+    if (out_summaries) {
+        *out_summaries = report->relocation_summaries + section->relocation_start_index;
+    }
+    return 1;
+}
+
 int machine_reloc_report_get_relocation_summary(const MachineRelocReport *report,
     size_t relocation_index,
     const MachineRelocationSummary **out_summary) {
@@ -1026,9 +1066,7 @@ int machine_reloc_dump_file(const MachineRelocFile *reloc_file,
     if (!machine_reloc_append_format(
             &builder,
             "machine_reloc profile=%s total_bytes=%zu object_sections=%zu symbols=%zu relocation_sections=%zu relocations=%zu\npolicy: addends=%s fallthrough=%s\nreloc-sections:\n",
-            target_policy_summary.target_profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW
-                ? "riscv32-preview"
-                : "generic",
+            machine_reloc_target_profile_name(target_policy_summary.target_profile),
             reloc_file->object_file.total_byte_count,
             reloc_file->object_file.section_count,
             reloc_file->object_file.symbol_count,
@@ -1110,7 +1148,7 @@ int machine_reloc_dump_report(const MachineRelocReport *report,
     if (!machine_reloc_append_format(
             &builder,
             "machine_reloc-report total_bytes=%zu object_sections=%zu symbols=%zu relocation_sections=%zu relocations=%zu\n"
-            "target_policy profile=%u preview_addends=%d fallthrough=%d\n"
+            "target_policy profile=%s preview_addends=%d fallthrough=%d\n"
             "relocation_families: call=%zu primary=%zu secondary=%zu data_addr=%zu data_load=%zu data_store=%zu\n"
             "section_summaries:\n",
             report->file.object_file.total_byte_count,
@@ -1118,7 +1156,7 @@ int machine_reloc_dump_report(const MachineRelocReport *report,
             report->file.object_file.symbol_count,
             report->file.section_count,
             report->file.relocation_count,
-            (unsigned)report->target_policy_summary.target_profile,
+            machine_reloc_target_profile_name(report->target_policy_summary.target_profile),
             report->target_policy_summary.preserves_preview_pc_relative_addends,
             report->target_policy_summary.preserves_direct_fallthrough_honesty,
             report->relocation_family_summary.call_relocation_count,

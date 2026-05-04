@@ -81,6 +81,9 @@ static int ir_verify_block_targets(const IrProgram *program,
 
     switch (block->terminator.kind) {
     case IR_TERM_RETURN:
+        if (!block->terminator.has_return_value) {
+            return 1;
+        }
         return ir_verify_value_ref(program,
             function,
             block->terminator.as.return_value,
@@ -268,6 +271,9 @@ static int ir_verify_internal_initializer_call_policy(const IrFunction *caller,
 
 static int ir_return_terminator_is_zero_immediate(const IrTerminator *terminator) {
     if (!terminator || terminator->kind != IR_TERM_RETURN) {
+        return 0;
+    }
+    if (!terminator->has_return_value) {
         return 0;
     }
 
@@ -805,18 +811,20 @@ static int ir_verify_temp_availability(const IrFunction *function, IrError *erro
 
         switch (block->terminator.kind) {
         case IR_TERM_RETURN:
-            if (!ir_verify_temp_use_is_available(block->terminator.as.return_value,
-                    available,
-                    temp_count,
-                    block->id,
-                    "return terminator",
-                    error)) {
-                free(block_defs);
-                free(in_sets);
-                free(out_sets);
-                free(edges);
-                free(available);
-                return 0;
+            if (block->terminator.has_return_value) {
+                if (!ir_verify_temp_use_is_available(block->terminator.as.return_value,
+                        available,
+                        temp_count,
+                        block->id,
+                        "return terminator",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
             }
             break;
         case IR_TERM_BRANCH:

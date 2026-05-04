@@ -25,6 +25,7 @@ typedef struct {
 
 typedef struct {
     const Token *name_tok;
+    AstFunctionReturnType return_type;
     size_t parameter_count;
     char **parameter_names;
     int *parameter_is_const;
@@ -93,6 +94,7 @@ static int parse_function_external_definition_body(Parser *p,
     size_t *out_return_statement_count);
 static int parse_function_external(Parser *p,
     const Token **out_name_token,
+    AstFunctionReturnType *out_return_type,
     size_t *out_parameter_count,
     char ***out_parameter_names,
     int **out_parameter_is_const,

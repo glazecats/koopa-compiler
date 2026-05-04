@@ -422,6 +422,7 @@ int machine_ir_eliminate_phi_nodes(MachineIrProgram *program,
             MachineIrPhiCopy *copies = NULL;
             size_t copy_count = 0;
             size_t phi_index;
+            size_t current_block_id = block->id;
 
             if (block->phi_count == 0) {
                 ++block_index;
@@ -484,7 +485,7 @@ int machine_ir_eliminate_phi_nodes(MachineIrProgram *program,
                         if (!machine_ir_ensure_edge_block(
                                 function,
                                 predecessor_block_id,
-                                block->id,
+                                current_block_id,
                                 &edge_block_id,
                                 error)) {
                             free(edge_block_ids);
@@ -497,6 +498,12 @@ int machine_ir_eliminate_phi_nodes(MachineIrProgram *program,
                 }
                 free(edge_block_ids);
             }
+
+            /*
+             * Critical-edge splitting may grow/realloc function->blocks, so the
+             * old `block` pointer is no longer trustworthy after the edge pass.
+             */
+            block = &function->blocks[current_block_id];
 
             if (copy_count > 0) {
                 size_t predecessor_index = 0;

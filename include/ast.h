@@ -11,6 +11,11 @@ typedef enum {
 } AstExternalKind;
 
 typedef enum {
+    AST_FUNCTION_RETURN_INT = 0,
+    AST_FUNCTION_RETURN_VOID,
+} AstFunctionReturnType;
+
+typedef enum {
     AST_EXPR_IDENTIFIER = 0,
     AST_EXPR_NUMBER,
     AST_EXPR_PAREN,
@@ -102,6 +107,7 @@ struct AstStatement {
 
 typedef struct {
     AstExternalKind kind;
+    AstFunctionReturnType function_return_type;
     char *name;
     size_t name_length;
     int is_const_qualified;
@@ -118,6 +124,11 @@ typedef struct {
     int line;
     int column;
 } AstExternal;
+
+static inline int ast_external_function_returns_value(const AstExternal *external) {
+    return external && external->kind == AST_EXTERNAL_FUNCTION &&
+        external->function_return_type == AST_FUNCTION_RETURN_INT;
+}
 
 typedef struct {
     AstExternal *externals;

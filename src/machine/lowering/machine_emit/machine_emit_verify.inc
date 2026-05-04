@@ -255,9 +255,10 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
 
             switch (block->terminator.kind) {
                 case MACHINE_LAYOUT_TERM_RETURN:
-                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_REGISTER ||
-                        !machine_emit_verify_operand(
-                            block->terminator.as.return_value, program, function->spill_slot_count, "return", error)) {
+                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
+                        (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_REGISTER ||
+                            !machine_emit_verify_operand(
+                                block->terminator.as.return_value, program, function->spill_slot_count, "return", error))) {
                         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-127: invalid register return");
                         return 0;
                     }

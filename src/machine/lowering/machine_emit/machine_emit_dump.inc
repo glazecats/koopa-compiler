@@ -254,8 +254,13 @@ int machine_emit_dump_program(const MachineEmitProgram *program,
             }
             switch (block->terminator.kind) {
                 case MACHINE_LAYOUT_TERM_RETURN:
-                    if (!machine_emit_append_format(&builder, "ret ") ||
-                        !machine_emit_dump_operand(&builder, block->terminator.as.return_value)) {
+                    if (!machine_emit_append_format(&builder, "ret")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
+                        (!machine_emit_append_format(&builder, " ") ||
+                            !machine_emit_dump_operand(&builder, block->terminator.as.return_value))) {
                         free(builder.data);
                         return 0;
                     }

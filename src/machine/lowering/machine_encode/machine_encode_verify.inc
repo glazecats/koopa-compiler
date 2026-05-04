@@ -8,6 +8,47 @@ static int machine_encode_verify_target_index(size_t target_index, size_t block_
     return target_index < block_count;
 }
 
+static int machine_encode_verify_return_operand(const MachineEncodeProgram *program,
+    const MachineEncodeFunction *function,
+    const MachineEncodeBlock *block,
+    MachineEncodeError *error) {
+    const MachineEmitOperand *return_value;
+
+    if (!program || !function || !block) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-140: invalid return verifier contract");
+        return 0;
+    }
+
+    return_value = &block->block.terminator.as.return_value;
+    switch (block->block.terminator.kind) {
+        case MACHINE_LAYOUT_TERM_RETURN:
+            if (return_value->kind == MACHINE_SELECT_OPERAND_NONE) {
+                return 1;
+            }
+            if (return_value->kind != MACHINE_SELECT_OPERAND_REGISTER ||
+                return_value->machine_register_id >= program->register_bank.register_count) {
+                machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-141: invalid register return");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_RETURN_IMM:
+            if (return_value->kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-142: invalid immediate return");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_RETURN_SPILL:
+            if (return_value->kind != MACHINE_SELECT_OPERAND_SPILL_SLOT ||
+                return_value->spill_slot >= function->spill_slot_count) {
+                machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-143: invalid spill return");
+                return 0;
+            }
+            return 1;
+        default:
+            return 1;
+    }
+}
+
 int machine_encode_verify_program(const MachineEncodeProgram *program, MachineEncodeError *error) {
     size_t function_index;
 
@@ -76,6 +117,9 @@ int machine_encode_verify_program(const MachineEncodeProgram *program, MachineEn
                 case MACHINE_LAYOUT_TERM_RETURN:
                 case MACHINE_LAYOUT_TERM_RETURN_IMM:
                 case MACHINE_LAYOUT_TERM_RETURN_SPILL:
+                    if (!machine_encode_verify_return_operand(program, function, block, error)) {
+                        return 0;
+                    }
                     break;
                 case MACHINE_LAYOUT_TERM_FALLTHROUGH:
                     if (!machine_encode_verify_target_index(

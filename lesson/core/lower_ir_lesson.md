@@ -214,6 +214,11 @@ terminator 仍然保持 block-based CFG 结构：
 - `LOWER_IR_TERM_JUMP`
 - `LOWER_IR_TERM_BRANCH`
 
+最近这条线还要同步一个小而关键的点：
+
+- `LOWER_IR_TERM_RETURN` 现在也显式保留 `has_return_value`
+- 所以 lower IR 不会再把 bare `ret` 强行扁平成 `ret 0`
+
 也就是说，当前 lower IR 仍然刻意只改变“value/storage boundary”，不改变 CFG 形状。
 
 ---
@@ -340,6 +345,19 @@ ret tmp.2
 所以更准确地说，它不是“优化式 lowering”，而是：
 
 `value/storage boundary lowering`
+
+但最近它有一个很值得补进 lesson 的细节例外：
+
+- **它会忠实保留上游 return 形状**
+
+也就是：
+
+- canonical IR 的 `ret value`
+  - 继续 lower 成 lower IR 的 `ret value`
+- canonical IR 的 bare `ret`
+  - 继续 lower 成 lower IR 的 bare `ret`
+
+这个边界很重要，因为后面的 `value_ssa -> memory_ssa -> machine_*` 现在都开始依赖这个区分，而不是默认把所有 return 都看成“必有一个整数值”。
 
 ---
 

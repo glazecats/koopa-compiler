@@ -186,6 +186,10 @@ int machine_reloc_report_find_section_summary_by_name(const MachineRelocReport *
     const char *section_name,
     size_t *out_section_index,
     const MachineRelocSectionSummary **out_summary);
+int machine_reloc_report_get_section_relocation_summaries(const MachineRelocReport *report,
+    size_t section_index,
+    size_t *out_count,
+    const MachineRelocationSummary **out_summaries);
 int machine_reloc_report_get_relocation_summary(const MachineRelocReport *report,
     size_t relocation_index,
     const MachineRelocationSummary **out_summary);

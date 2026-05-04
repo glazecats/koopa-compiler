@@ -23,7 +23,7 @@
 
 学完你应该能：
 
-1. 能解释 `SEMA-CALL-001..006` 的判定分层。
+1. 能解释 `SEMA-CALL-001..007` 与 `SEMA-RET-001/002` 的判定分层。
 2. 能说明为什么“同声明顺序”会影响 initializer 可见性。
 3. 能区分“语义规则”与“当前子集限制”。
 
@@ -101,7 +101,7 @@ $$
 
 1. 顶层声明 initializer 规则（callable + scope）
 2. callable shadow precheck（局部遮蔽优先）
-3. callable 规则检查（`SEMA-CALL-001..006`）
+3. callable 规则检查（`SEMA-CALL-001..007`）
 4. scope 规则检查（`SEMA-SCOPE-*`）
 5. return-flow 分析（函数是否所有路径返回）
 6. 顶层符号一致性检查（重复定义/冲突/参数数一致）
@@ -115,12 +115,42 @@ $$
 最近这条主线里还多了一组单独值得记住的规则族：
 
 - `const` rule family
+- `void + builtin` rule family
 
 也就是：
 
 - `const` 声明必须带 initializer
 - 不能给 `const` 对象赋值
 - 不能给 `const` 形参赋值
+- `void` 函数里 `return;` 合法，但 `return 1;` 不合法
+- 非 `void` 函数里 `return;` 不合法
+- `void` call 的结果不能被拿去当 value 用
+- 课程 builtin
+  - `getint/getch/getarray/putint/putch/putarray/starttime/stoptime`
+  现在已经进入 semantic 可见性合同，而不是“必须先手写声明”才能调
+
+## 2.1 最近同步：这轮 semantic 最该更新的四件事
+
+如果你要按最近未提交行为讲课，semantic 这篇现在最该先点名这四件事：
+
+1. `void` 已经不是 parser-only stub
+   - semantic 会真的区分 `int` 函数和 `void` 函数
+2. return 形状已经单独成规则
+   - `SEMA-RET-001`：non-void 函数不能写裸 `return;`
+   - `SEMA-RET-002`：void 函数不能 `return value;`
+3. `void` call result 不能混进 value context
+   - 比如 `int x = putint(1);` 现在要报 `SEMA-CALL-007`
+4. 课程 builtin 已经内建可见
+   - 即使源码里没先声明，semantic 也知道它们的参数个数和返回类型
+
+最小例子可以直接这样讲：
+
+```c
+void log1() { putint(1); return; }   // 现在合法
+int bad() { return; }                // SEMA-RET-001
+void bad2() { return 1; }            // SEMA-RET-002
+int x() { return putint(1); }        // SEMA-CALL-007
+```
 
 ---
 
@@ -456,7 +486,7 @@ while(a){
 
 ---
 
-## 5. callable 规则（`SEMA-CALL-001..006`）
+## 5. callable 规则（`SEMA-CALL-001..007`）
 
 核心函数：
 
@@ -487,6 +517,26 @@ callee 分类由 `classify_ast_call_callee` 给出：
   - 函数存在但参数不匹配 -> `SEMA-CALL-004`
   - 仅后方声明存在 -> `SEMA-CALL-002`
   - 无任何声明 -> `SEMA-CALL-001`
+- value context 里滥用 `void` call result：
+  - `SEMA-CALL-007`
+
+最近这一段还要补两个实现层面的更新：
+
+1. 课程 builtin 现在会被当成“已知可调用函数”参与这套检查
+   - `getint/getch/getarray` 被视为返回 `int`
+   - `putint/putch/putarray/starttime/stoptime` 被视为返回 `void`
+2. `SEMA-CALL-004` 现在不只是普通函数 arity mismatch
+   - builtin 参数个数不匹配时，也会沿用这条诊断族
+   - 只是 message 会更明确写成 builtin mismatch
+
+例如：
+
+```c
+int x = getint();     // 合法
+putint(1);            // 合法
+putint();             // SEMA-CALL-004
+int y = putint(1);    // SEMA-CALL-007
+```
 
 顶层声明 initializer 也会复用同一套 callable 规则，但可见性窗口不同：
 
@@ -696,6 +746,7 @@ $$
 2. 同名函数不能重复定义，否则报 `SEMA-TOP-003`。
 3. 同名顶层变量若都带 initializer，报 `SEMA-TOP-001`（duplicate top-level variable definition）。
 4. 函数名与变量名不能在顶层同名共存，否则报 `SEMA-TOP-004`。
+5. 同名函数声明的返回类型必须一致，否则报 `SEMA-TOP-005`。
 
 反过来说，下面这些当前是被接受的：
 

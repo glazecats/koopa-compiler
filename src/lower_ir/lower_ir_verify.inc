@@ -532,18 +532,20 @@ static int lower_ir_verify_temp_availability(const LowerIrFunction *function, Lo
 
         switch (block->terminator.kind) {
         case LOWER_IR_TERM_RETURN:
-            if (!lower_ir_verify_temp_use_is_available(block->terminator.as.return_value,
-                    available,
-                    temp_count,
-                    block->id,
-                    "return terminator",
-                    error)) {
-                free(block_defs);
-                free(in_sets);
-                free(out_sets);
-                free(edges);
-                free(available);
-                return 0;
+            if (block->terminator.has_return_value) {
+                if (!lower_ir_verify_temp_use_is_available(block->terminator.as.return_value,
+                        available,
+                        temp_count,
+                        block->id,
+                        "return terminator",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
             }
             break;
         case LOWER_IR_TERM_BRANCH:
@@ -577,6 +579,9 @@ static int lower_ir_verify_temp_availability(const LowerIrFunction *function, Lo
 
 static int lower_ir_return_terminator_is_zero_immediate(const LowerIrTerminator *terminator) {
     if (!terminator || terminator->kind != LOWER_IR_TERM_RETURN) {
+        return 0;
+    }
+    if (!terminator->has_return_value) {
         return 0;
     }
 
@@ -1031,6 +1036,9 @@ static int lower_ir_verify_terminator(const LowerIrFunction *function,
 
     switch (block->terminator.kind) {
     case LOWER_IR_TERM_RETURN:
+        if (!block->terminator.has_return_value) {
+            return 1;
+        }
         return lower_ir_verify_value_ref(block->terminator.as.return_value,
             function->next_temp_id,
             "return terminator",

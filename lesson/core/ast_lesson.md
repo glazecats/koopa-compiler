@@ -176,11 +176,31 @@ $$
 
 - 名字与定位：`name/name_length/line/column`
 - 声明信息：`has_initializer` + `declaration_initializer`（顶层声明 initializer 的表达式 AST）
-- 函数信息：`parameter_count`, `is_function_definition`, `function_body`
+- 函数信息：`function_return_type`, `parameter_count`, `is_function_definition`, `function_body`
 - 控制流统计：`return_statement_count`（仅保留 return 计数）
 - 不再在 external 上暴露 `called_function_*` 调用元数据数组
 
 semantic 的 return-flow、callable、scope 规则现在直接基于 `function_body`（语句/表达式 AST）进行分析，不依赖 external 附加调用元数据。
+
+最近这一层还有一个必须补进 lesson 的新事实：
+
+- `AstExternal` 现在正式区分
+  - `AST_FUNCTION_RETURN_INT`
+  - `AST_FUNCTION_RETURN_VOID`
+
+也就是说，AST 不再只是知道“这里有个函数”，还会稳定保存：
+
+- 这个函数是不是 value-returning function
+- 还是 bare-returning `void` function
+
+举个最小对照：
+
+```c
+int id(int x) { return x; }
+void log(int x) { putint(x); return; }
+```
+
+在 AST contract 里，两者现在至少会在 `function_return_type` 这一位上分开。
 
 最近这层还要记住和 `const` 直接相关的三组字段：
 

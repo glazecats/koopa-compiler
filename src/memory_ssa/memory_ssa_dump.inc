@@ -290,8 +290,13 @@ int memory_ssa_dump_program(const MemorySsaProgram *program, char **out_text) {
             }
             switch (block->terminator.kind) {
             case VALUE_SSA_TERM_RETURN:
-                if (!memory_ssa_append_string(&builder, "ret ") ||
-                    !memory_ssa_append_value_name(&builder, block->terminator.as.return_value)) {
+                if (!memory_ssa_append_string(&builder, "ret")) {
+                    free(builder.data);
+                    return 0;
+                }
+                if (block->terminator.has_return_value &&
+                    (!memory_ssa_append_string(&builder, " ") ||
+                        !memory_ssa_append_value_name(&builder, block->terminator.as.return_value))) {
                     free(builder.data);
                     return 0;
                 }

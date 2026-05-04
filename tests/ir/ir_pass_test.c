@@ -252,6 +252,7 @@ static int rewrite_as_multi_def_join_value_program(IrProgram *program,
     else_block->instruction_capacity = 1;
 
     join_block->terminator.kind = IR_TERM_RETURN;
+    join_block->terminator.has_return_value = 1;
     join_block->terminator.as.return_value = make_temp_value(0);
     function->next_temp_id = 1;
 
@@ -446,6 +447,7 @@ static int rewrite_as_single_use_call_arg_copy_program(IrProgram *program) {
     block->instruction_capacity = 2;
     block->has_terminator = 1;
     block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = make_temp_value(1);
     function->next_temp_id = 2;
     return 1;

@@ -156,6 +156,60 @@ static int test_machine_layout_lowers_fallthrough_branch_from_machine_ir(void) {
     return ok;
 }
 
+static int test_machine_layout_lowers_void_return_from_machine_select(void) {
+    MachineSelectProgram select_program;
+    MachineLayoutProgram layout_program;
+    MachineSelectError select_error;
+    MachineLayoutError layout_error;
+    int ok = 1;
+
+    memset(&select_error, 0, sizeof(select_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_select_program_init(&select_program);
+    machine_layout_program_init(&layout_program);
+
+    select_program.function_count = 1;
+    select_program.function_capacity = 1;
+    select_program.functions = (MachineSelectFunction *)calloc(1, sizeof(MachineSelectFunction));
+    if (!select_program.functions) {
+        return 0;
+    }
+
+    select_program.functions[0].name = dup_text("main");
+    select_program.functions[0].has_body = 1;
+    select_program.functions[0].block_count = 1;
+    select_program.functions[0].block_capacity = 1;
+    select_program.functions[0].blocks = (MachineSelectBasicBlock *)calloc(1, sizeof(MachineSelectBasicBlock));
+    if (!select_program.functions[0].name || !select_program.functions[0].blocks) {
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    select_program.functions[0].blocks[0].id = 0;
+    select_program.functions[0].blocks[0].has_terminator = 1;
+    select_program.functions[0].blocks[0].terminator.kind = MACHINE_SELECT_TERM_RETURN;
+    select_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_none();
+
+    if (!machine_layout_lower_program_from_machine_select(&select_program, &layout_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: void-return lowering failed: %s\n", layout_error.message);
+        machine_select_program_free(&select_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &layout_program,
+        "machine_layout\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  layout.0 -> bb.0:\n"
+        "    ret\n");
+
+    machine_select_program_free(&select_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
 static int test_machine_layout_bridge_respects_upstream_jump_canonicalization(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -5429,6 +5483,9 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
 
 int main(void) {
     if (!test_machine_layout_lowers_fallthrough_branch_from_machine_ir()) {
+        return 1;
+    }
+    if (!test_machine_layout_lowers_void_return_from_machine_select()) {
         return 1;
     }
     if (!test_machine_layout_bridge_respects_upstream_jump_canonicalization()) {

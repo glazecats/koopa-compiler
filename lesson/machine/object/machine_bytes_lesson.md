@@ -98,6 +98,10 @@
    - `data-addr / data-load / data-store` 已经进入 bytes-side artifact
 6. global-object slice
    - `.sbss` / `.sdata` / `global-object` symbols 现在也会在这层开始出现
+7. bare-return honesty
+   - bytes-side terminator summary 现在会保留
+     - `has_return_value = 0` 的 bare `ret`
+     - 和 `reti value` 区分开来
 
 所以这层现在除了“第一次有 `unsigned char[]`”，还可以理解成：
 
@@ -322,6 +326,27 @@
 也就是说，`machine_bytes` 不只是“编码完了的 bytes”，还是：
 
 `object-facing raw material`
+
+最近还要再补一个和 `void` 直接相关的数据点：
+
+- `MachineBytesTerminatorSummary` 现在不只告诉你“这是 return”
+- 还会告诉你“这个 return 有没有 value”
+
+举个最小对照：
+
+```text
+bb.0:
+  ret
+```
+
+和：
+
+```text
+bb.0:
+  reti 7
+```
+
+在 bytes report 里现在不会再被压成同一种 return summary。
 
 ### 5.3 program/report 两个视角都是真实的
 

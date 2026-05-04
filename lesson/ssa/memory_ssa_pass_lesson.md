@@ -219,6 +219,39 @@ ssa.0 = mov value
 
 这里最近已经不该再只理解成“遇到 call 就全杀光”。
 
+最近这条线还补了两个很值得单独讲的收口点：
+
+1. **迭代预算不再是拍脑袋常数 8**
+   - deep short-circuit / branchy CFG 上，load forwarding 现在会按
+     - block 数
+     - instruction 数
+     动态给 budget
+   - lesson 口径上就是：这条 pass 现在更像“程序形状驱动的收敛预算”，不是固定小常数碰碰运气
+2. **join-load PRE 更保守了**
+   - 只有当所有相关 predecessor 都能解释清楚 expected memory version 时，才会补 predecessor load 再合流
+   - 如果某条前驱其实还对不上 join phi 预期版本，就宁可保留 join load，也不乱造 value phi
+
+一个很适合记忆的伪代码是：
+
+```text
+for each predecessor P of join J:
+    expected = map_join_memory_version_to_predecessor(P)
+    if P already has equivalent value(expected):
+        reuse it
+    else if P is plain jump-to-J and can safely insert:
+        mark pending inserted load
+    else:
+        give up this PRE
+```
+
+这也是最近那组 branch-materialized global-load regression 会从：
+
+- “在 join 上直接造全 pred value-phi”
+
+收口成：
+
+- “前驱都讲得通才补，不然保留 join load”
+
 当前 bridge / analysis 线已经能把 call 分成更细的情况：
 
 - declaration-only / unknown callee：保守全局 barrier

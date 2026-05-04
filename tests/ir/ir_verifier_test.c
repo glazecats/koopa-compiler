@@ -273,6 +273,7 @@ static int test_ir_verifier_rejects_unreachable_block(void) {
     block->instruction_capacity = 0;
     block->has_terminator = 1;
     block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value.kind = IR_VALUE_IMMEDIATE;
     block->terminator.as.return_value.immediate = 0;
     block->terminator.as.return_value.id = 0;

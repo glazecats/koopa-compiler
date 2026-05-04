@@ -56,6 +56,13 @@
 2. **它现在更像 provenance 保持链的一环**
    后面的 ELF / image lesson 已经开始讲 artifact summary / origin profile / source provenance，所以 container 现在最好别再理解成“随手序列化一下”，而是：
    - 直达标准 ELF 之前的内部最终收口层
+3. **container dump 现在也会直接带 profile/policy**
+   - 不再只是告诉你 header/table/string/payload 在哪
+   - 还会先告诉你当前容器承接的是
+     - `generic`
+     - `riscv32-preview`
+     - `i386-preview`
+     哪条 profile 线，以及 addend / fallthrough honesty 事实
 
 一句话压缩就是：
 
@@ -134,6 +141,18 @@
 - string table 在哪里
 - payload 在哪里
 
+最近还要把 lesson 口径再往前推半步：
+
+- 这份最终 byte image 现在也会显式带出“它承接的是哪条 target profile/policy 线”
+
+所以它不只是：
+
+- `reloc artifact serialized`
+
+也更像：
+
+- `reloc artifact serialized with profile-aware provenance header text`
+
 ---
 
 ## 2. 为什么不能把这层塞回 `machine_reloc`
@@ -194,6 +213,16 @@
   - header/table offset layout
   - final byte image serialization
   - layout/query/dump
+
+如果你要按最近未提交改动去抓最值得看的源码点，我会推荐：
+
+- `machine_container_target_profile_name(...)`
+  - 说明 container dump 不再把 profile 当内部数字用
+- `machine_container_dump_file(...)`
+  - 说明这一层的 dump 现在已经会先输出
+    - `profile=...`
+    - `policy: addends=... fallthrough=...`
+    然后再进入 header/table/string/payload 的布局说明
 
 ---
 

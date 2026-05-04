@@ -193,7 +193,7 @@ static int test_machine_bytes_lowers_from_machine_encode(void) {
         "  F0.L0 @0..4 term@2 bytes=21 81 83 01 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @4\n"
         "  F0.L1 @4..6 term@4 bytes=81 17 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n");
+        "    reti 7\n");
 
     if (!machine_bytes_function_compute_summary(&bytes_program.functions[0], &summary) ||
         summary.block_count != 2 || summary.byte_count != 6 || summary.op_byte_count != 2 ||
@@ -225,6 +225,86 @@ static int test_machine_bytes_lowers_from_machine_encode(void) {
     machine_emit_program_free(&emit_program);
     machine_encode_program_free(&encode_program);
     machine_bytes_program_free(&bytes_program);
+    return ok;
+}
+
+static int test_machine_bytes_riscv32_preview_emits_void_return_word(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineBytesReport bytes_report;
+    MachineBytesError bytes_error;
+    MachineBytesTerminatorSummary terminator_summary;
+    const MachineBytesFunction *function_view = NULL;
+    size_t function_index = 0u;
+    unsigned char *program_bytes = NULL;
+    size_t program_byte_count = 0u;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+    machine_bytes_report_init(&bytes_report);
+
+    emit_program.function_count = 1;
+    emit_program.function_capacity = 1;
+    emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
+    if (!emit_program.functions) {
+        return 0;
+    }
+
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1;
+    emit_program.functions[0].block_capacity = 1;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0;
+    emit_program.functions[0].blocks[0].original_layout_index = 0;
+    emit_program.functions[0].blocks[0].original_block_id = 0;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    emit_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_none();
+    if (!emit_program.functions[0].blocks[0].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_bytes_report_free(&bytes_report);
+        return 0;
+    }
+
+    if (!machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_bytes_build_report_from_program(&bytes_program, &bytes_report, &bytes_error) ||
+        !machine_bytes_program_get_function_by_name(&bytes_program, "main", &function_index, &function_view) ||
+        function_index != 0u ||
+        !function_view ||
+        !machine_bytes_function_get_block_terminator_summary(function_view, 0u, &terminator_summary) ||
+        terminator_summary.kind != MACHINE_LAYOUT_TERM_RETURN ||
+        terminator_summary.has_return_value ||
+        terminator_summary.return_value.kind != MACHINE_SELECT_OPERAND_NONE ||
+        !machine_bytes_report_get_block_terminator_summary(&bytes_report, 0u, 0u, &terminator_summary) ||
+        terminator_summary.kind != MACHINE_LAYOUT_TERM_RETURN ||
+        terminator_summary.has_return_value ||
+        terminator_summary.return_value.kind != MACHINE_SELECT_OPERAND_NONE ||
+        !machine_bytes_program_copy_bytes(&bytes_program, &program_bytes, &program_byte_count, &bytes_error) ||
+        program_byte_count != 4u ||
+        read_u32_le(program_bytes) != 0x00008067u) {
+        fprintf(stderr, "[machine-bytes] FAIL: preview void-return mismatch: %s\n", bytes_error.message);
+        ok = 0;
+    }
+
+    free(program_bytes);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    machine_bytes_report_free(&bytes_report);
     return ok;
 }
 
@@ -2124,7 +2204,7 @@ static int test_machine_bytes_from_machine_emit_artifacts(void) {
         "  F0.L0 @0..4 term@2 bytes=21 84 83 01 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @4\n"
         "  F0.L1 @4..6 term@4 bytes=81 13 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n");
+        "    reti 3\n");
 
     if (!machine_bytes_report_find_block_summary_by_function_name_and_offset(&bytes_report, "main", 4, NULL, &block_summary) ||
         !block_summary || strcmp(block_summary->label_name, "F0.L1") != 0) {
@@ -2245,7 +2325,7 @@ static int test_machine_bytes_encodes_call_payloads(void) {
         "machine_bytes\n"
         "function main params=0 locals=0 spills=0 bytes=5\n"
         "  F0.L0 @0..5 term@3 bytes=1B 01 15 81 10 ; emit.0 -> layout.0 -> bb.0\n"
-        "    return\n");
+        "    reti 0\n");
 
     if (!machine_bytes_report_get_reference_summary_count(&bytes_report, &reference_count) ||
         reference_count != 1 ||
@@ -2544,6 +2624,7 @@ int main(void) {
     int ok = 1;
 
     ok &= test_machine_bytes_lowers_from_machine_encode();
+    ok &= test_machine_bytes_riscv32_preview_emits_void_return_word();
     ok &= test_machine_bytes_report_and_bridges();
     ok &= test_machine_bytes_riscv32_preview_profile_changes_text_bytes();
     ok &= test_machine_bytes_riscv32_preview_patches_internal_call_targets();

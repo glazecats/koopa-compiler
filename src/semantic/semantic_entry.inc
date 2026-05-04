@@ -83,11 +83,16 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 return 0;
             }
 
-            if (!semantic_compute_function_returns_all_paths(lhs, &returns_all_paths, error)) {
+             if (!semantic_check_function_return_shape_rules(lhs, error)) {
                 return 0;
             }
 
-            if (!returns_all_paths) {
+            if (lhs->function_return_type == AST_FUNCTION_RETURN_INT &&
+                !semantic_compute_function_returns_all_paths(lhs, &returns_all_paths, error)) {
+                return 0;
+            }
+
+            if (lhs->function_return_type == AST_FUNCTION_RETURN_INT && !returns_all_paths) {
                 if (error) {
                     semantic_set_error(error,
                         lhs->line,
@@ -110,6 +115,24 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
             }
 
             if (lhs->kind == AST_EXTERNAL_FUNCTION && rhs->kind == AST_EXTERNAL_FUNCTION) {
+                if (lhs->function_return_type != rhs->function_return_type) {
+                    if (error) {
+                        char preview[128];
+                        char msg[512];
+
+                        format_callee_preview(lhs->name, preview, sizeof(preview));
+                        snprintf(msg,
+                            sizeof(msg),
+                            "SEMA-TOP-005: identifier=%s; conflicting function declarations: return type mismatch",
+                            preview);
+                        semantic_set_error(error,
+                            rhs->line,
+                            rhs->column,
+                            msg);
+                    }
+                    return 0;
+                }
+
                 if (lhs->parameter_count != rhs->parameter_count) {
                     if (error) {
                         char preview[128];

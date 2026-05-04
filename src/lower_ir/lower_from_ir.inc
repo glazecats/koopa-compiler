@@ -212,6 +212,9 @@ static int lower_ir_lower_terminator(const IrTerminator *terminator,
 
     switch (terminator->kind) {
     case IR_TERM_RETURN:
+        if (!terminator->has_return_value) {
+            return lower_ir_block_set_void_return(out_block, error);
+        }
         if (!lower_ir_lower_value_ref(&terminator->as.return_value,
                 out_function,
                 out_block,

@@ -245,9 +245,17 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
 
             switch (block->terminator.kind) {
             case LOWER_IR_TERM_RETURN:
-                if (!lower_ir_append_string(&builder, "ret ") ||
-                    !lower_ir_append_value_name(&builder, block->terminator.as.return_value) ||
-                    !lower_ir_append_string(&builder, "\n")) {
+                if (!lower_ir_append_string(&builder, "ret")) {
+                    free(builder.data);
+                    return 0;
+                }
+                if (block->terminator.has_return_value &&
+                    (!lower_ir_append_string(&builder, " ") ||
+                        !lower_ir_append_value_name(&builder, block->terminator.as.return_value))) {
+                    free(builder.data);
+                    return 0;
+                }
+                if (!lower_ir_append_string(&builder, "\n")) {
                     free(builder.data);
                     return 0;
                 }

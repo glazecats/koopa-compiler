@@ -320,6 +320,9 @@ static int memory_ssa_copy_terminator(MemorySsaBasicBlock *output_block,
     MemorySsaError *error) {
     switch (input_block->terminator.kind) {
     case VALUE_SSA_TERM_RETURN:
+        if (!input_block->terminator.has_return_value) {
+            return memory_ssa_block_set_void_return(output_block, error);
+        }
         return memory_ssa_block_set_return(output_block, input_block->terminator.as.return_value, error);
     case VALUE_SSA_TERM_JUMP:
         return memory_ssa_block_set_jump(output_block, input_block->terminator.as.jump_target, error);

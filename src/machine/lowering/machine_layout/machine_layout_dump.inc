@@ -245,8 +245,13 @@ int machine_layout_dump_program(const MachineLayoutProgram *program,
             }
             switch (block->terminator.kind) {
                 case MACHINE_LAYOUT_TERM_RETURN:
-                    if (!machine_layout_append_format(&builder, "ret ") ||
-                        !machine_layout_dump_operand(&builder, block->terminator.as.return_value)) {
+                    if (!machine_layout_append_format(&builder, "ret")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
+                        (!machine_layout_append_format(&builder, " ") ||
+                            !machine_layout_dump_operand(&builder, block->terminator.as.return_value))) {
                         free(builder.data);
                         return 0;
                     }

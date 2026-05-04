@@ -61,6 +61,13 @@
 
 - `layout -> emitted labels + downstream carry-through surface`
 
+最近这层再补一个最容易漏讲的点会更完整：
+
+4. **emit 不会洗掉 bare `ret`**
+   - 如果 layout block 本来就是 void-return block
+   - emit 只会给它加 label / emitted identity
+   - 不会把它改造成 `reti 0`
+
 ---
 
 ## 导学
@@ -412,6 +419,14 @@ verify emitted program
 - 它不是又来一轮 control rewrite
 - 它是在保留 layout 结果的前提下，附加 emitted identity
 
+这里“保留 layout 结果”现在最好明确到 return family：
+
+- `ret`
+- `reti imm`
+- `ret spill`
+
+都会被原样保留下来，只是从 `layout.N` 世界进入 `F0.Ln` 世界。
+
 ---
 
 ## 9. 一个最小 before/after 例子：plain fallthrough block
@@ -446,6 +461,31 @@ F0.L1:
 - 地址
 - offset
 - bytes
+
+同时它“也还没改”的还有：
+
+- return 是否带值
+
+所以如果上游是：
+
+```text
+layout.1:
+  ret
+```
+
+那么 emit 之后应该理解成：
+
+```text
+F0.L1:
+  ret
+```
+
+而不是：
+
+```text
+F0.L1:
+  reti 0
+```
 
 ---
 

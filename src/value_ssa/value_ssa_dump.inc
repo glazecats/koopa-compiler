@@ -278,9 +278,17 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
             }
             switch (block->terminator.kind) {
             case VALUE_SSA_TERM_RETURN:
-                if (!value_ssa_append_string(&builder, "ret ") ||
-                    !value_ssa_append_value_name(&builder, block->terminator.as.return_value) ||
-                    !value_ssa_append_string(&builder, "\n")) {
+                if (!value_ssa_append_string(&builder, "ret")) {
+                    free(builder.data);
+                    return 0;
+                }
+                if (block->terminator.has_return_value &&
+                    (!value_ssa_append_string(&builder, " ") ||
+                        !value_ssa_append_value_name(&builder, block->terminator.as.return_value))) {
+                    free(builder.data);
+                    return 0;
+                }
+                if (!value_ssa_append_string(&builder, "\n")) {
                     free(builder.data);
                     return 0;
                 }

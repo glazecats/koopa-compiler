@@ -55,6 +55,8 @@ typedef struct {
 
 typedef struct {
     MachineBytesTerminatorKind kind;
+    int has_return_value;
+    MachineEmitOperand return_value;
     int has_primary_target;
     const char *primary_target_label_name;
     size_t primary_target_byte_offset;

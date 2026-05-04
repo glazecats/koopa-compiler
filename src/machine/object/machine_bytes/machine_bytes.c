@@ -837,6 +837,228 @@ static size_t machine_bytes_align_up(size_t value, size_t alignment) {
     return remainder == 0u ? value : value + (alignment - remainder);
 }
 
+static size_t machine_bytes_riscv_emit_register_call_args(
+    unsigned char *bytes,
+    size_t offset,
+    const MachineEmitOp *op,
+    size_t stack_arg_bytes) {
+    size_t arg_index;
+    uint32_t target_regs[8];
+    uint32_t source_regs[8];
+    unsigned char source_is_register[8];
+    unsigned char done[8] = {0};
+    size_t remaining = 0u;
+
+    if (!op) {
+        return 0u;
+    }
+
+    for (arg_index = 0u; arg_index < 8u; ++arg_index) {
+        target_regs[arg_index] = 10u + (uint32_t)arg_index;
+        source_regs[arg_index] = 0u;
+        source_is_register[arg_index] = 0u;
+    }
+
+    for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+        const MachineEmitOperand *arg = &op->as.call.args[arg_index];
+
+        if (arg->kind == MACHINE_SELECT_OPERAND_REGISTER) {
+            source_is_register[arg_index] = 1u;
+            source_regs[arg_index] = machine_bytes_riscv_map_operand_register(arg);
+        }
+        ++remaining;
+    }
+
+    while (remaining > 0u) {
+        size_t ready_index = (size_t)-1;
+        size_t cycle_index = (size_t)-1;
+
+        for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+            size_t other_index;
+            int blocked = 0;
+
+            if (done[arg_index]) {
+                continue;
+            }
+
+            if (cycle_index == (size_t)-1) {
+                cycle_index = arg_index;
+            }
+
+            if (source_is_register[arg_index] && source_regs[arg_index] == target_regs[arg_index]) {
+                ready_index = arg_index;
+                break;
+            }
+
+            for (other_index = 0u; other_index < op->as.call.arg_count && other_index < 8u; ++other_index) {
+                if (other_index == arg_index || done[other_index] || !source_is_register[other_index]) {
+                    continue;
+                }
+                if (source_regs[other_index] == target_regs[arg_index]) {
+                    blocked = 1;
+                    break;
+                }
+            }
+            if (!blocked) {
+                ready_index = arg_index;
+                break;
+            }
+        }
+
+        if (ready_index != (size_t)-1) {
+            const MachineEmitOperand *arg = &op->as.call.args[ready_index];
+            uint32_t target_reg = target_regs[ready_index];
+
+            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                offset += machine_bytes_riscv_emit_materialize_immediate(
+                    bytes, offset, target_reg, arg->immediate);
+            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                offset += machine_bytes_riscv_emit_load_from_stack(
+                    bytes,
+                    offset,
+                    target_reg,
+                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
+                    machine_bytes_riscv_scratch_register());
+            } else {
+                uint32_t source_reg = source_regs[ready_index];
+
+                if (source_reg != target_reg) {
+                    offset += machine_bytes_riscv_emit_copy_register(bytes, offset, target_reg, source_reg);
+                }
+            }
+
+            done[ready_index] = 1u;
+            --remaining;
+            continue;
+        }
+
+        if (cycle_index == (size_t)-1) {
+            break;
+        }
+
+        offset += machine_bytes_riscv_emit_copy_register(
+            bytes,
+            offset,
+            machine_bytes_riscv_secondary_scratch_register(),
+            target_regs[cycle_index]);
+        for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+            if (!done[arg_index] && source_is_register[arg_index] &&
+                source_regs[arg_index] == target_regs[cycle_index]) {
+                source_regs[arg_index] = machine_bytes_riscv_secondary_scratch_register();
+                source_is_register[arg_index] = 1u;
+            }
+        }
+    }
+
+    return offset;
+}
+
+static size_t machine_bytes_riscv_register_call_args_size(
+    const MachineEmitOp *op,
+    size_t stack_arg_bytes) {
+    size_t arg_index;
+    uint32_t target_regs[8];
+    uint32_t source_regs[8];
+    unsigned char source_is_register[8];
+    unsigned char done[8] = {0};
+    size_t remaining = 0u;
+    size_t size = 0u;
+
+    if (!op) {
+        return 0u;
+    }
+
+    for (arg_index = 0u; arg_index < 8u; ++arg_index) {
+        target_regs[arg_index] = 10u + (uint32_t)arg_index;
+        source_regs[arg_index] = 0u;
+        source_is_register[arg_index] = 0u;
+    }
+
+    for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+        const MachineEmitOperand *arg = &op->as.call.args[arg_index];
+
+        if (arg->kind == MACHINE_SELECT_OPERAND_REGISTER) {
+            source_is_register[arg_index] = 1u;
+            source_regs[arg_index] = machine_bytes_riscv_map_operand_register(arg);
+        }
+        ++remaining;
+    }
+
+    while (remaining > 0u) {
+        size_t ready_index = (size_t)-1;
+        size_t cycle_index = (size_t)-1;
+
+        for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+            size_t other_index;
+            int blocked = 0;
+
+            if (done[arg_index]) {
+                continue;
+            }
+
+            if (cycle_index == (size_t)-1) {
+                cycle_index = arg_index;
+            }
+
+            if (source_is_register[arg_index] && source_regs[arg_index] == target_regs[arg_index]) {
+                ready_index = arg_index;
+                break;
+            }
+
+            for (other_index = 0u; other_index < op->as.call.arg_count && other_index < 8u; ++other_index) {
+                if (other_index == arg_index || done[other_index] || !source_is_register[other_index]) {
+                    continue;
+                }
+                if (source_regs[other_index] == target_regs[arg_index]) {
+                    blocked = 1;
+                    break;
+                }
+            }
+            if (!blocked) {
+                ready_index = arg_index;
+                break;
+            }
+        }
+
+        if (ready_index != (size_t)-1) {
+            const MachineEmitOperand *arg = &op->as.call.args[ready_index];
+            uint32_t target_reg = target_regs[ready_index];
+
+            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                size += machine_bytes_riscv_materialize_size(arg->immediate);
+            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                size += machine_bytes_riscv_load_from_stack_size(
+                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
+            } else {
+                uint32_t source_reg = source_regs[ready_index];
+
+                if (source_reg != target_reg) {
+                    size += 4u;
+                }
+            }
+
+            done[ready_index] = 1u;
+            --remaining;
+            continue;
+        }
+
+        if (cycle_index == (size_t)-1) {
+            break;
+        }
+
+        size += 4u;
+        for (arg_index = 0u; arg_index < op->as.call.arg_count && arg_index < 8u; ++arg_index) {
+            if (!done[arg_index] && source_is_register[arg_index] &&
+                source_regs[arg_index] == target_regs[cycle_index]) {
+                source_regs[arg_index] = machine_bytes_riscv_secondary_scratch_register();
+                source_is_register[arg_index] = 1u;
+            }
+        }
+    }
+
+    return size;
+}
+
 static size_t machine_bytes_riscv_stack_arg_count(const MachineEmitOp *op) {
     if (!op || op->as.call.arg_count <= 8u) {
         return 0u;
@@ -1192,32 +1414,20 @@ static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op) {
     if (stack_arg_bytes > 0u) {
         size += machine_bytes_riscv_adjust_sp_size(-(long long)stack_arg_bytes);
     }
-    for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+    size += machine_bytes_riscv_register_call_args_size(op, stack_arg_bytes);
+    for (arg_index = 8u; arg_index < op->as.call.arg_count; ++arg_index) {
         const MachineEmitOperand *arg = &op->as.call.args[arg_index];
-        if (arg_index < 8u) {
-            uint32_t target_reg = 10u + (uint32_t)arg_index;
+        long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
 
-            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
-                size += machine_bytes_riscv_materialize_size(arg->immediate);
-            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                size += machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
-            } else if (machine_bytes_riscv_map_operand_register(arg) != target_reg) {
-                size += 4u;
-            }
+        if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+            size += machine_bytes_riscv_materialize_size(arg->immediate);
+            size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
+        } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+            size += machine_bytes_riscv_load_from_stack_size(
+                machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
+            size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         } else {
-            long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
-
-            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
-                size += machine_bytes_riscv_materialize_size(arg->immediate);
-                size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
-            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                size += machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
-                size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
-            } else {
-                size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
-            }
+            size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         }
     }
     return size;
@@ -2026,65 +2236,47 @@ static int machine_bytes_write_block_bytes_for_profile(
                             byte_index,
                             -(long long)stack_arg_bytes);
                     }
-                    for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+                    byte_index = machine_bytes_riscv_emit_register_call_args(
+                        dest_block->bytes,
+                        byte_index,
+                        op,
+                        stack_arg_bytes);
+                    for (arg_index = 8u; arg_index < op->as.call.arg_count; ++arg_index) {
                         const MachineEmitOperand *arg = &op->as.call.args[arg_index];
-                        if (arg_index < 8u) {
-                            uint32_t target_reg = 10u + (uint32_t)arg_index;
+                        long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
 
-                            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
-                                byte_index += machine_bytes_riscv_emit_materialize_immediate(
-                                    dest_block->bytes, byte_index, target_reg, arg->immediate);
-                            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                                byte_index += machine_bytes_riscv_emit_load_from_stack(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    target_reg,
-                                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
-                                    machine_bytes_riscv_scratch_register());
-                            } else {
-                                uint32_t source_reg = machine_bytes_riscv_map_operand_register(arg);
-
-                                if (source_reg != target_reg) {
-                                    byte_index += machine_bytes_riscv_emit_copy_register(
-                                        dest_block->bytes, byte_index, target_reg, source_reg);
-                                }
-                            }
+                        if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+                            byte_index += machine_bytes_riscv_emit_materialize_immediate(
+                                dest_block->bytes,
+                                byte_index,
+                                machine_bytes_riscv_secondary_scratch_register(),
+                                arg->immediate);
+                            byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                dest_block->bytes,
+                                byte_index,
+                                machine_bytes_riscv_secondary_scratch_register(),
+                                stack_byte_offset,
+                                machine_bytes_riscv_scratch_register());
+                        } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                            byte_index += machine_bytes_riscv_emit_load_from_stack(
+                                dest_block->bytes,
+                                byte_index,
+                                machine_bytes_riscv_secondary_scratch_register(),
+                                machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
+                                machine_bytes_riscv_scratch_register());
+                            byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                dest_block->bytes,
+                                byte_index,
+                                machine_bytes_riscv_secondary_scratch_register(),
+                                stack_byte_offset,
+                                machine_bytes_riscv_scratch_register());
                         } else {
-                            long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
-
-                            if (arg->kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
-                                byte_index += machine_bytes_riscv_emit_materialize_immediate(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    machine_bytes_riscv_secondary_scratch_register(),
-                                    arg->immediate);
-                                byte_index += machine_bytes_riscv_emit_store_to_stack(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    machine_bytes_riscv_secondary_scratch_register(),
-                                    stack_byte_offset,
-                                    machine_bytes_riscv_scratch_register());
-                            } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                                byte_index += machine_bytes_riscv_emit_load_from_stack(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    machine_bytes_riscv_secondary_scratch_register(),
-                                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
-                                    machine_bytes_riscv_scratch_register());
-                                byte_index += machine_bytes_riscv_emit_store_to_stack(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    machine_bytes_riscv_secondary_scratch_register(),
-                                    stack_byte_offset,
-                                    machine_bytes_riscv_scratch_register());
-                            } else {
-                                byte_index += machine_bytes_riscv_emit_store_to_stack(
-                                    dest_block->bytes,
-                                    byte_index,
-                                    machine_bytes_riscv_map_operand_register(arg),
-                                    stack_byte_offset,
-                                    machine_bytes_riscv_scratch_register());
-                            }
+                            byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                dest_block->bytes,
+                                byte_index,
+                                machine_bytes_riscv_map_operand_register(arg),
+                                stack_byte_offset,
+                                machine_bytes_riscv_scratch_register());
                         }
                     }
                     if (machine_bytes_riscv_resolve_call_target_byte_offset(

@@ -68,6 +68,9 @@ static int value_ssa_block_is_empty_return(const ValueSsaBasicBlock *block, Valu
         block->terminator.kind != VALUE_SSA_TERM_RETURN) {
         return 0;
     }
+    if (!block->terminator.has_return_value) {
+        return 0;
+    }
 
     *out_value = block->terminator.as.return_value;
     return 1;
@@ -209,6 +212,7 @@ static int value_ssa_rewrite_trivial_branches(ValueSsaFunction *function, ValueS
                 value_ssa_block_is_empty_return(else_block, &else_value) &&
                 value_ssa_value_refs_equal(then_value, else_value)) {
                 block->terminator.kind = VALUE_SSA_TERM_RETURN;
+                block->terminator.has_return_value = 1;
                 block->terminator.as.return_value = then_value;
             }
         }
@@ -236,6 +240,7 @@ static int value_ssa_rewrite_trivial_jumps(ValueSsaFunction *function, ValueSsaE
         }
 
         block->terminator.kind = VALUE_SSA_TERM_RETURN;
+        block->terminator.has_return_value = 1;
         block->terminator.as.return_value = return_value;
     }
 
@@ -334,6 +339,7 @@ static int value_ssa_merge_single_predecessor_jump_blocks(ValueSsaFunction *func
         target->phi_count = 0;
         target->has_terminator = 0;
         target->terminator.kind = VALUE_SSA_TERM_RETURN;
+        target->terminator.has_return_value = 1;
         target->terminator.as.return_value = value_ssa_value_immediate(0);
 
         *out_changed = 1;

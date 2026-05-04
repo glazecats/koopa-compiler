@@ -12,6 +12,7 @@ typedef enum {
 
     TOKEN_KW_CONST,
     TOKEN_KW_INT,
+    TOKEN_KW_VOID,
     TOKEN_KW_RETURN,
     TOKEN_KW_IF,
     TOKEN_KW_ELSE,

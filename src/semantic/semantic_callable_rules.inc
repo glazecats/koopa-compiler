@@ -18,11 +18,13 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
     int found_matching_param_count = 0;
     int found_non_function_symbol = 0;
     int has_later_function_decl = 0;
+    int matched_builtin = 0;
     int later_decl_line = 0;
     int later_decl_column = 0;
     size_t expected_arg_count = 0;
     size_t visible_external_count;
     char callee_preview[128];
+    const SemanticBuiltinFunctionInfo *builtin = NULL;
 
     format_callee_preview(called_name, callee_preview, sizeof(callee_preview));
 
@@ -77,6 +79,16 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
     }
 
     if (!found_decl) {
+        builtin = semantic_find_builtin_function(called_name);
+        if (builtin) {
+            found_decl = 1;
+            matched_builtin = 1;
+            expected_arg_count = builtin->parameter_count;
+            found_matching_param_count = builtin->parameter_count == called_arg_count;
+        }
+    }
+
+    if (!found_decl) {
         for (j = func_index + 1; j < program->count; ++j) {
             const AstExternal *candidate = &program->externals[j];
 
@@ -110,7 +122,9 @@ static int semantic_check_single_callable_rule(const AstProgram *program,
             char msg[512];
             snprintf(msg,
                 sizeof(msg),
-                "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
+                matched_builtin
+                    ? "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; builtin call argument count mismatch"
+                    : "SEMA-CALL-004: callee=%s; expected=%zu; got=%zu; call argument count mismatch",
                 callee_preview,
                 expected_arg_count,
                 called_arg_count);

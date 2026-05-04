@@ -134,6 +134,59 @@ static int test_machine_emit_lowers_labels_from_machine_layout(void) {
     return ok;
 }
 
+static int test_machine_emit_preserves_void_return_shape(void) {
+    MachineLayoutProgram layout_program;
+    MachineEmitProgram emit_program;
+    MachineEmitError emit_error;
+    int ok = 1;
+
+    memset(&emit_error, 0, sizeof(emit_error));
+    machine_layout_program_init(&layout_program);
+    machine_emit_program_init(&emit_program);
+
+    layout_program.function_count = 1;
+    layout_program.function_capacity = 1;
+    layout_program.functions = (MachineLayoutFunction *)calloc(1, sizeof(MachineLayoutFunction));
+    if (!layout_program.functions) {
+        return 0;
+    }
+
+    layout_program.functions[0].name = dup_text("main");
+    layout_program.functions[0].has_body = 1;
+    layout_program.functions[0].block_count = 1;
+    layout_program.functions[0].block_capacity = 1;
+    layout_program.functions[0].blocks = (MachineLayoutBlock *)calloc(1, sizeof(MachineLayoutBlock));
+    if (!layout_program.functions[0].name || !layout_program.functions[0].blocks) {
+        machine_layout_program_free(&layout_program);
+        machine_emit_program_free(&emit_program);
+        return 0;
+    }
+
+    layout_program.functions[0].blocks[0].layout_index = 0;
+    layout_program.functions[0].blocks[0].original_block_id = 0;
+    layout_program.functions[0].blocks[0].has_terminator = 1;
+    layout_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    layout_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_none();
+
+    if (!machine_emit_lower_program_from_machine_layout(&layout_program, &emit_program, &emit_error)) {
+        fprintf(stderr, "[machine-emit] FAIL: void-return lower failed: %s\n", emit_error.message);
+        machine_layout_program_free(&layout_program);
+        machine_emit_program_free(&emit_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &emit_program,
+        "machine_emit\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  F0.L0: ; emit.0 -> layout.0 -> bb.0\n"
+        "    ret\n");
+
+    machine_layout_program_free(&layout_program);
+    machine_emit_program_free(&emit_program);
+    return ok;
+}
+
 static int test_machine_emit_summary_surface(void) {
     MachineLayoutProgram layout_program;
     MachineEmitProgram emit_program;
@@ -1121,6 +1174,7 @@ int main(void) {
 
     ok &= test_machine_emit_summary_surface();
     ok &= test_machine_emit_lowers_labels_from_machine_layout();
+    ok &= test_machine_emit_preserves_void_return_shape();
     ok &= test_machine_emit_bridge_surfaces_labels_from_machine_ir();
     ok &= test_machine_emit_lower_dump_from_machine_ir();
     ok &= test_machine_emit_report_surface_from_machine_layout();

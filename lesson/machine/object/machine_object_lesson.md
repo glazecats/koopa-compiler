@@ -55,6 +55,12 @@
    - 不再只有 raw object file
 4. global-object / data-fixup slice
    - `.sbss` / `.sdata` / `global-object` / data-side fixup 也已经在这层保留
+5. explicit profile-name dump
+   - dump/report-dump 现在会直接打印
+     - `generic`
+     - `riscv32-preview`
+     - `i386-preview`
+     这种 profile 名，而不是只露出一个数字枚举值
 
 所以现在这层除了“section/symbol/fixup 正式容器化”，还要记成：
 
@@ -178,6 +184,11 @@
 - `object`：把雏形装进正式容器
 - `reloc`：把 fixup 再提升成 relocation record/table
 
+最近这条 object line 还可以再压成一句更贴近当前实现的话：
+
+- `machine_object` 现在已经不只是“把东西装起来”
+- 它还会把当前 preview profile/policy 以更适合 consumer 直接阅读的形式带出来
+
 ---
 
 ## 3. 文件定位
@@ -203,6 +214,13 @@
 - bytes report/program -> object lowering
 - verifier
 - dump
+
+如果你要按最近这轮未提交改动去看源码，最值得直接盯一眼的两个变化点是：
+
+- `machine_object_target_profile_name(...)`
+  - 说明 dump/report 已经开始把 profile 当成“给人和 consumer 看懂的名字”
+- `machine_object_dump_report(...)`
+  - 说明 report 层不只是缓存 summary，也在承担更稳定的 consumer-facing文本 contract
 
 ---
 

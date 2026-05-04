@@ -257,12 +257,20 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
 
             if (block->has_terminator) {
                 if (block->terminator.kind == IR_TERM_RETURN) {
-                    if (!ir_append_string(&builder, "    ret ") ||
-                        !ir_append_value_name(&builder,
-                            program,
-                            function,
-                            block->terminator.as.return_value) ||
-                        !ir_append_string(&builder, "\n")) {
+                    if (!ir_append_string(&builder, "    ret")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (block->terminator.has_return_value &&
+                        (!ir_append_string(&builder, " ") ||
+                            !ir_append_value_name(&builder,
+                                program,
+                                function,
+                                block->terminator.as.return_value))) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (!ir_append_string(&builder, "\n")) {
                         free(builder.data);
                         return 0;
                     }

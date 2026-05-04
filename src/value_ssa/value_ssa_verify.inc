@@ -345,6 +345,9 @@ static int value_ssa_verify_terminator(const ValueSsaFunction *function,
 
     switch (terminator->kind) {
     case VALUE_SSA_TERM_RETURN:
+        if (!terminator->has_return_value) {
+            return 1;
+        }
         return value_ssa_verify_value_ref(terminator->as.return_value,
             function->next_value_id,
             "return value",
@@ -1006,8 +1009,10 @@ static int value_ssa_verify_value_availability(const ValueSsaFunction *function,
 
         switch (block->terminator.kind) {
         case VALUE_SSA_TERM_RETURN:
-            VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
-                block->id, block->instruction_count, block->terminator.as.return_value, "return value");
+            if (block->terminator.has_return_value) {
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                    block->id, block->instruction_count, block->terminator.as.return_value, "return value");
+            }
             break;
         case VALUE_SSA_TERM_BRANCH:
             VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(

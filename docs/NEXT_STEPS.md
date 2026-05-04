@@ -96,104 +96,63 @@
 - Current multi-round implementation focus is now the following ordered line,
   and it should be treated as the default mainline until these items are
   materially closed:
-  1. finish `lv7`
-  2. redesign and harden `SEMA-CF-001` / function-return control-flow
-     reasoning so it is conservative, reasonable, and only rejects clearly
-     wrong shapes
-  3. replace the current selected-side conservative cleanup fallback with a
-     real CFG live-out-aware cross-block copy/dead-def cleanup backed by
-     explicit dataflow, not successor peeking
-  4. formally solve full `memory_ssa_pass` / `memory-binary CSE`
-     convergence instead of relying on compiler fallback behavior
-  5. keep repository regressions plus course tests green throughout
+  1. pass course `lv8` under `autotest -riscv -s lv8 /workspaces/compiler_lab`
+  2. land complete `void` compatibility across the current front-end /
+     semantic / lowering chain rather than a parse-only partial stub
+  3. land SysY builtin callable visibility for the course runtime surface
+     (`getint/getch/getarray/putint/putch/putarray/starttime/stoptime`)
+  4. keep repository regressions plus course tests green throughout
+  5. after `lv8` is stable again, return to the reopened downstream
+     RISC-V artifact-honesty line (`machine_reloc -> machine_elf`)
 - Current progress snapshot for that ordered line:
-  - `lv7`: **complete / 12 of 12 passing**, including the earlier
-    `06_nested_while` blocker after backing out an unsound
-    post-phi `machine_ir` known-slot branch CFG fold
-  - `SEMA-CF-001` boundary hardening: **checkpoint-near / roughly 98%**
-    after locking the function-level rule to
-    `guaranteed_return && !may_fallthrough` and adding focused regressions for
-    infinite-loop all-path-return accept/reject boundaries; current loop
-    policy now also flows through one shared semantic helper instead of
-    duplicated `while` / `for` decision trees, with nested infinite-loop
-    return boundaries regression-locked on both `while(1)` and `for(;;)`
-    families, including the current mixed `for -> while` and `while -> for`
-    nested shapes too, plus matched mixed nested break-guard refinement
-    families in both directions (`while -> for` and `for -> while`), plus the
-    mirrored direct `if(a) ... else break;` continuing-path refinement on both
-    constant-true `while(1)` and `for(;;)` loops;
-    the current line now also rejects
-    one first explicit family of constant-true partial-exit dead loops where a
-    guarded `break`/`return` condition is provably forced false again on the
-    loop backedge, including the first matching `for`-step family where the
-    step expression itself re-forces that exit guard false before the next
-    iteration, plus the first narrow direct-identifier fallthrough refinement
-    where `if(a) break;` lets the continuing path reuse `a==0` for later
-    backedge-proof checks
-  - CFG live-out-aware selected cleanup: **checkpoint-near / roughly 99%**
-    after replacing successor-peeking-only cleanup with a first explicit
-    selected-side dataflow slice: block-entry must-agree alias propagation now
-    rewrites copy/materialize facts across CFG edges, and block `live_out`
-    facts now guard cross-block trivial-def / dead-def removal; the current
-    selected cleanup line also keeps caller-clobber versus callee-preserved
-    `call` barriers explicit in both alias propagation and focused regression
-    coverage instead of pretending cross-call copy facts are always safe;
-    spill-slot aliases are now also regression-locked as surviving those same
-    `call` barriers, so the current cleanup line no longer only exercises the
-    register-side half of the cross-call alias story, and must-agree
-    spill-slot joins plus unique-successor spill alias propagation and
-    disagreeing spill-join preservation are now likewise locked on the
-    selected cleanup path, so the current spill-backed path now has coverage
-    on the three main local CFG families we already exercise on registers:
-    straight successor flow, must-agree join flow, and disagreeing join flow;
-    cross-block dead-def removal is now also regression-locked for both
-    register-backed and spill-backed defs when a successor immediately
-    redefines the same resource before any surviving downstream use, and the
-    current live-out line is now also explicitly locked against the opposite
-    mistake on both resource families: if only one successor path redefines
-    the resource but another path still carries the old value to a later use,
-    the predecessor-side def remains live and must be preserved; that same
-    “partial path kills are not whole-CFG kills” rule is now also explicitly
-    locked across `call` barriers, including the split case where one
-    successor path passes through a caller-clobbering call while another path
-    still relies on the older value, and the current cleanup line is now also
-    regression-locked on the complementary mixed-kill distinction across
-    resource kinds: when every path invalidates a caller-clobbered register
-    before the later use (for example one path by `call`, another by
-    redefinition), the predecessor-side register def may be removed, while the
-    analogous spill-backed def remains live because the `call` side does not
-    invalidate the spill resource; the current live-out line now also
-    exercises the mixed-kill split explicitly when different successor paths
-    invalidate the register resource by different mechanisms (`call` on one
-    path, redefinition on another) while the analogous spill resource remains
-    live through the `call` path, and the latest focused coverage now also
-    locks same-predecessor multi-resource precision explicitly: one predecessor
-    may lose its dead register def while keeping a sibling spill-backed def
-    live (and, depending on the later path split, either preserve it as
-    `retspill` or fold it further to `reti`) under the same successor region
-    rather than forcing a coarse one-size-fits-all keep/remove decision; the
-    current selected cleanup line now therefore exercises not only
-    path-sensitive but also resource-sensitive live-out precision under mixed
-    `call` / redefinition pressure, including
-    the same-predecessor split where a dead register-backed def disappears
-    while a sibling spill-backed def still survives through the very same
-    successor region; current focused `machine_select` cleanup coverage now
-    also rechecks both direct targeted regressions and the dedicated
-    `machine_select` test binary green after the latest semantic-side closure
-    work, so this line should now be treated as effectively checkpointed
-    unless a concrete selected-cleanup bug reopens it
-  - full memory-cse convergence fix: **complete / regression-locked**
-    after removing the temporary compiler fallback, sharing the same widened
-    memory-binary fixed-point budget across the nested join/expose/full CSE
-    loops, and keeping the default `compiler -riscv` / `-perf` path on the
-    memory-full canonicalization route; current targeted
-    `memory_ssa_pass` / compiler / course-suite coverage stayed green on the
-    post-fallback line
-  - regression hygiene: **active and currently green**
-    including refreshed `machine_layout` compare-family bridge expectations,
-    refreshed `memory_ssa` bridge expectations for the now-simplified local
-    diamond case, repository targeted suites, full `make test`, and the
-    course `lv5` / `lv6` / `lv7` RISC-V suites
+  - `lv8` course line: **complete / 12 of 12 passing**
+    under
+    `CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases -s lv8 /workspaces/compiler_lab`
+    after closing the call/result preservation bugs in `03_more_params` /
+    `06_complex_call` / `07_recursion`, fixing the `_start` / CRT coexistence
+    issue for `08_lib_funcs`, stabilizing the `machine_ir -> machine_select ->
+    machine_layout -> machine_emit -> machine_bytes` CLI lowering path so
+    loop-carried copies survive into final RISC-V text for `10_complex`, and
+    shrinking the last `11_short_circuit` blocker from a broad course failure
+    down to one backend / Memory-SSA-side corner case that is now at least
+    course-correct again
+  - `void` compatibility line: **course-complete / effectively 100% toward ideal**
+    with the old front-end-only compatibility bridge now materially shrunk:
+    `IR -> lower_ir -> value_ssa -> memory_ssa -> machine_ir ->
+    machine_select -> machine_layout -> machine_emit -> machine_encode ->
+    machine_bytes` all accept an explicit no-value return shape now, and the
+    encode boundary no longer treats return operand shape as an unchecked
+    carry-through detail. Direct preview bytes/tests already lock the
+    resulting bare `ret` behavior instead of forcing those layers to route
+    `void` through a synthetic `ret 0` all the way down. The encode/bytes
+    report-side terminator summaries now also preserve whether one return is
+    bare or value-carrying instead of collapsing that distinction in the
+    structured consumer surface, and the dump surfaces now mirror the
+    selected/layout meaning more closely instead of flattening return shape
+    back into a single compatibility string. The main remaining ideal-state
+    work is now only very narrow later-stage artifact/query polish rather
+    than first-class `void` return semantics
+  - SysY builtin callable-visibility line: **course-complete / roughly 80% toward ideal**
+    with the required current runtime surface
+    `getint/getch/getarray/putint/putch/putarray/starttime/stoptime`
+    now accepted by the front-end and exercised through the course suite. The
+    remaining ideal-state work is cleanup / documentation / regression
+    tightening rather than first-support bring-up
+  - regression / ideal-state tail: **checkpoint-near / roughly 98%**
+    course `lv8` remains closed, `test-memory-ssa-pass` is green again, and
+    the previously reopened branch-materialized / mixed global-load
+    forwarding family has been reclosed on a more conservative-but-stable
+    rule: join-load PRE is now staged with all-predecessor validation first,
+    and the branch-materialized partial-unknown cases are explicitly locked
+    to the current conservative shape that keeps direct predecessor stores
+    plus the final join load when the side-exit predecessor is not rewritten
+    into a cross-edge global-value phi. The remaining work on this tail is
+    broad repository sweep / polish, not the old load-forwarding
+    non-convergence bug itself
+  - older closure lines remain maintenance-first:
+    `lv7` is complete, `SEMA-CF-001` is checkpoint-near, and
+    `machine_select` cleanup is effectively checkpointed unless a concrete bug
+    reopens them
 - The downstream observe/runtime provenance follow-through line
   (`machine_elf -> ... -> machine_journal`) is now effectively
   **checkpointed end-to-end** for the current workstream.
@@ -327,6 +286,30 @@
     `.sbss` / `.sdata` section summaries plus `global-object` symbols, and
     direct `machine_object -> machine_reloc` builds now preserve those
     sections structurally even when they carry zero relocations
+  - that same object/reloc consumer-facing dump/report surface now also keeps
+    explicit target-profile names instead of flattening non-RISC-V preview
+    lanes back into generic or numeric profile placeholders, so downstream
+    artifact snapshots can distinguish at least `generic`,
+    `riscv32-preview`, and `i386-preview` directly without mirroring
+    implementation-side enums
+  - that same profile-name honesty is now also regression-locked on the
+    non-RISC-V preview side rather than being only a generic-path cleanup:
+    focused `machine_object` / `machine_reloc` tests now explicitly require
+    `i386-preview` to survive through dump/report text too, so the surface
+    can no longer silently regress back to a generic/numeric placeholder
+  - that same artifact-honesty thread now also reaches `machine_container`
+    instead of dropping the selected relocation profile/policy facts between
+    `machine_reloc` and `machine_elf`: container dumps now surface the
+    inherited profile name and the same addend/fallthrough policy summary the
+    reloc layer already exposes, and the `i386-preview` lane is explicitly
+    regression-locked there too
+  - that same downstream honesty line now also reaches the actual
+    `machine_elf` report dump surface instead of stopping at raw-file dump
+    plus separate query helpers: report dumps now emit the cached artifact,
+    header, policy, and relocation-family summaries explicitly before the
+    embedded file dump, so callers no longer need to choose between
+    “structured summary API” and “human-readable dump text” at the ELF
+    boundary
   - that same reopened RISC-V line now also has one first explicit
     data-reference slice for global accesses: small preview `load_global` /
     `store_global` families may now survive as paired `data-addr` +
@@ -1992,6 +1975,19 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-03: The `SEMA-CF-001` closure line now also locks the mirrored mixed-nested break-guard family instead of covering only one loop-direction. Focused semantic regressions now cover both `while(1){ for(;;){ if(a) break; ... } return ...; }` and `for(;;){ while(1){ if(a) break; ... } return ...; }` in both accept and reject forms, so the shared loop helper no longer relies on one-way mixed nesting coverage only. `semantic_regression_test`, full `make test`, and `git diff --check` stayed green.
 - 2026-05-04: That same `SEMA-CF-001` closure line now also locks the mirrored direct continuing-path polarity instead of testing only `if(a) break;`-style refinement. Constant-true `while(1)` and `for(;;)` loops now have focused accept/reject regressions for `if(a) ... else break;` too, so the direct-identifier continuing-path refinement is covered on both branch polarities rather than only one. `semantic_regression_test`, full `make test`, and `git diff --check` stayed green again.
 - 2026-05-04: The current CFG live-out-aware `machine_select` cleanup line was also reclosed explicitly after the semantic-side closure work rather than being left on an older implicit checkpoint. The dedicated `machine_select` test binary is green, the spill/register/call-barrier/live-out cleanup matrix remains green under the repository suite, and the selected-cleanup line should now be treated as effectively checkpointed for the active reopen unless a concrete correctness bug reappears.
+- 2026-05-04: The default active implementation line has now explicitly switched from the earlier `lv7`/semantic/selected-cleanup closure bundle to the course `lv8` RISC-V suite. The first direct run under `autotest -riscv -s lv8 /workspaces/compiler_lab` exposed a compact course-compatibility cluster rather than a broad backend collapse: current failures center on missing `void` front-end/semantic/lowering compatibility plus missing SysY builtin callable visibility (`getint/getch/getarray/putint/putch/putarray/starttime/stoptime`), while the initial `-lsysy` family was also traced to passing the library root at the wrong directory level during the manual `autotest` invocation. Current mainline plan is therefore to land full `void` compatibility and builtin visibility first, then rerun `lv8` with the corrected environment and only afterward return to the downstream `machine_reloc -> machine_elf` reopen.
+- 2026-05-04: While pushing `lv8`, the first working `void` bridge was intentionally landed as a compatibility layer rather than treated as the final design: current lowering/runtime export may temporarily route `void` returns through the existing value-return path plus a minimal startup/call-convention bridge so the course suite can keep moving, but that stopgap is not the intended end state. The recorded long-term target remains explicit `void` function modeling and a fuller calling/return convention surface after the immediate `lv8` blockers are cleared.
+- 2026-05-04: The reopened post-`lv8` Memory-SSA regression tail is now materially reclosed. `make test-memory-ssa-pass` is green again after tightening `memory_ssa_pass_try_phi_forward_join_load(...)` into a staged all-predecessor validation flow, so predecessor PRE loads are no longer inserted incrementally before a later predecessor veto can abort the same join-forward attempt. That removes the old `MEMORY-SSA-PASS-051` non-convergence loop on mixed/global-barrier and branch-materialized partial-unknown families. Current authority is also intentionally more conservative on one narrow shape: the branch-materialized partial-unknown family now keeps predecessor `store_global` ops plus the final join `load_global` instead of insisting on a cross-edge global-value phi through the side-exit predecessor, and the repository expectations were updated to lock that stable conservative shape rather than the older more aggressive one.
+- 2026-05-04: The follow-up safety sweep after that Memory-SSA reclosure is also green on the most relevant active fronts. `git diff --check` is clean, `make test-compiler-driver` is green, and the course command `env CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases -s lv8 /workspaces/compiler_lab` is back to `12/12` passing after narrowing predecessor-version remapping so it only applies to memory-phi defs owned by the current join block, rather than accidentally trying to reinterpret unrelated ancestor phi versions under the current predecessor set.
+- 2026-05-04: The post-`lv8` “make `void` real rather than compatibility-shaped” line advanced materially again. Front/mid IR already had first-class no-value return semantics by the earlier slice; this round carried that same shape through `machine_ir`, `machine_select`, `machine_layout`, and `machine_emit`, so a `void` return is no longer forced through a synthetic zero-valued return operand at those backend-middle layers. Focused backend regressions now lock the more honest shape directly (`ret` instead of `reti 0`) across selected/layout/emitted surfaces, and a new `machine_bytes` preview regression locks the resulting bare RV32 return word (`0x00008067`) for a no-value return block. `test-machine-ir`, `test-machine-select`, `test-machine-layout`, `test-machine-emit`, `test-machine-bytes`, `test-compiler-driver`, and course `lv8` are all green across that change.
+- 2026-05-04: That same post-`lv8` no-value-return line is now also stricter at the `machine_encode` boundary instead of relying only on upstream legality plus downstream bytes behavior. `machine_encode_verify_program(...)` now enforces the same three-way return contract the earlier selected/layout/emitted layers already used: plain `RETURN` may be either bare/no-value or register-return only, `RETURN_IMM` must carry an immediate operand, and `RETURN_SPILL` must carry an in-range spill slot. Focused `machine_encode` regression coverage now locks those cases directly, while `test-machine-encode`, `test-machine-bytes`, `test-compiler-driver`, and course `lv8` all stayed green after the tightening. Current reading of the remaining `void` ideal-state tail is therefore “mostly downstream artifact/query polish” rather than “still missing one more core backend legality boundary.”
+- 2026-05-04: That same no-value-return cleanup line now also reaches the current structured consumer surface one step farther downstream instead of stopping at legality plus raw byte behavior. `MachineEncodeTerminatorSummary` and `MachineBytesTerminatorSummary` now explicitly preserve `has_return_value` / `return_value`, so later query/report consumers can distinguish a bare `return` from immediate/register/spill-backed returns without re-inferring it from the original terminator kind or from raw bytes. Focused encode/bytes regressions now lock both sides of that distinction, and `test-machine-encode`, `test-machine-bytes`, `test-compiler-driver`, and course `lv8` remained green across the added summary honesty.
+- 2026-05-04: The same no-value-return cleanup line now also reached the text dump surfaces, so the structured consumer honesty is no longer only a query/report fact. `machine_encode` and `machine_bytes` dumps now mirror the earlier selected/layout spelling more closely by printing `ret`, `reti`, or `retspill` instead of flattening every return back into one compatibility string. Focused dump regressions stayed green together with `test-machine-encode`, `test-machine-bytes`, `test-compiler-driver`, and course `lv8`, so the remaining ideal-state tail is now mostly very narrow later-stage artifact polish rather than any core return-shape compatibility gap.
+- 2026-05-04: The same no-value-return cleanup line is now effectively closed for the current workstream. `test-machine-encode`, `test-machine-bytes`, `test-compiler-driver`, and course `lv8` stayed green after the final dump/query alignment pass, and `git diff --check` is still clean. Current authority is that the remaining work is no longer about core `void` compatibility at all; it is only the earlier reopened RISC-V artifact-honesty line (`machine_reloc -> machine_elf`) and any later downstream polish that comes up from there.
+- 2026-05-04: The reopened object/reloc artifact-honesty line now also tightened one remaining presentation-side compatibility fold. `machine_object` and `machine_reloc` dump/report output no longer collapse target profiles back into numeric or generic-only placeholders at the report surface; they now print explicit profile names that stay aligned with the underlying profile enum (`generic`, `riscv32-preview`, `i386-preview`). Focused object/reloc regressions plus `test-compiler-driver`, course `lv8`, and `git diff --check` all remained green across that cleanup, so this slice should be read as another small honesty/polish closure inside the still-active `machine_reloc -> machine_elf` mainline rather than a behavioral backend reopening.
+- 2026-05-04: That same object/reloc profile-name cleanup is now also locked on the `i386-preview` lane instead of being tested only through generic-path snapshots and implementation inspection. Focused `machine_object` and `machine_reloc` regressions now build a tiny `i386-preview` artifact chain and require dump/report text to preserve the explicit `i386-preview` profile name, while `test-machine-object`, `test-machine-reloc`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green. Current reading is that this removes another small “surface still works, but only one preview lane is actually locked” compatibility tail from the active `machine_reloc -> machine_elf` reopen.
+- 2026-05-04: The same profile/policy honesty line now also reached `machine_container`, which previously still behaved more like a pure packaging layer than an artifact-facing summary surface. Container dumps now expose the inherited relocation profile name plus the current addend/fallthrough policy text instead of dropping that context between `machine_reloc` and `machine_elf`, and a focused `i386-preview` regression now locks that behavior. `test-machine-container`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green, so this should be read as another small but real downstream honesty closure inside the still-active `machine_reloc -> machine_elf` mainline.
+- 2026-05-04: The same artifact-honesty line now also tightened `machine_elf_dump_report(...)`, which had still been acting more like a thin alias of raw file dump despite the richer cached report artifact already existing. Report dumps now print the cached artifact summary, header summary, target-policy summary, and relocation-family summary before the canonical file dump, and focused ELF helper regressions now lock those added report-side lines on both imported/reprofiled and direct-preview paths. `test-machine-elf`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green, so this is another presentation/query closure rather than a new behavioral backend change.
 
 ## Historical Note
 

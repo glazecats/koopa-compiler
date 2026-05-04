@@ -73,11 +73,13 @@ static int ir_pass_try_fold_jump_to_return(IrBasicBlock *block, const IrFunction
     target_block = &function->blocks[block->terminator.as.jump_target];
     if (target_block->instruction_count != 0
         || !target_block->has_terminator
-        || target_block->terminator.kind != IR_TERM_RETURN) {
+        || target_block->terminator.kind != IR_TERM_RETURN
+        || !target_block->terminator.has_return_value) {
         return 0;
     }
 
     block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = target_block->terminator.as.return_value;
     return 1;
 }
@@ -188,6 +190,7 @@ static int ir_pass_try_fold_branch_to_same_return(IrBasicBlock *block,
     }
 
     block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = resolved_then;
     if (out_changed) {
         *out_changed = 1;

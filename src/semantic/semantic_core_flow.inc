@@ -45,6 +45,59 @@ static void semantic_set_error(SemanticError *error,
     snprintf(error->message, sizeof(error->message), "%s", message);
 }
 
+static const SemanticBuiltinFunctionInfo *semantic_find_builtin_function(const char *name) {
+    static const SemanticBuiltinFunctionInfo k_builtins[] = {
+        {"getint", AST_FUNCTION_RETURN_INT, 0u},
+        {"getch", AST_FUNCTION_RETURN_INT, 0u},
+        {"getarray", AST_FUNCTION_RETURN_INT, 1u},
+        {"putint", AST_FUNCTION_RETURN_VOID, 1u},
+        {"putch", AST_FUNCTION_RETURN_VOID, 1u},
+        {"putarray", AST_FUNCTION_RETURN_VOID, 2u},
+        {"starttime", AST_FUNCTION_RETURN_VOID, 0u},
+        {"stoptime", AST_FUNCTION_RETURN_VOID, 0u},
+    };
+    size_t i;
+
+    if (!name || name[0] == '\0') {
+        return NULL;
+    }
+    for (i = 0; i < sizeof(k_builtins) / sizeof(k_builtins[0]); ++i) {
+        if (strcmp(k_builtins[i].name, name) == 0) {
+            return &k_builtins[i];
+        }
+    }
+    return NULL;
+}
+
+static const AstExternal *semantic_find_visible_function_external(const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const char *name) {
+    size_t visible_external_count;
+    size_t i;
+
+    if (!program || !name || name[0] == '\0') {
+        return NULL;
+    }
+
+    visible_external_count = include_current_external ? (func_index + 1u) : func_index;
+    if (visible_external_count > program->count) {
+        visible_external_count = program->count;
+    }
+
+    for (i = 0; i < visible_external_count; ++i) {
+        const AstExternal *candidate = &program->externals[i];
+
+        if (candidate->kind == AST_EXTERNAL_FUNCTION &&
+            candidate->name &&
+            strcmp(candidate->name, name) == 0) {
+            return candidate;
+        }
+    }
+
+    return NULL;
+}
+
 static int names_equal(const AstExternal *a, const AstExternal *b) {
     if (!a->name || !b->name) {
         return 0;

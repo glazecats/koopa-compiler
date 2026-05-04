@@ -513,6 +513,48 @@ static void machine_ir_rewrite_terminator_operands_with_local_aliases(size_t res
     }
 }
 
+static int machine_ir_instruction_is_preserved_edge_copy(const MachineIrFunction *function,
+    const MachineIrBasicBlock *block,
+    size_t instruction_index,
+    const size_t *predecessor_counts) {
+    size_t successor_a = (size_t)-1;
+    size_t successor_b = (size_t)-1;
+    size_t trailing_index;
+
+    if (!function || !block || !predecessor_counts || instruction_index >= block->instruction_count) {
+        return 0;
+    }
+    if (block->instructions[instruction_index].kind != MACHINE_IR_INSTR_MOV) {
+        return 0;
+    }
+    if (!block->has_terminator) {
+        return 0;
+    }
+
+    switch (block->terminator.kind) {
+        case MACHINE_IR_TERM_JUMP:
+            successor_a = block->terminator.as.jump_target;
+            break;
+        case MACHINE_IR_TERM_BRANCH:
+            successor_a = block->terminator.as.branch.then_target;
+            successor_b = block->terminator.as.branch.else_target;
+            break;
+        default:
+            return 0;
+    }
+
+    if ((successor_a >= function->block_count || predecessor_counts[successor_a] <= 1u) &&
+        (successor_b >= function->block_count || predecessor_counts[successor_b] <= 1u)) {
+        return 0;
+    }
+    for (trailing_index = instruction_index + 1u; trailing_index < block->instruction_count; ++trailing_index) {
+        if (block->instructions[trailing_index].kind != MACHINE_IR_INSTR_MOV) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void machine_ir_collect_block_use_def(const MachineIrProgram *program,
     const MachineIrFunction *function,
     const MachineIrBasicBlock *block,
@@ -879,8 +921,14 @@ static int machine_ir_cleanup_local_copies_in_function(MachineIrProgram *program
             MachineIrInstruction *instruction = &block->instructions[instruction_index];
             size_t result_index = (size_t)-1;
             int removable_dead_def = machine_ir_instruction_is_removable_dead_def(instruction);
+            int preserve_edge_copy = machine_ir_instruction_is_preserved_edge_copy(
+                function,
+                block,
+                instruction_index,
+                predecessor_counts);
 
-            if (instruction->kind == MACHINE_IR_INSTR_MOV &&
+            if (!preserve_edge_copy &&
+                instruction->kind == MACHINE_IR_INSTR_MOV &&
                 instruction->has_result &&
                 machine_ir_operands_equal(instruction->result, instruction->as.mov_value)) {
                 delete_flags[instruction_index] = 1u;
@@ -893,6 +941,7 @@ static int machine_ir_cleanup_local_copies_in_function(MachineIrProgram *program
             if (instruction->has_result &&
                 machine_ir_operand_get_resource_index(program, function, instruction->result, &result_index) &&
                 removable_dead_def &&
+                !preserve_edge_copy &&
                 !needed[result_index]) {
                 delete_flags[instruction_index] = 1u;
                 if (out_changed) {

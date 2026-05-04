@@ -138,6 +138,11 @@ Do not start with:
     report artifact above the raw relocation file, so later consumers can
     stay on cached target-policy / family / section / relocation summaries
     rather than rewalking raw relocation arrays every time
+  - that same report-facing artifact now also exposes one first section-local
+    relocation-summary slice instead of forcing later consumers to bounce
+    back down through the raw file just to recover "the relocation summaries
+    that belong to this one relocation section"; current report helpers may
+    now return the cached summary rows for one section directly
   - preview addend/fallthrough honesty is now also verifier-backed at the
     relocation boundary itself instead of remaining only a build-path habit:
     malformed preview relocations with drifted addends or fake zero-patch

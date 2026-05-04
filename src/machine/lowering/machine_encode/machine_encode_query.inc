@@ -263,6 +263,17 @@ int machine_encode_function_get_block_terminator_summary(const MachineEncodeFunc
     memset(out_summary, 0, sizeof(*out_summary));
     out_summary->kind = block->block.terminator.kind;
     switch (block->block.terminator.kind) {
+        case MACHINE_LAYOUT_TERM_RETURN:
+            if (block->block.terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE) {
+                out_summary->has_return_value = 1;
+                out_summary->return_value = block->block.terminator.as.return_value;
+            }
+            break;
+        case MACHINE_LAYOUT_TERM_RETURN_IMM:
+        case MACHINE_LAYOUT_TERM_RETURN_SPILL:
+            out_summary->has_return_value = 1;
+            out_summary->return_value = block->block.terminator.as.return_value;
+            break;
         case MACHINE_LAYOUT_TERM_FALLTHROUGH: {
             const MachineEncodeBlock *target =
                 machine_encode_target_block(function, block->block.terminator.as.fallthrough_target);

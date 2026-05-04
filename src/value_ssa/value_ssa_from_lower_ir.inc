@@ -327,7 +327,9 @@ after_instruction_append:
 
     switch (input_block->terminator.kind) {
     case LOWER_IR_TERM_RETURN:
-        {
+        if (!input_block->terminator.has_return_value) {
+            return value_ssa_block_set_void_return(output_block, error);
+        } else {
             ValueSsaValueRef return_value;
 
             if (!value_ssa_map_value_from_lower_ir_rename_state(input_block->terminator.as.return_value,

@@ -119,6 +119,7 @@ typedef enum {
 
 typedef struct {
     ValueSsaTerminatorKind kind;
+    int has_return_value;
     union {
         ValueSsaValueRef return_value;
         size_t jump_target;
@@ -357,6 +358,7 @@ int value_ssa_block_append_instruction(ValueSsaBasicBlock *block,
 int value_ssa_block_set_return(ValueSsaBasicBlock *block,
     ValueSsaValueRef value,
     ValueSsaError *error);
+int value_ssa_block_set_void_return(ValueSsaBasicBlock *block, ValueSsaError *error);
 int value_ssa_block_set_jump(ValueSsaBasicBlock *block,
     size_t target_block_id,
     ValueSsaError *error);

@@ -327,8 +327,10 @@ int machine_select_basic_block_get_terminator_summary(const MachineSelectBasicBl
         case MACHINE_SELECT_TERM_RETURN:
         case MACHINE_SELECT_TERM_RETURN_IMM:
         case MACHINE_SELECT_TERM_RETURN_SPILL:
-            out_summary->has_return_value = 1;
-            out_summary->return_value = block->terminator.as.return_value;
+            if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE) {
+                out_summary->has_return_value = 1;
+                out_summary->return_value = block->terminator.as.return_value;
+            }
             break;
         case MACHINE_SELECT_TERM_JUMP:
             out_summary->has_primary_target = 1;

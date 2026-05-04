@@ -4772,7 +4772,7 @@ static int test_machine_select_distinguishes_void_calls(void) {
     instruction.as.call.args = NULL;
     instruction.as.call.arg_count = 0;
     if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
-        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_ir_block_set_void_return(&function->blocks[0], &machine_error) ||
         !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
         fprintf(stderr, "[machine-select] FAIL: void-call lowering failed\n");
         machine_ir_program_free(&machine_program);
@@ -4786,7 +4786,7 @@ static int test_machine_select_distinguishes_void_calls(void) {
         "function main params=0 locals=0 spills=0\n"
         "  bb.0:\n"
         "    call_void sink()\n"
-        "    reti 0\n");
+        "    ret\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);

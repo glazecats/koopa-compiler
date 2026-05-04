@@ -219,8 +219,11 @@ static int machine_ir_clone_value_ssa_program(const ValueSsaProgram *source,
             if (source_block->has_terminator) {
                 switch (source_block->terminator.kind) {
                     case VALUE_SSA_TERM_RETURN:
-                        if (!value_ssa_block_set_return(
-                                dest_block, source_block->terminator.as.return_value, &value_error)) {
+                        if ((source_block->terminator.has_return_value &&
+                                !value_ssa_block_set_return(
+                                    dest_block, source_block->terminator.as.return_value, &value_error)) ||
+                            (!source_block->terminator.has_return_value &&
+                                !value_ssa_block_set_void_return(dest_block, &value_error))) {
                             machine_ir_set_error_from_value_ssa(error, &value_error);
                             value_ssa_program_free(out_program);
                             return 0;
@@ -382,7 +385,10 @@ static int machine_ir_clone_program(const MachineIrProgram *source,
             if (source_block->has_terminator) {
                 switch (source_block->terminator.kind) {
                     case MACHINE_IR_TERM_RETURN:
-                        if (!machine_ir_block_set_return(dest_block, source_block->terminator.as.return_value, error)) {
+                        if ((source_block->terminator.as.return_value.kind == MACHINE_IR_OPERAND_NONE &&
+                                !machine_ir_block_set_void_return(dest_block, error)) ||
+                            (source_block->terminator.as.return_value.kind != MACHINE_IR_OPERAND_NONE &&
+                                !machine_ir_block_set_return(dest_block, source_block->terminator.as.return_value, error))) {
                             machine_ir_program_free(out_program);
                             return 0;
                         }

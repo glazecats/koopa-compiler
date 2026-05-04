@@ -96,6 +96,7 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     }
 
     external.kind = kind;
+    external.function_return_type = AST_FUNCTION_RETURN_INT;
     external.name = NULL;
     external.name_length = 0;
     external.is_const_qualified = 0;

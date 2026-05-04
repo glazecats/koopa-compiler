@@ -9,9 +9,187 @@
 
 #include <limits.h>
 
+typedef struct {
+    const char *name;
+    size_t parameter_count;
+} IrBuiltinFunctionInfo;
+
+static const IrBuiltinFunctionInfo k_ir_builtin_functions[] = {
+    {"getint", 0u},
+    {"getch", 0u},
+    {"getarray", 1u},
+    {"putint", 1u},
+    {"putch", 1u},
+    {"putarray", 2u},
+    {"starttime", 0u},
+    {"stoptime", 0u},
+};
+
+static const IrBuiltinFunctionInfo *ir_find_builtin_function_info(const char *name) {
+    size_t builtin_index;
+
+    if (!name || name[0] == '\0') {
+        return NULL;
+    }
+    for (builtin_index = 0u;
+        builtin_index < sizeof(k_ir_builtin_functions) / sizeof(k_ir_builtin_functions[0]);
+        ++builtin_index) {
+        if (strcmp(k_ir_builtin_functions[builtin_index].name, name) == 0) {
+            return &k_ir_builtin_functions[builtin_index];
+        }
+    }
+    return NULL;
+}
+
 static int ir_function_parameter_count_matches_external(const IrFunction *function,
     const AstExternal *external) {
     return function && external && function->parameter_count == external->parameter_count;
+}
+
+static int ir_ensure_builtin_function_signature(IrProgram *program,
+    const char *name,
+    IrFunction **out_function,
+    IrError *error) {
+    size_t builtin_index;
+    size_t param_index;
+    const IrBuiltinFunctionInfo *builtin = NULL;
+    IrFunction *function = NULL;
+
+    if (out_function) {
+        *out_function = NULL;
+    }
+    if (!program || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    builtin = ir_find_builtin_function_info(name);
+    if (!builtin) {
+        return 0;
+    }
+
+    function = ir_program_find_function_mut(program, builtin->name);
+    if (!function) {
+        if (!ir_program_append_function(program, builtin->name, &function, error)) {
+            return 0;
+        }
+    }
+
+    if (function->local_count == 0u && function->parameter_count == 0u &&
+        builtin->parameter_count > 0u) {
+        for (param_index = 0u; param_index < builtin->parameter_count; ++param_index) {
+            char fallback_name[32];
+
+            snprintf(fallback_name, sizeof(fallback_name), "param%zu", param_index);
+            if (!ir_function_append_local(function, fallback_name, 1, NULL, error)) {
+                return 0;
+            }
+        }
+    }
+
+    if (function->parameter_count != builtin->parameter_count) {
+        ir_set_error(error,
+            0,
+            0,
+            "IR-LOWER-028: builtin function '%s' declaration arity mismatch during IR lowering",
+            builtin->name);
+        return 0;
+    }
+
+    if (out_function) {
+        *out_function = function;
+    }
+    return 1;
+}
+
+static int ir_predeclare_builtin_calls_in_expression(IrProgram *program,
+    const AstExpression *expr,
+    IrError *error) {
+    size_t arg_index;
+    const char *called_name = NULL;
+
+    if (!program || !expr) {
+        return 1;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_PAREN:
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.inner, error);
+    case AST_EXPR_UNARY:
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.unary.operand, error);
+    case AST_EXPR_POSTFIX:
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.postfix.operand, error);
+    case AST_EXPR_BINARY:
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.binary.left, error) &&
+            ir_predeclare_builtin_calls_in_expression(program, expr->as.binary.right, error);
+    case AST_EXPR_TERNARY:
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.ternary.condition, error) &&
+            ir_predeclare_builtin_calls_in_expression(program, expr->as.ternary.then_expr, error) &&
+            ir_predeclare_builtin_calls_in_expression(program, expr->as.ternary.else_expr, error);
+    case AST_EXPR_CALL:
+        called_name = ir_extract_direct_call_callee_name(expr->as.call.callee);
+        if (called_name && ir_find_builtin_function_info(called_name) &&
+            !ir_ensure_builtin_function_signature(program, called_name, NULL, error)) {
+            return 0;
+        }
+        if (!ir_predeclare_builtin_calls_in_expression(program, expr->as.call.callee, error)) {
+            return 0;
+        }
+        for (arg_index = 0u; arg_index < expr->as.call.arg_count; ++arg_index) {
+            if (!ir_predeclare_builtin_calls_in_expression(program, expr->as.call.args[arg_index], error)) {
+                return 0;
+            }
+        }
+        return 1;
+    default:
+        return 1;
+    }
+}
+
+static int ir_predeclare_builtin_calls_in_statement(IrProgram *program,
+    const AstStatement *stmt,
+    IrError *error) {
+    size_t i;
+
+    if (!program || !stmt) {
+        return 1;
+    }
+
+    for (i = 0u; i < stmt->expression_count; ++i) {
+        if (!ir_predeclare_builtin_calls_in_expression(program, stmt->expressions[i], error)) {
+            return 0;
+        }
+    }
+    for (i = 0u; i < stmt->child_count; ++i) {
+        if (!ir_predeclare_builtin_calls_in_statement(program, stmt->children[i], error)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int ir_predeclare_used_builtin_functions(IrProgram *program,
+    const AstProgram *ast_program,
+    IrError *error) {
+    size_t external_index;
+
+    if (!program || !ast_program) {
+        return 1;
+    }
+
+    for (external_index = 0u; external_index < ast_program->count; ++external_index) {
+        const AstExternal *external = &ast_program->externals[external_index];
+
+        if (external->declaration_initializer &&
+            !ir_predeclare_builtin_calls_in_expression(program, external->declaration_initializer, error)) {
+            return 0;
+        }
+        if (external->function_body &&
+            !ir_predeclare_builtin_calls_in_statement(program, external->function_body, error)) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static int ir_function_set_parameter_name(IrFunction *function,
@@ -833,6 +1011,7 @@ static int ir_lower_function(IrProgram *program,
     memset(&ctx, 0, sizeof(ctx));
     ctx.program = program;
     ctx.function = function;
+    ctx.function_return_type = external->function_return_type;
     ctx.block_id = 0;
     ctx.has_block = 1;
     ctx.error = error;
@@ -873,14 +1052,23 @@ static int ir_lower_function(IrProgram *program,
         goto cleanup;
     }
 
-    if (ctx.has_block && (!ir_lower_current_block(&ctx) ||
-            !ir_lower_current_block(&ctx)->has_terminator)) {
-        ir_set_error(error,
-            external->line,
-            external->column,
-            "IR-LOWER-009: function '%s' body does not terminate on all lowered paths",
-            external->name);
+    if (ctx.has_block && !ir_lower_current_block(&ctx)) {
         goto cleanup;
+    }
+
+    if (ctx.has_block && !ir_lower_current_block(&ctx)->has_terminator) {
+        if (external->function_return_type == AST_FUNCTION_RETURN_VOID) {
+            if (!ir_block_set_void_return(ir_lower_current_block(&ctx), error)) {
+                goto cleanup;
+            }
+        } else {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-LOWER-009: function '%s' body does not terminate on all lowered paths",
+                external->name);
+            goto cleanup;
+        }
     }
 
     function->has_body = 1;
@@ -914,6 +1102,9 @@ int ir_lower_program(const AstProgram *ast_program, IrProgram *out_program, IrEr
     ir_program_init(out_program);
 
     if (!ir_predeclare_program_globals(out_program, ast_program, error)) {
+        return 0;
+    }
+    if (!ir_predeclare_used_builtin_functions(out_program, ast_program, error)) {
         return 0;
     }
 
@@ -1021,4 +1212,3 @@ int ir_lower_program(const AstProgram *ast_program, IrProgram *out_program, IrEr
 }
 
 #endif
-

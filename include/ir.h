@@ -89,6 +89,7 @@ typedef enum {
 
 typedef struct {
     IrTerminatorKind kind;
+    int has_return_value;
     union {
         IrValueRef return_value;
         size_t jump_target;

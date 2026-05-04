@@ -292,6 +292,7 @@ int machine_ir_block_append_instruction(MachineIrBasicBlock *block,
 int machine_ir_block_set_return(MachineIrBasicBlock *block,
     MachineIrOperand value,
     MachineIrError *error);
+int machine_ir_block_set_void_return(MachineIrBasicBlock *block, MachineIrError *error);
 int machine_ir_block_set_jump(MachineIrBasicBlock *block,
     size_t target_block_id,
     MachineIrError *error);

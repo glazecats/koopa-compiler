@@ -99,11 +99,11 @@
 如果只看你刚提到的这轮 front-end 新增点，最值得单独记住的测试入口是：
 
 - `tests/lexer/lexer_regression_test.c`
-  - 锁整数字面量基数和 `const` keyword tokenization
+  - 锁整数字面量基数、`const` keyword tokenization、以及 `void` keyword contract
 - `tests/parser/parser_regression_test.c`
-  - 锁 `const int` declaration / parameter 这类 AST 入口 contract
+  - 锁 `const int` declaration / parameter，以及 `int/void` function signature 这类 AST 入口 contract
 - `tests/semantic/semantic_regression_test.c`
-  - 锁 `const` initializer / assignment rule
+  - 锁 `const` initializer / assignment rule，也锁 `void` / builtin 相关语义边界
 
 当前拆分片段（11 个 `.inc`）：
 
@@ -140,12 +140,33 @@ $$
   - `01234`
   - `0x133fAb`
   - `const`
+  - `void`
 - parser / AST
   - `const int x = 1;`
   - `int f(const int a) { ... }`
+  - `void f() { return; }`
 - semantic
   - `const` declaration 必须初始化
   - 对 `const` 对象/参数赋值要拒绝
+  - `void` / non-void return shape
+  - `void` call result 不可落进 value context
+  - builtin callable visibility / builtin arity
+
+如果只看最近这一轮未提交改动，还可以再单独记一张“最新同步小表”：
+
+- semantic
+  - `SEMA-RET-001`
+  - `SEMA-RET-002`
+  - `SEMA-CALL-007`
+  - `SEMA-TOP-005`
+- IR / lower IR / SSA
+  - bare `ret` 不再被一路伪装成 `ret 0`
+- machine middle
+  - `machine_layout` 接受 void return
+  - `machine_encode` verifier 现在显式检查 return shape
+- compiler driver
+  - `compiler -riscv` 文本输出里有 `_start`
+  - call span 周围的 caller-save 次序有专门回归
 
 如果只看最新这轮你们刚收口的两条线，tests 里现在还多了两组特别值得单独记住的东西：
 
@@ -161,6 +182,23 @@ $$
   - `call` barrier 下 caller-clobber vs spill persistence
   - must-agree / disagreeing join
   - mixed path / mixed resource precision
+
+如果把“这轮 void/builtin/backend 中游同步”压成一组最该点名的测试名，我会推荐直接记这几个：
+
+- `tests/machine/lowering/machine_layout/machine_layout_test.c`
+  - `test_machine_layout_lowers_void_return_from_machine_select`
+- `tests/machine/lowering/machine_encode/machine_encode_test.c`
+  - `test_machine_encode_verifier_enforces_return_shapes`
+- `tests/compiler/compiler_driver_test.c`
+  - `test_compiler_builds_riscv_backend_dump_from_source`
+  - `test_compiler_saves_caller_regs_around_whole_call_span`
+
+它们分别锁的是：
+
+1. selected-side bare `ret` 进入 layout 不丢形状
+2. encode 边界不会把 bare return / value return 混成一种 payload
+3. 当前 `compiler -riscv` 输出已经包含 `_start` startup stub
+4. call 整段周围的 caller-save 插入顺序已经有文字级回归保护
 
 如果只按最近几轮 IR / lower-IR 改动来归类，新增测试重点主要也是几组：
 

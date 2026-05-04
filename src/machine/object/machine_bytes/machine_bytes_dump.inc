@@ -4,6 +4,19 @@
 #include "machine_bytes.c"
 #else
 
+static int machine_bytes_dump_operand(MachineBytesStringBuilder *builder, MachineEmitOperand operand) {
+    switch (operand.kind) {
+        case MACHINE_SELECT_OPERAND_IMMEDIATE:
+            return machine_bytes_append_format(builder, "%lld", operand.immediate);
+        case MACHINE_SELECT_OPERAND_REGISTER:
+            return machine_bytes_append_format(builder, "reg.%zu", operand.machine_register_id);
+        case MACHINE_SELECT_OPERAND_SPILL_SLOT:
+            return machine_bytes_append_format(builder, "spill.%zu", operand.spill_slot);
+        default:
+            return machine_bytes_append_format(builder, "<none>");
+    }
+}
+
 int machine_bytes_dump_program(const MachineBytesProgram *program,
     char **out_text,
     MachineBytesError *error) {
@@ -156,9 +169,35 @@ int machine_bytes_dump_program(const MachineBytesProgram *program,
                     }
                     break;
                 case MACHINE_LAYOUT_TERM_RETURN:
+                    if (!machine_bytes_append_format(&builder, "    ret")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (terminator_summary.has_return_value &&
+                        (!machine_bytes_append_format(&builder, " ") ||
+                            !machine_bytes_dump_operand(&builder, terminator_summary.return_value) ||
+                            !machine_bytes_append_format(&builder, "\n"))) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (!terminator_summary.has_return_value &&
+                        !machine_bytes_append_format(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
                 case MACHINE_LAYOUT_TERM_RETURN_IMM:
+                    if (!machine_bytes_append_format(&builder, "    reti ") ||
+                        !machine_bytes_dump_operand(&builder, terminator_summary.return_value) ||
+                        !machine_bytes_append_format(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
                 case MACHINE_LAYOUT_TERM_RETURN_SPILL:
-                    if (!machine_bytes_append_format(&builder, "    return\n")) {
+                    if (!machine_bytes_append_format(&builder, "    retspill ") ||
+                        !machine_bytes_dump_operand(&builder, terminator_summary.return_value) ||
+                        !machine_bytes_append_format(&builder, "\n")) {
                         free(builder.data);
                         return 0;
                     }

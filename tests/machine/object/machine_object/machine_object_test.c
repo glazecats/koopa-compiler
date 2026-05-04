@@ -336,7 +336,7 @@ static int test_machine_object_report_surface(void) {
     ok &= expect_report_dump(
         &report,
         "machine_object-report total_bytes=9 sections=1 symbols=4 fixups=2\n"
-        "target_policy profile=0 preview_offsets=0 fallthrough=0\n"
+        "target_policy profile=generic preview_offsets=0 fallthrough=0\n"
         "fixup_families: call=0 primary=1 secondary=1 data_addr=0 data_load=0 data_store=0\n"
         "section_summaries:\n"
         "  sec.0 .text span=0..9 bytes=9 symbols=4 fixups=2\n"
@@ -562,6 +562,104 @@ static int test_machine_object_preserves_target_profile_from_preview_bytes(void)
     machine_emit_program_free(&emit_program);
     machine_bytes_program_free(&bytes_program);
     machine_object_file_free(&object_file);
+    return ok;
+}
+
+static int test_machine_object_dump_uses_explicit_i386_preview_profile_name(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineObjectFile object_file;
+    MachineBytesError bytes_error;
+    MachineObjectError object_error;
+    char *dump_text = NULL;
+    char *report_dump_text = NULL;
+    MachineObjectReport report;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    memset(&object_error, 0, sizeof(object_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+    machine_object_file_init(&object_file);
+    machine_object_report_init(&report);
+
+    emit_program.function_count = 2;
+    emit_program.function_capacity = 2;
+    emit_program.functions = (MachineEmitFunction *)calloc(2, sizeof(MachineEmitFunction));
+    if (!emit_program.functions) {
+        return 0;
+    }
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1;
+    emit_program.functions[0].block_capacity = 1;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    emit_program.functions[1].name = dup_text("sink");
+    emit_program.functions[1].has_body = 1;
+    emit_program.functions[1].block_count = 1;
+    emit_program.functions[1].block_capacity = 1;
+    emit_program.functions[1].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks ||
+        !emit_program.functions[1].name || !emit_program.functions[1].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_object_report_free(&report);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 1u;
+    emit_program.functions[0].blocks[0].op_capacity = 1u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    emit_program.functions[1].blocks[0].emit_index = 0u;
+    emit_program.functions[1].blocks[0].original_layout_index = 0u;
+    emit_program.functions[1].blocks[0].original_block_id = 0u;
+    emit_program.functions[1].blocks[0].label_name = dup_text("F1.L0");
+    if (!emit_program.functions[0].blocks[0].label_name ||
+        !emit_program.functions[0].blocks[0].ops ||
+        !emit_program.functions[1].blocks[0].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_object_report_free(&report);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_VOID;
+    emit_program.functions[0].blocks[0].ops[0].as.call.callee_name = dup_text("sink");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    emit_program.functions[1].blocks[0].has_terminator = 1;
+    emit_program.functions[1].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+
+    if (!emit_program.functions[0].blocks[0].ops[0].as.call.callee_name ||
+        !machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_object_build_from_machine_bytes_program(&bytes_program, &object_file, &object_error) ||
+        !machine_object_dump_file(&object_file, &dump_text, &object_error) ||
+        !dump_text ||
+        strstr(dump_text, "machine_object profile=i386-preview ") == NULL ||
+        !machine_object_build_report_from_file(&object_file, &report, &object_error) ||
+        !machine_object_dump_report(&report, &report_dump_text, &object_error) ||
+        !report_dump_text ||
+        strstr(report_dump_text, "target_policy profile=i386-preview ") == NULL) {
+        fprintf(stderr, "[machine-object] FAIL: i386 preview profile-name dump mismatch: %s\n", object_error.message);
+        ok = 0;
+    }
+
+    free(dump_text);
+    free(report_dump_text);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    machine_object_file_free(&object_file);
+    machine_object_report_free(&report);
     return ok;
 }
 
@@ -885,6 +983,7 @@ int main(void) {
     ok &= test_machine_object_report_surface();
     ok &= test_machine_object_builds_from_machine_bytes_program_with_external_symbol();
     ok &= test_machine_object_preserves_target_profile_from_preview_bytes();
+    ok &= test_machine_object_dump_uses_explicit_i386_preview_profile_name();
     ok &= test_machine_object_preview_verifier_rejects_target_offset_drift();
     ok &= test_machine_object_surfaces_global_object_sections();
     ok &= test_machine_object_surfaces_global_data_fixups();

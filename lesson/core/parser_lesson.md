@@ -142,20 +142,23 @@ $$
 
 不满足直接失败（常见报错：`Empty token stream` 或 `Token stream missing EOF terminator`）。
 
-最近 parser 这层还要同步一个很重要的扩展：
+最近 parser 这层还要同步两个很重要的扩展：
 
 - declaration / parameter / top-level external 已经开始显式接受 `const int`
+- function external signature 现在已经显式接受 `int` 和 `void`
 
 也就是说，parser 现在不只认：
 
 - `int x;`
 - `int f(int a) {...}`
+- `void f(){ return; }`
 
 还认：
 
 - `const int x = 1;`
 - `int f(const int a) {...}`
 - `for (const int i = 0; ... )`
+- `void log(const int x) { putint(x); return; }`
 
 ---
 

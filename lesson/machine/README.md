@@ -70,6 +70,16 @@ lesson 里会经常出现：
 - ELF provenance / artifact summary
 - image 对上游 ELF provenance 的承接
 
+如果你最近主要在补 object/runtime 这条收尾线，还可以再用一句话把它们串起来：
+
+- `machine_bytes -> machine_object -> machine_reloc -> machine_container -> machine_elf -> machine_image`
+  现在已经不只是“越走越下游”
+  - 也是一条越来越完整的
+    - profile
+    - policy
+    - provenance
+    承接链
+
 ---
 
 ## 2. 最推荐的阅读顺序

@@ -702,7 +702,28 @@ int lower_ir_block_set_return(LowerIrBasicBlock *block,
 
     block->has_terminator = 1;
     block->terminator.kind = LOWER_IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = value;
+    return 1;
+}
+
+int lower_ir_block_set_void_return(LowerIrBasicBlock *block, LowerIrError *error) {
+    if (!block) {
+        lower_ir_set_error(error, 0, 0, "LOWER-IR-022: invalid return terminator contract");
+        return 0;
+    }
+    if (block->has_terminator) {
+        lower_ir_set_error(error,
+            0,
+            0,
+            "LOWER-IR-040: bb.%zu already has a terminator",
+            block->id);
+        return 0;
+    }
+
+    block->has_terminator = 1;
+    block->terminator.kind = LOWER_IR_TERM_RETURN;
+    block->terminator.has_return_value = 0;
     return 1;
 }
 

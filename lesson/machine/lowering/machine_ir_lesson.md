@@ -97,6 +97,24 @@
 - 以前：`value_ssa_machine -> machine_ir`
 - 现在：`value_ssa_machine -> machine_ir -> selected/report/preview bytes/object` 这条链已经更完整了
 
+最近这层还要再补一个很具体、很容易在讲课时漏掉的点：
+
+- `machine_ir` 现在已经正式有 `machine_ir_block_set_void_return(...)`
+
+也就是说它不再假装：
+
+- every return == `return immediate 0`
+
+而是开始认真区分：
+
+- value-carrying return
+- bare return
+
+这件事虽然看起来小，但它会直接影响后面：
+
+- `machine_select` 是出 `ret` 还是 `reti`
+- `machine_bytes` 最后 summary/dump 里是不是还保留 bare-return 事实
+
 ---
 
 ## 1. 为什么需要 `machine_ir`

@@ -3456,7 +3456,12 @@ static int test_machine_elf_build_report_helpers(void) {
         !machine_elf_report_get_relocation_summary(&report, 0u, &relocation_summary) || !relocation_summary ||
         relocation_summary->type != (uint32_t)R_386_PC32 ||
         !machine_elf_dump_report(&report, &dump_text, &elf_error) ||
-        !dump_text || strstr(dump_text, "machine_elf profile=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
+        !dump_text ||
+        strstr(dump_text, "machine_elf-report bytes=468 sections=6 symbols=5 relocations=2") == NULL ||
+        strstr(dump_text, "artifact: target=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
+        strstr(dump_text, "policy: profile=i386-preview machine=3 flags=0 call=4 primary=2 secondary=11 data_addr=1 data_load=3 data_store=9") == NULL ||
+        strstr(dump_text, "relocation_families: call=0 primary=1 secondary=1 data_addr=0 data_load=0 data_store=0") == NULL ||
+        strstr(dump_text, "machine_elf profile=i386-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         !machine_elf_build_report_from_machine_ir_report_with_profile(
             &machine_report,
             MACHINE_ELF_TARGET_PROFILE_RISCV32_PREVIEW,
@@ -3584,6 +3589,9 @@ static int test_machine_elf_report_summary_and_dump_helpers(void) {
             &dump_text,
             &elf_error) ||
         !dump_text ||
+        strstr(dump_text, "machine_elf-report bytes=468 sections=6 symbols=5 relocations=2") == NULL ||
+        strstr(dump_text, "artifact: target=riscv32-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
+        strstr(dump_text, "policy: profile=riscv32-preview machine=243 flags=0 call=18 primary=16 secondary=17 data_addr=26 data_load=27 data_store=28") == NULL ||
         strstr(dump_text, "machine_elf profile=riscv32-preview origin=generic-elf32 semantics=imported-relocation-table") == NULL ||
         strstr(dump_text, "type=16") == NULL ||
         strstr(dump_text, "type=17") == NULL) {
@@ -3694,6 +3702,9 @@ static int test_machine_elf_profile_helpers_from_file_and_machine_ir(void) {
             &dump_text,
             &elf_error) ||
         !dump_text ||
+        strstr(dump_text, "machine_elf-report bytes=468 sections=6 symbols=5 relocations=2") == NULL ||
+        strstr(dump_text, "artifact: target=riscv32-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
+        strstr(dump_text, "policy: profile=riscv32-preview machine=243 flags=0 call=18 primary=16 secondary=17 data_addr=26 data_load=27 data_store=28") == NULL ||
         strstr(dump_text, "machine_elf profile=riscv32-preview origin=generic-elf32 semantics=direct-patch-spans") == NULL ||
         strstr(dump_text, "type=16") == NULL ||
         strstr(dump_text, "type=17") == NULL) {

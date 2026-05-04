@@ -599,7 +599,24 @@ int memory_ssa_block_set_return(MemorySsaBasicBlock *block,
 
     block->has_terminator = 1;
     block->terminator.kind = VALUE_SSA_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = value;
+    return 1;
+}
+
+int memory_ssa_block_set_void_return(MemorySsaBasicBlock *block, MemorySsaError *error) {
+    if (!block) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-027: invalid return terminator contract");
+        return 0;
+    }
+    if (block->has_terminator) {
+        memory_ssa_set_error(error, 0, 0, "MEMORY-SSA-028: bb.%zu already has a terminator", block->id);
+        return 0;
+    }
+
+    block->has_terminator = 1;
+    block->terminator.kind = VALUE_SSA_TERM_RETURN;
+    block->terminator.has_return_value = 0;
     return 1;
 }
 

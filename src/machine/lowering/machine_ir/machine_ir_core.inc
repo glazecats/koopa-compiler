@@ -512,6 +512,22 @@ int machine_ir_block_set_return(MachineIrBasicBlock *block,
     return 1;
 }
 
+int machine_ir_block_set_void_return(MachineIrBasicBlock *block, MachineIrError *error) {
+    if (!block) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-038: invalid return terminator contract");
+        return 0;
+    }
+    if (block->has_terminator) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-039: block terminator already set");
+        return 0;
+    }
+
+    block->has_terminator = 1;
+    block->terminator.kind = MACHINE_IR_TERM_RETURN;
+    block->terminator.as.return_value = machine_ir_operand_none();
+    return 1;
+}
+
 int machine_ir_block_set_jump(MachineIrBasicBlock *block,
     size_t target_block_id,
     MachineIrError *error) {

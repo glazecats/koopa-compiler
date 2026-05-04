@@ -169,6 +169,10 @@ static size_t machine_select_count_term_result_uses(const MachineSelectTerminato
 
 static int machine_select_cleanup_op_shape(MachineSelectOp *op);
 static int machine_select_cleanup_terminator_shape(MachineSelectBasicBlock *block);
+static int machine_select_cleanup_op_is_preserved_edge_copy(const MachineSelectFunction *function,
+    const MachineSelectBasicBlock *block,
+    size_t op_index,
+    size_t **predecessor_counts_ptr);
 
 typedef struct {
     size_t block_count;
@@ -1768,6 +1772,7 @@ static int machine_select_cleanup_forward_trivial_defs_in_block(const MachineSel
     MachineSelectBasicBlock *block;
     int changed = 0;
     int local_changed = 1;
+    size_t *predecessor_counts = NULL;
 
     if (!function || block_index >= function->block_count) {
         return 0;
@@ -1783,9 +1788,17 @@ static int machine_select_cleanup_forward_trivial_defs_in_block(const MachineSel
             MachineSelectOperand replacement;
             size_t total_uses;
             int redefined_before_terminator = 0;
+            int preserve_edge_copy = machine_select_cleanup_op_is_preserved_edge_copy(
+                function,
+                block,
+                op_index - 1u,
+                &predecessor_counts);
 
             if (!op->has_result ||
                 (op->kind != MACHINE_SELECT_OP_COPY && op->kind != MACHINE_SELECT_OP_MATERIALIZE_IMM)) {
+                continue;
+            }
+            if (preserve_edge_copy) {
                 continue;
             }
 
@@ -1816,7 +1829,62 @@ static int machine_select_cleanup_forward_trivial_defs_in_block(const MachineSel
         }
     }
 
+    free(predecessor_counts);
     return changed;
+}
+
+static int machine_select_cleanup_op_is_preserved_edge_copy(const MachineSelectFunction *function,
+    const MachineSelectBasicBlock *block,
+    size_t op_index,
+    size_t **predecessor_counts_ptr) {
+    size_t *predecessor_counts = predecessor_counts_ptr ? *predecessor_counts_ptr : NULL;
+    size_t successor_a = (size_t)-1;
+    size_t successor_b = (size_t)-1;
+    size_t trailing_index;
+
+    if (!function || !block || op_index >= block->op_count) {
+        return 0;
+    }
+    if (block->ops[op_index].kind != MACHINE_SELECT_OP_COPY) {
+        return 0;
+    }
+
+    if (!predecessor_counts) {
+        if (!machine_select_cleanup_compute_predecessor_counts(function, &predecessor_counts, NULL)) {
+            return 0;
+        }
+        if (predecessor_counts_ptr) {
+            *predecessor_counts_ptr = predecessor_counts;
+        }
+    }
+
+    switch (block->terminator.kind) {
+        case MACHINE_SELECT_TERM_JUMP:
+            successor_a = block->terminator.as.jump_target;
+            break;
+        case MACHINE_SELECT_TERM_BRANCH:
+            successor_a = block->terminator.as.branch.then_target;
+            successor_b = block->terminator.as.branch.else_target;
+            break;
+        case MACHINE_SELECT_TERM_COMPARE_BRANCH:
+        case MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM:
+            successor_a = block->terminator.as.compare_branch.then_target;
+            successor_b = block->terminator.as.compare_branch.else_target;
+            break;
+        default:
+            return 0;
+    }
+
+    if ((successor_a >= function->block_count || predecessor_counts[successor_a] <= 1u) &&
+        (successor_b >= function->block_count || predecessor_counts[successor_b] <= 1u)) {
+        return 0;
+    }
+    for (trailing_index = op_index + 1u; trailing_index < block->op_count; ++trailing_index) {
+        if (block->ops[trailing_index].kind != MACHINE_SELECT_OP_COPY) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunction *function,
@@ -1827,6 +1895,7 @@ static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunctio
     MachineSelectBasicBlock *block;
     int changed = 0;
     int local_changed = 1;
+    size_t *predecessor_counts = NULL;
 
     if (!function || block_index >= function->block_count) {
         return 0;
@@ -1841,6 +1910,11 @@ static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunctio
             MachineSelectOp *op = &block->ops[op_index - 1];
             size_t total_uses;
             int redefined_before_terminator = 0;
+            int preserve_edge_copy = machine_select_cleanup_op_is_preserved_edge_copy(
+                function,
+                block,
+                op_index - 1u,
+                &predecessor_counts);
 
             if (!machine_select_op_is_pure_value_op(op)) {
                 continue;
@@ -1849,6 +1923,9 @@ static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunctio
             total_uses = machine_select_count_visible_result_uses_in_block(
                 program, function, block, op_index - 1, op->result, &redefined_before_terminator);
             if (total_uses != 0) {
+                continue;
+            }
+            if (preserve_edge_copy) {
                 continue;
             }
             if (!redefined_before_terminator &&
@@ -1865,6 +1942,7 @@ static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunctio
         }
     }
 
+    free(predecessor_counts);
     return changed;
 }
 

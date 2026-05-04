@@ -30,6 +30,7 @@ typedef struct {
 static void machine_container_set_error(MachineContainerError *error, int line, int column, const char *fmt, ...);
 static char *machine_container_strdup(const char *text);
 static int machine_container_append_format(MachineContainerStringBuilder *builder, const char *fmt, ...);
+static const char *machine_container_target_profile_name(MachineBytesTargetProfile profile);
 static void machine_container_write_u32_le(unsigned char *bytes, size_t offset, uint32_t value);
 static int machine_container_clone_reloc_file(const MachineRelocFile *source,
     MachineRelocFile *out_reloc_file,
@@ -114,6 +115,18 @@ static int machine_container_append_format(MachineContainerStringBuilder *builde
     builder->length += (size_t)needed;
     va_end(args);
     return 1;
+}
+
+static const char *machine_container_target_profile_name(MachineBytesTargetProfile profile) {
+    switch (profile) {
+        case MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW:
+            return "riscv32-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW:
+            return "i386-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_GENERIC:
+        default:
+            return "generic";
+    }
 }
 
 static void machine_container_write_u32_le(unsigned char *bytes, size_t offset, uint32_t value) {
@@ -786,6 +799,7 @@ int machine_container_dump_file(const MachineContainerFile *container_file,
     char **out_text,
     MachineContainerError *error) {
     MachineContainerStringBuilder builder;
+    MachineRelocTargetPolicySummary target_policy_summary;
     size_t section_index;
     int ok = 0;
 
@@ -801,14 +815,22 @@ int machine_container_dump_file(const MachineContainerFile *container_file,
     }
 
     memset(&builder, 0, sizeof(builder));
+    memset(&target_policy_summary, 0, sizeof(target_policy_summary));
+    if (!machine_reloc_file_get_target_policy_summary(&container_file->reloc_file, &target_policy_summary)) {
+        machine_container_set_error(error, 0, 0, "MACHINE-CONTAINER-131: invalid reloc target policy contract");
+        return 0;
+    }
     if (!machine_container_append_format(
             &builder,
-            "machine_container container_bytes=%zu object_bytes=%zu sections=%zu symbols=%zu relocations=%zu\nlayout header=%zu..%zu section_table=%zu symbol_table=%zu relocation_table=%zu string_table=%zu..%zu payload=%zu..%zu\nsections:\n",
+            "machine_container profile=%s container_bytes=%zu object_bytes=%zu sections=%zu symbols=%zu relocations=%zu\npolicy: addends=%s fallthrough=%s\nlayout header=%zu..%zu section_table=%zu symbol_table=%zu relocation_table=%zu string_table=%zu..%zu payload=%zu..%zu\nsections:\n",
+            machine_container_target_profile_name(target_policy_summary.target_profile),
             container_file->byte_count,
             container_file->reloc_file.object_file.total_byte_count,
             container_file->section_count,
             container_file->reloc_file.object_file.symbol_count,
             container_file->reloc_file.relocation_count,
+            target_policy_summary.preserves_preview_pc_relative_addends ? "pc-relative-preview" : "zero-or-generic",
+            target_policy_summary.preserves_direct_fallthrough_honesty ? "direct-preview-aware" : "not-guaranteed",
             container_file->header_offset,
             container_file->header_offset + container_file->header_size,
             container_file->section_table_offset,

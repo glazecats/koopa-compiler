@@ -277,13 +277,20 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
 
         switch (source_block->terminator.kind) {
             case VALUE_SSA_TERM_RETURN: {
-                MachineIrOperand value = machine_ir_lower_value_ref(
-                    machine_view, source_block->terminator.as.return_value, error);
+                if (!source_block->terminator.has_return_value) {
+                    if (!machine_ir_block_set_void_return(dest_block, error)) {
+                        machine_ir_function_free(out_function);
+                        return 0;
+                    }
+                } else {
+                    MachineIrOperand value = machine_ir_lower_value_ref(
+                        machine_view, source_block->terminator.as.return_value, error);
 
-                if (value.kind == MACHINE_IR_OPERAND_NONE ||
-                    !machine_ir_block_set_return(dest_block, value, error)) {
-                    machine_ir_function_free(out_function);
-                    return 0;
+                    if (value.kind == MACHINE_IR_OPERAND_NONE ||
+                        !machine_ir_block_set_return(dest_block, value, error)) {
+                        machine_ir_function_free(out_function);
+                        return 0;
+                    }
                 }
                 break;
             }

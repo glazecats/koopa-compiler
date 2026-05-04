@@ -94,6 +94,13 @@
    - canonical direct preview ELF artifact 不允许偷偷带不该存在的 secondary control relocation
 5. global-object section slice
    - `.sbss` / `.sdata` 与 `STT_OBJECT` globals 现在也能一路保留下来
+6. report dump 已经不再只是 raw file dump 的薄别名
+   - 现在会先显式打印
+     - artifact summary
+     - header summary
+     - target-policy summary
+     - relocation-family summary
+   - 然后才接 canonical file dump
 
 所以现在对这层的印象最好从：
 
@@ -102,6 +109,11 @@
 更新成：
 
 - “带 provenance / relocation-family / global-object slice 的标准 ELF object”
+
+一句更贴近当前未提交实现的话是：
+
+- `machine_elf` 现在既是标准 object-format 边界
+- 也是 artifact provenance / policy / relocation-family 的集中展示层
 
 ---
 
@@ -191,6 +203,13 @@ lesson 口径上更准确地说，现在是：
 - `machine_elf_dump.inc` 放 dump
 
 也就是说，它已经不是一个“只会 build 一次 ELF bytes”的薄层。
+
+如果你要按最近这轮改动去抓最值得看的实现点，我会推荐：
+
+- `machine_elf_dump_report(...)`
+  - 它现在最能体现“report artifact 已经有自己独立的 consumer-facing 文本 surface”
+- `machine_elf_target_profile_name(...)`
+  - 可以帮助你把 `target_profile / origin_profile` 两条线和 dump 文本直接对上
 
 ---
 

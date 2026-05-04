@@ -415,6 +415,32 @@ static int semantic_scope_callee_shadowed_by_local_non_function(const AstExpress
     return 1;
 }
 
+static int semantic_expression_call_returns_void(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external) {
+    const char *called_name = NULL;
+    const AstExternal *external = NULL;
+    const SemanticBuiltinFunctionInfo *builtin = NULL;
+
+    if (!expr || expr->kind != AST_EXPR_CALL) {
+        return 0;
+    }
+
+    if (classify_ast_call_callee(expr->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+        !called_name || called_name[0] == '\0') {
+        return 0;
+    }
+
+    external = semantic_find_visible_function_external(program, func_index, include_current_external, called_name);
+    if (external) {
+        return external->function_return_type == AST_FUNCTION_RETURN_VOID;
+    }
+
+    builtin = semantic_find_builtin_function(called_name);
+    return builtin && builtin->return_type == AST_FUNCTION_RETURN_VOID;
+}
+
 static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
     char *const *names,
     const int *is_const_flags,
@@ -780,6 +806,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
     int include_current_external,
     const ScopeStack *scopes,
     int in_call_callee,
+    int allow_void_result,
     SemanticError *error,
     size_t depth) {
     size_t i;
@@ -826,6 +853,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             include_current_external,
             scopes,
             in_call_callee,
+            allow_void_result,
             error,
             depth + 1);
     case AST_EXPR_UNARY:
@@ -835,6 +863,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             include_current_external,
             scopes,
             in_call_callee,
+            0,
             error,
             depth + 1);
     case AST_EXPR_POSTFIX:
@@ -844,6 +873,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                0,
                 error,
                 depth + 1);
     case AST_EXPR_BINARY:
@@ -875,6 +905,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                expr->as.binary.op == TOKEN_COMMA ? 1 : 0,
                 error,
                 depth + 1) &&
             semantic_scope_check_expression_with_visibility_impl(expr->as.binary.right,
@@ -883,6 +914,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                0,
                 error,
                 depth + 1);
     case AST_EXPR_TERNARY:
@@ -892,6 +924,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                0,
                 error,
                 depth + 1) &&
             semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.then_expr,
@@ -900,6 +933,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                0,
                 error,
                 depth + 1) &&
             semantic_scope_check_expression_with_visibility_impl(expr->as.ternary.else_expr,
@@ -908,6 +942,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 in_call_callee,
+                0,
                 error,
                 depth + 1);
     case AST_EXPR_CALL: {
@@ -933,6 +968,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             include_current_external,
             scopes,
             1,
+            0,
             error,
             depth + 1)) {
             return 0;
@@ -944,10 +980,19 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 include_current_external,
                 scopes,
                 0,
+                0,
                 error,
                 depth + 1)) {
                 return 0;
             }
+        }
+        if (!allow_void_result &&
+            semantic_expression_call_returns_void(expr, program, func_index, include_current_external)) {
+            semantic_set_error(error,
+                expr->line,
+                expr->column,
+                "SEMA-CALL-007: void call result cannot be used in a value context");
+            return 0;
         }
         return 1;
     }
@@ -962,6 +1007,7 @@ static int semantic_scope_check_expression_with_visibility(const AstExpression *
     int include_current_external,
     const ScopeStack *scopes,
     int in_call_callee,
+    int allow_void_result,
     SemanticError *error) {
     return semantic_scope_check_expression_with_visibility_impl(expr,
         program,
@@ -969,6 +1015,7 @@ static int semantic_scope_check_expression_with_visibility(const AstExpression *
         include_current_external,
         scopes,
         in_call_callee,
+        allow_void_result,
         error,
         0);
 }
@@ -978,6 +1025,7 @@ static int semantic_scope_check_expression(const AstExpression *expr,
     size_t func_index,
     const ScopeStack *scopes,
     int in_call_callee,
+    int allow_void_result,
     SemanticError *error) {
     return semantic_scope_check_expression_with_visibility(expr,
         program,
@@ -985,6 +1033,7 @@ static int semantic_scope_check_expression(const AstExpression *expr,
         1,
         scopes,
         in_call_callee,
+        allow_void_result,
         error);
 }
 
@@ -997,6 +1046,7 @@ static int semantic_scope_check_top_level_initializer_expression(const AstExpres
         external_index,
         0,
         NULL,
+        0,
         0,
         error);
 }
@@ -1083,6 +1133,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     func_index,
                     scopes,
                     0,
+                    0,
                     error)) {
                     scope_stack_pop(scopes);
                     return 0;
@@ -1111,6 +1162,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 program,
                 func_index,
                 scopes,
+                0,
                 0,
                 error)) {
                 scope_stack_pop(scopes);
@@ -1160,6 +1212,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 0,
+                0,
                 error)) {
                 return 0;
             }
@@ -1189,6 +1242,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 0,
+                0,
                 error)) {
                 return 0;
             }
@@ -1213,6 +1267,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             func_index,
             scopes,
             0,
+            stmt->kind == AST_STMT_EXPRESSION ? 1 : 0,
             error)) {
             return 0;
         }
@@ -1308,6 +1363,55 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
 
     scope_stack_free(&scopes);
     return 1;
+}
+
+static int semantic_check_return_statement_shape(const AstExternal *func,
+    const AstStatement *stmt,
+    SemanticError *error) {
+    size_t i;
+    int has_return_expression = 0;
+
+    if (!func || !stmt) {
+        return 1;
+    }
+
+    if (stmt->kind == AST_STMT_RETURN) {
+        has_return_expression = stmt->has_primary_expression ||
+            stmt->expression_count > 0;
+
+        if (func->function_return_type == AST_FUNCTION_RETURN_VOID) {
+            if (has_return_expression) {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-RET-002: void function return statement must not return a value");
+                return 0;
+            }
+        } else if (!has_return_expression) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-RET-001: non-void function return statement must return a value");
+            return 0;
+        }
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (!semantic_check_return_statement_shape(func, stmt->children[i], error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int semantic_check_function_return_shape_rules(const AstExternal *func,
+    SemanticError *error) {
+    if (!func || !func->is_function_definition || !func->function_body) {
+        return 1;
+    }
+
+    return semantic_check_return_statement_shape(func, func->function_body, error);
 }
 
 #endif

@@ -16,6 +16,7 @@ static void machine_object_set_error(MachineObjectError *error, int line, int co
 static char *machine_object_strdup(const char *text);
 static int machine_object_append_format(MachineObjectStringBuilder *builder, const char *fmt, ...);
 static int machine_object_target_profile_is_valid(MachineBytesTargetProfile profile);
+static const char *machine_object_target_profile_name(MachineBytesTargetProfile profile);
 static int machine_object_clone_file(const MachineObjectFile *source,
     MachineObjectFile *out_object_file,
     MachineObjectError *error);
@@ -109,6 +110,18 @@ static int machine_object_target_profile_is_valid(MachineBytesTargetProfile prof
             return 1;
         default:
             return 0;
+    }
+}
+
+static const char *machine_object_target_profile_name(MachineBytesTargetProfile profile) {
+    switch (profile) {
+        case MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW:
+            return "riscv32-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW:
+            return "i386-preview";
+        case MACHINE_BYTES_TARGET_PROFILE_GENERIC:
+        default:
+            return "generic";
     }
 }
 
@@ -1292,9 +1305,7 @@ int machine_object_dump_file(const MachineObjectFile *object_file,
     if (!machine_object_append_format(
             &builder,
             "machine_object profile=%s total_bytes=%zu sections=%zu symbols=%zu fixups=%zu\npolicy: offsets=%s fallthrough=%s\nsections:\n",
-            target_policy_summary.target_profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW
-                ? "riscv32-preview"
-                : "generic",
+            machine_object_target_profile_name(target_policy_summary.target_profile),
             object_file->total_byte_count,
             object_file->section_count,
             object_file->symbol_count,
@@ -1393,14 +1404,14 @@ int machine_object_dump_report(const MachineObjectReport *report,
     if (!machine_object_append_format(
             &builder,
             "machine_object-report total_bytes=%zu sections=%zu symbols=%zu fixups=%zu\n"
-            "target_policy profile=%u preview_offsets=%d fallthrough=%d\n"
+            "target_policy profile=%s preview_offsets=%d fallthrough=%d\n"
             "fixup_families: call=%zu primary=%zu secondary=%zu data_addr=%zu data_load=%zu data_store=%zu\n"
             "section_summaries:\n",
             report->file.total_byte_count,
             report->file.section_count,
             report->file.symbol_count,
             report->file.fixup_count,
-            (unsigned)report->target_policy_summary.target_profile,
+            machine_object_target_profile_name(report->target_policy_summary.target_profile),
             report->target_policy_summary.preserves_preview_target_byte_offsets,
             report->target_policy_summary.preserves_direct_fallthrough_honesty,
             report->fixup_family_summary.call_fixup_count,

@@ -347,7 +347,8 @@ int machine_ir_verify_program(const MachineIrProgram *program, MachineIrError *e
 
             switch (block->terminator.kind) {
                 case MACHINE_IR_TERM_RETURN:
-                    if (!machine_ir_verify_operand(program, function, block->terminator.as.return_value, "return", error)) {
+                    if (block->terminator.as.return_value.kind != MACHINE_IR_OPERAND_NONE &&
+                        !machine_ir_verify_operand(program, function, block->terminator.as.return_value, "return", error)) {
                         return 0;
                     }
                     break;

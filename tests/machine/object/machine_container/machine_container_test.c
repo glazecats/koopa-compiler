@@ -145,7 +145,8 @@ static int test_machine_container_builds_from_machine_ir_report(void) {
 
     ok &= expect_dump(
         &container_file,
-        "machine_container container_bytes=382 object_bytes=9 sections=1 symbols=4 relocations=2\n"
+        "machine_container profile=generic container_bytes=382 object_bytes=9 sections=1 symbols=4 relocations=2\n"
+        "policy: addends=zero-or-generic fallthrough=not-guaranteed\n"
         "layout header=0..44 section_table=44 symbol_table=72 relocation_table=216 string_table=320..373 payload=373..382\n"
         "sections:\n"
         "  csec.0 .text file@373 bytes=9 logical=0 relocations=2\n");
@@ -273,11 +274,116 @@ static int test_machine_container_builds_from_machine_reloc_with_external_call(v
     return ok;
 }
 
+static int test_machine_container_dump_uses_explicit_i386_preview_profile_name(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineObjectFile object_file;
+    MachineRelocFile reloc_file;
+    MachineContainerFile container_file;
+    MachineBytesError bytes_error;
+    MachineObjectError object_error;
+    MachineRelocError reloc_error;
+    MachineContainerError container_error;
+    char *dump_text = NULL;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    memset(&object_error, 0, sizeof(object_error));
+    memset(&reloc_error, 0, sizeof(reloc_error));
+    memset(&container_error, 0, sizeof(container_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+    machine_object_file_init(&object_file);
+    machine_reloc_file_init(&reloc_file);
+    machine_container_file_init(&container_file);
+
+    emit_program.function_count = 2;
+    emit_program.function_capacity = 2;
+    emit_program.functions = (MachineEmitFunction *)calloc(2, sizeof(MachineEmitFunction));
+    if (!emit_program.functions) {
+        return 0;
+    }
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1;
+    emit_program.functions[0].block_capacity = 1;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    emit_program.functions[1].name = dup_text("sink");
+    emit_program.functions[1].has_body = 1;
+    emit_program.functions[1].block_count = 1;
+    emit_program.functions[1].block_capacity = 1;
+    emit_program.functions[1].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks ||
+        !emit_program.functions[1].name || !emit_program.functions[1].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        machine_container_file_free(&container_file);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 1u;
+    emit_program.functions[0].blocks[0].op_capacity = 1u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    emit_program.functions[1].blocks[0].emit_index = 0u;
+    emit_program.functions[1].blocks[0].original_layout_index = 0u;
+    emit_program.functions[1].blocks[0].original_block_id = 0u;
+    emit_program.functions[1].blocks[0].label_name = dup_text("F1.L0");
+    if (!emit_program.functions[0].blocks[0].label_name ||
+        !emit_program.functions[0].blocks[0].ops ||
+        !emit_program.functions[1].blocks[0].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        machine_container_file_free(&container_file);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_VOID;
+    emit_program.functions[0].blocks[0].ops[0].as.call.callee_name = dup_text("sink");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    emit_program.functions[1].blocks[0].has_terminator = 1;
+    emit_program.functions[1].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+
+    if (!emit_program.functions[0].blocks[0].ops[0].as.call.callee_name ||
+        !machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_object_build_from_machine_bytes_program(&bytes_program, &object_file, &object_error) ||
+        !machine_reloc_build_from_machine_object_file(&object_file, &reloc_file, &reloc_error) ||
+        !machine_container_build_from_machine_reloc_file(&reloc_file, &container_file, &container_error) ||
+        !machine_container_dump_file(&container_file, &dump_text, &container_error) ||
+        !dump_text ||
+        strstr(dump_text, "machine_container profile=i386-preview ") == NULL ||
+        strstr(dump_text, "policy: addends=zero-or-generic fallthrough=not-guaranteed") == NULL) {
+        fprintf(stderr, "[machine-container] FAIL: i386 preview profile-name dump mismatch: %s\n", container_error.message);
+        ok = 0;
+    }
+
+    free(dump_text);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    machine_object_file_free(&object_file);
+    machine_reloc_file_free(&reloc_file);
+    machine_container_file_free(&container_file);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_container_builds_from_machine_ir_report();
     ok &= test_machine_container_builds_from_machine_reloc_with_external_call();
+    ok &= test_machine_container_dump_uses_explicit_i386_preview_profile_name();
 
     if (!ok) {
         return 1;

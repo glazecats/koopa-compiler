@@ -893,7 +893,9 @@ int lower_ir_collect_temp_live_in_blocks(const LowerIrFunction *function,
 
         switch (block->terminator.kind) {
         case LOWER_IR_TERM_RETURN:
-            if (!defined && lower_ir_value_uses_temp(block->terminator.as.return_value, temp_id)) {
+            if (block->terminator.has_return_value &&
+                !defined &&
+                lower_ir_value_uses_temp(block->terminator.as.return_value, temp_id)) {
                 use_before_def_blocks[block_index] = 1;
             }
             break;

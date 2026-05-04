@@ -1623,6 +1623,9 @@ static int machine_ir_cleanup_known_slot_values(MachineIrProgram *program,
         if (slot_count == 0) {
             continue;
         }
+        if (!function->has_body || function->block_count == 0) {
+            continue;
+        }
 
         if (!machine_ir_compute_predecessor_count_map(function, &predecessor_counts, error)) {
             return 0;

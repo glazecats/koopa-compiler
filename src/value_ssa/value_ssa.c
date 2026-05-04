@@ -775,7 +775,24 @@ int value_ssa_block_set_return(ValueSsaBasicBlock *block,
 
     block->has_terminator = 1;
     block->terminator.kind = VALUE_SSA_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = value;
+    return 1;
+}
+
+int value_ssa_block_set_void_return(ValueSsaBasicBlock *block, ValueSsaError *error) {
+    if (!block) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-031: invalid return terminator contract");
+        return 0;
+    }
+    if (block->has_terminator) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-032: bb.%zu already has a terminator", block->id);
+        return 0;
+    }
+
+    block->has_terminator = 1;
+    block->terminator.kind = VALUE_SSA_TERM_RETURN;
+    block->terminator.has_return_value = 0;
     return 1;
 }
 

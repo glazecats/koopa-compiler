@@ -268,8 +268,12 @@ int machine_ir_dump_program(const MachineIrProgram *program,
             }
             switch (block->terminator.kind) {
                 case MACHINE_IR_TERM_RETURN:
-                    if (!machine_ir_append_format(&builder, "ret ") ||
-                        !machine_ir_append_operand(&builder, program, block->terminator.as.return_value)) {
+                    if (!machine_ir_append_format(&builder, "ret")) {
+                        goto oom;
+                    }
+                    if (block->terminator.as.return_value.kind != MACHINE_IR_OPERAND_NONE &&
+                        (!machine_ir_append_format(&builder, " ") ||
+                            !machine_ir_append_operand(&builder, program, block->terminator.as.return_value))) {
                         goto oom;
                     }
                     break;

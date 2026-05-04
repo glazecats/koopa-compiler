@@ -23,11 +23,22 @@ typedef struct {
     int exits_loop_on_all_paths;
 } FlowLoopExitSummary;
 
+typedef struct {
+    const char *name;
+    AstFunctionReturnType return_type;
+    size_t parameter_count;
+} SemanticBuiltinFunctionInfo;
+
 static void format_callee_preview(const char *name, char *out, size_t out_size);
 static void semantic_set_error(SemanticError *error,
     int line,
     int column,
     const char *message);
+static const SemanticBuiltinFunctionInfo *semantic_find_builtin_function(const char *name);
+static const AstExternal *semantic_find_visible_function_external(const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const char *name);
 static int names_equal(const AstExternal *a, const AstExternal *b);
 static const AstExpression *unwrap_paren_expression(const AstExpression *expr);
 static int classify_ast_call_callee(const AstExpression *callee, const char **out_name);
@@ -95,6 +106,8 @@ static int semantic_scope_check_top_level_initializer_expression(const AstExpres
 static int semantic_check_function_scope_rules(const AstProgram *program,
     size_t func_index,
     const AstExternal *func,
+    SemanticError *error);
+static int semantic_check_function_return_shape_rules(const AstExternal *func,
     SemanticError *error);
 static int semantic_compute_function_returns_all_paths(const AstExternal *func,
     int *out_returns_all_paths,

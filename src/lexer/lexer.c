@@ -184,6 +184,9 @@ static TokenType keyword_or_identifier(const char *start, size_t len) {
     if (len == 3 && strncmp(start, "int", 3) == 0) {
         return TOKEN_KW_INT;
     }
+    if (len == 4 && strncmp(start, "void", 4) == 0) {
+        return TOKEN_KW_VOID;
+    }
     if (len == 4 && strncmp(start, "else", 4) == 0) {
         return TOKEN_KW_ELSE;
     }
@@ -552,6 +555,8 @@ const char *lexer_token_type_name(TokenType type) {
         return "KW_CONST";
     case TOKEN_KW_INT:
         return "KW_INT";
+    case TOKEN_KW_VOID:
+        return "KW_VOID";
     case TOKEN_KW_RETURN:
         return "KW_RETURN";
     case TOKEN_KW_IF:

@@ -176,7 +176,7 @@ static int ir_lower_ternary_value_expression(IrLowerContext *ctx,
 
 static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *stmt) {
     const AstExpression *expr = NULL;
-    IrValueRef value;
+    IrValueRef value = ir_value_immediate(0);
     IrBasicBlock *block;
 
     if (!ctx || !stmt) {
@@ -190,15 +190,22 @@ static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *st
     }
 
     if (!expr) {
-        ir_set_error(ctx->error,
-            stmt->line,
-            stmt->column,
-            "IR-LOWER-001: return statement without expression is not supported in IR v1");
-        return 0;
-    }
-
-    if (!ir_lower_expression(ctx, expr, &value)) {
-        return 0;
+        if (ctx->function_return_type != AST_FUNCTION_RETURN_VOID) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-001: return statement without expression is not supported in IR v1");
+            return 0;
+        }
+        block = ir_lower_current_block(ctx);
+        if (!block) {
+            return 0;
+        }
+        return ir_block_set_void_return(block, ctx->error);
+    } else {
+        if (!ir_lower_expression(ctx, expr, &value)) {
+            return 0;
+        }
     }
 
     block = ir_lower_current_block(ctx);
@@ -397,7 +404,8 @@ static int ir_lower_expression(IrLowerContext *ctx,
         }
 
         callee_function = ir_program_find_function_mut(ctx->program, callee_name);
-        if (!callee_function) {
+        if (!callee_function &&
+            !ir_ensure_builtin_function_signature(ctx->program, callee_name, &callee_function, ctx->error)) {
             ir_set_error(ctx->error,
                 expr->line,
                 expr->column,

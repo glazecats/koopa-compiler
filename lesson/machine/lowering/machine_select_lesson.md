@@ -131,6 +131,18 @@
 
 - 一条已经有明确 dataflow、明确 call barrier、明确 mixed resource/path coverage 的 cleanup line
 
+这轮未提交改动里，这层还要再同步两个容易漏掉的点：
+
+1. **void return 现在真的会落成 bare `ret`**
+   - 不再把它统一伪装成 `reti 0`
+2. **cleanup 会刻意保留某些 block 尾部 edge-copy**
+   - 如果这些 trailing `copy` 是为了喂给多前驱 successor 的边界值，cleanup 不会再把它们当普通 trivial copy 一把删掉
+
+所以现在这层除了“选 op”，还在更认真地守两种真实性：
+
+- return-shape honesty
+- edge-copy / successor-boundary honesty
+
 ---
 
 ## 1. 为什么需要 `machine_select`
@@ -1040,6 +1052,7 @@ reg.0 = calli f(7)
 spill.0 = calli_spill g(9)
 call_void sink()
 call_voidi sink(5)
+ret
 ```
 
 你从这些 dump 就能直接看出：
@@ -1047,6 +1060,7 @@ call_voidi sink(5)
 - immediate arg
 - spill result
 - void call
+- bare return
 
 都已经被编码进 selected family 了。
 

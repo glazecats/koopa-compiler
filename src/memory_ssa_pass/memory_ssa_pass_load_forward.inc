@@ -4,6 +4,97 @@
 #include "memory_ssa_pass.c"
 #else
 
+static size_t memory_ssa_pass_load_forward_iteration_limit(const ValueSsaProgram *program) {
+    size_t function_index;
+    size_t total_blocks = 0u;
+    size_t total_instructions = 0u;
+    size_t limit;
+
+    if (!program) {
+        return 8u;
+    }
+
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        const ValueSsaFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        if (!function->has_body) {
+            continue;
+        }
+        total_blocks += function->block_count;
+        for (block_index = 0u; block_index < function->block_count; ++block_index) {
+            total_instructions += function->blocks[block_index].instruction_count;
+        }
+    }
+
+    /*
+     * Global/local load PRE is monotone here: each restart inserts one more
+     * predecessor load, and each successful forward removes at least one load.
+     * Deep short-circuit CFGs legitimately need far more than a flat constant
+     * 8 restarts, so derive a program-shaped budget instead of using a fixed
+     * small cap.
+     */
+    limit = total_instructions + (total_blocks * 2u) + 8u;
+    if (limit < 256u) {
+        limit = 256u;
+    }
+    return limit;
+}
+
+static int memory_ssa_pass_map_predecessor_expected_version(const MemorySsaFunction *memory_function,
+    const MemorySsaDefUseAnalysis *memory_def_use,
+    size_t block_id,
+    size_t predecessor_block_id,
+    size_t expected_version_id,
+    size_t *out_expected_version_id,
+    ValueSsaError *error) {
+    size_t phi_block_id;
+    size_t phi_index;
+    const MemorySsaPhi *phi;
+    size_t input_index;
+
+    if (!memory_function || !memory_def_use || !out_expected_version_id) {
+        memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-066: invalid predecessor-version mapping contract");
+        return 0;
+    }
+
+    *out_expected_version_id = expected_version_id;
+    if (expected_version_id >= memory_def_use->version_count || !memory_def_use->has_def || !memory_def_use->has_def[expected_version_id] ||
+        !memory_def_use->def_kinds || memory_def_use->def_kinds[expected_version_id] != MEMORY_SSA_VERSION_DEF_PHI) {
+        return 1;
+    }
+
+    phi_block_id = memory_def_use->def_block_ids[expected_version_id];
+    phi_index = memory_def_use->def_phi_indices[expected_version_id];
+    if (phi_block_id != block_id) {
+        return 1;
+    }
+    if (phi_block_id >= memory_function->block_count || phi_index >= memory_function->blocks[phi_block_id].phi_count) {
+        memory_ssa_pass_set_error(error,
+            0,
+            0,
+            "MEMORY-SSA-PASS-067: invalid memory phi def for mem.%zu during predecessor mapping",
+            expected_version_id);
+        return 0;
+    }
+
+    phi = &memory_function->blocks[phi_block_id].phis[phi_index];
+    for (input_index = 0; input_index < phi->input_count; ++input_index) {
+        if (phi->inputs[input_index].predecessor_block_id == predecessor_block_id) {
+            *out_expected_version_id = phi->inputs[input_index].version_id;
+            return 1;
+        }
+    }
+
+    memory_ssa_pass_set_error(error,
+        0,
+        0,
+        "MEMORY-SSA-PASS-068: memory phi mem.%zu is missing predecessor bb.%zu",
+        expected_version_id,
+        predecessor_block_id);
+    return 0;
+}
+
 static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_function,
     const MemorySsaFunction *memory_function,
     const MemorySsaDefUseAnalysis *memory_def_use,
@@ -19,11 +110,14 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
     const MemorySsaInstruction *memory_instruction;
     MemorySsaError memory_error;
     ValueSsaPhiInput *phi_inputs = NULL;
+    size_t *pending_insert_input_indices = NULL;
     size_t predecessor_count;
     size_t predecessor_block_id;
     size_t phi_result_id;
     size_t input_index = 0;
     int has_backedge_predecessor;
+    size_t pending_insert_count = 0;
+    size_t join_expected_version_id;
 
     if (!value_function || !memory_function || !memory_def_use || !value_def_use || !cfg_analysis || !out_forwarded ||
         !out_restart_required) {
@@ -54,19 +148,35 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
         !memory_instruction->accesses[0].has_use_version) {
         return 1;
     }
+    join_expected_version_id = memory_instruction->accesses[0].use_version_id;
 
     phi_inputs = (ValueSsaPhiInput *)calloc(predecessor_count, sizeof(ValueSsaPhiInput));
-    if (!phi_inputs) {
+    pending_insert_input_indices = (size_t *)calloc(predecessor_count ? predecessor_count : 1u, sizeof(size_t));
+    if (!phi_inputs || !pending_insert_input_indices) {
         memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-032: out of memory while preparing load phi");
+        free(pending_insert_input_indices);
+        free(phi_inputs);
         return 0;
     }
 
     for (predecessor_block_id = 0; predecessor_block_id < cfg_analysis->block_count; ++predecessor_block_id) {
         int has_value = 0;
-        ValueSsaValueRef input_value;
+        ValueSsaValueRef input_value = value_ssa_value_immediate(0);
+        size_t predecessor_expected_version_id = join_expected_version_id;
 
         if (!cfg_analysis->predecessor_matrix[predecessor_block_id * cfg_analysis->block_count + block_id]) {
             continue;
+        }
+        if (!memory_ssa_pass_map_predecessor_expected_version(memory_function,
+                memory_def_use,
+                block_id,
+                predecessor_block_id,
+                join_expected_version_id,
+                &predecessor_expected_version_id,
+                error)) {
+            free(pending_insert_input_indices);
+            free(phi_inputs);
+            return 0;
         }
         if (!memory_ssa_find_block_equivalent_value(value_function,
                 memory_function,
@@ -74,11 +184,12 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
                 value_def_use,
                 predecessor_block_id,
                 instruction->as.load_slot,
-                memory_instruction->accesses[0].use_version_id,
+                predecessor_expected_version_id,
                 &has_value,
                 &input_value,
                 &memory_error)) {
             memory_ssa_pass_copy_memory_error(error, &memory_error);
+            free(pending_insert_input_indices);
             free(phi_inputs);
             return 0;
         }
@@ -86,9 +197,7 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
             if (!has_backedge_predecessor) {
                 int has_dominating_value = 0;
                 ValueSsaValueRef dominating_value;
-                ValueSsaBasicBlock *predecessor_block = &value_function->blocks[predecessor_block_id];
-                ValueSsaInstruction inserted_load;
-                size_t inserted_value_id;
+                const ValueSsaBasicBlock *predecessor_block = &value_function->blocks[predecessor_block_id];
 
                 if (!memory_ssa_pass_find_dominating_equivalent_value(value_function,
                         memory_function,
@@ -98,10 +207,11 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
                         predecessor_block_id,
                         predecessor_block->instruction_count,
                         instruction->as.load_slot,
-                        memory_instruction->accesses[0].use_version_id,
+                        predecessor_expected_version_id,
                         &has_dominating_value,
                         &dominating_value,
                         error)) {
+                    free(pending_insert_input_indices);
                     free(phi_inputs);
                     return 0;
                 }
@@ -109,31 +219,17 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
                     input_value = dominating_value;
                     has_value = 1;
                 } else {
-                    inserted_value_id = value_ssa_function_allocate_value(value_function);
-                    if (inserted_value_id == (size_t)-1) {
-                        memory_ssa_pass_set_error(
-                            error, 0, 0, "MEMORY-SSA-PASS-032: failed to allocate value for PRE load");
+                    if (predecessor_block->terminator.kind != VALUE_SSA_TERM_JUMP ||
+                        predecessor_block->terminator.as.jump_target != block_id) {
+                        free(pending_insert_input_indices);
                         free(phi_inputs);
-                        return 0;
+                        return 1;
                     }
 
-                    memset(&inserted_load, 0, sizeof(inserted_load));
-                    inserted_load.kind = instruction->kind;
-                    inserted_load.has_result = 1;
-                    inserted_load.result = value_ssa_value_id(inserted_value_id);
-                    inserted_load.as.load_slot = instruction->as.load_slot;
-
-                    if (!memory_ssa_pass_append_instruction_ignoring_terminator(
-                            predecessor_block, &inserted_load, error)) {
-                        free(phi_inputs);
-                        return 0;
-                    }
-
-                    input_value = value_ssa_value_id(inserted_value_id);
-                    has_value = 1;
-                    *out_restart_required = 1;
+                    pending_insert_input_indices[pending_insert_count++] = input_index;
                 }
             } else {
+                free(pending_insert_input_indices);
                 free(phi_inputs);
                 return 1;
             }
@@ -145,9 +241,46 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
     }
 
     if (input_index != predecessor_count) {
+        free(pending_insert_input_indices);
         free(phi_inputs);
         return 1;
     }
+
+    if (pending_insert_count > 0) {
+        size_t pending_index;
+
+        for (pending_index = 0; pending_index < pending_insert_count; ++pending_index) {
+            ValueSsaInstruction inserted_load;
+            size_t inserted_value_id;
+            size_t pending_input_index = pending_insert_input_indices[pending_index];
+            size_t pending_predecessor_block_id = phi_inputs[pending_input_index].predecessor_block_id;
+            inserted_value_id = value_ssa_function_allocate_value(value_function);
+            if (inserted_value_id == (size_t)-1) {
+                memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-032: failed to allocate value for PRE load");
+                free(pending_insert_input_indices);
+                free(phi_inputs);
+                return 0;
+            }
+
+            memset(&inserted_load, 0, sizeof(inserted_load));
+            inserted_load.kind = instruction->kind;
+            inserted_load.has_result = 1;
+            inserted_load.result = value_ssa_value_id(inserted_value_id);
+            inserted_load.as.load_slot = instruction->as.load_slot;
+            phi_inputs[pending_input_index].value = value_ssa_value_id(inserted_value_id);
+
+            if (!memory_ssa_pass_append_instruction_ignoring_terminator(
+                    &value_function->blocks[pending_predecessor_block_id], &inserted_load, error)) {
+                free(pending_insert_input_indices);
+                free(phi_inputs);
+                return 0;
+            }
+        }
+
+        *out_restart_required = 1;
+    }
+
+    free(pending_insert_input_indices);
 
     phi_result_id = value_ssa_function_allocate_value(value_function);
     if (phi_result_id == (size_t)-1 ||
@@ -345,13 +478,15 @@ static int memory_ssa_pass_forward_loads(ValueSsaProgram *program,
     const char *invalid_error_code,
     ValueSsaError *error) {
     size_t iteration;
+    size_t iteration_limit;
 
     if (!program) {
         memory_ssa_pass_set_error(error, 0, 0, "%s", invalid_error_code ? invalid_error_code : "MEMORY-SSA-PASS");
         return 0;
     }
 
-    for (iteration = 0; iteration < 8; ++iteration) {
+    iteration_limit = memory_ssa_pass_load_forward_iteration_limit(program);
+    for (iteration = 0; iteration < iteration_limit; ++iteration) {
         MemorySsaProgram memory_program;
         MemorySsaError memory_error;
         size_t function_index;
@@ -516,8 +651,8 @@ static int memory_ssa_pass_forward_loads(ValueSsaProgram *program,
     memory_ssa_pass_set_error(error,
         0,
         0,
-        "MEMORY-SSA-PASS-051: load forwarding did not converge within %d iterations",
-        8);
+        "MEMORY-SSA-PASS-051: load forwarding did not converge within %zu iterations",
+        iteration_limit);
     return 0;
 }
 

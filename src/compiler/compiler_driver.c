@@ -5,7 +5,10 @@
 #include "lexer.h"
 #include "lower_ir.h"
 #include "machine/bytes.h"
+#include "machine/emit.h"
+#include "machine/layout.h"
 #include "machine/ir.h"
+#include "machine/select.h"
 #include "parser.h"
 #include "semantic.h"
 #include "value_ssa.h"
@@ -58,14 +61,27 @@ static int compiler_emit_global_sections(
 static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset(
     const MachineBytesReport *report,
     size_t patch_byte_offset);
+static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset(
+    const MachineBytesReport *report,
+    size_t program_byte_offset);
 static const char *compiler_find_label_at_program_byte_offset(
     const MachineBytesReport *report,
     size_t program_byte_offset);
+static int compiler_append_caller_save_sequence(
+    CompilerStringBuilder *builder,
+    size_t call_save_area_offset,
+    int is_store,
+    int include_a0);
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
     size_t program_byte_offset,
-    uint32_t word);
+    uint32_t word,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset,
+    int epilogue_restores_ra,
+    size_t call_save_area_offset,
+    int save_caller_regs_around_call);
 static MachineBytesTargetProfile compiler_backend_profile_for_mode(CompilerMode mode);
 static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteReport *report,
     CompilerMode mode,
@@ -410,6 +426,30 @@ static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset(
     return NULL;
 }
 
+static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset(
+    const MachineBytesReport *report,
+    size_t program_byte_offset) {
+    size_t fixup_count = 0u;
+    size_t fixup_index;
+
+    if (!report || !machine_bytes_report_get_fixup_summary_count(report, &fixup_count)) {
+        return NULL;
+    }
+    for (fixup_index = 0u; fixup_index < fixup_count; ++fixup_index) {
+        const MachineBytesFixupSummary *fixup = NULL;
+
+        if (!machine_bytes_report_get_fixup_summary(report, fixup_index, &fixup) || !fixup) {
+            return NULL;
+        }
+        if (fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
+            program_byte_offset >= fixup->owner_byte_offset &&
+            program_byte_offset < fixup->owner_byte_offset + fixup->owner_byte_count) {
+            return fixup;
+        }
+    }
+    return NULL;
+}
+
 static const char *compiler_find_label_at_program_byte_offset(
     const MachineBytesReport *report,
     size_t program_byte_offset) {
@@ -473,11 +513,45 @@ static const char *compiler_find_label_at_program_byte_offset(
     return NULL;
 }
 
+static int compiler_append_caller_save_sequence(
+    CompilerStringBuilder *builder,
+    size_t call_save_area_offset,
+    int is_store,
+    int include_a0) {
+    static const char *const saved_regs[] = {
+        "a0",
+        "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+        "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+    };
+    size_t start_index = include_a0 ? 0u : 1u;
+    size_t reg_index;
+
+    if (!builder) {
+        return 0;
+    }
+
+    for (reg_index = start_index; reg_index < sizeof(saved_regs) / sizeof(saved_regs[0]); ++reg_index) {
+        if (!compiler_builder_appendf(
+                builder,
+                is_store ? "  sw %s, %zu(s11)\n" : "  lw %s, %zu(s11)\n",
+                saved_regs[reg_index],
+                call_save_area_offset + ((reg_index - start_index) * 4u))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
     size_t program_byte_offset,
-    uint32_t word) {
+    uint32_t word,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset,
+    int epilogue_restores_ra,
+    size_t call_save_area_offset,
+    int save_caller_regs_around_call) {
     uint32_t opcode = word & 0x7Fu;
     uint32_t rd = (word >> 7u) & 0x1Fu;
     uint32_t funct3 = (word >> 12u) & 0x7u;
@@ -486,6 +560,9 @@ static int compiler_append_riscv_preview_instruction(
     uint32_t funct7 = (word >> 25u) & 0x7Fu;
     const MachineBytesFixupSummary *fixup = compiler_find_fixup_at_patch_offset(report, program_byte_offset);
     const char *target_name = NULL;
+
+    (void)call_save_area_offset;
+    (void)save_caller_regs_around_call;
 
     switch (opcode) {
         case 0x03u:
@@ -750,6 +827,24 @@ static int compiler_append_riscv_preview_instruction(
             int32_t imm = compiler_riscv_decode_i_imm(word);
 
             if (rd == 0u && rs1 == 1u && imm == 0) {
+                if (epilogue_stack_size > 0u) {
+                    if (epilogue_restores_ra) {
+                        return compiler_builder_appendf(
+                            builder,
+                            "  lw s11, %zu(sp)\n"
+                            "  lw ra, %zu(sp)\n"
+                            "  addi sp, sp, %zu\n"
+                            "  ret\n",
+                            epilogue_ra_offset - 4u,
+                            epilogue_ra_offset,
+                            epilogue_stack_size);
+                    }
+                    return compiler_builder_appendf(
+                        builder,
+                        "  addi sp, sp, %zu\n"
+                        "  ret\n",
+                        epilogue_stack_size);
+                }
                 return compiler_builder_appendf(builder, "  ret\n");
             }
             return compiler_builder_appendf(
@@ -856,7 +951,13 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
     CompilerMode mode,
     char **out_text,
     CompilerError *error) {
+    MachineSelectProgram select_program;
+    MachineLayoutProgram layout_program;
+    MachineEmitProgram emit_program;
     MachineBytesReport bytes_report;
+    MachineSelectError select_error;
+    MachineLayoutError layout_error;
+    MachineEmitError emit_error;
     MachineBytesError bytes_error;
     const MachineBytesProgram *program = NULL;
     size_t symbol_count = 0u;
@@ -864,6 +965,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
     int ok = 0;
     size_t symbol_index;
     size_t function_index;
+    int has_main = 0;
 
     if (out_text) {
         *out_text = NULL;
@@ -873,12 +975,33 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         return 0;
     }
 
+    memset(&select_error, 0, sizeof(select_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    memset(&emit_error, 0, sizeof(emit_error));
     memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_select_program_init(&select_program);
+    machine_layout_program_init(&layout_program);
+    machine_emit_program_init(&emit_program);
     machine_bytes_report_init(&bytes_report);
     compiler_builder_init(&builder);
 
-    ok = machine_bytes_build_report_from_machine_ir_report_with_profile(
-        report,
+    ok = machine_select_build_program_from_machine_ir_report(report, &select_program, &select_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, select_error.line, select_error.column, select_error.message);
+        goto cleanup;
+    }
+    ok = machine_layout_lower_program_from_machine_select(&select_program, &layout_program, &layout_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, layout_error.line, layout_error.column, layout_error.message);
+        goto cleanup;
+    }
+    ok = machine_emit_lower_program_from_machine_layout(&layout_program, &emit_program, &emit_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, emit_error.line, emit_error.column, emit_error.message);
+        goto cleanup;
+    }
+    ok = machine_bytes_build_report_from_machine_emit_program_with_profile(
+        &emit_program,
         compiler_backend_profile_for_mode(mode),
         &bytes_report,
         &bytes_error);
@@ -937,7 +1060,6 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         size_t local_count = 0u;
         size_t block_count = 0u;
         size_t spill_slot_count = 0u;
-        size_t block_index;
 
         if (!machine_bytes_report_get_function(&bytes_report, function_index, &function) || !function ||
             !machine_bytes_function_get_summary(
@@ -954,15 +1076,133 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         }
         (void)parameter_count;
         (void)local_count;
+        (void)block_count;
+        (void)spill_slot_count;
+        if (has_body && function_name && strcmp(function_name, "main") == 0) {
+            has_main = 1;
+            break;
+        }
+    }
+    if (has_main) {
+        if (!compiler_builder_appendf(&builder,
+                ".weak _start\n"
+                ".type _start, @function\n"
+                "_start:\n"
+                "  call main\n"
+                "  li a7, 93\n"
+                "  ecall\n"
+                ".size _start, .-_start\n\n")) {
+            compiler_set_error(error, 0, 0, "COMPILER-115: out of memory writing startup stub");
+            ok = 0;
+            goto cleanup;
+        }
+    }
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        const MachineBytesFunction *function = NULL;
+        const char *function_name = NULL;
+        int has_body = 0;
+        size_t parameter_count = 0u;
+        size_t local_count = 0u;
+        size_t block_count = 0u;
+        size_t spill_slot_count = 0u;
+        const MachineBytesFunctionSummary *function_summary = NULL;
+        size_t frame_bytes = 0u;
+        size_t ra_save_offset = 0u;
+        size_t s11_save_offset = 0u;
+        size_t call_save_area_offset = 0u;
+        int frame_restores_ra = 0;
+        int save_caller_regs_around_call = 0;
+        size_t block_index;
+
+        if (!machine_bytes_report_get_function(&bytes_report, function_index, &function) || !function ||
+            !machine_bytes_function_get_summary(
+                function,
+                &function_name,
+                &has_body,
+                &parameter_count,
+                &local_count,
+                &block_count,
+                &spill_slot_count)) {
+            compiler_set_error(error, 0, 0, "COMPILER-116: malformed bytes function surface");
+            ok = 0;
+            goto cleanup;
+        }
+        if (!machine_bytes_report_get_function_summary_artifact(&bytes_report, function_index, &function_summary) ||
+            !function_summary) {
+            compiler_set_error(error, 0, 0, "COMPILER-116: missing bytes function summary artifact");
+            ok = 0;
+            goto cleanup;
+        }
+        (void)parameter_count;
+        (void)local_count;
         (void)spill_slot_count;
         if (!has_body || !function_name || function_name[0] == '\0') {
             continue;
+        }
+        frame_bytes = parameter_count * 4u;
+        if (function_summary->call_count > 0u) {
+            frame_bytes += 4u;   /* ra */
+            frame_bytes += 4u;   /* s11 */
+            frame_bytes += 14u * 4u; /* a1-a7,t0-t6 save area */
+            frame_restores_ra = 1;
+            save_caller_regs_around_call = 1;
+        }
+        if (frame_bytes > 0u && (frame_bytes % 16u) != 0u) {
+            frame_bytes = ((frame_bytes + 15u) / 16u) * 16u;
+        }
+        if (function_summary->call_count > 0u) {
+            ra_save_offset = frame_bytes - 4u;
+            s11_save_offset = frame_bytes - 8u;
+            call_save_area_offset = frame_bytes - 8u - (14u * 4u);
         }
 
         if (!compiler_builder_appendf(&builder, ".globl %s\n.type %s, @function\n%s:\n", function_name, function_name, function_name)) {
             compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function header");
             ok = 0;
             goto cleanup;
+        }
+        if (frame_bytes > 0u) {
+            size_t param_index;
+
+            if (!compiler_builder_appendf(&builder, "  addi sp, sp, -%zu\n", frame_bytes)) {
+                compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
+                ok = 0;
+                goto cleanup;
+            }
+            if (function_summary->call_count > 0u &&
+                !compiler_builder_appendf(
+                    &builder,
+                    "  sw ra, %zu(sp)\n"
+                    "  sw s11, %zu(sp)\n"
+                    "  mv s11, sp\n",
+                    ra_save_offset,
+                    s11_save_offset)) {
+                compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
+                ok = 0;
+                goto cleanup;
+            }
+
+            for (param_index = 0u; param_index < parameter_count; ++param_index) {
+                if (param_index < 8u) {
+                    if (!compiler_builder_appendf(&builder, "  sw a%zu, %zu(sp)\n", param_index, param_index * 4u)) {
+                        compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
+                        ok = 0;
+                        goto cleanup;
+                    }
+                } else {
+                    size_t caller_stack_offset = frame_bytes + ((param_index - 8u) * 4u);
+
+                    if (!compiler_builder_appendf(
+                            &builder,
+                            "  lw t5, %zu(sp)\n  sw t5, %zu(sp)\n",
+                            caller_stack_offset,
+                            param_index * 4u)) {
+                        compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
+                        ok = 0;
+                        goto cleanup;
+                    }
+                }
+            }
         }
 
         for (block_index = 0u; block_index < block_count; ++block_index) {
@@ -998,9 +1238,42 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
             for (byte_offset = 0u; byte_offset < block_byte_count; byte_offset += 4u) {
                 uint32_t word = compiler_read_u32_le(block_bytes + byte_offset);
                 size_t program_byte_offset = function_start + block_summary.start_byte_offset + byte_offset;
+                const MachineBytesFixupSummary *call_fixup = NULL;
+                const MachineEmitOp *call_op = NULL;
+                int include_a0 = 0;
 
-                if (!compiler_append_riscv_preview_instruction(&builder, &bytes_report, program_byte_offset, word)) {
+                if (save_caller_regs_around_call) {
+                    call_fixup = compiler_find_call_fixup_covering_offset(&bytes_report, program_byte_offset);
+                    if (call_fixup && call_fixup->emit_index < block->block.op_count) {
+                        call_op = &block->block.ops[call_fixup->emit_index];
+                        include_a0 = !call_op->has_result;
+                    }
+                }
+                if (call_fixup && program_byte_offset == call_fixup->owner_byte_offset &&
+                    !compiler_append_caller_save_sequence(&builder, call_save_area_offset, 1, include_a0)) {
+                    compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing caller-save prologue");
+                    ok = 0;
+                    goto cleanup;
+                }
+
+                if (!compiler_append_riscv_preview_instruction(
+                        &builder,
+                        &bytes_report,
+                        program_byte_offset,
+                        word,
+                        frame_bytes,
+                        ra_save_offset,
+                        frame_restores_ra,
+                        call_save_area_offset,
+                        save_caller_regs_around_call)) {
                     compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing riscv instruction");
+                    ok = 0;
+                    goto cleanup;
+                }
+                if (call_fixup &&
+                    program_byte_offset == call_fixup->patch_byte_offset &&
+                    !compiler_append_caller_save_sequence(&builder, call_save_area_offset, 0, include_a0)) {
+                    compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing caller-save epilogue");
                     ok = 0;
                     goto cleanup;
                 }
@@ -1019,6 +1292,9 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
     ok = 1;
 
 cleanup:
+    machine_emit_program_free(&emit_program);
+    machine_layout_program_free(&layout_program);
+    machine_select_program_free(&select_program);
     compiler_builder_free(&builder);
     machine_bytes_report_free(&bytes_report);
     return ok;
@@ -1108,7 +1384,7 @@ int compiler_compile_source_text(const char *source,
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_canonicalized_flat_report(
+    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_phi_eliminated_flat_report(
         &value_program,
         COMPILER_DEFAULT_COLOR_BUDGET,
         COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,

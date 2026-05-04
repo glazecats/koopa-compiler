@@ -60,6 +60,18 @@
 - 以前：`emit -> encode -> bytes`，encode 更偏位置
 - 现在：`emit -> encode -> bytes`，encode 也开始承担 preview-lane honesty screening
 
+最近这层还要再补一个直接关系到 `void` 的点：
+
+4. **encode 现在也显式保留 return shape**
+   - bare `ret`
+   - `reti imm`
+   - `ret spill`
+   不再被视作“反正都是 return”这种单一 terminator
+
+这条线现在也有直接回归：
+
+- `test_machine_encode_verifier_enforces_return_shapes`
+
 ---
 
 ## 导学
@@ -464,7 +476,7 @@ F0.L0:
   load_local a.0
   cmpbrift.t ne reg.0, 0, taken=F0.L2, fallthrough=F0.L1
 F0.L1:
-  reti 0
+  ret
 F0.L2:
   reti 1
 ```
@@ -558,6 +570,17 @@ end_offset = 3
 而是：
 
 - “既然你已经进入 `machine_encode`，那 offset/span 模型必须严格成立”
+
+最近还要把它再讲得更完整一点：
+
+- verifier 现在不仅锁 offset/span
+- 也会锁 return family 和 return payload shape 要匹配
+
+比如：
+
+- bare `ret` 不能带假 payload
+- `reti` 不能没有返回值
+- `ret_spill` 也不能拿 immediate 充数
 
 这点非常重要，因为后面 `machine_bytes` 会把它当成位置语义前提。
 

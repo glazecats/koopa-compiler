@@ -52,6 +52,7 @@
 2. direct build vs imported/reprofiled 区分继续保留
    - 后面的 load/runtime/observe 不用回到 `machine_elf`，也能知道 image 的来源语义
 3. image 现在不只是一层地址视图，也开始承接 provenance-aware consumer surface
+4. lesson 口径上现在最好把 image 看成 “第一层真正同时携带地址语义和来源语义的 runtime-side artifact”
 
 所以现在这层除了：
 
@@ -62,6 +63,11 @@
 还要再加一句：
 
 - `image` 现在也开始承接“这份东西是怎么从 ELF 来的”这一层 artifact provenance
+
+这很适合用一句压缩记忆：
+
+- `machine_elf` 关心“它是不是标准 ELF”
+- `machine_image` 关心“如果把它当成要被装载的东西，它从哪来、现在住哪、哪些地址已知”
 
 ---
 
@@ -210,6 +216,13 @@
 - `machine_ir -> ... -> machine_elf -> machine_image` bridge
 
 也就是说，这层已经不只是“转一下名字再 dump”。
+
+如果你要按最近未提交实现去抓最值得看的点，我会推荐直接盯：
+
+- `source_elf_artifact_summary`
+  - 这是 provenance 真正从 object-format 世界进入 runtime/image 世界的接缝
+- resolved / unresolved relocation 分组
+  - 这是“地址事实”和“来源事实”同时开始有消费价值的地方
 
 ---
 

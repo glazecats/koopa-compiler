@@ -472,7 +472,24 @@ static int ir_block_set_return(IrBasicBlock *block, IrValueRef value, IrError *e
     }
 
     block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 1;
     block->terminator.as.return_value = value;
+    block->has_terminator = 1;
+    return 1;
+}
+
+static int ir_block_set_void_return(IrBasicBlock *block, IrError *error) {
+    if (!block) {
+        ir_set_error(error, 0, 0, "IR-INT-015: invalid return terminator block");
+        return 0;
+    }
+    if (block->has_terminator) {
+        ir_set_error(error, 0, 0, "IR-INT-016: block already has a terminator");
+        return 0;
+    }
+
+    block->terminator.kind = IR_TERM_RETURN;
+    block->terminator.has_return_value = 0;
     block->has_terminator = 1;
     return 1;
 }

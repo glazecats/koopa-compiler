@@ -1384,6 +1384,7 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
         return;
     }
 
+    signature->return_type = AST_FUNCTION_RETURN_INT;
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
@@ -1442,7 +1443,12 @@ static int parse_function_external_signature(Parser *p,
     parsed_function_signature_init(out_signature);
 
     parser_consume_optional_const_qualifier(p);
-    if (!consume(p, TOKEN_KW_INT, "'int'")) {
+    if (match(p, TOKEN_KW_INT)) {
+        out_signature->return_type = AST_FUNCTION_RETURN_INT;
+    } else if (match(p, TOKEN_KW_VOID)) {
+        out_signature->return_type = AST_FUNCTION_RETURN_VOID;
+    } else {
+        consume(p, TOKEN_KW_INT, "'int' or 'void'");
         return 0;
     }
     if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", &out_signature->name_tok)) {
@@ -1505,6 +1511,7 @@ static int parse_function_external_definition_body(Parser *p,
 
 static int parse_function_external(Parser *p,
     const Token **out_name_token,
+    AstFunctionReturnType *out_return_type,
     size_t *out_parameter_count,
     char ***out_parameter_names,
     int **out_parameter_is_const,
@@ -1523,6 +1530,9 @@ static int parse_function_external(Parser *p,
 
     if (out_name_token) {
         *out_name_token = NULL;
+    }
+    if (out_return_type) {
+        *out_return_type = AST_FUNCTION_RETURN_INT;
     }
     if (out_parameter_count) {
         *out_parameter_count = 0;
@@ -1557,6 +1567,9 @@ static int parse_function_external(Parser *p,
 
     if (out_name_token) {
         *out_name_token = signature.name_tok;
+    }
+    if (out_return_type) {
+        *out_return_type = signature.return_type;
     }
     if (out_parameter_count) {
         *out_parameter_count = signature.parameter_count;
@@ -1662,6 +1675,7 @@ static int parser_prepare(Parser *p, const TokenArray *tokens, ParserError *erro
 static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram *out_program) {
     size_t start = p->current;
     const Token *external_name = NULL;
+    AstFunctionReturnType external_return_type = AST_FUNCTION_RETURN_INT;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
     int *external_parameter_is_const = NULL;
@@ -1673,6 +1687,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     if (!parse_function_external(p,
         out_program ? &external_name : NULL,
+        out_program ? &external_return_type : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
         out_program ? &external_parameter_is_const : NULL,
@@ -1700,6 +1715,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     }
 
     out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
+    out_program->externals[out_program->count - 1].function_return_type = external_return_type;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
     out_program->externals[out_program->count - 1].parameter_is_const = external_parameter_is_const;
     out_program->externals[out_program->count - 1].parameter_name_lines =

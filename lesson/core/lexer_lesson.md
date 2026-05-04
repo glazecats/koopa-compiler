@@ -79,12 +79,14 @@ $$
 
 - 控制类：`TOKEN_EOF`, `TOKEN_INVALID`
 - 基础类：`TOKEN_IDENTIFIER`, `TOKEN_NUMBER`
-- 关键字：`int/const/return/if/else/while/for/break/continue`
+- 关键字：`int/void/const/return/if/else/while/for/break/continue`
 - 运算符：`+ - * / % ! ~ & ^ | && || = == != < <= > >= << >>` 及复合赋值
 - 符号：`() {} ; , ? :`
 
-最近还要记住一个非常具体的新点：
+最近还要记住两个非常具体的新点：
 
+- `void` 现在已经是正式关键字
+  - `void f(){ return; }` 里的 `void` 会被切成 `TOKEN_KW_VOID`
 - 数字字面量现在已经不只是十进制
   - `0`
   - `01234`（八进制）
@@ -141,6 +143,11 @@ $$
   - 锁 `0 / 01234 / 0x133fAb / 42` 的数值结果
 - `test_const_keyword_tokenization`
   - 锁 `const int x = 1;` 会切出 `TOKEN_KW_CONST`
+
+再加一个 lesson 里现在最好顺手记住的同步点：
+
+- lexer 关键字表已经包含 `void`
+  - 也就是说，后面的 parser/semantic 支持 `void`，不是靠“把它当普通标识符再特判”拼出来的
 
 ---
 

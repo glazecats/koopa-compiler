@@ -328,7 +328,9 @@ static int machine_select_lower_terminator(const MachineIrFunction *src_function
     switch (src_block->terminator.kind) {
         case MACHINE_IR_TERM_RETURN:
             return_value = machine_select_lower_operand(src_block->terminator.as.return_value);
-            if (return_value.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
+            if (return_value.kind == MACHINE_SELECT_OPERAND_NONE) {
+                dest_block->terminator.kind = MACHINE_SELECT_TERM_RETURN;
+            } else if (return_value.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
                 dest_block->terminator.kind = MACHINE_SELECT_TERM_RETURN_IMM;
             } else if (return_value.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                 dest_block->terminator.kind = MACHINE_SELECT_TERM_RETURN_SPILL;

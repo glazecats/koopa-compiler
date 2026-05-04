@@ -31,7 +31,10 @@ static int test_compiler_builds_riscv_backend_dump_from_source(void) {
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
-        strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n\n.globl main\n.type main, @function\nmain:\n.Lmain_0:\n") != output ||
+        strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n") != output ||
+        strstr(output, ".weak _start\n.type _start, @function\n_start:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
+        strstr(output, ".Lmain_0:\n") == NULL ||
         strstr(output, "  li a0, 0\n") == NULL ||
         strstr(output, "  ret\n") == NULL ||
         strstr(output, ".size main, .-main\n") == NULL) {
@@ -52,7 +55,10 @@ static int test_compiler_builds_perf_backend_dump_from_source(void) {
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_PERF, &output, &error) ||
         !output ||
-        strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n\n.globl main\n.type main, @function\nmain:\n.Lmain_0:\n") != output ||
+        strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n") != output ||
+        strstr(output, ".weak _start\n.type _start, @function\n_start:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
+        strstr(output, ".Lmain_0:\n") == NULL ||
         strstr(output, "  li a0, 1\n") == NULL ||
         strstr(output, "  ret\n") == NULL ||
         strstr(output, ".size main, .-main\n") == NULL) {
@@ -94,7 +100,8 @@ static int test_compiler_pretty_prints_calls_and_control_labels(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, ".globl foo\n.type foo, @function\nfoo:\n.Lfoo_0:\n") == NULL ||
-        strstr(output, ".globl main\n.type main, @function\nmain:\n.Lmain_0:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
+        strstr(output, ".Lmain_0:\n") == NULL ||
         strstr(output, "  jal ra, foo\n") == NULL ||
         strstr(output, "  ret\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
@@ -191,7 +198,8 @@ static int test_compiler_pretty_prints_immediate_compares_and_loop_control(void)
         !output ||
         strstr(output, "  li t5, 3\n") == NULL ||
         strstr(output, "  beq a0, t5, .Ltesteq_2\n") == NULL ||
-        strstr(output, ".globl loop\n.type loop, @function\nloop:\n.Lloop_0:\n") == NULL ||
+        strstr(output, ".globl loop\n.type loop, @function\nloop:\n") == NULL ||
+        strstr(output, ".Lloop_0:\n") == NULL ||
         strstr(output, "  blt a1, a0, .Lloop_3\n") == NULL ||
         strstr(output, "  j .Lloop_1\n") == NULL ||
         strstr(output, "  jal ra, loop\n") == NULL ||
@@ -330,6 +338,44 @@ static int test_compiler_handles_complex_const_shadowing_scopes(void) {
     return ok;
 }
 
+static int test_compiler_saves_caller_regs_around_whole_call_span(void) {
+    static const char *source =
+        "int sum(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7){"
+        "return a0+a1+a2+a3+a4+a5+a6+a7;}"
+        "int sum2(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,int a8,"
+        "int a9,int a10,int a11,int a12,int a13,int a14,int a15){"
+        "return a0+a1+a2+a3+a4+a5+a6+a7+a8+a9+a10+a11+a12+a13+a14+a15;}"
+        "int main(){int x=sum(1,2,3,4,5,6,7,8); return x+sum2(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16);}\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: caller-save span compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    if (strstr(output,
+            "  li a7, 8\n"
+            "  jal ra, sum\n"
+            "  lw a1, 0(s11)\n") == NULL ||
+        strstr(output,
+            "  lw t6, 52(s11)\n"
+            "  mv a1, a0\n"
+            "  sw a1, 0(s11)\n") == NULL ||
+        strstr(output,
+            "  jal ra, sum2\n"
+            "  lw a1, 0(s11)\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: caller-save span ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -344,6 +390,7 @@ int main(void) {
     ok &= test_compiler_pretty_prints_immediate_compares_and_loop_control();
     ok &= test_compiler_emits_global_bss_and_data_sections();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
+    ok &= test_compiler_saves_caller_regs_around_whole_call_span();
 
     if (!ok) {
         return 1;

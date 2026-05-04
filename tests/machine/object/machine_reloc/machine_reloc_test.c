@@ -205,12 +205,14 @@ static int test_machine_reloc_report_surface(void) {
     const MachineRelocTargetPolicySummary *target_policy_summary = NULL;
     const MachineRelocRelocationFamilySummary *relocation_family_summary = NULL;
     const MachineRelocSectionSummary *section_summary = NULL;
+    const MachineRelocationSummary *section_relocation_summaries = NULL;
     const MachineRelocationSummary *relocation_summary = NULL;
     size_t total_byte_count = 0u;
     size_t object_section_count = 0u;
     size_t symbol_count = 0u;
     size_t relocation_section_count = 0u;
     size_t relocation_count = 0u;
+    size_t section_relocation_count = 0u;
     size_t section_index = (size_t)-1;
     int ok = 1;
 
@@ -297,6 +299,10 @@ static int test_machine_reloc_report_surface(void) {
         relocation_family_summary->data_store_relocation_count != 0u ||
         !machine_reloc_report_find_section_summary_by_name(&report, ".text", &section_index, &section_summary) ||
         section_index != 0u || !section_summary || section_summary->relocation_count != 2u ||
+        !machine_reloc_report_get_section_relocation_summaries(
+            &report, section_index, &section_relocation_count, &section_relocation_summaries) ||
+        section_relocation_count != 2u || !section_relocation_summaries ||
+        section_relocation_summaries[0].kind != MACHINE_BYTES_FIXUP_CONTROL_PRIMARY ||
         !machine_reloc_report_get_relocation_summary(&report, 0u, &relocation_summary) ||
         !relocation_summary ||
         relocation_summary->kind != MACHINE_BYTES_FIXUP_CONTROL_PRIMARY ||
@@ -309,7 +315,7 @@ static int test_machine_reloc_report_surface(void) {
     ok &= expect_report_dump(
         &report,
         "machine_reloc-report total_bytes=9 object_sections=1 symbols=4 relocation_sections=1 relocations=2\n"
-        "target_policy profile=0 preview_addends=0 fallthrough=0\n"
+        "target_policy profile=generic preview_addends=0 fallthrough=0\n"
         "relocation_families: call=0 primary=1 secondary=1 data_addr=0 data_load=0 data_store=0\n"
         "section_summaries:\n"
         "  relsec.0 .text span=0..9 bytes=9 relocations=2\n"
@@ -704,6 +710,112 @@ static int test_machine_reloc_preview_internal_call_uses_pc_relative_addend(void
     return ok;
 }
 
+static int test_machine_reloc_dump_uses_explicit_i386_preview_profile_name(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineObjectFile object_file;
+    MachineRelocFile reloc_file;
+    MachineRelocReport report;
+    MachineBytesError bytes_error;
+    MachineObjectError object_error;
+    MachineRelocError reloc_error;
+    char *dump_text = NULL;
+    char *report_dump_text = NULL;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    memset(&object_error, 0, sizeof(object_error));
+    memset(&reloc_error, 0, sizeof(reloc_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+    machine_object_file_init(&object_file);
+    machine_reloc_file_init(&reloc_file);
+    machine_reloc_report_init(&report);
+
+    emit_program.function_count = 2;
+    emit_program.function_capacity = 2;
+    emit_program.functions = (MachineEmitFunction *)calloc(2, sizeof(MachineEmitFunction));
+    if (!emit_program.functions) {
+        return 0;
+    }
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1;
+    emit_program.functions[0].block_capacity = 1;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    emit_program.functions[1].name = dup_text("sink");
+    emit_program.functions[1].has_body = 1;
+    emit_program.functions[1].block_count = 1;
+    emit_program.functions[1].block_capacity = 1;
+    emit_program.functions[1].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks ||
+        !emit_program.functions[1].name || !emit_program.functions[1].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        machine_reloc_report_free(&report);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 1u;
+    emit_program.functions[0].blocks[0].op_capacity = 1u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    emit_program.functions[1].blocks[0].emit_index = 0u;
+    emit_program.functions[1].blocks[0].original_layout_index = 0u;
+    emit_program.functions[1].blocks[0].original_block_id = 0u;
+    emit_program.functions[1].blocks[0].label_name = dup_text("F1.L0");
+    if (!emit_program.functions[0].blocks[0].label_name ||
+        !emit_program.functions[0].blocks[0].ops ||
+        !emit_program.functions[1].blocks[0].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        machine_reloc_report_free(&report);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_VOID;
+    emit_program.functions[0].blocks[0].ops[0].as.call.callee_name = dup_text("sink");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    emit_program.functions[1].blocks[0].has_terminator = 1;
+    emit_program.functions[1].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+
+    if (!emit_program.functions[0].blocks[0].ops[0].as.call.callee_name ||
+        !machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_I386_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_object_build_from_machine_bytes_program(&bytes_program, &object_file, &object_error) ||
+        !machine_reloc_build_from_machine_object_file(&object_file, &reloc_file, &reloc_error) ||
+        !machine_reloc_dump_file(&reloc_file, &dump_text, &reloc_error) ||
+        !dump_text ||
+        strstr(dump_text, "machine_reloc profile=i386-preview ") == NULL ||
+        !machine_reloc_build_report_from_file(&reloc_file, &report, &reloc_error) ||
+        !machine_reloc_dump_report(&report, &report_dump_text, &reloc_error) ||
+        !report_dump_text ||
+        strstr(report_dump_text, "target_policy profile=i386-preview ") == NULL) {
+        fprintf(stderr, "[machine-reloc] FAIL: i386 preview profile-name dump mismatch: %s\n", reloc_error.message);
+        ok = 0;
+    }
+
+    free(dump_text);
+    free(report_dump_text);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    machine_object_file_free(&object_file);
+    machine_reloc_file_free(&reloc_file);
+    machine_reloc_report_free(&report);
+    return ok;
+}
+
 static int test_machine_reloc_preview_verifier_rejects_addend_drift(void) {
     MachineEmitProgram emit_program;
     MachineBytesProgram bytes_program;
@@ -1047,6 +1159,7 @@ int main(void) {
     ok &= test_machine_reloc_builds_from_machine_object_with_external_call();
     ok &= test_machine_reloc_preview_fallthrough_control_uses_single_real_relocation();
     ok &= test_machine_reloc_preview_internal_call_uses_pc_relative_addend();
+    ok &= test_machine_reloc_dump_uses_explicit_i386_preview_profile_name();
     ok &= test_machine_reloc_preview_verifier_rejects_addend_drift();
     ok &= test_machine_reloc_preserves_global_object_sections_without_fixups();
     ok &= test_machine_reloc_surfaces_global_data_relocations();

@@ -247,8 +247,10 @@ static void value_ssa_liveness_record_terminator_uses(const ValueSsaTerminator *
 
     switch (terminator->kind) {
     case VALUE_SSA_TERM_RETURN:
-        value_ssa_liveness_record_use_if_not_defined(
-            terminator->as.return_value, block_defs, value_count, block_uses);
+        if (terminator->has_return_value) {
+            value_ssa_liveness_record_use_if_not_defined(
+                terminator->as.return_value, block_defs, value_count, block_uses);
+        }
         break;
     case VALUE_SSA_TERM_BRANCH:
         value_ssa_liveness_record_use_if_not_defined(
@@ -405,7 +407,9 @@ static void value_ssa_interference_add_terminator_uses(const ValueSsaTerminator 
 
     switch (terminator->kind) {
     case VALUE_SSA_TERM_RETURN:
-        value_ssa_interference_add_value_use(terminator->as.return_value, value_count, live);
+        if (terminator->has_return_value) {
+            value_ssa_interference_add_value_use(terminator->as.return_value, value_count, live);
+        }
         break;
     case VALUE_SSA_TERM_BRANCH:
         value_ssa_interference_add_value_use(terminator->as.branch.condition, value_count, live);
@@ -914,7 +918,9 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
 
         switch (block->terminator.kind) {
         case VALUE_SSA_TERM_RETURN:
-            value_ssa_record_use_count(block->terminator.as.return_value, analysis->use_counts);
+            if (block->terminator.has_return_value) {
+                value_ssa_record_use_count(block->terminator.as.return_value, analysis->use_counts);
+            }
             break;
         case VALUE_SSA_TERM_BRANCH:
             value_ssa_record_use_count(block->terminator.as.branch.condition, analysis->use_counts);
@@ -1068,20 +1074,22 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
 
         switch (block->terminator.kind) {
         case VALUE_SSA_TERM_RETURN:
-            if (!value_ssa_write_use_site(block->terminator.as.return_value,
-                    VALUE_SSA_USE_TERM,
-                    VALUE_SSA_USE_ROLE_RETURN_VALUE,
-                    block_index,
-                    (size_t)-1,
-                    (size_t)-1,
-                    0,
-                    cursor,
-                    analysis->use_offsets,
-                    analysis->use_sites)) {
-                free(cursor);
-                value_ssa_def_use_analysis_free(analysis);
-                value_ssa_set_error(error, 0, 0, "VALUE-SSA-198: failed to record return use-site");
-                return 0;
+            if (block->terminator.has_return_value) {
+                if (!value_ssa_write_use_site(block->terminator.as.return_value,
+                        VALUE_SSA_USE_TERM,
+                        VALUE_SSA_USE_ROLE_RETURN_VALUE,
+                        block_index,
+                        (size_t)-1,
+                        (size_t)-1,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-198: failed to record return use-site");
+                    return 0;
+                }
             }
             break;
         case VALUE_SSA_TERM_BRANCH:

@@ -158,6 +158,7 @@ int memory_ssa_block_append_instruction(MemorySsaBasicBlock *block,
 int memory_ssa_block_set_return(MemorySsaBasicBlock *block,
     ValueSsaValueRef value,
     MemorySsaError *error);
+int memory_ssa_block_set_void_return(MemorySsaBasicBlock *block, MemorySsaError *error);
 int memory_ssa_block_set_jump(MemorySsaBasicBlock *block,
     size_t target_block_id,
     MemorySsaError *error);

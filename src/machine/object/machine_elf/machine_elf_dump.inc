@@ -106,11 +106,73 @@ cleanup:
 int machine_elf_dump_report(const MachineElfReport *report,
     char **out_text,
     MachineElfError *error) {
-    if (!report) {
+    MachineElfStringBuilder builder;
+    char *file_dump = NULL;
+    int ok = 0;
+
+    if (out_text) {
+        *out_text = NULL;
+    }
+    if (!report || !out_text) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-151: invalid elf report dump contract");
         return 0;
     }
-    return machine_elf_dump_file(&report->file, out_text, error);
+    if (!machine_elf_dump_file(&report->file, &file_dump, error)) {
+        return 0;
+    }
+
+    memset(&builder, 0, sizeof(builder));
+    if (!machine_elf_append_format(
+            &builder,
+            "machine_elf-report bytes=%zu sections=%zu symbols=%zu relocations=%zu\n"
+            "artifact: target=%s origin=%s semantics=%s\n"
+            "header: class=%u data=%u type=%u machine=%u flags=%u shoff=%zu shentsize=%u shcount=%u shstrndx=%u\n"
+            "policy: profile=%s machine=%u flags=%u call=%u primary=%u secondary=%u data_addr=%u data_load=%u data_store=%u\n"
+            "relocation_families: call=%zu primary=%zu secondary=%zu data_addr=%zu data_load=%zu data_store=%zu\n"
+            "\n%s",
+            report->file.byte_count,
+            report->section_summary_count,
+            report->symbol_summary_count,
+            report->relocation_summary_count,
+            machine_elf_target_profile_name(report->artifact_summary.target_profile),
+            machine_elf_target_profile_name(report->artifact_summary.origin_profile),
+            machine_elf_relocation_semantics_name(report->artifact_summary.relocation_semantics),
+            report->header_summary.elf_class,
+            report->header_summary.data_encoding,
+            report->header_summary.object_type,
+            report->header_summary.machine,
+            report->header_summary.flags,
+            report->header_summary.section_header_offset,
+            report->header_summary.section_header_entry_size,
+            report->header_summary.section_header_count,
+            report->header_summary.section_name_string_table_index,
+            machine_elf_target_profile_name(report->target_policy_summary.target_profile),
+            report->target_policy_summary.machine,
+            report->target_policy_summary.flags,
+            report->target_policy_summary.call_relocation_type,
+            report->target_policy_summary.primary_control_relocation_type,
+            report->target_policy_summary.secondary_control_relocation_type,
+            report->target_policy_summary.data_address_relocation_type,
+            report->target_policy_summary.data_load_relocation_type,
+            report->target_policy_summary.data_store_relocation_type,
+            report->relocation_family_summary.call_relocation_count,
+            report->relocation_family_summary.primary_control_relocation_count,
+            report->relocation_family_summary.secondary_control_relocation_count,
+            report->relocation_family_summary.data_address_relocation_count,
+            report->relocation_family_summary.data_load_relocation_count,
+            report->relocation_family_summary.data_store_relocation_count,
+            file_dump)) {
+        goto cleanup;
+    }
+
+    *out_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    free(file_dump);
+    free(builder.data);
+    return ok;
 }
 
 int machine_elf_build_report_dump_from_file(const MachineElfFile *source,

@@ -303,6 +303,9 @@ int value_ssa_rename_rewrite_block_uses(ValueSsaBasicBlock *block,
 
     switch (block->terminator.kind) {
     case VALUE_SSA_TERM_RETURN:
+        if (!block->terminator.has_return_value) {
+            return 1;
+        }
         return value_ssa_rename_rewrite_value_ref(&block->terminator.as.return_value, state, error);
     case VALUE_SSA_TERM_BRANCH:
         return value_ssa_rename_rewrite_value_ref(&block->terminator.as.branch.condition, state, error);
@@ -374,6 +377,9 @@ static int value_ssa_rename_rewrite_terminator_uses(ValueSsaBasicBlock *block,
 
     switch (block->terminator.kind) {
     case VALUE_SSA_TERM_RETURN:
+        if (!block->terminator.has_return_value) {
+            return 1;
+        }
         return value_ssa_rename_rewrite_value_ref(&block->terminator.as.return_value, state, error);
     case VALUE_SSA_TERM_BRANCH:
         return value_ssa_rename_rewrite_value_ref(&block->terminator.as.branch.condition, state, error);

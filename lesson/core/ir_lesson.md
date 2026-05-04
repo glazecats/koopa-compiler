@@ -210,6 +210,16 @@ $$
 - `IR_TERM_JUMP`
 - `IR_TERM_BRANCH`
 
+最近这里还要补一个很关键的 contract 变化：
+
+- `IR_TERM_RETURN` 不再默认“必然带返回值”
+- terminator 现在显式带 `has_return_value`
+
+所以 lesson 口径上现在要把 return terminator 分成两种：
+
+- `ret value`
+- bare `ret`
+
 所以当前 IR v1 的控制流能力已经可以概括成：
 
 $$
@@ -355,6 +365,9 @@ int ir_lower_program(const AstProgram *ast_program,
    global 现在不只支持普通读写，也支持 compound assignment、`++/--`、`<<=` / `&=` / `^=` / `|=` 这类更新路径。
 4. runtime-init verifier 契约  
    verifier 现在不只查普通 CFG/temps，还会单独检查 `__global.init()` / `__program.init()` 的 helper 形状、入口调用和保留名约束。
+5. `void + builtin` lowering line
+   - `void` 函数现在能稳定 lower 出 bare `ret`
+   - IR lowering 现在会预声明实际用到的课程 builtin 函数签名，而不是要求源码里一定先手写 prototype
 
 ### 3.1.2 最近这 4 个“机制升级点”
 
@@ -376,7 +389,7 @@ int ir_lower_program(const AstProgram *ast_program,
 下面这些不是“还没在测试里覆盖”，而是当前 lowering 会直接报错：
 
 - callee 不是“直接标识符”的调用表达式
-- 没有返回值表达式的 `return`
+- 在 non-void 函数里写没有返回值表达式的 `return`
 - 无法在当前 `IrProgram` / scope 里解析的标识符
 - runtime path 也无法 lower 的顶层初始化表达式
 - runtime global initializer 对未初始化 global 的前向依赖
@@ -1043,7 +1056,9 @@ $$
 
 ### 8.4 `return`
 
-当前 `return` lowering 只支持“有表达式的 return”。
+当前 `return` lowering 已经要分成两条路来理解。
+
+### 情况 A：value-return
 
 流程是：
 
@@ -1051,7 +1066,35 @@ $$
 2. lower 成一个 `IrValueRef`
 3. 写入 block terminator：`IR_TERM_RETURN`
 
-如果拿不到返回表达式，报 `IR-LOWER-001`。
+### 情况 B：bare-return
+
+如果当前函数在 AST 上是 `void` function，那么：
+
+1. `return;` 不需要先 lower 一个值
+2. block terminator 会写成 `IR_TERM_RETURN + has_return_value = 0`
+
+只有当函数不是 `void` 时，裸 `return;` 才会继续落到 `IR-LOWER-001`。
+
+最小例子：
+
+```c
+void log1() { return; }
+int id(int x) { return x; }
+```
+
+近似会被 lower 成：
+
+```text
+func log1() {
+  bb.0:
+    ret
+}
+
+func id(p0) {
+  bb.0:
+    ret p0
+}
+```
 
 ---
 
@@ -1405,6 +1448,8 @@ require entry block has terminator
 
 - 遍历 `AstProgram.externals`
 - 遇到 `AST_EXTERNAL_DECLARATION` 时，先 lower 成 `IrGlobal`
+- 在真正 lower function body 之前，会先扫描程序里实际用到的课程 builtin call
+- 对用到的 builtin，先补出对应 `IrFunction` 签名
 - 遇到函数声明时，先用 `ir_ensure_function_signature(...)` 记录函数名与参数 locals
 - 遇到函数定义时，在同名 `IrFunction` 上继续补 body / blocks / temps
 - 第一次遇到 runtime global initializer 时，才懒创建内部 helper `__global.init()`
@@ -1430,6 +1475,18 @@ require entry block has terminator
 - 而是 IR lowering 自己的 self-check / last-line guard
 
 也就是说，就算前面的 semantic gate 被绕开，IR 这一层仍会拒绝“不自洽的声明/定义/调用状态”，防止坏 AST 或坏签名关系继续流进 IR。
+
+最近这条 program-level line 还有一个很适合上课时点名的例子：
+
+```c
+void log1() { putint(1); return; }
+int main() { log1(); return 0; }
+```
+
+这里 IR lowering 现在做了两件以前 lesson 没讲过的事：
+
+1. `putint` 即使没有源码 prototype，也会先被预声明成 builtin signature
+2. `log1` 的结尾会落成 bare `ret`，不是被硬塞成 `ret 0`
 
 所以当前顶层行为更准确地写成：
 

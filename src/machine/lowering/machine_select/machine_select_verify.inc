@@ -285,7 +285,8 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                 case MACHINE_SELECT_TERM_RETURN:
                 case MACHINE_SELECT_TERM_RETURN_IMM:
                 case MACHINE_SELECT_TERM_RETURN_SPILL:
-                    if (!machine_select_verify_operand(program, function, block->terminator.as.return_value, "return value", error)) {
+                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
+                        !machine_select_verify_operand(program, function, block->terminator.as.return_value, "return value", error)) {
                         return 0;
                     }
                     if (block->terminator.kind == MACHINE_SELECT_TERM_RETURN_IMM &&
@@ -301,6 +302,7 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                         return 0;
                     }
                     if (block->terminator.kind == MACHINE_SELECT_TERM_RETURN &&
+                        block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
                         block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_REGISTER) {
                         machine_select_set_error(
                             error, 0, 0, "MACHINE-SELECT-136: register return family requires register value");

@@ -204,7 +204,31 @@ terminator：
 
 不是新的控制流模型。
 
-### 3.3.1 当前支持 / 不支持什么
+### 3.3.1 最近同步：bare `ret` 现在会原样穿过 Value SSA
+
+这轮前后端同步里，一个很容易漏讲的小点是：
+
+- `value_ssa` 现在不会把上游 `void` return 偷偷改写成 `ret 0`
+
+也就是说：
+
+- `LOWER_IR_TERM_RETURN + has_return_value = 0`
+  - 会继续变成
+- `VALUE_SSA_TERM_RETURN + has_return_value = 0`
+
+这个区分后来会继续传到：
+
+- `memory_ssa`
+- `machine_ir`
+- `machine_select`
+- `machine_bytes`
+
+所以 lesson 口径上要把它看成：
+
+- 不只是 verifier 小修
+- 而是整条 pipeline 开始认真保留 return shape
+
+### 3.3.2 当前支持 / 不支持什么
 
 把 core representation 本身单独看，当前最稳妥的口径是：
 

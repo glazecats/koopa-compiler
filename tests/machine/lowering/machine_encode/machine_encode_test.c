@@ -107,7 +107,7 @@ static int test_machine_encode_lowers_offsets_from_machine_emit(void) {
         "  F0.L0 @0..2 term@1 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @2\n"
         "  F0.L1 @2..3 term@2 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n");
+        "    reti 7\n");
 
     if (!machine_encode_function_compute_summary(&encode_program.functions[0], &summary) ||
         summary.block_count != 2 || summary.unit_count != 3 || summary.op_unit_count != 1 ||
@@ -215,9 +215,9 @@ static int test_machine_encode_bridge_from_machine_ir(void) {
         "  F0.L0 @0..2 term@1 ; emit.0 -> layout.0 -> bb.0\n"
         "    cmpbrift.10 taken=F0.L2 @3 fallthrough=F0.L1 @2\n"
         "  F0.L1 @2..3 term@2 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n"
+        "    reti 1\n"
         "  F0.L2 @3..4 term@3 ; emit.2 -> layout.2 -> bb.2\n"
-        "    return\n");
+        "    reti 2\n");
 
     machine_ir_program_free(&machine_program);
     machine_encode_program_free(&encode_program);
@@ -305,8 +305,7 @@ static int test_machine_encode_structured_terminator_targets(void) {
     emit_program.functions[0].blocks[4].original_block_id = 4;
     emit_program.functions[0].blocks[4].label_name = dup_text("F0.L4");
     emit_program.functions[0].blocks[4].has_terminator = 1;
-    emit_program.functions[0].blocks[4].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
-    emit_program.functions[0].blocks[4].terminator.as.return_value = machine_select_operand_immediate(6);
+    emit_program.functions[0].blocks[4].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
 
     if (!machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error) ||
         !machine_encode_build_report_from_program(&encode_program, &report, &encode_error)) {
@@ -328,9 +327,9 @@ static int test_machine_encode_structured_terminator_targets(void) {
         "  F0.L2 @2..3 term@2 ; emit.2 -> layout.2 -> bb.2\n"
         "    cmpbri.10 then=F0.L3 @3 else=F0.L4 @4\n"
         "  F0.L3 @3..4 term@3 ; emit.3 -> layout.3 -> bb.3\n"
-        "    return\n"
+        "    reti 5\n"
         "  F0.L4 @4..5 term@4 ; emit.4 -> layout.4 -> bb.4\n"
-        "    return\n");
+        "    ret\n");
 
     if (!machine_encode_program_get_function_by_name(&encode_program, "main", NULL, &function_view) || !function_view) {
         fprintf(stderr, "[machine-encode] FAIL: terminator-summary function lookup failed\n");
@@ -365,6 +364,21 @@ static int test_machine_encode_structured_terminator_targets(void) {
         strcmp(terminator_summary.secondary_target_label_name, "F0.L4") != 0 ||
         terminator_summary.secondary_target_offset != 4) {
         fprintf(stderr, "[machine-encode] FAIL: report terminator summary mismatch\n");
+        ok = 0;
+    }
+    if (!machine_encode_function_get_block_terminator_summary(function_view, 3, &terminator_summary) ||
+        terminator_summary.kind != MACHINE_LAYOUT_TERM_RETURN_IMM ||
+        !terminator_summary.has_return_value ||
+        terminator_summary.return_value.kind != MACHINE_SELECT_OPERAND_IMMEDIATE ||
+        terminator_summary.return_value.immediate != 5) {
+        fprintf(stderr, "[machine-encode] FAIL: immediate return terminator summary mismatch\n");
+        ok = 0;
+    }
+    if (!machine_encode_report_get_block_terminator_summary(&report, 0, 4, &terminator_summary) ||
+        terminator_summary.kind != MACHINE_LAYOUT_TERM_RETURN ||
+        terminator_summary.has_return_value ||
+        terminator_summary.return_value.kind != MACHINE_SELECT_OPERAND_NONE) {
+        fprintf(stderr, "[machine-encode] FAIL: bare return terminator summary mismatch\n");
         ok = 0;
     }
 
@@ -863,7 +877,7 @@ static int test_machine_encode_from_machine_emit_report(void) {
         "  F0.L0 @0..2 term@1 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @2\n"
         "  F0.L1 @2..3 term@2 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n");
+        "    reti 9\n");
 
     if (!machine_encode_report_get_function_by_name(&encode_report, "main", NULL, &function_view) || !function_view ||
         !machine_encode_report_find_block_summary_by_function_name_and_offset(
@@ -980,9 +994,9 @@ static int test_machine_encode_from_machine_ir_report(void) {
         "  F0.L0 @0..2 term@1 ; emit.0 -> layout.0 -> bb.0\n"
         "    cmpbrift.10 taken=F0.L2 @3 fallthrough=F0.L1 @2\n"
         "  F0.L1 @2..3 term@2 ; emit.1 -> layout.1 -> bb.1\n"
-        "    return\n"
+        "    reti 1\n"
         "  F0.L2 @3..4 term@3 ; emit.2 -> layout.2 -> bb.2\n"
-        "    return\n");
+        "    reti 2\n");
 
     if (!machine_encode_report_get_function_by_name(&encode_report, "main", NULL, &function_view) || !function_view ||
         !machine_encode_report_get_function_summary_artifact(&encode_report, 0, &function_summary) ||
@@ -1107,6 +1121,81 @@ static int test_machine_encode_verifier_rejects_bad_targets(void) {
     return 1;
 }
 
+static int test_machine_encode_verifier_enforces_return_shapes(void) {
+    MachineEncodeProgram program;
+    MachineEncodeError error;
+
+    memset(&error, 0, sizeof(error));
+    machine_encode_program_init(&program);
+
+    program.register_bank.register_count = 1;
+    program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1, sizeof(MachineEmitRegisterDesc));
+    program.function_count = 1;
+    program.function_capacity = 1;
+    program.functions = (MachineEncodeFunction *)calloc(1, sizeof(MachineEncodeFunction));
+    if (!program.register_bank.registers || !program.functions) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+    program.functions[0].name = dup_text("main");
+    program.functions[0].has_body = 1;
+    program.functions[0].spill_slot_count = 1;
+    program.functions[0].block_count = 1;
+    program.functions[0].block_capacity = 1;
+    program.functions[0].blocks = (MachineEncodeBlock *)calloc(1, sizeof(MachineEncodeBlock));
+    if (!program.functions[0].name || !program.functions[0].blocks) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+
+    program.functions[0].blocks[0].emit_index = 0;
+    program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program.functions[0].blocks[0].start_offset = 0;
+    program.functions[0].blocks[0].terminator_offset = 0;
+    program.functions[0].blocks[0].end_offset = 1;
+    program.functions[0].blocks[0].span.start_offset = 0;
+    program.functions[0].blocks[0].span.terminator_offset = 0;
+    program.functions[0].blocks[0].span.end_offset = 1;
+    if (!program.functions[0].blocks[0].label_name) {
+        machine_encode_program_free(&program);
+        return 0;
+    }
+    program.functions[0].blocks[0].block.has_terminator = 1;
+
+    program.functions[0].blocks[0].block.terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    program.functions[0].blocks[0].block.terminator.as.return_value = machine_select_operand_none();
+    if (!machine_encode_verify_program(&program, &error)) {
+        fprintf(stderr, "[machine-encode] FAIL: verifier rejected void return: %s\n", error.message);
+        machine_encode_program_free(&program);
+        return 0;
+    }
+
+    memset(&error, 0, sizeof(error));
+    program.functions[0].blocks[0].block.terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program.functions[0].blocks[0].block.terminator.as.return_value = machine_select_operand_none();
+    if (machine_encode_verify_program(&program, &error) || strstr(error.message, "MACHINE-ENCODE-142") == NULL) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: verifier accepted malformed immediate return: %s\n",
+            error.message);
+        machine_encode_program_free(&program);
+        return 0;
+    }
+
+    memset(&error, 0, sizeof(error));
+    program.functions[0].blocks[0].block.terminator.kind = MACHINE_LAYOUT_TERM_RETURN_SPILL;
+    program.functions[0].blocks[0].block.terminator.as.return_value = machine_select_operand_spill_slot(1);
+    if (machine_encode_verify_program(&program, &error) || strstr(error.message, "MACHINE-ENCODE-143") == NULL) {
+        fprintf(stderr,
+            "[machine-encode] FAIL: verifier accepted out-of-range spill return: %s\n",
+            error.message);
+        machine_encode_program_free(&program);
+        return 0;
+    }
+
+    machine_encode_program_free(&program);
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1119,6 +1208,7 @@ int main(void) {
     ok &= test_machine_encode_from_machine_ir_report();
     ok &= test_machine_encode_verifier_rejects_bad_offsets();
     ok &= test_machine_encode_verifier_rejects_bad_targets();
+    ok &= test_machine_encode_verifier_enforces_return_shapes();
     ok &= test_machine_encode_rejects_riscv32_preview_incompatible_register_bank();
     ok &= test_machine_encode_rejects_riscv32_preview_bytes_incompatible_branch_range();
 

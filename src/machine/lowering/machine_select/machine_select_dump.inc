@@ -249,11 +249,16 @@ int machine_select_dump_program(const MachineSelectProgram *program,
                 case MACHINE_SELECT_TERM_RETURN_SPILL:
                     if (!machine_select_append_format(
                             &builder,
-                            "%s ",
+                            "%s",
                             block->terminator.kind == MACHINE_SELECT_TERM_RETURN_IMM
                                 ? "reti"
-                                : (block->terminator.kind == MACHINE_SELECT_TERM_RETURN_SPILL ? "retspill" : "ret")) ||
-                        !machine_select_dump_operand(&builder, block->terminator.as.return_value)) {
+                                : (block->terminator.kind == MACHINE_SELECT_TERM_RETURN_SPILL ? "retspill" : "ret"))) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    if (block->terminator.as.return_value.kind != MACHINE_SELECT_OPERAND_NONE &&
+                        (!machine_select_append_format(&builder, " ") ||
+                            !machine_select_dump_operand(&builder, block->terminator.as.return_value))) {
                         free(builder.data);
                         return 0;
                     }

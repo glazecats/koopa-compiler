@@ -107,6 +107,7 @@ typedef enum {
 
 typedef struct {
     LowerIrTerminatorKind kind;
+    int has_return_value;
     union {
         LowerIrValueRef return_value;
         size_t jump_target;
@@ -206,6 +207,7 @@ int lower_ir_block_append_instruction(LowerIrBasicBlock *block,
 int lower_ir_block_set_return(LowerIrBasicBlock *block,
     LowerIrValueRef value,
     LowerIrError *error);
+int lower_ir_block_set_void_return(LowerIrBasicBlock *block, LowerIrError *error);
 int lower_ir_block_set_jump(LowerIrBasicBlock *block,
     size_t target_block_id,
     LowerIrError *error);
