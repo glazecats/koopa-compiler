@@ -704,6 +704,335 @@ static int test_semantic_rejects_call_guard_return_only_without_tail_return(void
     return run_callable_diag_case(&c);
 }
 
+static int test_semantic_rejects_partial_return_inside_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-82 partial return in while true",
+        "int f(int a){while(1){if(a){return 1;}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_partial_return_inside_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-83 partial return in for true",
+        "int f(int a){for(;;){if(a){return 1;}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_all_path_return_inside_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-010",
+        "int f(int a){while(1){if(a){return 1;}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_all_path_return_inside_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-011",
+        "int f(int a){for(;;){if(a){return 1;}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_all_path_return_inside_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-012",
+        "int f(int a){while(1){if(a){while(1){return 1;}}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_nested_partial_return_inside_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-84 nested partial return in while true",
+        "int f(int a){while(1){if(a){while(1){return 1;}}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_mixed_nested_all_path_return_inside_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-017",
+        "int f(int a){while(1){if(a){for(;;){return 1;}}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_mixed_nested_partial_return_inside_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-94 mixed nested partial return in while true",
+        "int f(int a){while(1){if(a){for(;;){return 1;}}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_nested_all_path_return_inside_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-015",
+        "int f(int a){for(;;){if(a){for(;;){return 1;}}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_nested_partial_return_inside_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-92 nested partial return in for true",
+        "int f(int a){for(;;){if(a){for(;;){return 1;}}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_mixed_nested_all_path_return_inside_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-016",
+        "int f(int a){for(;;){if(a){while(1){return 1;}}else{return 2;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_mixed_nested_partial_return_inside_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-93 mixed nested partial return in for true",
+        "int f(int a){for(;;){if(a){while(1){return 1;}}}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_mixed_nested_break_guard_set_true_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-018",
+        "int f(int a){while(1){for(;;){if(a) break; a=1;} return 1;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_mixed_nested_break_guard_reset_false_in_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-95 mixed nested false-guard in while true",
+        "int f(int a){while(1){for(;;){if(a) break; a=0;} return 1;}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_mixed_nested_break_guard_set_true_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-019",
+        "int f(int a){for(;;){while(1){if(a) break; a=1;} return 1;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_mixed_nested_break_guard_reset_false_in_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-96 mixed nested false-guard in for true",
+        "int f(int a){for(;;){while(1){if(a) break; a=0;} return 1;}}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_else_break_guard_reset_false_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-020",
+        "int f(int a){while(1){if(a) a=0; else break;} return 1;}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_else_break_guard_stays_true_in_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-97 else-break true-guard in while true",
+        "int f(int a){while(1){if(a) a=1; else break;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_else_break_guard_reset_false_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-021",
+        "int f(int a){for(;;){if(a) a=0; else break;} return 1;}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_else_break_guard_stays_true_in_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-98 else-break true-guard in for true",
+        "int f(int a){for(;;){if(a) a=1; else break;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_constant_true_break_guard_reset_false_in_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-85 false-guard backedge while true",
+        "int f(int a){while(1){if(a) break; a=0;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_constant_false_guard_before_break_in_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-86 pre-zeroed guard while true",
+        "int f(int a){while(1){a=0; if(a) break;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_break_guard_set_true_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-013",
+        "int f(int a){while(1){if(a) break; a=1;} return 1;}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_path_refined_zero_guard_in_while_true(void) {
+    static const CallableDiagCase c = {
+        "CF-90 path-refined zero guard while true",
+        "int f(int a){while(1){if(a) break; a=a-a;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_constant_true_break_guard_reset_false_in_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-87 false-guard backedge for true",
+        "int f(int a){for(;;){if(a) break; a=0;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_constant_true_break_guard_step_reset_false_in_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-88 false-guard step backedge for true",
+        "int f(int a){for(;;a=0){if(a) break;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_break_guard_step_set_true_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-014",
+        "int f(int a){for(;;a=1){if(a) break;} return 1;}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_rejects_path_refined_zero_guard_in_for_true_step(void) {
+    static const CallableDiagCase c = {
+        "CF-91 path-refined zero guard for true step",
+        "int f(int a){for(;;a=a-a){if(a) break;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_constant_true_break_guard_body_true_but_step_reset_false_in_for_true(void) {
+    static const CallableDiagCase c = {
+        "CF-89 body-true but step-false for true",
+        "int f(int a){for(;;a=0){if(a) break; a=1;} return 1;}\n",
+        "SEMA-CF-001",
+        "Function definition must return on all control-flow paths",
+        1,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
 static int test_semantic_accepts_reachable_return_after_break_in_while_true(void) {
     const char *source = "int f(){while(1){break;}return 1;}\n";
     TokenArray tokens;
@@ -1133,4 +1462,3 @@ static int test_semantic_rejects_metadata_only_definition_during_ast_primary_pha
     ast_program_free(&program);
     return 1;
 }
-

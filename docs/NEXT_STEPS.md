@@ -93,6 +93,107 @@
 
 ## Current Active Slice
 
+- Current multi-round implementation focus is now the following ordered line,
+  and it should be treated as the default mainline until these items are
+  materially closed:
+  1. finish `lv7`
+  2. redesign and harden `SEMA-CF-001` / function-return control-flow
+     reasoning so it is conservative, reasonable, and only rejects clearly
+     wrong shapes
+  3. replace the current selected-side conservative cleanup fallback with a
+     real CFG live-out-aware cross-block copy/dead-def cleanup backed by
+     explicit dataflow, not successor peeking
+  4. formally solve full `memory_ssa_pass` / `memory-binary CSE`
+     convergence instead of relying on compiler fallback behavior
+  5. keep repository regressions plus course tests green throughout
+- Current progress snapshot for that ordered line:
+  - `lv7`: **complete / 12 of 12 passing**, including the earlier
+    `06_nested_while` blocker after backing out an unsound
+    post-phi `machine_ir` known-slot branch CFG fold
+  - `SEMA-CF-001` boundary hardening: **checkpoint-near / roughly 98%**
+    after locking the function-level rule to
+    `guaranteed_return && !may_fallthrough` and adding focused regressions for
+    infinite-loop all-path-return accept/reject boundaries; current loop
+    policy now also flows through one shared semantic helper instead of
+    duplicated `while` / `for` decision trees, with nested infinite-loop
+    return boundaries regression-locked on both `while(1)` and `for(;;)`
+    families, including the current mixed `for -> while` and `while -> for`
+    nested shapes too, plus matched mixed nested break-guard refinement
+    families in both directions (`while -> for` and `for -> while`), plus the
+    mirrored direct `if(a) ... else break;` continuing-path refinement on both
+    constant-true `while(1)` and `for(;;)` loops;
+    the current line now also rejects
+    one first explicit family of constant-true partial-exit dead loops where a
+    guarded `break`/`return` condition is provably forced false again on the
+    loop backedge, including the first matching `for`-step family where the
+    step expression itself re-forces that exit guard false before the next
+    iteration, plus the first narrow direct-identifier fallthrough refinement
+    where `if(a) break;` lets the continuing path reuse `a==0` for later
+    backedge-proof checks
+  - CFG live-out-aware selected cleanup: **checkpoint-near / roughly 99%**
+    after replacing successor-peeking-only cleanup with a first explicit
+    selected-side dataflow slice: block-entry must-agree alias propagation now
+    rewrites copy/materialize facts across CFG edges, and block `live_out`
+    facts now guard cross-block trivial-def / dead-def removal; the current
+    selected cleanup line also keeps caller-clobber versus callee-preserved
+    `call` barriers explicit in both alias propagation and focused regression
+    coverage instead of pretending cross-call copy facts are always safe;
+    spill-slot aliases are now also regression-locked as surviving those same
+    `call` barriers, so the current cleanup line no longer only exercises the
+    register-side half of the cross-call alias story, and must-agree
+    spill-slot joins plus unique-successor spill alias propagation and
+    disagreeing spill-join preservation are now likewise locked on the
+    selected cleanup path, so the current spill-backed path now has coverage
+    on the three main local CFG families we already exercise on registers:
+    straight successor flow, must-agree join flow, and disagreeing join flow;
+    cross-block dead-def removal is now also regression-locked for both
+    register-backed and spill-backed defs when a successor immediately
+    redefines the same resource before any surviving downstream use, and the
+    current live-out line is now also explicitly locked against the opposite
+    mistake on both resource families: if only one successor path redefines
+    the resource but another path still carries the old value to a later use,
+    the predecessor-side def remains live and must be preserved; that same
+    “partial path kills are not whole-CFG kills” rule is now also explicitly
+    locked across `call` barriers, including the split case where one
+    successor path passes through a caller-clobbering call while another path
+    still relies on the older value, and the current cleanup line is now also
+    regression-locked on the complementary mixed-kill distinction across
+    resource kinds: when every path invalidates a caller-clobbered register
+    before the later use (for example one path by `call`, another by
+    redefinition), the predecessor-side register def may be removed, while the
+    analogous spill-backed def remains live because the `call` side does not
+    invalidate the spill resource; the current live-out line now also
+    exercises the mixed-kill split explicitly when different successor paths
+    invalidate the register resource by different mechanisms (`call` on one
+    path, redefinition on another) while the analogous spill resource remains
+    live through the `call` path, and the latest focused coverage now also
+    locks same-predecessor multi-resource precision explicitly: one predecessor
+    may lose its dead register def while keeping a sibling spill-backed def
+    live (and, depending on the later path split, either preserve it as
+    `retspill` or fold it further to `reti`) under the same successor region
+    rather than forcing a coarse one-size-fits-all keep/remove decision; the
+    current selected cleanup line now therefore exercises not only
+    path-sensitive but also resource-sensitive live-out precision under mixed
+    `call` / redefinition pressure, including
+    the same-predecessor split where a dead register-backed def disappears
+    while a sibling spill-backed def still survives through the very same
+    successor region; current focused `machine_select` cleanup coverage now
+    also rechecks both direct targeted regressions and the dedicated
+    `machine_select` test binary green after the latest semantic-side closure
+    work, so this line should now be treated as effectively checkpointed
+    unless a concrete selected-cleanup bug reopens it
+  - full memory-cse convergence fix: **complete / regression-locked**
+    after removing the temporary compiler fallback, sharing the same widened
+    memory-binary fixed-point budget across the nested join/expose/full CSE
+    loops, and keeping the default `compiler -riscv` / `-perf` path on the
+    memory-full canonicalization route; current targeted
+    `memory_ssa_pass` / compiler / course-suite coverage stayed green on the
+    post-fallback line
+  - regression hygiene: **active and currently green**
+    including refreshed `machine_layout` compare-family bridge expectations,
+    refreshed `memory_ssa` bridge expectations for the now-simplified local
+    diamond case, repository targeted suites, full `make test`, and the
+    course `lv5` / `lv6` / `lv7` RISC-V suites
 - The downstream observe/runtime provenance follow-through line
   (`machine_elf -> ... -> machine_journal`) is now effectively
   **checkpointed end-to-end** for the current workstream.
@@ -1888,6 +1989,9 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-04-28: Structural split rewriting now also composes more cleanly with unique-predecessor jump edges. On a jump edge that feeds downstream phis, one spilled value may now first carve one local split child for repeated uses in the jump predecessor block and still materialize a separate edge child for the phi consumers on that same edge in the same round. Focused allocator coverage now locks that loop-backedge family too, and the full test matrix remains green.
 - 2026-04-28: That jump-edge structural split line now also has a narrower, stronger endpoint for the single-phi case. If the unique jump predecessor has already formed one local split child for repeated predecessor-local uses, and there is only one downstream phi consumer on the jump edge, the allocator may now let that phi consume the predecessor-local child directly instead of opening a separate split-edge block. Focused allocator coverage now locks that tighter loop-backedge family, and the full test matrix remains green.
 - 2026-04-28: The branch-side structural split boundary was probed against the same stronger "reuse the predecessor local child" idea, but current authority intentionally keeps the narrower endpoint only on the unique-predecessor jump-edge side. The branch-edge path still uses its split block as the default carrier for phi consumers, while the stronger no-extra-child endpoint remains regression-locked only for the jump-edge single-phi family. Tests stayed green after explicitly restoring that boundary.
+- 2026-05-03: The `SEMA-CF-001` closure line now also locks the mirrored mixed-nested break-guard family instead of covering only one loop-direction. Focused semantic regressions now cover both `while(1){ for(;;){ if(a) break; ... } return ...; }` and `for(;;){ while(1){ if(a) break; ... } return ...; }` in both accept and reject forms, so the shared loop helper no longer relies on one-way mixed nesting coverage only. `semantic_regression_test`, full `make test`, and `git diff --check` stayed green.
+- 2026-05-04: That same `SEMA-CF-001` closure line now also locks the mirrored direct continuing-path polarity instead of testing only `if(a) break;`-style refinement. Constant-true `while(1)` and `for(;;)` loops now have focused accept/reject regressions for `if(a) ... else break;` too, so the direct-identifier continuing-path refinement is covered on both branch polarities rather than only one. `semantic_regression_test`, full `make test`, and `git diff --check` stayed green again.
+- 2026-05-04: The current CFG live-out-aware `machine_select` cleanup line was also reclosed explicitly after the semantic-side closure work rather than being left on an older implicit checkpoint. The dedicated `machine_select` test binary is green, the spill/register/call-barrier/live-out cleanup matrix remains green under the repository suite, and the selected-cleanup line should now be treated as effectively checkpointed for the active reopen unless a concrete correctness bug reappears.
 
 ## Historical Note
 

@@ -492,7 +492,7 @@ In short:
 
 - `MS1`-`MS3` should now be treated as checkpoint-ready / historical by
   default.
-- `MS4` should now be treated as checkpoint-close and maintenance-first:
+- `MS4` should now be treated as checkpoint-near and maintenance-first:
   reopen it for confirmed selected-lowering/legalization regressions, a
   concrete downstream consumer need, or a deliberately chosen selected-form
   widening pass, not as the default backend mainline.
@@ -501,6 +501,13 @@ In short:
   **~99% of the currently chosen immediate/call-shaping slice**: the next
   likely work should stay downstream in `machine_bytes` / relocation / ELF
   unless a newly exposed selected-form bug reopens `machine_select` again.
+- Latest focused closure check:
+  - dedicated `machine_select` test binary is green
+  - current spill/register/call-barrier/live-out cleanup regressions remain
+    green under the repository test matrix
+  - current authority is that the CFG live-out-aware cleanup line is
+    effectively checkpointed for the active reopen, and should only move back
+    to the front for a concrete selected-cleanup correctness bug
 - Default backend progress reporting should no longer fall back to `MS*`
   stage names once the active downstream checkpoint has moved to later sibling
   plans such as `machine_layout`, `machine_emit`, or `machine_elf`, unless
