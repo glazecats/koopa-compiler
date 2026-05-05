@@ -82,9 +82,6 @@ static int compiler_append_caller_save_sequence(
     size_t call_save_area_offset,
     int is_store,
     int include_a0);
-static int compiler_call_result_needs_a0(
-    const MachineBytesBlock *block,
-    size_t call_emit_index);
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
@@ -635,107 +632,6 @@ static int compiler_append_caller_save_sequence(
         }
     }
     return 1;
-}
-
-static int compiler_operand_uses_a0(const MachineEmitOperand *operand) {
-    return operand && operand->kind == MACHINE_SELECT_OPERAND_REGISTER &&
-        operand->machine_register_id == 0u;
-}
-
-static int compiler_op_uses_a0(const MachineEmitOp *op) {
-    if (!op) {
-        return 0;
-    }
-    switch (op->kind) {
-        case MACHINE_SELECT_OP_COPY:
-            return compiler_operand_uses_a0(&op->as.copy_value);
-        case MACHINE_SELECT_OP_ALU:
-        case MACHINE_SELECT_OP_ALU_IMM:
-        case MACHINE_SELECT_OP_CMP:
-        case MACHINE_SELECT_OP_CMP_IMM:
-            return compiler_operand_uses_a0(&op->as.binary.lhs) ||
-                compiler_operand_uses_a0(&op->as.binary.rhs);
-        case MACHINE_SELECT_OP_STORE_LOCAL:
-        case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
-        case MACHINE_SELECT_OP_STORE_GLOBAL:
-        case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
-            return compiler_operand_uses_a0(&op->as.store.value);
-        case MACHINE_SELECT_OP_LOAD_INDIRECT:
-            return compiler_operand_uses_a0(&op->as.load_indirect_addr);
-        case MACHINE_SELECT_OP_STORE_INDIRECT:
-            return compiler_operand_uses_a0(&op->as.store_indirect.addr) ||
-                compiler_operand_uses_a0(&op->as.store_indirect.value);
-        case MACHINE_SELECT_OP_CALL:
-        case MACHINE_SELECT_OP_CALL_IMM:
-        case MACHINE_SELECT_OP_CALL_SPILL:
-        case MACHINE_SELECT_OP_CALL_IMM_SPILL:
-        case MACHINE_SELECT_OP_CALL_VOID:
-        case MACHINE_SELECT_OP_CALL_VOID_IMM:
-            for (size_t arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
-                if (compiler_operand_uses_a0(&op->as.call.args[arg_index])) {
-                    return 1;
-                }
-            }
-            return 0;
-        default:
-            return 0;
-    }
-}
-
-static int compiler_op_defines_a0(const MachineEmitOp *op) {
-    return op && op->has_result && op->result.kind == MACHINE_SELECT_OPERAND_REGISTER &&
-        op->result.machine_register_id == 0u;
-}
-
-static int compiler_terminator_uses_a0(const MachineEmitTerminator *terminator) {
-    if (!terminator) {
-        return 0;
-    }
-    switch (terminator->kind) {
-        case MACHINE_LAYOUT_TERM_RETURN:
-        case MACHINE_LAYOUT_TERM_RETURN_IMM:
-        case MACHINE_LAYOUT_TERM_RETURN_SPILL:
-            return compiler_operand_uses_a0(&terminator->as.return_value);
-        case MACHINE_LAYOUT_TERM_BRANCH:
-            return compiler_operand_uses_a0(&terminator->as.branch.condition);
-        case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
-            return compiler_operand_uses_a0(&terminator->as.branch_fallthrough.condition);
-        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH:
-            return compiler_operand_uses_a0(&terminator->as.compare_branch.lhs) ||
-                compiler_operand_uses_a0(&terminator->as.compare_branch.rhs);
-        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM:
-            return compiler_operand_uses_a0(&terminator->as.compare_branch.lhs) ||
-                compiler_operand_uses_a0(&terminator->as.compare_branch.rhs);
-        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
-            return compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.lhs) ||
-                compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.rhs);
-        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
-            return compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.lhs) ||
-                compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.rhs);
-        default:
-            return 0;
-    }
-}
-
-static int compiler_call_result_needs_a0(
-    const MachineBytesBlock *block,
-    size_t call_emit_index) {
-    size_t op_index;
-
-    if (!block || call_emit_index >= block->block.op_count) {
-        return 0;
-    }
-    for (op_index = call_emit_index + 1u; op_index < block->block.op_count; ++op_index) {
-        const MachineEmitOp *op = &block->block.ops[op_index];
-
-        if (compiler_op_defines_a0(op)) {
-            return 0;
-        }
-        if (compiler_op_uses_a0(op)) {
-            return 1;
-        }
-    }
-    return compiler_terminator_uses_a0(&block->block.terminator);
 }
 
 static int compiler_append_riscv_preview_instruction(
@@ -1437,17 +1333,11 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                 uint32_t word = compiler_read_u32_le(block_bytes + byte_offset);
                 size_t program_byte_offset = function_start + block_summary.start_byte_offset + byte_offset;
                 const MachineBytesFixupSummary *call_fixup = NULL;
-                const MachineEmitOp *call_op = NULL;
                 int include_a0 = 0;
 
                 if (save_caller_regs_around_call) {
                     call_fixup = compiler_find_call_fixup_covering_offset(&bytes_report, program_byte_offset);
-                    if (call_fixup && call_fixup->emit_index < block->block.op_count) {
-                        call_op = &block->block.ops[call_fixup->emit_index];
-                        include_a0 = 0;
-                        (void)call_op;
-                        (void)compiler_call_result_needs_a0;
-                    }
+                    (void)block;
                 }
                 if (call_fixup && program_byte_offset == call_fixup->owner_byte_offset &&
                     !compiler_append_caller_save_sequence(&builder, call_save_area_offset, 1, include_a0)) {

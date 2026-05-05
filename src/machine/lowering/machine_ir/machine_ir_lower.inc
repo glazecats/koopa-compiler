@@ -9,6 +9,7 @@ static MachineIrBinaryOp machine_ir_lower_binary_op(ValueSsaBinaryOp op) {
 }
 
 static MachineIrOperand machine_ir_lower_value_ref(const ValueSsaFunctionMachineAllocationView *machine_view,
+    const size_t *protected_spill_slots,
     ValueSsaValueRef value,
     MachineIrError *error) {
     const ValueSsaMachineAllocatedValuePlacement *placement = NULL;
@@ -27,6 +28,9 @@ static MachineIrOperand machine_ir_lower_value_ref(const ValueSsaFunctionMachine
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-301: missing placement for SSA value");
         return machine_ir_operand_none();
     }
+    if (protected_spill_slots && protected_spill_slots[value.value_id] != (size_t)-1) {
+        return machine_ir_operand_spill_slot(protected_spill_slots[value.value_id]);
+    }
 
     if (placement->kind == VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR) {
         return machine_ir_operand_register(placement->machine_register_id);
@@ -37,6 +41,70 @@ static MachineIrOperand machine_ir_lower_value_ref(const ValueSsaFunctionMachine
 
     machine_ir_set_error(error, 0, 0, "MACHINE-IR-302: SSA value has no lowered machine placement");
     return machine_ir_operand_none();
+}
+
+static int machine_ir_build_protected_call_crossing_spill_slots(
+    const ValueSsaFunction *function,
+    const ValueSsaFunctionMachineAllocationView *machine_view,
+    const ValueSsaMachineRegisterBank *bank,
+    size_t **out_slots,
+    size_t *out_protected_spill_count,
+    MachineIrError *error) {
+    ValueSsaAllocationPrep prep;
+    ValueSsaError value_error;
+    size_t *slots = NULL;
+    size_t value_id;
+    size_t next_spill_slot = 0;
+
+    if (out_slots) {
+        *out_slots = NULL;
+    }
+    if (out_protected_spill_count) {
+        *out_protected_spill_count = 0;
+    }
+    if (!function || !machine_view || !bank || !out_slots || !out_protected_spill_count) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-315: invalid protected spill-slot build contract");
+        return 0;
+    }
+    if (!function->has_body || machine_view->value_count == 0) {
+        return 1;
+    }
+
+    value_ssa_allocation_prep_init(&prep);
+    memset(&value_error, 0, sizeof(value_error));
+    slots = (size_t *)malloc(machine_view->value_count * sizeof(size_t));
+    if (!slots) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-316: out of memory building protected spill-slot map");
+        return 0;
+    }
+    for (value_id = 0; value_id < machine_view->value_count; ++value_id) {
+        slots[value_id] = (size_t)-1;
+    }
+    if (!value_ssa_compute_allocation_prep(function, NULL, NULL, NULL, NULL, &prep, &value_error)) {
+        free(slots);
+        value_ssa_allocation_prep_free(&prep);
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        return 0;
+    }
+
+    next_spill_slot = machine_view->spill_slot_count;
+    for (value_id = 0; value_id < machine_view->value_count; ++value_id) {
+        const ValueSsaMachineAllocatedValuePlacement *placement = NULL;
+
+        if (!prep.call_crossing_counts || prep.call_crossing_counts[value_id] == 0 ||
+            !value_ssa_function_machine_allocation_view_get_placement(machine_view, value_id, &placement) ||
+            !placement || placement->kind != VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR ||
+            placement->machine_register_id >= bank->register_count ||
+            !bank->registers[placement->machine_register_id].caller_clobbered) {
+            continue;
+        }
+        slots[value_id] = next_spill_slot++;
+    }
+
+    *out_slots = slots;
+    *out_protected_spill_count = next_spill_slot - machine_view->spill_slot_count;
+    value_ssa_allocation_prep_free(&prep);
+    return 1;
 }
 
 static int machine_ir_copy_globals_from_value_ssa(const ValueSsaProgram *program,
@@ -115,6 +183,8 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
     MachineIrError *error) {
     size_t local_index;
     size_t block_index;
+    size_t *protected_spill_slots = NULL;
+    size_t protected_spill_count = 0;
 
     if (!function || !machine_view || !bank || !out_function) {
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-307: invalid function lowering contract");
@@ -129,9 +199,15 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
         return 0;
     }
     out_function->has_body = function->has_body;
-    out_function->spill_slot_count = machine_view->spill_slot_count;
+    if (!machine_ir_build_protected_call_crossing_spill_slots(
+            function, machine_view, bank, &protected_spill_slots, &protected_spill_count, error)) {
+        machine_ir_function_free(out_function);
+        return 0;
+    }
+    out_function->spill_slot_count = machine_view->spill_slot_count + protected_spill_count;
 
     if (!function->has_body) {
+        free(protected_spill_slots);
         return 1;
     }
 
@@ -163,22 +239,24 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
             MachineIrPhi *dest_phi = NULL;
             size_t input_index;
             MachineIrOperand result = machine_ir_lower_value_ref(
-                machine_view, value_ssa_value_id(source_phi->result_id), error);
+                machine_view, protected_spill_slots, value_ssa_value_id(source_phi->result_id), error);
 
             if (result.kind == MACHINE_IR_OPERAND_NONE ||
                 !machine_ir_block_append_phi(dest_block, result, NULL, &dest_phi, error) || !dest_phi) {
+                free(protected_spill_slots);
                 machine_ir_function_free(out_function);
                 return 0;
             }
             for (input_index = 0; input_index < source_phi->input_count; ++input_index) {
                 MachineIrOperand input_value = machine_ir_lower_value_ref(
-                    machine_view, source_phi->inputs[input_index].value, error);
+                    machine_view, protected_spill_slots, source_phi->inputs[input_index].value, error);
 
                 if (input_value.kind == MACHINE_IR_OPERAND_NONE ||
                     !machine_ir_phi_append_input(dest_phi,
                         source_phi->inputs[input_index].predecessor_block_id,
                         input_value,
                         error)) {
+                    free(protected_spill_slots);
                     machine_ir_function_free(out_function);
                     return 0;
                 }
@@ -193,8 +271,10 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
             instruction.kind = (MachineIrInstructionKind)source_instruction->kind;
             instruction.has_result = source_instruction->has_result;
             if (source_instruction->has_result) {
-                instruction.result = machine_ir_lower_value_ref(machine_view, source_instruction->result, error);
+                instruction.result =
+                    machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->result, error);
                 if (instruction.result.kind == MACHINE_IR_OPERAND_NONE) {
+                    free(protected_spill_slots);
                     machine_ir_function_free(out_function);
                     return 0;
                 }
@@ -203,14 +283,14 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
             switch (source_instruction->kind) {
                 case VALUE_SSA_INSTR_MOV:
                     instruction.as.mov_value =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.mov_value, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.mov_value, error);
                     break;
                 case VALUE_SSA_INSTR_BINARY:
                     instruction.as.binary.op = machine_ir_lower_binary_op(source_instruction->as.binary.op);
                     instruction.as.binary.lhs =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.binary.lhs, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.binary.lhs, error);
                     instruction.as.binary.rhs =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.binary.rhs, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.binary.rhs, error);
                     break;
                 case VALUE_SSA_INSTR_CALL: {
                     size_t arg_index;
@@ -236,9 +316,11 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                     }
                     for (arg_index = 0; arg_index < instruction.as.call.arg_count; ++arg_index) {
                         instruction.as.call.args[arg_index] =
-                            machine_ir_lower_value_ref(machine_view, source_instruction->as.call.args[arg_index], error);
+                            machine_ir_lower_value_ref(
+                                machine_view, protected_spill_slots, source_instruction->as.call.args[arg_index], error);
                         if (instruction.as.call.args[arg_index].kind == MACHINE_IR_OPERAND_NONE) {
                             machine_ir_instruction_free(&instruction);
+                            free(protected_spill_slots);
                             machine_ir_function_free(out_function);
                             return 0;
                         }
@@ -257,7 +339,7 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                 case VALUE_SSA_INSTR_STORE_LOCAL:
                     instruction.as.store.slot = machine_ir_slot_local(source_instruction->as.store.slot.id);
                     instruction.as.store.value =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store.value, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.store.value, error);
                     break;
                 case VALUE_SSA_INSTR_LOAD_GLOBAL:
                     instruction.as.load_slot = machine_ir_slot_global(source_instruction->as.load_slot.id);
@@ -265,20 +347,21 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                 case VALUE_SSA_INSTR_STORE_GLOBAL:
                     instruction.as.store.slot = machine_ir_slot_global(source_instruction->as.store.slot.id);
                     instruction.as.store.value =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store.value, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.store.value, error);
                     break;
                 case VALUE_SSA_INSTR_LOAD_INDIRECT:
                     instruction.as.load_indirect_addr =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.load_indirect_addr, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.load_indirect_addr, error);
                     break;
                 case VALUE_SSA_INSTR_STORE_INDIRECT:
                     instruction.as.store_indirect.addr =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store_indirect.addr, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.store_indirect.addr, error);
                     instruction.as.store_indirect.value =
-                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store_indirect.value, error);
+                        machine_ir_lower_value_ref(machine_view, protected_spill_slots, source_instruction->as.store_indirect.value, error);
                     break;
                 default:
                     machine_ir_instruction_free(&instruction);
+                    free(protected_spill_slots);
                     machine_ir_function_free(out_function);
                     machine_ir_set_error(error, 0, 0, "MACHINE-IR-311: unsupported Value-SSA instruction kind");
                     return 0;
@@ -286,6 +369,7 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
 
             if (!machine_ir_block_append_instruction(dest_block, &instruction, error)) {
                 machine_ir_instruction_free(&instruction);
+                free(protected_spill_slots);
                 machine_ir_function_free(out_function);
                 return 0;
             }
@@ -301,10 +385,11 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                     }
                 } else {
                     MachineIrOperand value = machine_ir_lower_value_ref(
-                        machine_view, source_block->terminator.as.return_value, error);
+                        machine_view, protected_spill_slots, source_block->terminator.as.return_value, error);
 
                     if (value.kind == MACHINE_IR_OPERAND_NONE ||
                         !machine_ir_block_set_return(dest_block, value, error)) {
+                        free(protected_spill_slots);
                         machine_ir_function_free(out_function);
                         return 0;
                     }
@@ -313,13 +398,14 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
             }
             case VALUE_SSA_TERM_JUMP:
                 if (!machine_ir_block_set_jump(dest_block, source_block->terminator.as.jump_target, error)) {
+                    free(protected_spill_slots);
                     machine_ir_function_free(out_function);
                     return 0;
                 }
                 break;
             case VALUE_SSA_TERM_BRANCH: {
                 MachineIrOperand condition = machine_ir_lower_value_ref(
-                    machine_view, source_block->terminator.as.branch.condition, error);
+                    machine_view, protected_spill_slots, source_block->terminator.as.branch.condition, error);
 
                 if (condition.kind == MACHINE_IR_OPERAND_NONE ||
                     !machine_ir_block_set_branch(dest_block,
@@ -327,18 +413,21 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                         source_block->terminator.as.branch.then_target,
                         source_block->terminator.as.branch.else_target,
                         error)) {
+                    free(protected_spill_slots);
                     machine_ir_function_free(out_function);
                     return 0;
                 }
                 break;
             }
             default:
+                free(protected_spill_slots);
                 machine_ir_function_free(out_function);
                 machine_ir_set_error(error, 0, 0, "MACHINE-IR-312: unsupported Value-SSA terminator kind");
                 return 0;
         }
     }
 
+    free(protected_spill_slots);
     (void)bank;
     return 1;
 }

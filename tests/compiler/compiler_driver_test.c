@@ -384,18 +384,50 @@ static int test_compiler_saves_caller_regs_around_whole_call_span(void) {
     if (strstr(output,
             "  li a7, 8\n"
             "  jal ra, sum\n"
-            "  lw t5, 52(s11)\n"
-            "  lw a1, 4(s11)\n") == NULL ||
+            "  lw t5, 56(s11)\n") == NULL ||
         strstr(output,
-            "  mv a1, a0\n"
-            "  sw t5, 52(s11)\n"
-            "  sw a1, 4(s11)\n") == NULL ||
+            "  sw a0, 4(sp)\n"
+            "  sw t5, 56(s11)\n") == NULL ||
         strstr(output,
             "  li a7, 8\n"
             "  jal ra, sum2\n"
-            "  lw t5, 52(s11)\n"
-            "  lw a1, 4(s11)\n") == NULL) {
+            "  lw t5, 56(s11)\n") == NULL ||
+        strstr(output,
+            "  addi sp, sp, 32\n"
+            "  lw t6, 4(sp)\n"
+            "  add a0, t6, a0\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: caller-save span ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_preserves_a0_across_nested_call_spans(void) {
+    static const char *source =
+        "int f(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,"
+        "int a8,int a9,int a10,int a11,int a12,int a13,int a14,int a15){"
+        "return a0+a1+a2+a3+a4+a5+a6+a7+a8+a9+a10+a11+a12+a13+a14+a15;}"
+        "int g0(){return 1;} int g1(){return 2;} int g2(){return 3;} int g3(){return 4;}"
+        "int g4(){return 5;} int g5(){return 6;} int g6(){return 7;} int g7(){return 8;}"
+        "int g8(){return 9;} int g9(){return 10;} int g10(){return 11;} int g11(){return 12;}"
+        "int g12(){return 13;} int g13(){return 14;} int g14(){return 15;} int g15(){return 16;}"
+        "int main(){return f(g0(),g1(),g2(),g3(),g4(),g5(),g6(),g7(),g8(),g9(),g10(),g11(),g12(),g13(),g14(),g15());}\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: nested-call a0 preserve compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    if (strstr(output, "  sw a0, 92(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 32(sp)\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: nested-call a0 preserve output mismatch: %s\n", error.message);
         ok = 0;
     }
 
@@ -419,6 +451,7 @@ int main(void) {
     ok &= test_compiler_pretty_prints_global_array_address_materialization();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
     ok &= test_compiler_saves_caller_regs_around_whole_call_span();
+    ok &= test_compiler_preserves_a0_across_nested_call_spans();
 
     if (!ok) {
         return 1;
