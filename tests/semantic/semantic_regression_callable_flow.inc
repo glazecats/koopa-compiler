@@ -959,6 +959,159 @@ static int test_semantic_accepts_constant_true_break_guard_set_true_in_while_tru
     return run_callable_pass_case(&c);
 }
 
+static int test_semantic_accepts_constant_true_return_guard_set_true_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-022",
+        "int f(int a){while(1){if(a){return 2;} a=1;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-023",
+        "int f(int a){for(;;){if(a){return 2;} a=1;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_in_while_true_else_path(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-024",
+        "int f(int a){while(1){if(a){return 2;} else a=1;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_return_same_iteration_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-025",
+        "int f(int a){while(1){if(a){return 2;} a=1; if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_return_same_iteration_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-026",
+        "int f(int a){for(;;){if(a){return 2;} a=1; if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_loop_guard_set_true_then_outer_return_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-027",
+        "int f(int a){while(1){if(a){return 2;} while(1){a=1; break;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_loop_guard_set_true_then_outer_return_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-028",
+        "int f(int a){for(;;){if(a){return 2;} while(1){a=1; break;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_for_guard_set_true_then_outer_return_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-029",
+        "int f(int a){while(1){if(a){return 2;} for(;;){a=1; break;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_loop_guard_set_true_then_return_same_iteration_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-030",
+        "int f(int a){while(1){if(a){return 2;} while(1){a=1; break;} if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_continue_in_while_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-031",
+        "int f(int a){while(1){if(a){return 2;} a=1; continue;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_continue_in_for_true(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-032",
+        "int f(int a){for(;;){if(a){return 2;} a=1; continue;}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_continue_in_while_true_else_path(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-033",
+        "int f(int a){while(1){if(a){return 2;} else {a=1; continue;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_constant_true_return_guard_set_true_then_continue_in_for_true_else_path(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-034",
+        "int f(int a){for(;;){if(a){return 2;} else {a=1; continue;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_inner_while_break_else_continue_then_outer_return(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-035",
+        "int f(int a){while(1){if(a){return 2;} while(1){if(a) break; else {a=1; continue;}} if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_nested_inner_for_break_else_continue_then_outer_return(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-036",
+        "int f(int a){while(1){if(a){return 2;} for(;;){if(a) break; else {a=1; continue;}} if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_outer_for_nested_inner_while_break_else_continue_then_outer_return(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-037",
+        "int f(int a){for(;;){if(a){return 2;} while(1){if(a) break; else {a=1; continue;}} if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
+static int test_semantic_accepts_outer_for_nested_inner_for_break_else_continue_then_outer_return(void) {
+    static const CallablePassCase c = {
+        "CF-PASS-038",
+        "int f(int a){for(;;){if(a){return 2;} for(;;){if(a) break; else {a=1; continue;}} if(a){return 3;}}}\n",
+    };
+
+    return run_callable_pass_case(&c);
+}
+
 static int test_semantic_rejects_path_refined_zero_guard_in_while_true(void) {
     static const CallableDiagCase c = {
         "CF-90 path-refined zero guard while true",
