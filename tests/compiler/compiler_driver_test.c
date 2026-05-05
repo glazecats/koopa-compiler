@@ -279,6 +279,30 @@ static int test_compiler_emits_global_bss_and_data_sections(void) {
     return ok;
 }
 
+static int test_compiler_pretty_prints_global_array_address_materialization(void) {
+    static const char *source =
+        "int g[2];\n"
+        "int foo(int a[]){ return 0; }\n"
+        "int main(){ foo(g); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, ".globl g\n.type g, @object\n.size g, 8\n.p2align 2\ng:\n  .zero 8\n") == NULL ||
+        strstr(output, "  lui a0, %hi(g)\n") == NULL ||
+        strstr(output, "  addi a0, a0, %lo(g)\n") == NULL ||
+        strstr(output, "  jal ra, foo\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: global-array address materialization mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_handles_complex_const_shadowing_scopes(void) {
     static const char *source =
         "int main() {\n"
@@ -360,14 +384,17 @@ static int test_compiler_saves_caller_regs_around_whole_call_span(void) {
     if (strstr(output,
             "  li a7, 8\n"
             "  jal ra, sum\n"
-            "  lw a1, 0(s11)\n") == NULL ||
+            "  lw t5, 52(s11)\n"
+            "  lw a1, 4(s11)\n") == NULL ||
         strstr(output,
-            "  lw t6, 52(s11)\n"
             "  mv a1, a0\n"
-            "  sw a1, 0(s11)\n") == NULL ||
+            "  sw t5, 52(s11)\n"
+            "  sw a1, 4(s11)\n") == NULL ||
         strstr(output,
+            "  li a7, 8\n"
             "  jal ra, sum2\n"
-            "  lw a1, 0(s11)\n") == NULL) {
+            "  lw t5, 52(s11)\n"
+            "  lw a1, 4(s11)\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: caller-save span ordering mismatch: %s\n", error.message);
         ok = 0;
     }
@@ -389,6 +416,7 @@ int main(void) {
     ok &= test_compiler_pretty_prints_external_call_and_stack_spill();
     ok &= test_compiler_pretty_prints_immediate_compares_and_loop_control();
     ok &= test_compiler_emits_global_bss_and_data_sections();
+    ok &= test_compiler_pretty_prints_global_array_address_materialization();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
     ok &= test_compiler_saves_caller_regs_around_whole_call_span();
 

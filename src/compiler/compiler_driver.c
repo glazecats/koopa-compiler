@@ -794,6 +794,18 @@ static int compiler_append_riscv_preview_instruction(
         case 0x13u: {
             int32_t imm = compiler_riscv_decode_i_imm(word);
 
+            if (fixup &&
+                fixup->kind == MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET &&
+                fixup->target_name && fixup->target_name[0] != '\0' &&
+                funct3 == 0x0u) {
+                return compiler_builder_appendf(
+                    builder,
+                    "  addi %s, %s, %%lo(%s)\n",
+                    compiler_riscv_register_name(rd),
+                    compiler_riscv_register_name(rs1),
+                    fixup->target_name);
+            }
+
             switch (funct3) {
                 case 0x0u:
                     if (rd == 0u && rs1 == 0u && imm == 0) {

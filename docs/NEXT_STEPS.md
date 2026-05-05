@@ -116,6 +116,22 @@
     the active mainline can move back to the reopened downstream
     RISC-V artifact-honesty line (`machine_reloc -> machine_elf`) when the
     next round starts
+  - `perf` course line: **course-correctness complete / effectively 100%**
+    - `perf/00_bitset1` was reopened by one real backend text-export bug:
+      global-address materialization for `addr_global` had been printed as
+      `lui + mv` instead of `lui + addi %lo(symbol)`, which truncated global
+      array addresses to page bases in the final textual RISC-V surface
+    - that text-export bug is now fixed in `compiler_driver`, and focused
+      compiler-driver regression coverage now locks global-array address
+      materialization in call arguments (`addi rd, rs1, %lo(symbol)`)
+    - staged reruns now reclose `perf/00_bitset1`, repeated full-course
+      `autotest -perf /workspaces/compiler_lab` verification has re-passed the
+      front/middle perf suite through `perf/12_fft0`, and the remaining tail
+      `13_fft1 .. 19_brainfuck-calculator` has also been rechecked green
+      one-by-one with the current `build/compiler`
+    - current remaining perf work is therefore no longer correctness, but
+      only optional performance-score tuning if/when that line is explicitly
+      reopened
   - `void` compatibility line: **course-complete / effectively 100% toward ideal**
     with the old front-end-only compatibility bridge now materially shrunk
   - SysY builtin callable-visibility line: **course-complete / roughly 80% toward ideal**
@@ -2017,6 +2033,7 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-04: That same `lv9` element-access groundwork now also has the first explicit downstream instruction-shape reopen instead of stopping at scope metadata only. Canonical IR, lower IR, Value-SSA, and Machine-IR surfaces now each have a first skeletal address/indirect-memory opcode family (`addr_local`, `addr_global`, `load_indirect`, `store_indirect`) wired into their core data structures and at least the immediate conversion/dump/verification scaffolding that has been touched so far. Current authority is still deliberately conservative: those opcodes are not yet the active course path, and the remaining work is to finish the actual `AST_EXPR_SUBSCRIPT` lowering plus enough downstream lowering/verification coverage that `lv9` can start consuming them instead of only carrying their schema.
 - 2026-05-04: The active `lv9` array-object line advanced materially again. `AST_EXPR_INIT_LIST` now recurses through semantic scope/flow walks and global-dependency / builtin-predeclaration traversals instead of being treated as a parser-only leaf, local array declarations now expand brace initializers into explicit per-element writes during canonical IR lowering, and global array declarations now compute real object byte sizes plus runtime initializer expansion through `__global.init` instead of keeping array globals in a scalar-only initializer model. In parallel, preview text/object emission now preserves those larger global object sizes, and preview function-frame sizing now counts local slots plus spill slots instead of only parameter slots, which closed the `08_arr_access.c` segfault and moved course `lv9` to `13/22` passing.
 - 2026-05-04: After that array-object closure round, the remaining `lv9` blockers are now sharply concentrated instead of being broad array-path failures. The current course failures are: one remaining allocator/rewrite `VALUE-SSA-071` on `12_more_arr_params.c`; large-frame preview-assembly legality on `06_long_array.c` and `13_complex_arr_params.c` where emitted `addi` / stack offsets exceed RV32 immediate limits; and the later sorting-family wrong-answer tail (`15`-`20`). Current authority is to treat those as the next mainline rather than reopening already-closed front-end/initializer admission work.
+- 2026-05-05: The active post-`lv9` course line reopened on `-perf`, and the first real blocker was traced to the final textual RISC-V export rather than to IR/selection/bytes semantics. `addr_global` had still been printed as `lui + mv` in `compiler_driver`, which dropped the `%lo(symbol)` addend on global-array addresses and caused perf calls such as `set(a, ...)` / `putarray(..., a)` to pass page-base pointers instead of exact symbol addresses. `compiler_driver` now prints the matching `addi rd, rs1, %lo(symbol)` form when a preview bytes fixup marks the low-half global-address word, and focused compiler-driver regression coverage now locks that exact global-array call-argument materialization. `make test-compiler-driver` is green again, direct `perf/00_bitset1` reruns are back to content-correct output, staged `autotest -perf /workspaces/compiler_lab` verification has re-passed the suite through `perf/12_fft0`, and the remaining tail `13_fft1 .. 19_brainfuck-calculator` has also been checked green one-by-one with the rebuilt `build/compiler`. Current authority is therefore that the perf course line is now correctness-closed again, and any later reopen would be about score/performance tuning rather than about a known remaining wrong-answer bug.
 
 ## Historical Note
 

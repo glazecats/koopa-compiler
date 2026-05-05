@@ -601,6 +601,7 @@ static int ir_lower_expression(IrLowerContext *ctx,
         return 1;
     case AST_EXPR_IDENTIFIER: {
         IrLowerBindingInfo binding_info;
+        IrGlobal *global = NULL;
 
         if (expr->as.identifier.name &&
             ir_lower_scope_lookup_binding(&ctx->scopes, expr->as.identifier.name, &binding_info)) {
@@ -621,6 +622,18 @@ static int ir_lower_expression(IrLowerContext *ctx,
             }
             *out_value = ir_value_local(binding_info.local_id);
             return 1;
+        }
+        if (expr->as.identifier.name && ctx->program) {
+            global = ir_program_find_global_mut(ctx->program, expr->as.identifier.name);
+            if (global && global->array_rank > 0u) {
+                IrLowerArrayAddress array_value;
+
+                if (!ir_lower_array_base_address(ctx, expr, &array_value)) {
+                    return 0;
+                }
+                *out_value = array_value.address;
+                return 1;
+            }
         }
         if (expr->as.identifier.name &&
             ir_extract_lvalue_ref(ctx, expr, out_value)) {
