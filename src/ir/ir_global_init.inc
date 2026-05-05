@@ -1258,6 +1258,7 @@ static int ir_lower_global_declaration(IrProgram *program,
 }
 
 static int ir_lower_function(IrProgram *program,
+    const IrLowerOptions *options,
     const AstExternal *external,
     IrError *error) {
     IrFunction *function;
@@ -1306,6 +1307,8 @@ static int ir_lower_function(IrProgram *program,
     ctx.program = program;
     ctx.function = function;
     ctx.function_return_type = external->function_return_type;
+    ctx.allow_implicit_fallthrough_return =
+        options && options->allow_implicit_fallthrough_return ? 1 : 0;
     ctx.block_id = 0;
     ctx.has_block = 1;
     ctx.error = error;
@@ -1387,6 +1390,10 @@ static int ir_lower_function(IrProgram *program,
             if (!ir_block_set_void_return(ir_lower_current_block(&ctx), error)) {
                 goto cleanup;
             }
+        } else if (ctx.allow_implicit_fallthrough_return) {
+            if (!ir_block_set_return(ir_lower_current_block(&ctx), ir_value_immediate(0), error)) {
+                goto cleanup;
+            }
         } else {
             ir_set_error(error,
                 external->line,
@@ -1409,7 +1416,10 @@ cleanup:
     return ok;
 }
 
-int ir_lower_program(const AstProgram *ast_program, IrProgram *out_program, IrError *error) {
+int ir_lower_program(const AstProgram *ast_program,
+    const IrLowerOptions *options,
+    IrProgram *out_program,
+    IrError *error) {
     IrFunction *runtime_init_function = NULL;
     size_t i;
 
@@ -1458,7 +1468,7 @@ int ir_lower_program(const AstProgram *ast_program, IrProgram *out_program, IrEr
         if (!ir_ensure_function_signature(out_program, external, NULL, error)) {
             return 0;
         }
-        if (external->is_function_definition && !ir_lower_function(out_program, external, error)) {
+        if (external->is_function_definition && !ir_lower_function(out_program, options, external, error)) {
             return 0;
         }
     }

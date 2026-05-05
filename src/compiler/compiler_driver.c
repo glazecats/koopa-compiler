@@ -1405,8 +1405,9 @@ int compiler_mode_from_flag(const char *flag, CompilerMode *out_mode) {
     return 0;
 }
 
-int compiler_compile_source_text(const char *source,
+int compiler_compile_source_text_with_options(const char *source,
     CompilerMode mode,
+    const CompilerOptions *options,
     char **out_text,
     CompilerError *error) {
     TokenArray tokens;
@@ -1421,6 +1422,9 @@ int compiler_compile_source_text(const char *source,
     LowerIrError lower_error;
     ValueSsaError value_error;
     MachineIrError machine_error;
+    SemanticOptions semantic_options;
+    IrLowerOptions ir_options;
+    LowerIrOptions lower_options;
     int ok = 0;
 
     if (out_text) {
@@ -1433,8 +1437,11 @@ int compiler_compile_source_text(const char *source,
 
     memset(&parser_error, 0, sizeof(parser_error));
     memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
     memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
     memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
     memset(&value_error, 0, sizeof(value_error));
     memset(&machine_error, 0, sizeof(machine_error));
     lexer_init_tokens(&tokens);
@@ -1454,17 +1461,23 @@ int compiler_compile_source_text(const char *source,
         compiler_copy_stage_error(error, parser_error.line, parser_error.column, parser_error.message);
         goto cleanup;
     }
-    ok = semantic_analyze_program(&ast_program, &semantic_error);
+    semantic_options.skip_all_paths_return_check =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    ok = semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error);
     if (!ok) {
         compiler_copy_stage_error(error, semantic_error.line, semantic_error.column, semantic_error.message);
         goto cleanup;
     }
-    ok = ir_lower_program(&ast_program, &ir_program, &ir_error);
+    ir_options.allow_implicit_fallthrough_return =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    ok = ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error);
     if (!ok) {
         compiler_copy_stage_error(error, ir_error.line, ir_error.column, ir_error.message);
         goto cleanup;
     }
-    ok = lower_ir_lower_from_ir(&ir_program, &lower_program, &lower_error);
+    lower_options.allow_implicit_fallthrough_return =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    ok = lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error);
     if (!ok) {
         compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
         goto cleanup;
@@ -1499,8 +1512,20 @@ cleanup:
     return ok;
 }
 
-int compiler_compile_file(const char *input_path,
+int compiler_compile_source_text(const char *source,
     CompilerMode mode,
+    char **out_text,
+    CompilerError *error) {
+    CompilerOptions options;
+
+    memset(&options, 0, sizeof(options));
+    options.skip_all_paths_return_check = 1;
+    return compiler_compile_source_text_with_options(source, mode, &options, out_text, error);
+}
+
+int compiler_compile_file_with_options(const char *input_path,
+    CompilerMode mode,
+    const CompilerOptions *options,
     char **out_text,
     CompilerError *error) {
     char *source_text;
@@ -1513,7 +1538,18 @@ int compiler_compile_file(const char *input_path,
     if (!source_text) {
         return 0;
     }
-    ok = compiler_compile_source_text(source_text, mode, out_text, error);
+    ok = compiler_compile_source_text_with_options(source_text, mode, options, out_text, error);
     free(source_text);
     return ok;
+}
+
+int compiler_compile_file(const char *input_path,
+    CompilerMode mode,
+    char **out_text,
+    CompilerError *error) {
+    CompilerOptions options;
+
+    memset(&options, 0, sizeof(options));
+    options.skip_all_paths_return_check = 1;
+    return compiler_compile_file_with_options(input_path, mode, &options, out_text, error);
 }

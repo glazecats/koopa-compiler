@@ -293,6 +293,7 @@ static int lower_ir_lower_terminator(const IrTerminator *terminator,
 }
 
 int lower_ir_lower_from_ir(const IrProgram *program,
+    const LowerIrOptions *options,
     LowerIrProgram *out_program,
     LowerIrError *error) {
     IrError ir_error;
@@ -389,10 +390,25 @@ int lower_ir_lower_from_ir(const IrProgram *program,
                 }
             }
 
-            if (!lower_ir_lower_terminator(&source_block->terminator,
-                    target_function,
-                    target_block,
-                    error)) {
+            if (source_block->has_terminator) {
+                if (!lower_ir_lower_terminator(&source_block->terminator,
+                        target_function,
+                        target_block,
+                        error)) {
+                    lower_ir_program_free(out_program);
+                    return 0;
+                }
+            } else if (options && options->allow_implicit_fallthrough_return) {
+                if (!lower_ir_block_set_return(target_block, lower_ir_value_immediate(0), error)) {
+                    lower_ir_program_free(out_program);
+                    return 0;
+                }
+            } else {
+                lower_ir_set_error(error,
+                    0,
+                    0,
+                    "LOWER-IR-042: function '%s' body does not terminate on all lowered paths",
+                    source_function->name ? source_function->name : "<anon>");
                 lower_ir_program_free(out_program);
                 return 0;
             }

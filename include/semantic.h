@@ -9,10 +9,18 @@ typedef struct {
     char message[512];
 } SemanticError;
 
+typedef struct {
+    int skip_all_paths_return_check;
+} SemanticOptions;
+
 /*
  * Performs semantic checks on parsed top-level AST nodes.
  * Returns 1 on success, 0 on semantic error.
  */
+int semantic_analyze_program_with_options(
+    const AstProgram *program,
+    const SemanticOptions *options,
+    SemanticError *error);
 int semantic_analyze_program(const AstProgram *program, SemanticError *error);
 
 #endif

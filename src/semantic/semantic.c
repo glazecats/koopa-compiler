@@ -19,6 +19,10 @@ typedef struct {
 } CallableRuleVisitCtx;
 
 typedef struct {
+    int skip_all_paths_return_check;
+} SemanticAnalyzeConfig;
+
+typedef struct {
     int may_exit_loop;
     int exits_loop_on_all_paths;
 } FlowLoopExitSummary;

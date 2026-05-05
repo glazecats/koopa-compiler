@@ -52,7 +52,7 @@ static int lower_source_to_ir_text(const char *source, char **out_text) {
         return 0;
     }
 
-    if (!ir_lower_program(&program, &ir_program, &ir_err)) {
+    if (!ir_lower_program(&program, NULL, &ir_program, &ir_err)) {
         fprintf(stderr,
             "[ir-reg] FAIL: IR lowering failed at %d:%d: %s\n",
             ir_err.line,
@@ -151,7 +151,7 @@ static int expect_ir_lower_fails(const char *case_id,
         return 0;
     }
 
-    if (ir_lower_program(&program, &ir_program, &ir_err)) {
+    if (ir_lower_program(&program, NULL, &ir_program, &ir_err)) {
         fprintf(stderr,
             "[ir-reg] FAIL: %s unexpectedly lowered successfully\n",
             case_id);
@@ -212,7 +212,7 @@ static int expect_ir_lower_fails_without_semantic(const char *case_id,
         return 0;
     }
 
-    if (ir_lower_program(&program, &ir_program, &ir_err)) {
+    if (ir_lower_program(&program, NULL, &ir_program, &ir_err)) {
         fprintf(stderr,
             "[ir-reg] FAIL: %s unexpectedly lowered successfully (semantic skipped)\n",
             case_id);

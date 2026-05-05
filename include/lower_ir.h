@@ -11,6 +11,10 @@ typedef struct {
     char message[512];
 } LowerIrError;
 
+typedef struct {
+    int allow_implicit_fallthrough_return;
+} LowerIrOptions;
+
 typedef enum {
     LOWER_IR_VALUE_IMMEDIATE = 0,
     LOWER_IR_VALUE_TEMP,
@@ -229,6 +233,7 @@ int lower_ir_block_set_branch(LowerIrBasicBlock *block,
     LowerIrError *error);
 
 int lower_ir_lower_from_ir(const IrProgram *program,
+    const LowerIrOptions *options,
     LowerIrProgram *out_program,
     LowerIrError *error);
 int lower_ir_compute_cfg_analysis(const LowerIrFunction *function,

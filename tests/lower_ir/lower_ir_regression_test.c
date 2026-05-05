@@ -56,7 +56,7 @@ static int lower_source_to_lower_ir_text(const char *source, char **out_text) {
         return 0;
     }
 
-    if (!ir_lower_program(&ast_program, &ir_program, &ir_err)) {
+    if (!ir_lower_program(&ast_program, NULL, &ir_program, &ir_err)) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: canonical IR lowering failed at %d:%d: %s\n",
             ir_err.line,
@@ -68,7 +68,7 @@ static int lower_source_to_lower_ir_text(const char *source, char **out_text) {
         return 0;
     }
 
-    if (!lower_ir_lower_from_ir(&ir_program, &lower_program, &lower_err)) {
+    if (!lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_err)) {
         fprintf(stderr,
             "[lower-ir-reg] FAIL: lower IR lowering failed at %d:%d: %s\n",
             lower_err.line,

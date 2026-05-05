@@ -4,14 +4,21 @@
 #include "semantic.c"
 #else
 
-int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
+int semantic_analyze_program_with_options(
+    const AstProgram *program,
+    const SemanticOptions *options,
+    SemanticError *error) {
     size_t i;
     size_t j;
+    SemanticAnalyzeConfig config;
 
     if (!program) {
         semantic_set_error(error, 0, 0, "SEMA-INT-013: semantic input program is NULL");
         return 0;
     }
+
+    config.skip_all_paths_return_check =
+        options && options->skip_all_paths_return_check ? 1 : 0;
 
     if (error) {
         error->line = 0;
@@ -87,12 +94,14 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
                 return 0;
             }
 
-            if (lhs->function_return_type == AST_FUNCTION_RETURN_INT &&
+            if (!config.skip_all_paths_return_check &&
+                lhs->function_return_type == AST_FUNCTION_RETURN_INT &&
                 !semantic_compute_function_returns_all_paths(lhs, &returns_all_paths, error)) {
                 return 0;
             }
 
-            if (lhs->function_return_type == AST_FUNCTION_RETURN_INT && !returns_all_paths) {
+            if (!config.skip_all_paths_return_check &&
+                lhs->function_return_type == AST_FUNCTION_RETURN_INT && !returns_all_paths) {
                 if (error) {
                     semantic_set_error(error,
                         lhs->line,
@@ -219,5 +228,9 @@ int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
     }
 
     return 1;
+}
+
+int semantic_analyze_program(const AstProgram *program, SemanticError *error) {
+    return semantic_analyze_program_with_options(program, NULL, error);
 }
 #endif

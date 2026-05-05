@@ -11,6 +11,10 @@ typedef struct {
     char message[512];
 } IrError;
 
+typedef struct {
+    int allow_implicit_fallthrough_return;
+} IrLowerOptions;
+
 typedef enum {
     IR_VALUE_IMMEDIATE = 0,
     IR_VALUE_LOCAL,
@@ -155,7 +159,10 @@ void ir_program_free(IrProgram *program);
  * out_program should be initialized via ir_program_init or zeroed.
  * Returns 1 on success, 0 on allocation/lowering error.
  */
-int ir_lower_program(const AstProgram *ast_program, IrProgram *out_program, IrError *error);
+int ir_lower_program(const AstProgram *ast_program,
+    const IrLowerOptions *options,
+    IrProgram *out_program,
+    IrError *error);
 
 /*
  * Verifies structural IR invariants for a fully built program.

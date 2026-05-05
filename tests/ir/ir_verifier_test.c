@@ -52,7 +52,7 @@ static int lower_source_to_ir_program(const char *source, IrProgram *out_program
         return 0;
     }
 
-    if (!ir_lower_program(&program, out_program, &ir_err)) {
+    if (!ir_lower_program(&program, NULL, out_program, &ir_err)) {
         fprintf(stderr,
             "[ir-verify] FAIL: IR lowering failed at %d:%d: %s\n",
             ir_err.line,

@@ -59,6 +59,7 @@ typedef struct {
     IrProgram *program;
     IrFunction *function;
     AstFunctionReturnType function_return_type;
+    int allow_implicit_fallthrough_return;
     size_t block_id;
     int has_block;
     IrLowerScopeStack scopes;
@@ -203,6 +204,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
 static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt);
 static int ir_lower_function(IrProgram *program,
+    const IrLowerOptions *options,
     const AstExternal *external,
     IrError *error);
 static int ir_dependency_try_eval_condition_truthiness(const AstExpression *expr,

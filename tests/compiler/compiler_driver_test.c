@@ -22,6 +22,26 @@ static int test_compiler_parses_supported_modes(void) {
     return 1;
 }
 
+static int test_compiler_skips_all_paths_return_check_by_default(void) {
+    static const char *source = "int f(int x){ if (x) return 1; } int main(){ return f(0); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, ".globl f\n.type f, @function\nf:\n") == NULL ||
+        strstr(output, "  li a0, 0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: default skip-all-paths-return-check output mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_builds_riscv_backend_dump_from_source(void) {
     static const char *source = "int main(){return 0;}\n";
     CompilerError error;
@@ -439,6 +459,7 @@ int main(void) {
     int ok = 1;
 
     ok &= test_compiler_parses_supported_modes();
+    ok &= test_compiler_skips_all_paths_return_check_by_default();
     ok &= test_compiler_builds_riscv_backend_dump_from_source();
     ok &= test_compiler_builds_perf_backend_dump_from_source();
     ok &= test_compiler_pretty_prints_basic_riscv_mnemonics();
