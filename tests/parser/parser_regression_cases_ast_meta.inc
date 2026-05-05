@@ -996,6 +996,84 @@ static int test_ast_collects_all_top_level_declarators(void) {
     return 1;
 }
 
+static int test_ast_records_array_rank_metadata(void) {
+    const char *source =
+        "int g[3][4];\n"
+        "int f(){int x[2], y[3][4]; return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *decl_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for array-rank metadata input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for array-rank metadata input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 2 ||
+        program.externals[0].declaration_array_rank != 2 ||
+        !program.externals[0].declaration_array_extent_exprs ||
+        !program.externals[0].declaration_array_extent_exprs[0] ||
+        !program.externals[0].declaration_array_extent_exprs[1] ||
+        program.externals[0].declaration_array_extent_exprs[0]->kind != AST_EXPR_NUMBER ||
+        program.externals[0].declaration_array_extent_exprs[0]->as.number_value != 3 ||
+        program.externals[0].declaration_array_extent_exprs[1]->kind != AST_EXPR_NUMBER ||
+        program.externals[0].declaration_array_extent_exprs[1]->as.number_value != 4) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected global array extents [3,4]\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.externals[1].function_body;
+    decl_stmt = (body && body->kind == AST_STMT_COMPOUND && body->child_count > 0)
+        ? body->children[0]
+        : NULL;
+    if (!decl_stmt || decl_stmt->kind != AST_STMT_DECLARATION ||
+        decl_stmt->declaration_name_count != 2 ||
+        !decl_stmt->declaration_array_ranks ||
+        !decl_stmt->declaration_array_extent_exprs ||
+        decl_stmt->declaration_array_ranks[0] != 1 ||
+        decl_stmt->declaration_array_ranks[1] != 2 ||
+        !decl_stmt->declaration_array_extent_exprs[0] ||
+        !decl_stmt->declaration_array_extent_exprs[1] ||
+        !decl_stmt->declaration_array_extent_exprs[0][0] ||
+        decl_stmt->declaration_array_extent_exprs[0][0]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->declaration_array_extent_exprs[0][0]->as.number_value != 2 ||
+        !decl_stmt->declaration_array_extent_exprs[1][0] ||
+        !decl_stmt->declaration_array_extent_exprs[1][1] ||
+        decl_stmt->declaration_array_extent_exprs[1][0]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->declaration_array_extent_exprs[1][0]->as.number_value != 3 ||
+        decl_stmt->declaration_array_extent_exprs[1][1]->kind != AST_EXPR_NUMBER ||
+        decl_stmt->declaration_array_extent_exprs[1][1]->as.number_value != 4) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected local declaration array extents [2] and [3,4]\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_ast_failure_clears_previous_program(void) {
     const char *valid_source = "int x;\n";
     TokenArray ok_tokens;
@@ -1306,4 +1384,3 @@ static int test_deep_statement_nesting_hits_recursion_limit(void) {
     free(source);
     return 1;
 }
-

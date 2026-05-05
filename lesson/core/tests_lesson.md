@@ -96,7 +96,7 @@
 - `tests/machine/object/machine_container/machine_container_test.c`
 - `tests/machine/object/machine_elf/machine_elf_test.c`
 
-如果只看你刚提到的这轮 front-end 新增点，最值得单独记住的测试入口是：
+如果只看你刚提到的这轮最新前端新增点，最值得单独记住的测试入口现在已经分成两轮：
 
 - `tests/lexer/lexer_regression_test.c`
   - 锁整数字面量基数、`const` keyword tokenization、以及 `void` keyword contract
@@ -104,6 +104,19 @@
   - 锁 `const int` declaration / parameter，以及 `int/void` function signature 这类 AST 入口 contract
 - `tests/semantic/semantic_regression_test.c`
   - 锁 `const` initializer / assignment rule，也锁 `void` / builtin 相关语义边界
+
+而如果按最新 `lv9 / array` 这一轮去看，最值得直接点名的是：
+
+- `tests/parser/parser_regression_test.c`
+  - `test_expression_ast_parses_subscript_primary`
+  - `test_ast_records_array_rank_metadata`
+- `tests/semantic/semantic_regression_test.c`
+  - `test_semantic_accepts_subscript_identifier_visibility`
+  - `test_semantic_rejects_undeclared_identifier_in_subscript_index`
+- `tests/ir/ir_regression_test.c`
+  - global/local array declaration metadata
+  - array parameter signature metadata
+  - `addr_global + store_indirect` 这类 runtime-init dump shape
 
 当前拆分片段（11 个 `.inc`）：
 

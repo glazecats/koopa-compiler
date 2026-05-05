@@ -55,10 +55,14 @@ typedef enum {
     VALUE_SSA_INSTR_MOV = 0,
     VALUE_SSA_INSTR_BINARY,
     VALUE_SSA_INSTR_CALL,
+    VALUE_SSA_INSTR_ADDR_LOCAL,
+    VALUE_SSA_INSTR_ADDR_GLOBAL,
     VALUE_SSA_INSTR_LOAD_LOCAL,
     VALUE_SSA_INSTR_STORE_LOCAL,
     VALUE_SSA_INSTR_LOAD_GLOBAL,
     VALUE_SSA_INSTR_STORE_GLOBAL,
+    VALUE_SSA_INSTR_LOAD_INDIRECT,
+    VALUE_SSA_INSTR_STORE_INDIRECT,
 } ValueSsaInstructionKind;
 
 typedef struct {
@@ -70,6 +74,7 @@ typedef struct {
 typedef struct {
     size_t id;
     char *name;
+    size_t byte_size;
     int has_initializer;
     long long initializer_value;
     int has_runtime_initializer;
@@ -103,11 +108,17 @@ typedef struct {
             ValueSsaValueRef *args;
             size_t arg_count;
         } call;
+        ValueSsaSlotRef addr_slot;
         ValueSsaSlotRef load_slot;
         struct {
             ValueSsaSlotRef slot;
             ValueSsaValueRef value;
         } store;
+        ValueSsaValueRef load_indirect_addr;
+        struct {
+            ValueSsaValueRef addr;
+            ValueSsaValueRef value;
+        } store_indirect;
     } as;
 } ValueSsaInstruction;
 
@@ -191,6 +202,9 @@ typedef enum {
     VALUE_SSA_USE_ROLE_BINARY_RHS,
     VALUE_SSA_USE_ROLE_CALL_ARG,
     VALUE_SSA_USE_ROLE_STORE_VALUE,
+    VALUE_SSA_USE_ROLE_LOAD_INDIRECT_ADDR,
+    VALUE_SSA_USE_ROLE_STORE_INDIRECT_ADDR,
+    VALUE_SSA_USE_ROLE_STORE_INDIRECT_VALUE,
     VALUE_SSA_USE_ROLE_RETURN_VALUE,
     VALUE_SSA_USE_ROLE_BRANCH_CONDITION,
 } ValueSsaUseRole;

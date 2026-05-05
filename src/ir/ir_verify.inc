@@ -633,7 +633,9 @@ static int ir_verify_temp_use_is_available(IrValueRef value,
     return 1;
 }
 
-static int ir_verify_temp_availability(const IrFunction *function, IrError *error) {
+static int ir_verify_temp_availability(const IrProgram *program,
+    const IrFunction *function,
+    IrError *error) {
     unsigned char *block_defs = NULL;
     unsigned char *in_sets = NULL;
     unsigned char *out_sets = NULL;
@@ -644,7 +646,7 @@ static int ir_verify_temp_availability(const IrFunction *function, IrError *erro
     int changed = 1;
     size_t i;
 
-    if (!function) {
+    if (!program || !function) {
         ir_set_error(error, 0, 0, "IR-VERIFY-001: invalid verifier contract");
         return 0;
     }
@@ -798,6 +800,67 @@ static int ir_verify_temp_availability(const IrFunction *function, IrError *erro
                         free(available);
                         return 0;
                     }
+                }
+                break;
+            case IR_INSTR_ADDR_LOCAL:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    instruction->as.addr_local_id >= function->local_count) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    ir_set_error(error, 0, 0, "IR-VERIFY-065: invalid addr_local instruction");
+                    return 0;
+                }
+                break;
+            case IR_INSTR_ADDR_GLOBAL:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    instruction->as.addr_global_id >= program->global_count) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    ir_set_error(error, 0, 0, "IR-VERIFY-066: invalid addr_global instruction");
+                    return 0;
+                }
+                break;
+            case IR_INSTR_LOAD_INDIRECT:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    !ir_verify_temp_use_is_available(instruction->as.load_indirect_addr,
+                        available,
+                        temp_count,
+                        block->id,
+                        "load_indirect address",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                break;
+            case IR_INSTR_STORE_INDIRECT:
+                if (!ir_verify_temp_use_is_available(instruction->as.store_indirect.addr,
+                        available,
+                        temp_count,
+                        block->id,
+                        "store_indirect addr",
+                        error) ||
+                    !ir_verify_temp_use_is_available(instruction->as.store_indirect.value,
+                        available,
+                        temp_count,
+                        block->id,
+                        "store_indirect value",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
                 }
                 break;
             default:
@@ -1114,21 +1177,23 @@ static int ir_verify_function(const IrProgram *program, const IrFunction *functi
         for (j = 0; j < block->instruction_count; ++j) {
             const IrInstruction *instruction = &block->instructions[j];
 
-            if (instruction->result.kind == IR_VALUE_IMMEDIATE) {
-                ir_set_error(error,
-                    0,
-                    0,
-                    "IR-VERIFY-018: bb.%zu instruction %zu writes into an immediate",
-                    block->id,
-                    j);
-                return 0;
-            }
-            if (!ir_verify_value_ref(program,
-                    function,
-                    instruction->result,
-                    "instruction result",
-                    error)) {
-                return 0;
+            if (instruction->kind != IR_INSTR_STORE_INDIRECT) {
+                if (instruction->result.kind == IR_VALUE_IMMEDIATE) {
+                    ir_set_error(error,
+                        0,
+                        0,
+                        "IR-VERIFY-018: bb.%zu instruction %zu writes into an immediate",
+                        block->id,
+                        j);
+                    return 0;
+                }
+                if (!ir_verify_value_ref(program,
+                        function,
+                        instruction->result,
+                        "instruction result",
+                        error)) {
+                    return 0;
+                }
             }
 
             switch (instruction->kind) {
@@ -1250,6 +1315,63 @@ static int ir_verify_function(const IrProgram *program, const IrFunction *functi
                 }
                 break;
                 }
+            case IR_INSTR_ADDR_LOCAL:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    instruction->as.addr_local_id >= function->local_count) {
+                    ir_set_error(error,
+                        0,
+                        0,
+                        "IR-VERIFY-065: bb.%zu instruction %zu has invalid addr_local payload",
+                        block->id,
+                        j);
+                    return 0;
+                }
+                break;
+            case IR_INSTR_ADDR_GLOBAL:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    instruction->as.addr_global_id >= program->global_count) {
+                    ir_set_error(error,
+                        0,
+                        0,
+                        "IR-VERIFY-066: bb.%zu instruction %zu has invalid addr_global payload",
+                        block->id,
+                        j);
+                    return 0;
+                }
+                break;
+            case IR_INSTR_LOAD_INDIRECT:
+                if (instruction->result.kind != IR_VALUE_TEMP ||
+                    !ir_verify_value_ref(program,
+                        function,
+                        instruction->as.load_indirect_addr,
+                        "load_indirect address",
+                        error)) {
+                    return 0;
+                }
+                break;
+            case IR_INSTR_STORE_INDIRECT:
+                if (instruction->result.kind != 0) {
+                    ir_set_error(error,
+                        0,
+                        0,
+                        "IR-VERIFY-067: bb.%zu instruction %zu store_indirect must not produce a result",
+                        block->id,
+                        j);
+                    return 0;
+                }
+                if (!ir_verify_value_ref(program,
+                        function,
+                        instruction->as.store_indirect.addr,
+                        "store_indirect address",
+                        error) ||
+                    !ir_verify_value_ref(program,
+                        function,
+                        instruction->as.store_indirect.value,
+                        "store_indirect value",
+                        error)) {
+                    return 0;
+                }
+                break;
             default:
                 ir_set_error(error,
                     0,
@@ -1267,7 +1389,7 @@ static int ir_verify_function(const IrProgram *program, const IrFunction *functi
         }
     }
 
-    if (!ir_verify_temp_availability(function, error)) {
+    if (!ir_verify_temp_availability(program, function, error)) {
         return 0;
     }
 

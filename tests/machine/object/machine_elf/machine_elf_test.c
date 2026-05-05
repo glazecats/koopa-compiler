@@ -782,6 +782,100 @@ static int test_machine_elf_builds_preview_global_data_relocations(void) {
     return ok;
 }
 
+static int test_machine_elf_preserves_global_object_byte_sizes(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrGlobal *global = NULL;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    const MachineElfSection *section = NULL;
+    const MachineElfSymbol *symbol = NULL;
+    unsigned char *bytes = NULL;
+    size_t byte_count = 0u;
+    size_t section_count = 0u;
+    size_t symbol_count = 0u;
+    size_t relocation_count = 0u;
+    size_t first_global_symbol_index = 0u;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+
+    machine_report.program.register_bank.register_count = 1u;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0u;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_report.program.register_bank.registers[0].name) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_global(&machine_report.program, "g", &global, &machine_error) ||
+        !global ||
+        !machine_ir_program_append_global(&machine_report.program, "h", &global, &machine_error) ||
+        !global) {
+        fprintf(stderr, "[machine-elf] FAIL: global-byte-size setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+    machine_report.program.globals[0].byte_size = 4u;
+    machine_report.program.globals[1].byte_size = 8u;
+    machine_report.program.globals[1].has_initializer = 1;
+    machine_report.program.globals[1].initializer_value = 7;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: global-byte-size setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
+        !machine_elf_file_get_summary(&elf_file, &section_count, &symbol_count, &relocation_count, &byte_count) ||
+        section_count != 8u || symbol_count != 5u || relocation_count != 0u || byte_count == 0u ||
+        !machine_elf_file_get_first_global_symbol_index(&elf_file, &first_global_symbol_index) ||
+        first_global_symbol_index != 2u ||
+        !machine_elf_file_find_section_by_name(&elf_file, ".sbss", NULL, &section) || !section ||
+        section->type != MACHINE_ELF_SECTION_NOBITS || section->byte_count != 4u ||
+        !machine_elf_file_find_section_by_name(&elf_file, ".sdata", NULL, &section) || !section ||
+        section->type != MACHINE_ELF_SECTION_PROGBITS || section->byte_count != 8u ||
+        !machine_elf_file_find_symbol_by_name(&elf_file, "g", NULL, &symbol) || !symbol ||
+        symbol->binding != MACHINE_ELF_SYMBOL_GLOBAL || symbol->type != MACHINE_ELF_SYMBOL_OBJECT ||
+        !symbol->is_defined || symbol->value != 0u || symbol->size != 4u ||
+        !machine_elf_file_find_symbol_by_name(&elf_file, "h", NULL, &symbol) || !symbol ||
+        symbol->binding != MACHINE_ELF_SYMBOL_GLOBAL || symbol->type != MACHINE_ELF_SYMBOL_OBJECT ||
+        !symbol->is_defined || symbol->value != 0u || symbol->size != 8u ||
+        !machine_elf_file_copy_bytes(&elf_file, &bytes, &byte_count, &elf_error) ||
+        !bytes || byte_count < 4u ||
+        bytes[0] != 0x7Fu || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F') {
+        fprintf(stderr, "[machine-elf] FAIL: global byte-size elf mismatch: %s\n", elf_error.message);
+        ok = 0;
+    }
+    if (ok) {
+        ok &= expect_round_trip_dump(&elf_file);
+    }
+
+    free(bytes);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
+    return ok;
+}
+
 static int test_machine_elf_parse_accepts_droppable_local_section_symbols(void) {
     MachineIrAllocateRewriteReport machine_report;
     MachineIrFunction *function = NULL;
@@ -4094,6 +4188,7 @@ int main(void) {
     ok &= test_machine_elf_builds_from_machine_ir_report();
     ok &= test_machine_elf_builds_global_object_sections();
     ok &= test_machine_elf_builds_preview_global_data_relocations();
+    ok &= test_machine_elf_preserves_global_object_byte_sizes();
     ok &= test_machine_elf_parse_accepts_droppable_local_section_symbols();
     ok &= test_machine_elf_parse_accepts_droppable_local_file_symbol();
     ok &= test_machine_elf_parse_accepts_droppable_local_symbol_on_extra_section();

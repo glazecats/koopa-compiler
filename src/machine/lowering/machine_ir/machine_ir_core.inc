@@ -202,6 +202,7 @@ int machine_ir_program_append_global(MachineIrProgram *program,
     global = &program->globals[program->global_count];
     memset(global, 0, sizeof(*global));
     global->id = program->global_count;
+    global->byte_size = 4u;
     global->name = machine_ir_strdup(name);
     if (!global->name) {
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-013: out of memory copying global name");

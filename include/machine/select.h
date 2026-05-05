@@ -48,12 +48,16 @@ typedef enum {
     MACHINE_SELECT_OP_CALL_IMM_SPILL,
     MACHINE_SELECT_OP_CALL_VOID,
     MACHINE_SELECT_OP_CALL_VOID_IMM,
+    MACHINE_SELECT_OP_ADDR_LOCAL,
+    MACHINE_SELECT_OP_ADDR_GLOBAL,
     MACHINE_SELECT_OP_LOAD_LOCAL,
     MACHINE_SELECT_OP_STORE_LOCAL,
     MACHINE_SELECT_OP_STORE_LOCAL_IMM,
     MACHINE_SELECT_OP_LOAD_GLOBAL,
     MACHINE_SELECT_OP_STORE_GLOBAL,
     MACHINE_SELECT_OP_STORE_GLOBAL_IMM,
+    MACHINE_SELECT_OP_LOAD_INDIRECT,
+    MACHINE_SELECT_OP_STORE_INDIRECT,
 } MachineSelectOpKind;
 
 typedef struct {
@@ -82,6 +86,11 @@ typedef struct {
 } MachineSelectStoreOp;
 
 typedef struct {
+    MachineSelectOperand addr;
+    MachineSelectOperand value;
+} MachineSelectIndirectStoreOp;
+
+typedef struct {
     MachineSelectOpKind kind;
     int has_result;
     MachineSelectOperand result;
@@ -89,8 +98,11 @@ typedef struct {
         MachineSelectOperand copy_value;
         MachineSelectBinaryOp binary;
         MachineSelectCallOp call;
+        MachineSelectSlotRef addr_slot;
         MachineSelectSlotRef load_slot;
         MachineSelectStoreOp store;
+        MachineSelectOperand load_indirect_addr;
+        MachineSelectIndirectStoreOp store_indirect;
     } as;
 } MachineSelectOp;
 
@@ -136,6 +148,7 @@ typedef struct {
 typedef struct {
     size_t id;
     char *name;
+    size_t byte_size;
     int has_initializer;
     long long initializer_value;
     int has_runtime_initializer;

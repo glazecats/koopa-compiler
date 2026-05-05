@@ -287,12 +287,25 @@ int value_ssa_rename_rewrite_block_uses(ValueSsaBasicBlock *block,
                 }
             }
             break;
+        case VALUE_SSA_INSTR_LOAD_INDIRECT:
+            if (!value_ssa_rename_rewrite_value_ref(&instruction->as.load_indirect_addr, state, error)) {
+                return 0;
+            }
+            break;
         case VALUE_SSA_INSTR_STORE_LOCAL:
         case VALUE_SSA_INSTR_STORE_GLOBAL:
             if (!value_ssa_rename_rewrite_value_ref(&instruction->as.store.value, state, error)) {
                 return 0;
             }
             break;
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            if (!value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.addr, state, error) ||
+                !value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.value, state, error)) {
+                return 0;
+            }
+            break;
+        case VALUE_SSA_INSTR_ADDR_LOCAL:
+        case VALUE_SSA_INSTR_ADDR_GLOBAL:
         case VALUE_SSA_INSTR_LOAD_LOCAL:
         case VALUE_SSA_INSTR_LOAD_GLOBAL:
             break;
@@ -412,9 +425,16 @@ static int value_ssa_rename_rewrite_instruction_uses(ValueSsaInstruction *instru
             }
         }
         return 1;
+    case VALUE_SSA_INSTR_LOAD_INDIRECT:
+        return value_ssa_rename_rewrite_value_ref(&instruction->as.load_indirect_addr, state, error);
     case VALUE_SSA_INSTR_STORE_LOCAL:
     case VALUE_SSA_INSTR_STORE_GLOBAL:
         return value_ssa_rename_rewrite_value_ref(&instruction->as.store.value, state, error);
+    case VALUE_SSA_INSTR_STORE_INDIRECT:
+        return value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.addr, state, error) &&
+            value_ssa_rename_rewrite_value_ref(&instruction->as.store_indirect.value, state, error);
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
     case VALUE_SSA_INSTR_LOAD_LOCAL:
     case VALUE_SSA_INSTR_LOAD_GLOBAL:
     default:

@@ -47,17 +47,25 @@ typedef enum {
     IR_INSTR_MOV = 0,
     IR_INSTR_BINARY,
     IR_INSTR_CALL,
+    IR_INSTR_ADDR_LOCAL,
+    IR_INSTR_ADDR_GLOBAL,
+    IR_INSTR_LOAD_INDIRECT,
+    IR_INSTR_STORE_INDIRECT,
 } IrInstructionKind;
 
 typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    size_t array_rank;
 } IrLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    size_t array_rank;
+    size_t *array_extents;
+    size_t byte_size;
     int has_initializer;
     long long initializer_value;
     int has_runtime_initializer;
@@ -78,6 +86,13 @@ typedef struct {
             IrValueRef *args;
             size_t arg_count;
         } call;
+        size_t addr_local_id;
+        size_t addr_global_id;
+        IrValueRef load_indirect_addr;
+        struct {
+            IrValueRef addr;
+            IrValueRef value;
+        } store_indirect;
     } as;
 } IrInstruction;
 

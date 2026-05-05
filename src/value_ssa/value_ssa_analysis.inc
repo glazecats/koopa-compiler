@@ -224,11 +224,23 @@ static void value_ssa_liveness_record_instruction_uses(const ValueSsaInstruction
                 instruction->as.call.args[arg_index], block_defs, value_count, block_uses);
         }
         break;
+    case VALUE_SSA_INSTR_LOAD_INDIRECT:
+        value_ssa_liveness_record_use_if_not_defined(
+            instruction->as.load_indirect_addr, block_defs, value_count, block_uses);
+        break;
     case VALUE_SSA_INSTR_STORE_LOCAL:
     case VALUE_SSA_INSTR_STORE_GLOBAL:
         value_ssa_liveness_record_use_if_not_defined(
             instruction->as.store.value, block_defs, value_count, block_uses);
         break;
+    case VALUE_SSA_INSTR_STORE_INDIRECT:
+        value_ssa_liveness_record_use_if_not_defined(
+            instruction->as.store_indirect.addr, block_defs, value_count, block_uses);
+        value_ssa_liveness_record_use_if_not_defined(
+            instruction->as.store_indirect.value, block_defs, value_count, block_uses);
+        break;
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
     case VALUE_SSA_INSTR_LOAD_LOCAL:
     case VALUE_SSA_INSTR_LOAD_GLOBAL:
         break;
@@ -386,10 +398,19 @@ static void value_ssa_interference_add_instruction_uses(const ValueSsaInstructio
             value_ssa_interference_add_value_use(instruction->as.call.args[arg_index], value_count, live);
         }
         break;
+    case VALUE_SSA_INSTR_LOAD_INDIRECT:
+        value_ssa_interference_add_value_use(instruction->as.load_indirect_addr, value_count, live);
+        break;
     case VALUE_SSA_INSTR_STORE_LOCAL:
     case VALUE_SSA_INSTR_STORE_GLOBAL:
         value_ssa_interference_add_value_use(instruction->as.store.value, value_count, live);
         break;
+    case VALUE_SSA_INSTR_STORE_INDIRECT:
+        value_ssa_interference_add_value_use(instruction->as.store_indirect.addr, value_count, live);
+        value_ssa_interference_add_value_use(instruction->as.store_indirect.value, value_count, live);
+        break;
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
     case VALUE_SSA_INSTR_LOAD_LOCAL:
     case VALUE_SSA_INSTR_LOAD_GLOBAL:
         break;
@@ -904,10 +925,19 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
                     value_ssa_record_use_count(instruction->as.call.args[arg_index], analysis->use_counts);
                 }
                 break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                value_ssa_record_use_count(instruction->as.load_indirect_addr, analysis->use_counts);
+                break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
             case VALUE_SSA_INSTR_STORE_GLOBAL:
                 value_ssa_record_use_count(instruction->as.store.value, analysis->use_counts);
                 break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                value_ssa_record_use_count(instruction->as.store_indirect.addr, analysis->use_counts);
+                value_ssa_record_use_count(instruction->as.store_indirect.value, analysis->use_counts);
+                break;
+            case VALUE_SSA_INSTR_ADDR_LOCAL:
+            case VALUE_SSA_INSTR_ADDR_GLOBAL:
             case VALUE_SSA_INSTR_LOAD_LOCAL:
             case VALUE_SSA_INSTR_LOAD_GLOBAL:
                 break;
@@ -1046,6 +1076,23 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
                     }
                 }
                 break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                if (!value_ssa_write_use_site(instruction->as.load_indirect_addr,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_LOAD_INDIRECT_ADDR,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-197: failed to record load_indirect use-site");
+                    return 0;
+                }
+                break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
             case VALUE_SSA_INSTR_STORE_GLOBAL:
                 if (!value_ssa_write_use_site(instruction->as.store.value,
@@ -1064,6 +1111,35 @@ int value_ssa_compute_def_use_analysis(const ValueSsaFunction *function,
                     return 0;
                 }
                 break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                if (!value_ssa_write_use_site(instruction->as.store_indirect.addr,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_STORE_INDIRECT_ADDR,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        0,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites) ||
+                    !value_ssa_write_use_site(instruction->as.store_indirect.value,
+                        VALUE_SSA_USE_INSTR,
+                        VALUE_SSA_USE_ROLE_STORE_INDIRECT_VALUE,
+                        block_index,
+                        (size_t)-1,
+                        instruction_index,
+                        1,
+                        cursor,
+                        analysis->use_offsets,
+                        analysis->use_sites)) {
+                    free(cursor);
+                    value_ssa_def_use_analysis_free(analysis);
+                    value_ssa_set_error(error, 0, 0, "VALUE-SSA-197: failed to record store_indirect use-site");
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_ADDR_LOCAL:
+            case VALUE_SSA_INSTR_ADDR_GLOBAL:
             case VALUE_SSA_INSTR_LOAD_LOCAL:
             case VALUE_SSA_INSTR_LOAD_GLOBAL:
                 break;

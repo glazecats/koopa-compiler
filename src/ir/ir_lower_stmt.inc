@@ -109,16 +109,81 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
 
     for (i = 0; i < stmt->declaration_name_count; ++i) {
         const char *name = stmt->declaration_names ? stmt->declaration_names[i] : NULL;
-        size_t local_id;
+        size_t local_id = (size_t)-1;
         IrValueRef init_value;
 
         if (!name || name[0] == '\0') {
             continue;
         }
-        if (!ir_function_append_local(ctx->function, name, 0, &local_id, ctx->error) ||
-            !ir_lower_scope_add_binding(&ctx->scopes,
-                ctx->function->locals[local_id].source_name,
-                local_id)) {
+        if (stmt->declaration_array_ranks && stmt->declaration_array_ranks[i] > 0u) {
+            size_t *array_extents = NULL;
+            size_t element_count = 0u;
+            const AstExpression *initializer_expr =
+                (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
+
+            if (!ir_compute_array_extents(ctx,
+                    stmt->declaration_array_extent_exprs
+                        ? stmt->declaration_array_extent_exprs[i]
+                        : NULL,
+                    stmt->declaration_array_ranks[i],
+                    0,
+                    &array_extents,
+                    &element_count) ||
+                !ir_append_array_local_slots(ctx, name, element_count, &local_id) ||
+                !ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+                    ctx->function->locals[local_id].source_name,
+                    local_id,
+                    IR_LOWER_BINDING_ARRAY_LOCAL,
+                    stmt->declaration_array_ranks[i],
+                    array_extents,
+                    stmt->declaration_is_const,
+                    0,
+                    0)) {
+                free(array_extents);
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-017: failed to record array local '%s' during IR lowering",
+                    name);
+                return 0;
+            }
+            ctx->function->locals[local_id].array_rank = stmt->declaration_array_ranks[i];
+            if (initializer_expr) {
+                const AstExpression **initializer_slots = NULL;
+                size_t slot_index;
+                size_t slot_count = 0u;
+
+                if (!ir_expand_array_initializer_slots(initializer_expr,
+                        stmt->declaration_array_ranks[i],
+                        array_extents,
+                        &initializer_slots,
+                        &slot_count,
+                        ctx->error)) {
+                    free(array_extents);
+                    return 0;
+                }
+                for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+                    IrValueRef slot_value = ir_value_immediate(0);
+
+                    if (initializer_slots[slot_index] &&
+                        !ir_lower_expression(ctx, initializer_slots[slot_index], &slot_value)) {
+                        free(initializer_slots);
+                        free(array_extents);
+                        return 0;
+                    }
+                    if (!ir_emit_mov(ctx, ir_value_local(local_id + slot_index), slot_value)) {
+                        free(initializer_slots);
+                        free(array_extents);
+                        return 0;
+                    }
+                }
+                free(initializer_slots);
+            }
+            free(array_extents);
+            continue;
+        }
+
+        if (!ir_function_append_local(ctx->function, name, 0, &local_id, ctx->error)) {
             ir_set_error(ctx->error,
                 stmt->line,
                 stmt->column,
@@ -127,10 +192,45 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
             return 0;
         }
         if (stmt->expressions && i < init_expr_limit && stmt->expressions[i]) {
+            long long const_value = 0;
+            int has_const_value = stmt->declaration_is_const &&
+                ir_eval_constant_int_expression(ctx, stmt->expressions[i], &const_value);
+
+            if (!ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+                    ctx->function->locals[local_id].source_name,
+                    local_id,
+                    IR_LOWER_BINDING_SCALAR_LOCAL,
+                    0u,
+                    NULL,
+                    stmt->declaration_is_const,
+                    has_const_value,
+                    const_value)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-017: failed to record local '%s' during IR lowering",
+                    name);
+                return 0;
+            }
             if (!ir_lower_expression(ctx, stmt->expressions[i], &init_value) ||
                 !ir_emit_mov(ctx, ir_value_local(local_id), init_value)) {
                 return 0;
             }
+        } else if (!ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+                ctx->function->locals[local_id].source_name,
+                local_id,
+                IR_LOWER_BINDING_SCALAR_LOCAL,
+                0u,
+                NULL,
+                stmt->declaration_is_const,
+                0,
+                0)) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-017: failed to record local '%s' during IR lowering",
+                name);
+            return 0;
         }
     }
 
@@ -177,6 +277,445 @@ static int ir_statement_has_break_targeting_current_loop(const AstStatement *stm
 
 static int ir_statement_has_continue_targeting_current_loop(const AstStatement *stmt) {
     return ir_statement_has_loop_control_for_current_loop(stmt, 0, 1);
+}
+
+static int ir_eval_constant_binary(TokenType op,
+    long long lhs,
+    long long rhs,
+    long long *out_value) {
+    if (!out_value) {
+        return 0;
+    }
+
+    switch (op) {
+    case TOKEN_PLUS:
+        *out_value = lhs + rhs;
+        return 1;
+    case TOKEN_MINUS:
+        *out_value = lhs - rhs;
+        return 1;
+    case TOKEN_STAR:
+        *out_value = lhs * rhs;
+        return 1;
+    case TOKEN_SLASH:
+        if (rhs == 0) {
+            return 0;
+        }
+        *out_value = lhs / rhs;
+        return 1;
+    case TOKEN_PERCENT:
+        if (rhs == 0) {
+            return 0;
+        }
+        *out_value = lhs % rhs;
+        return 1;
+    case TOKEN_SHIFT_LEFT:
+        if (rhs < 0 || rhs >= 63 || lhs < 0) {
+            return 0;
+        }
+        *out_value = lhs << rhs;
+        return 1;
+    case TOKEN_SHIFT_RIGHT:
+        if (rhs < 0 || rhs >= 63 || lhs < 0) {
+            return 0;
+        }
+        *out_value = lhs >> rhs;
+        return 1;
+    case TOKEN_AMP:
+        *out_value = lhs & rhs;
+        return 1;
+    case TOKEN_PIPE:
+        *out_value = lhs | rhs;
+        return 1;
+    case TOKEN_CARET:
+        *out_value = lhs ^ rhs;
+        return 1;
+    case TOKEN_EQ:
+        *out_value = lhs == rhs;
+        return 1;
+    case TOKEN_NE:
+        *out_value = lhs != rhs;
+        return 1;
+    case TOKEN_LT:
+        *out_value = lhs < rhs;
+        return 1;
+    case TOKEN_LE:
+        *out_value = lhs <= rhs;
+        return 1;
+    case TOKEN_GT:
+        *out_value = lhs > rhs;
+        return 1;
+    case TOKEN_GE:
+        *out_value = lhs >= rhs;
+        return 1;
+    case TOKEN_AND_AND:
+        *out_value = (lhs != 0 && rhs != 0) ? 1 : 0;
+        return 1;
+    case TOKEN_OR_OR:
+        *out_value = (lhs != 0 || rhs != 0) ? 1 : 0;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int ir_eval_constant_int_expression(IrLowerContext *ctx,
+    const AstExpression *expr,
+    long long *out_value) {
+    IrLowerBindingInfo binding_info;
+    long long lhs;
+    long long rhs;
+
+    if (!ctx || !expr || !out_value) {
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_NUMBER:
+        *out_value = expr->as.number_value;
+        return 1;
+    case AST_EXPR_IDENTIFIER:
+        if (expr->as.identifier.name &&
+            ir_lower_scope_lookup_binding(&ctx->scopes, expr->as.identifier.name, &binding_info) &&
+            binding_info.array_rank == 0u &&
+            binding_info.has_const_value) {
+            *out_value = binding_info.const_value;
+            return 1;
+        }
+        if (expr->as.identifier.name && ctx->program) {
+            IrGlobal *global = ir_program_find_global_mut(ctx->program, expr->as.identifier.name);
+
+            if (global && global->array_rank == 0u && global->has_initializer && !global->has_runtime_initializer) {
+                *out_value = global->initializer_value;
+                return 1;
+            }
+        }
+        return 0;
+    case AST_EXPR_PAREN:
+        return ir_eval_constant_int_expression(ctx, expr->as.inner, out_value);
+    case AST_EXPR_UNARY:
+        if (!ir_eval_constant_int_expression(ctx, expr->as.unary.operand, &lhs)) {
+            return 0;
+        }
+        switch (expr->as.unary.op) {
+        case TOKEN_PLUS:
+            *out_value = lhs;
+            return 1;
+        case TOKEN_MINUS:
+            *out_value = -lhs;
+            return 1;
+        case TOKEN_BANG:
+            *out_value = lhs == 0 ? 1 : 0;
+            return 1;
+        case TOKEN_TILDE:
+            *out_value = ~lhs;
+            return 1;
+        default:
+            return 0;
+        }
+    case AST_EXPR_BINARY:
+        if (expr->as.binary.op == TOKEN_COMMA) {
+            return ir_eval_constant_int_expression(ctx, expr->as.binary.right, out_value);
+        }
+        if (!ir_eval_constant_int_expression(ctx, expr->as.binary.left, &lhs) ||
+            !ir_eval_constant_int_expression(ctx, expr->as.binary.right, &rhs)) {
+            return 0;
+        }
+        return ir_eval_constant_binary(expr->as.binary.op, lhs, rhs, out_value);
+    case AST_EXPR_TERNARY:
+        if (!ir_eval_constant_int_expression(ctx, expr->as.ternary.condition, &lhs)) {
+            return 0;
+        }
+        if (lhs != 0) {
+            return ir_eval_constant_int_expression(ctx, expr->as.ternary.then_expr, out_value);
+        }
+        return ir_eval_constant_int_expression(ctx, expr->as.ternary.else_expr, out_value);
+    default:
+        return 0;
+    }
+}
+
+static int ir_compute_array_extents(IrLowerContext *ctx,
+    AstExpression **extent_exprs,
+    size_t rank,
+    int allow_unspecified_first_extent,
+    size_t **out_extents,
+    size_t *out_total_element_count) {
+    size_t *extents;
+    size_t i;
+    size_t total = 1u;
+
+    if (out_extents) {
+        *out_extents = NULL;
+    }
+    if (out_total_element_count) {
+        *out_total_element_count = 0u;
+    }
+    if (!ctx || !out_extents || !out_total_element_count || rank == 0u) {
+        return 0;
+    }
+
+    extents = (size_t *)calloc(rank, sizeof(size_t));
+    if (!extents) {
+        ir_set_error(ctx->error, 0, 0, "IR-INT-070: out of memory while computing array extents");
+        return 0;
+    }
+
+    for (i = 0; i < rank; ++i) {
+        long long extent_value = 0;
+
+        if (!extent_exprs || !extent_exprs[i]) {
+            if (allow_unspecified_first_extent && i == 0u) {
+                extents[i] = 0u;
+                continue;
+            }
+            ir_set_error(ctx->error,
+                0,
+                0,
+                "IR-LOWER-031: array extent must be a positive compile-time integer constant");
+            free(extents);
+            return 0;
+        }
+        if (!ir_eval_constant_int_expression(ctx, extent_exprs[i], &extent_value) ||
+            extent_value <= 0) {
+            ir_set_error(ctx->error,
+                extent_exprs && extent_exprs[i] ? extent_exprs[i]->line : 0,
+                extent_exprs && extent_exprs[i] ? extent_exprs[i]->column : 0,
+                "IR-LOWER-031: array extent must be a positive compile-time integer constant");
+            free(extents);
+            return 0;
+        }
+        extents[i] = (size_t)extent_value;
+        if (extents[i] > 0u) {
+            total *= extents[i];
+        }
+    }
+
+    *out_extents = extents;
+    *out_total_element_count = total;
+    return 1;
+}
+
+static int ir_append_array_local_slots(IrLowerContext *ctx,
+    const char *name,
+    size_t element_count,
+    size_t *out_base_local_id) {
+    size_t element_index;
+    size_t base_local_id = (size_t)-1;
+
+    if (!ctx || !ctx->function || !name || !out_base_local_id || element_count == 0u) {
+        return 0;
+    }
+
+    for (element_index = 0; element_index < element_count; ++element_index) {
+        size_t local_id = (size_t)-1;
+        if (!ir_function_append_local(ctx->function, name, 0, &local_id, ctx->error)) {
+            return 0;
+        }
+        if (element_index == 0u) {
+            base_local_id = local_id;
+        }
+    }
+
+    *out_base_local_id = base_local_id;
+    return 1;
+}
+
+static size_t ir_array_initializer_element_count(const size_t *extents, size_t rank) {
+    size_t total = 1u;
+    size_t i;
+
+    if (!extents || rank == 0u) {
+        return 0u;
+    }
+    for (i = 0u; i < rank; ++i) {
+        total *= extents[i];
+    }
+    return total;
+}
+
+static int ir_expand_array_initializer_from_items(const AstExpression *const *items,
+    size_t item_count,
+    size_t *io_item_index,
+    size_t rank,
+    const size_t *extents,
+    size_t start_index,
+    const AstExpression **slots,
+    IrError *error,
+    int line,
+    int column) {
+    size_t i;
+
+    if (!io_item_index || !extents || !slots || rank == 0u) {
+        ir_set_error(error, line, column, "IR-INT-071: invalid array-initializer expansion contract");
+        return 0;
+    }
+
+    if (rank == 1u) {
+        for (i = 0u; i < extents[0] && *io_item_index < item_count; ++i) {
+            const AstExpression *item = items[*io_item_index];
+
+            if (item && item->kind == AST_EXPR_INIT_LIST) {
+                size_t nested_index = 0u;
+
+                if (!ir_expand_array_initializer_from_items(
+                        (const AstExpression *const *)item->as.init_list.items,
+                        item->as.init_list.item_count,
+                        &nested_index,
+                        1u,
+                        extents,
+                        start_index + i,
+                        slots,
+                        error,
+                        item->line,
+                        item->column)) {
+                    return 0;
+                }
+                if (nested_index < item->as.init_list.item_count) {
+                    ir_set_error(error,
+                        item->line,
+                        item->column,
+                        "IR-LOWER-033: too many scalar initializers for array element sequence");
+                    return 0;
+                }
+                *io_item_index += 1u;
+            } else {
+                slots[start_index + i] = item;
+                *io_item_index += 1u;
+            }
+        }
+        return 1;
+    }
+
+    for (i = 0u; i < extents[0] && *io_item_index < item_count; ++i) {
+        const AstExpression *item = items[*io_item_index];
+        size_t sub_start = start_index + (i * ir_array_initializer_element_count(extents + 1u, rank - 1u));
+
+        if (item && item->kind == AST_EXPR_INIT_LIST) {
+            size_t nested_index = 0u;
+
+            if (!ir_expand_array_initializer_from_items(
+                    (const AstExpression *const *)item->as.init_list.items,
+                    item->as.init_list.item_count,
+                    &nested_index,
+                    rank - 1u,
+                    extents + 1u,
+                    sub_start,
+                    slots,
+                    error,
+                    item->line,
+                    item->column)) {
+                return 0;
+            }
+            if (nested_index < item->as.init_list.item_count) {
+                ir_set_error(error,
+                    item->line,
+                    item->column,
+                    "IR-LOWER-034: too many nested initializers for array subobject");
+                return 0;
+            }
+            *io_item_index += 1u;
+        } else {
+            if (!ir_expand_array_initializer_from_items(
+                    items,
+                    item_count,
+                    io_item_index,
+                    rank - 1u,
+                    extents + 1u,
+                    sub_start,
+                    slots,
+                    error,
+                    line,
+                    column)) {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int ir_expand_array_initializer_slots(const AstExpression *initializer_expr,
+    size_t rank,
+    const size_t *extents,
+    const AstExpression ***out_slots,
+    size_t *out_slot_count,
+    IrError *error) {
+    const AstExpression **slots = NULL;
+    size_t slot_count;
+
+    if (out_slots) {
+        *out_slots = NULL;
+    }
+    if (out_slot_count) {
+        *out_slot_count = 0u;
+    }
+    if (!initializer_expr || !out_slots || !out_slot_count || !extents || rank == 0u) {
+        ir_set_error(error,
+            initializer_expr ? initializer_expr->line : 0,
+            initializer_expr ? initializer_expr->column : 0,
+            "IR-INT-072: invalid array-initializer slot expansion contract");
+        return 0;
+    }
+
+    slot_count = ir_array_initializer_element_count(extents, rank);
+    slots = (const AstExpression **)calloc(slot_count, sizeof(*slots));
+    if (!slots) {
+        ir_set_error(error,
+            initializer_expr->line,
+            initializer_expr->column,
+            "IR-INT-073: out of memory while expanding array initializer slots");
+        return 0;
+    }
+
+    if (initializer_expr->kind == AST_EXPR_INIT_LIST) {
+        size_t item_index = 0u;
+
+        if (!ir_expand_array_initializer_from_items(
+                (const AstExpression *const *)initializer_expr->as.init_list.items,
+                initializer_expr->as.init_list.item_count,
+                &item_index,
+                rank,
+                extents,
+                0u,
+                slots,
+                error,
+                initializer_expr->line,
+                initializer_expr->column)) {
+            free(slots);
+            return 0;
+        }
+        if (item_index < initializer_expr->as.init_list.item_count) {
+            ir_set_error(error,
+                initializer_expr->line,
+                initializer_expr->column,
+                "IR-LOWER-035: too many initializers for declared array object");
+            free(slots);
+            return 0;
+        }
+    } else {
+        size_t item_index = 0u;
+        const AstExpression *single_item = initializer_expr;
+
+        if (!ir_expand_array_initializer_from_items(
+                &single_item,
+                1u,
+                &item_index,
+                rank,
+                extents,
+                0u,
+                slots,
+                error,
+                initializer_expr->line,
+                initializer_expr->column)) {
+            free(slots);
+            return 0;
+        }
+    }
+
+    *out_slots = slots;
+    *out_slot_count = slot_count;
+    return 1;
 }
 
 static int ir_statement_may_fallthrough_for_lowering(const AstStatement *stmt,

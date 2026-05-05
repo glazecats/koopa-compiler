@@ -182,6 +182,22 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
                         return 0;
                     }
                     break;
+                case LOWER_IR_INSTR_ADDR_LOCAL:
+                case LOWER_IR_INSTR_ADDR_GLOBAL:
+                    if (!lower_ir_append_value_name(&builder, instruction->result) ||
+                        !lower_ir_append_string(&builder,
+                            instruction->kind == LOWER_IR_INSTR_ADDR_LOCAL
+                                ? " = addr_local "
+                                : " = addr_global ") ||
+                        !lower_ir_append_slot_name(&builder,
+                            program,
+                            function,
+                            instruction->as.addr_slot) ||
+                        !lower_ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
                 case LOWER_IR_INSTR_LOAD_LOCAL:
                     if (!lower_ir_append_value_name(&builder, instruction->result) ||
                         !lower_ir_append_string(&builder, " = load_local ") ||
@@ -227,6 +243,25 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
                             instruction->as.store.slot) ||
                         !lower_ir_append_string(&builder, ", ") ||
                         !lower_ir_append_value_name(&builder, instruction->as.store.value) ||
+                        !lower_ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
+                case LOWER_IR_INSTR_LOAD_INDIRECT:
+                    if (!lower_ir_append_value_name(&builder, instruction->result) ||
+                        !lower_ir_append_string(&builder, " = load_indirect ") ||
+                        !lower_ir_append_value_name(&builder, instruction->as.load_indirect_addr) ||
+                        !lower_ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
+                case LOWER_IR_INSTR_STORE_INDIRECT:
+                    if (!lower_ir_append_string(&builder, "store_indirect ") ||
+                        !lower_ir_append_value_name(&builder, instruction->as.store_indirect.addr) ||
+                        !lower_ir_append_string(&builder, ", ") ||
+                        !lower_ir_append_value_name(&builder, instruction->as.store_indirect.value) ||
                         !lower_ir_append_string(&builder, "\n")) {
                         free(builder.data);
                         return 0;

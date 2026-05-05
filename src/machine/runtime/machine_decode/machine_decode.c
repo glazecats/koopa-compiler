@@ -101,6 +101,10 @@ static const char *machine_decode_op_tag_name(unsigned char tag_value) {
             return "call-void";
         case MACHINE_SELECT_OP_CALL_VOID_IMM:
             return "call-void-imm";
+        case MACHINE_SELECT_OP_ADDR_LOCAL:
+            return "addr-local";
+        case MACHINE_SELECT_OP_ADDR_GLOBAL:
+            return "addr-global";
         case MACHINE_SELECT_OP_LOAD_LOCAL:
             return "load-local";
         case MACHINE_SELECT_OP_STORE_LOCAL:
@@ -113,6 +117,10 @@ static const char *machine_decode_op_tag_name(unsigned char tag_value) {
             return "store-global";
         case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
             return "store-global-imm";
+        case MACHINE_SELECT_OP_LOAD_INDIRECT:
+            return "load-indirect";
+        case MACHINE_SELECT_OP_STORE_INDIRECT:
+            return "store-indirect";
     }
     return NULL;
 }

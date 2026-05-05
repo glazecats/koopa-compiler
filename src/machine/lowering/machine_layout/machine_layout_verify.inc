@@ -202,6 +202,20 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                         }
                         break;
                     }
+                    case MACHINE_SELECT_OP_ADDR_LOCAL:
+                    case MACHINE_SELECT_OP_ADDR_GLOBAL:
+                        if (!op->has_result ||
+                            !machine_layout_verify_slot_ref(program, function, op->as.addr_slot, "addr slot", error)) {
+                            return 0;
+                        }
+                        if ((op->kind == MACHINE_SELECT_OP_ADDR_LOCAL &&
+                                op->as.addr_slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            (op->kind == MACHINE_SELECT_OP_ADDR_GLOBAL &&
+                                op->as.addr_slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-128: addr op uses wrong slot kind");
+                            return 0;
+                        }
+                        break;
                     case MACHINE_SELECT_OP_LOAD_LOCAL:
                     case MACHINE_SELECT_OP_LOAD_GLOBAL:
                         if (!op->has_result ||
@@ -223,6 +237,23 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                             op->as.store.value.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                             machine_layout_set_error(
                                 error, 0, 0, "MACHINE-LAYOUT-123: immediate store family requires immediate value");
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_SELECT_OP_LOAD_INDIRECT:
+                        if (!op->has_result ||
+                            !machine_layout_verify_operand(
+                                op->as.load_indirect_addr, program, function->spill_slot_count, "load_indirect addr", error)) {
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_SELECT_OP_STORE_INDIRECT:
+                        if (op->has_result ||
+                            !machine_layout_verify_operand(
+                                op->as.store_indirect.addr, program, function->spill_slot_count, "store_indirect addr", error) ||
+                            !machine_layout_verify_operand(
+                                op->as.store_indirect.value, program, function->spill_slot_count, "store_indirect value", error)) {
+                            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-129: invalid store_indirect op");
                             return 0;
                         }
                         break;

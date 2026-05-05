@@ -5,12 +5,38 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef enum {
+    IR_LOWER_BINDING_SCALAR_LOCAL = 0,
+    IR_LOWER_BINDING_ARRAY_LOCAL,
+    IR_LOWER_BINDING_ARRAY_PARAMETER,
+} IrLowerBindingKind;
+
 typedef struct {
-    const char **names;
-    size_t *local_ids;
+    const char *name;
+    size_t local_id;
+    IrLowerBindingKind kind;
+    size_t array_rank;
+    size_t *array_extents;
+    int is_const;
+    int has_const_value;
+    long long const_value;
+} IrLowerBinding;
+
+typedef struct {
+    IrLowerBinding *bindings;
     size_t count;
     size_t capacity;
 } IrLowerScope;
+
+typedef struct {
+    size_t local_id;
+    IrLowerBindingKind kind;
+    size_t array_rank;
+    const size_t *array_extents;
+    int is_const;
+    int has_const_value;
+    long long const_value;
+} IrLowerBindingInfo;
 
 typedef struct {
     IrLowerScope *frames;
@@ -49,12 +75,21 @@ typedef struct {
 static void ir_lower_scope_stack_free(IrLowerScopeStack *stack);
 static int ir_lower_scope_stack_push(IrLowerScopeStack *stack);
 static void ir_lower_scope_stack_pop(IrLowerScopeStack *stack);
-static int ir_lower_scope_add_binding(IrLowerScopeStack *stack,
+static int ir_lower_scope_add_binding_with_metadata(IrLowerScopeStack *stack,
     const char *name,
-    size_t local_id);
+    size_t local_id,
+    IrLowerBindingKind kind,
+    size_t array_rank,
+    const size_t *array_extents,
+    int is_const,
+    int has_const_value,
+    long long const_value);
 static int ir_lower_scope_lookup(const IrLowerScopeStack *stack,
     const char *name,
     size_t *out_local_id);
+static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
+    const char *name,
+    IrLowerBindingInfo *out_info);
 
 static void ir_basic_block_free(IrBasicBlock *block);
 static void ir_function_free(IrFunction *function);
@@ -118,6 +153,38 @@ static int ir_emit_call(IrLowerContext *ctx,
     const char *callee_name,
     const IrValueRef *args,
     size_t arg_count);
+static int ir_emit_addr_local(IrLowerContext *ctx,
+    IrValueRef destination,
+    size_t local_id);
+static int ir_emit_addr_global(IrLowerContext *ctx,
+    IrValueRef destination,
+    size_t global_id);
+static int ir_emit_load_indirect(IrLowerContext *ctx,
+    IrValueRef destination,
+    IrValueRef address);
+static int ir_emit_store_indirect(IrLowerContext *ctx,
+    IrValueRef address,
+    IrValueRef value);
+static int ir_eval_constant_int_expression(IrLowerContext *ctx,
+    const AstExpression *expr,
+    long long *out_value);
+static int ir_compute_array_extents(IrLowerContext *ctx,
+    AstExpression **extent_exprs,
+    size_t rank,
+    int allow_unspecified_first_extent,
+    size_t **out_extents,
+    size_t *out_total_element_count);
+static int ir_append_array_local_slots(IrLowerContext *ctx,
+    const char *name,
+    size_t element_count,
+    size_t *out_base_local_id);
+static size_t ir_array_initializer_element_count(const size_t *extents, size_t rank);
+static int ir_expand_array_initializer_slots(const AstExpression *initializer_expr,
+    size_t rank,
+    const size_t *extents,
+    const AstExpression ***out_slots,
+    size_t *out_slot_count,
+    IrError *error);
 static int ir_ensure_builtin_function_signature(IrProgram *program,
     const char *name,
     IrFunction **out_function,

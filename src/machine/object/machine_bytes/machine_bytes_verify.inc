@@ -85,7 +85,7 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
             }
             if (block->terminator_byte_offset != block->end_byte_offset -
                     machine_bytes_terminator_encoded_size_for_profile(
-                        program->target_profile, &block->block.terminator)) {
+                        program->target_profile, function, &block->block.terminator)) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-112: terminator byte offset mismatch");
                 return 0;
             }

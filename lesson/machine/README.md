@@ -19,6 +19,19 @@
 - `-koopa` 现在仍然是刻意不支持的
 - 当前 machine 主线优先级是 **RISC-V correctness before backend optimization**
 
+如果按最新这轮再多记一条当前焦点，现在 machine 主线已经不只是在补 `void` 之后的收尾，而是开始承接：
+
+- `lv9 / array / indirect-memory`
+
+也就是：
+
+- 上游不再只会给 machine 一堆标量 slot op
+- 现在开始会给出第一批
+  - `addr_*`
+  - `load_indirect`
+  - `store_indirect`
+  形状
+
 如果按最近提交再多记一条当前焦点，那就是：
 
 - `machine_select` 的 CFG live-out-aware cleanup 已经不再只是实验性 fallback，而是更接近 checkpoint 的 selected-side cleanup 主线

@@ -332,8 +332,9 @@ static int test_ir_lowers_global_compound_assignment(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    tmp.0 = add g.0, 2\n"
-        "    g.0 = mov tmp.0\n"
+        "    tmp.0 = mov g.0\n"
+        "    tmp.1 = add tmp.0, 2\n"
+        "    g.0 = mov tmp.1\n"
         "    ret g.0\n"
         "}\n");
 }
@@ -345,14 +346,18 @@ static int test_ir_lowers_global_compound_assignment(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    tmp.0 = shl g.0, 1\n"
-        "    g.0 = mov tmp.0\n"
-        "    tmp.1 = and g.0, 6\n"
+        "    tmp.0 = mov g.0\n"
+        "    tmp.1 = shl tmp.0, 1\n"
         "    g.0 = mov tmp.1\n"
-        "    tmp.2 = xor g.0, 1\n"
-        "    g.0 = mov tmp.2\n"
-        "    tmp.3 = or g.0, 8\n"
+        "    tmp.2 = mov g.0\n"
+        "    tmp.3 = and tmp.2, 6\n"
         "    g.0 = mov tmp.3\n"
+        "    tmp.4 = mov g.0\n"
+        "    tmp.5 = xor tmp.4, 1\n"
+        "    g.0 = mov tmp.5\n"
+        "    tmp.6 = mov g.0\n"
+        "    tmp.7 = or tmp.6, 8\n"
+        "    g.0 = mov tmp.7\n"
         "    ret g.0\n"
         "}\n");
     }
@@ -364,13 +369,15 @@ static int test_ir_lowers_global_prefix_and_postfix_updates(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    tmp.0 = add g.0, 1\n"
-        "    g.0 = mov tmp.0\n"
-        "    tmp.1 = mov g.0\n"
-        "    tmp.2 = sub g.0, 1\n"
-        "    g.0 = mov tmp.2\n"
-        "    tmp.3 = add tmp.0, tmp.1\n"
-        "    ret tmp.3\n"
+        "    tmp.0 = mov g.0\n"
+        "    tmp.1 = add tmp.0, 1\n"
+        "    g.0 = mov tmp.1\n"
+        "    tmp.2 = mov g.0\n"
+        "    tmp.3 = mov tmp.2\n"
+        "    tmp.4 = sub tmp.2, 1\n"
+        "    g.0 = mov tmp.4\n"
+        "    tmp.5 = add tmp.1, tmp.3\n"
+        "    ret tmp.5\n"
         "}\n");
 }
 
@@ -394,8 +401,9 @@ static int test_ir_lowers_local_shadow_over_global(void) {
         "func main() {\n"
         "  bb.0:\n"
         "    g.0 = mov 1\n"
-        "    tmp.0 = add g.0, 2\n"
-        "    g.0 = mov tmp.0\n"
+        "    tmp.0 = mov g.0\n"
+        "    tmp.1 = add tmp.0, 2\n"
+        "    g.0 = mov tmp.1\n"
         "    ret g.0\n"
         "}\n");
 }
@@ -740,6 +748,53 @@ static int test_ir_merges_repeated_declarations_without_definition(void) {
         "}\n");
 }
 
+static int test_ir_preserves_global_array_declaration_metadata(void) {
+    return expect_ir_dump("IR-DECL-GLOBAL-ARRAYS",
+        "int a[10];\nint b[2][3] = {1, 2, 3};\nint main(){return 2;}\n",
+        "global a.0[rank=1]\n"
+        "global b.1[rank=2]\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_global global.1\n"
+        "    0 = store_indirect tmp.0, 1\n"
+        "    tmp.1 = add tmp.0, 4\n"
+        "    0 = store_indirect tmp.1, 2\n"
+        "    tmp.2 = add tmp.0, 8\n"
+        "    0 = store_indirect tmp.2, 3\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 2\n"
+        "}\n");
+}
+
+static int test_ir_lowers_unused_local_array_declarations(void) {
+    return expect_ir_dump("IR-DECL-LOCAL-ARRAYS",
+        "int main(){int a[3] = {}; int b[2][4]; return 7;}\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    a.0 = mov 0\n"
+        "    a.1 = mov 0\n"
+        "    a.2 = mov 0\n"
+        "    ret 7\n"
+        "}\n");
+}
+
+static int test_ir_preserves_array_parameter_signature_metadata(void) {
+    return expect_ir_dump("IR-DECL-ARRAY-PARAMS",
+        "int f(int arr[], int grid[][]);\nint main(){return 0;}\n",
+        "declare f(arr.0[rank=1], grid.1[rank=2])\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
     static int test_ir_merges_unnamed_declaration_then_definition(void) {
         return expect_ir_dump("IR-DECL-UNNAMED-THEN-DEF",
         "int add(int,int);\nint add(int a,int b){return a+b;}\nint main(){return add(1,2);}\n",
@@ -1044,12 +1099,14 @@ static int test_ir_lowers_compound_assignment(void) {
         "func f() {\n"
         "  bb.0:\n"
         "    x.0 = mov 1\n"
-        "    tmp.0 = add x.0, 2\n"
-        "    x.0 = mov tmp.0\n"
-        "    tmp.1 = shl x.0, 1\n"
+        "    tmp.0 = mov x.0\n"
+        "    tmp.1 = add tmp.0, 2\n"
         "    x.0 = mov tmp.1\n"
-        "    tmp.2 = add tmp.0, tmp.1\n"
-        "    ret tmp.2\n"
+        "    tmp.2 = mov x.0\n"
+        "    tmp.3 = shl tmp.2, 1\n"
+        "    x.0 = mov tmp.3\n"
+        "    tmp.4 = add tmp.1, tmp.3\n"
+        "    ret tmp.4\n"
         "}\n");
 }
 
@@ -1206,9 +1263,10 @@ static int test_ir_lowers_prefix_increment(void) {
         "func f() {\n"
         "  bb.0:\n"
         "    x.0 = mov 1\n"
-        "    tmp.0 = add x.0, 1\n"
-        "    x.0 = mov tmp.0\n"
-        "    ret tmp.0\n"
+        "    tmp.0 = mov x.0\n"
+        "    tmp.1 = add tmp.0, 1\n"
+        "    x.0 = mov tmp.1\n"
+        "    ret tmp.1\n"
         "}\n");
 }
 
@@ -1219,9 +1277,10 @@ static int test_ir_lowers_postfix_increment(void) {
         "  bb.0:\n"
         "    x.0 = mov 1\n"
         "    tmp.0 = mov x.0\n"
-        "    tmp.1 = add x.0, 1\n"
-        "    x.0 = mov tmp.1\n"
-        "    ret tmp.0\n"
+        "    tmp.1 = mov tmp.0\n"
+        "    tmp.2 = add tmp.0, 1\n"
+        "    x.0 = mov tmp.2\n"
+        "    ret tmp.1\n"
         "}\n");
 }
 
@@ -1231,9 +1290,10 @@ static int test_ir_lowers_prefix_decrement(void) {
         "func f() {\n"
         "  bb.0:\n"
         "    x.0 = mov 1\n"
-        "    tmp.0 = sub x.0, 1\n"
-        "    x.0 = mov tmp.0\n"
-        "    ret tmp.0\n"
+        "    tmp.0 = mov x.0\n"
+        "    tmp.1 = sub tmp.0, 1\n"
+        "    x.0 = mov tmp.1\n"
+        "    ret tmp.1\n"
         "}\n");
 }
 
@@ -1244,9 +1304,10 @@ static int test_ir_lowers_postfix_decrement(void) {
         "  bb.0:\n"
         "    x.0 = mov 1\n"
         "    tmp.0 = mov x.0\n"
-        "    tmp.1 = sub x.0, 1\n"
-        "    x.0 = mov tmp.1\n"
-        "    ret tmp.0\n"
+        "    tmp.1 = mov tmp.0\n"
+        "    tmp.2 = sub tmp.0, 1\n"
+        "    x.0 = mov tmp.2\n"
+        "    ret tmp.1\n"
         "}\n");
 }
 
@@ -1675,6 +1736,8 @@ int main(void) {
     ok &= test_ir_preserves_function_declaration_signature();
     ok &= test_ir_merges_declaration_with_definition();
     ok &= test_ir_merges_repeated_declarations_without_definition();
+    ok &= test_ir_preserves_global_array_declaration_metadata();
+    ok &= test_ir_lowers_unused_local_array_declarations();
     ok &= test_ir_merges_unnamed_declaration_then_definition();
     ok &= test_ir_merges_declaration_with_parameter_name_drift();
     ok &= test_ir_lowers_declared_call_in_if_condition();

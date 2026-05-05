@@ -61,6 +61,9 @@
      - `riscv32-preview`
      - `i386-preview`
      这类显式 profile 名，而不是只给一个数字枚举值
+8. global object byte-size preservation
+   - `.sbss` / `.sdata` 这类 section 不只结构上还在
+   - 对应 global-object symbol 的 `byte_count` 也会继续保留到 reloc artifact
 
 所以这层现在除了：
 

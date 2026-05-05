@@ -46,11 +46,60 @@ static int ir_function_parameter_count_matches_external(const IrFunction *functi
     return function && external && function->parameter_count == external->parameter_count;
 }
 
+static int ir_apply_array_rank_to_local(IrFunction *function,
+    size_t local_id,
+    size_t array_rank,
+    IrError *error) {
+    IrLocal *local;
+
+    if (!function || local_id >= function->local_count || !function->locals) {
+        ir_set_error(error, 0, 0, "IR-INT-068: invalid local array-rank assignment");
+        return 0;
+    }
+
+    local = &function->locals[local_id];
+    if (local->array_rank > 0u && array_rank > 0u && local->array_rank != array_rank) {
+        ir_set_error(error,
+            0,
+            0,
+            "IR-LOWER-029: function parameter '%s' is declared with conflicting array ranks",
+            local->source_name ? local->source_name : "<unnamed>");
+        return 0;
+    }
+
+    if (array_rank > 0u) {
+        local->array_rank = array_rank;
+    }
+    return 1;
+}
+
+static int ir_apply_array_rank_to_global(IrGlobal *global,
+    size_t array_rank,
+    IrError *error) {
+    if (!global) {
+        ir_set_error(error, 0, 0, "IR-INT-069: invalid global array-rank assignment");
+        return 0;
+    }
+
+    if (global->array_rank > 0u && array_rank > 0u && global->array_rank != array_rank) {
+        ir_set_error(error,
+            0,
+            0,
+            "IR-LOWER-030: global '%s' is declared with conflicting array ranks",
+            global->name ? global->name : "<unnamed>");
+        return 0;
+    }
+
+    if (array_rank > 0u) {
+        global->array_rank = array_rank;
+    }
+    return 1;
+}
+
 static int ir_ensure_builtin_function_signature(IrProgram *program,
     const char *name,
     IrFunction **out_function,
     IrError *error) {
-    size_t builtin_index;
     size_t param_index;
     const IrBuiltinFunctionInfo *builtin = NULL;
     IrFunction *function = NULL;
@@ -112,6 +161,13 @@ static int ir_predeclare_builtin_calls_in_expression(IrProgram *program,
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (arg_index = 0u; arg_index < expr->as.init_list.item_count; ++arg_index) {
+            if (!ir_predeclare_builtin_calls_in_expression(program, expr->as.init_list.items[arg_index], error)) {
+                return 0;
+            }
+        }
+        return 1;
     case AST_EXPR_PAREN:
         return ir_predeclare_builtin_calls_in_expression(program, expr->as.inner, error);
     case AST_EXPR_UNARY:
@@ -240,14 +296,19 @@ static int ir_predeclare_program_globals(IrProgram *program,
 
     for (i = 0; i < ast_program->count; ++i) {
         const AstExternal *external = &ast_program->externals[i];
+        IrGlobal *global;
 
         if (external->kind != AST_EXTERNAL_DECLARATION || !external->name ||
             external->name[0] == '\0') {
             continue;
         }
 
-        if (!ir_program_find_global_mut(program, external->name) &&
-            !ir_program_append_global(program, external->name, NULL, error)) {
+        global = ir_program_find_global_mut(program, external->name);
+        if (!global && !ir_program_append_global(program, external->name, &global, error)) {
+            return 0;
+        }
+        if (global &&
+            !ir_apply_array_rank_to_global(global, external->declaration_array_rank, error)) {
             return 0;
         }
     }
@@ -425,6 +486,11 @@ static int ir_eval_global_initializer_expr(const IrProgram *program,
     case AST_EXPR_NUMBER:
         *out_value = expr->as.number_value;
         return 1;
+    case AST_EXPR_INIT_LIST:
+        if (out_invalid_constant) {
+            *out_invalid_constant = 1;
+        }
+        return 0;
     case AST_EXPR_IDENTIFIER:
         {
             const IrGlobal *global;
@@ -622,7 +688,6 @@ static int ir_ensure_function_signature(IrProgram *program,
         ir_set_error(error, 0, 0, "IR-INT-058: invalid function signature lowering contract");
         return 0;
     }
-
     function = ir_program_find_function_mut(program, external->name);
     if (!function) {
         if (!ir_program_append_function(program, external->name, &function, error)) {
@@ -665,6 +730,10 @@ static int ir_ensure_function_signature(IrProgram *program,
             external->parameter_names ? external->parameter_names[i] : NULL;
 
         if (!ir_function_set_parameter_name(function, i, parameter_name, error)) {
+            return 0;
+        }
+        if (external->parameter_array_ranks &&
+            !ir_apply_array_rank_to_local(function, i, external->parameter_array_ranks[i], error)) {
             return 0;
         }
     }
@@ -730,6 +799,84 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
     IrGlobal *global,
     const AstExpression *initializer_expr,
     IrError *error) {
+    if (global && global->array_rank > 0u) {
+        IrLowerContext ctx;
+        IrValueRef base_address;
+        const AstExpression **initializer_slots = NULL;
+        size_t slot_count = 0u;
+        size_t slot_index;
+
+        if (!program || !runtime_init_function || !global || !initializer_expr || !global->array_extents) {
+            return 0;
+        }
+        if (runtime_init_function->block_count == 0 || !runtime_init_function->blocks) {
+            ir_set_error(error,
+                initializer_expr->line,
+                initializer_expr->column,
+                "IR-INT-059: runtime initializer helper has no entry block");
+            return 0;
+        }
+        if (runtime_init_function->blocks[0].has_terminator) {
+            ir_set_error(error,
+                initializer_expr->line,
+                initializer_expr->column,
+                "IR-INT-060: runtime initializer helper was unexpectedly terminated early");
+            return 0;
+        }
+
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.program = program;
+        ctx.function = runtime_init_function;
+        ctx.block_id = 0u;
+        ctx.has_block = 1;
+        ctx.error = error;
+
+        if (!ir_expand_array_initializer_slots(initializer_expr,
+                global->array_rank,
+                global->array_extents,
+                &initializer_slots,
+                &slot_count,
+                error)) {
+            return 0;
+        }
+
+        base_address = ir_value_temp(ir_allocate_temp(runtime_init_function));
+        if (!ir_emit_addr_global(&ctx, base_address, global->id)) {
+            free(initializer_slots);
+            return 0;
+        }
+
+        for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+            IrValueRef slot_value;
+            IrValueRef slot_address = base_address;
+
+            if (!initializer_slots[slot_index]) {
+                continue;
+            }
+
+            if (slot_index > 0u) {
+                slot_address = ir_value_temp(ir_allocate_temp(runtime_init_function));
+                if (!ir_emit_binary(&ctx,
+                        slot_address,
+                        IR_BINARY_ADD,
+                        base_address,
+                        ir_value_immediate((long long)(slot_index * 4u)))) {
+                    free(initializer_slots);
+                    return 0;
+                }
+            }
+
+            if (!ir_lower_expression(&ctx, initializer_slots[slot_index], &slot_value) ||
+                !ir_emit_store_indirect(&ctx, slot_address, slot_value)) {
+                free(initializer_slots);
+                return 0;
+            }
+        }
+
+        free(initializer_slots);
+        return 1;
+    }
+
     IrLowerContext ctx;
     IrValueRef initializer_value;
 
@@ -809,6 +956,9 @@ static int ir_lower_global_declaration(IrProgram *program,
     IrGlobal *global;
     int invalid_constant = 0;
     long long initializer_value = 0;
+    IrLowerContext extent_ctx;
+    size_t *array_extents = NULL;
+    size_t array_element_count = 0u;
 
     if (!program || !external || external->kind != AST_EXTERNAL_DECLARATION) {
         return 1;
@@ -823,6 +973,150 @@ static int ir_lower_global_declaration(IrProgram *program,
     }
     if (!global) {
         return 0;
+    }
+    if (!ir_apply_array_rank_to_global(global, external->declaration_array_rank, error)) {
+        return 0;
+    }
+
+    if (external->declaration_array_rank > 0u) {
+        memset(&extent_ctx, 0, sizeof(extent_ctx));
+        extent_ctx.program = program;
+        extent_ctx.error = error;
+        if (!ir_compute_array_extents(&extent_ctx,
+                external->declaration_array_extent_exprs,
+                external->declaration_array_rank,
+                0,
+                &array_extents,
+                &array_element_count)) {
+            return 0;
+        }
+        free(global->array_extents);
+        global->array_extents = array_extents;
+        global->byte_size = array_element_count * 4u;
+        global->has_initializer = 0;
+        global->initializer_value = 0;
+        global->has_runtime_initializer = 0;
+        if (!external->has_initializer) {
+            return 1;
+        }
+        if (!external->declaration_initializer) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-INT-062: top-level declaration '%s' is marked initialized but has no initializer AST",
+                external->name);
+            return 0;
+        }
+
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            error->message[0] = '\0';
+        }
+
+        {
+            size_t *deps = NULL;
+            size_t dep_count = 0;
+            size_t dep_capacity = 0;
+            size_t i;
+
+            if (!ir_collect_global_initializer_dependencies(program,
+                    ast_program,
+                    external->declaration_initializer,
+                    &deps,
+                    &dep_count,
+                    &dep_capacity,
+                    error)) {
+                free(deps);
+                return 0;
+            }
+
+            for (i = 0; i < dep_count; ++i) {
+                size_t dep_id = deps[i];
+                const IrGlobal *dep_global = ir_program_get_global(program, dep_id);
+
+                if (!dep_global) {
+                    continue;
+                }
+                if (!dep_global->has_initializer && !dep_global->has_runtime_initializer) {
+                    char dep_path[256];
+                    char cycle_chain[256];
+                    int via_callee = 0;
+                    const char *source_name = (global->name && global->name[0] != '\0')
+                        ? global->name
+                        : "<global>";
+                    const char *blocked_name = (dep_global->name && dep_global->name[0] != '\0')
+                        ? dep_global->name
+                        : "<global>";
+
+                    dep_path[0] = '\0';
+                    cycle_chain[0] = '\0';
+
+                    if (!ir_try_format_runtime_global_dependency_path(program,
+                            ast_program,
+                            global->id,
+                            external->declaration_initializer,
+                            dep_id,
+                            dep_path,
+                            sizeof(dep_path),
+                            &via_callee)) {
+                        snprintf(dep_path, sizeof(dep_path), "%s -> %s", source_name, blocked_name);
+                    }
+
+                    if (ir_try_format_runtime_global_cycle(program,
+                            ast_program,
+                            global->id,
+                            dep_id,
+                            cycle_chain,
+                            sizeof(cycle_chain))) {
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-LOWER-022: top-level initializer for global '%s' depends on not-yet-initialized global '%s' (dependency cycle: %s)",
+                            source_name,
+                            blocked_name,
+                            cycle_chain);
+                    } else if (via_callee) {
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-LOWER-022: top-level initializer for global '%s' depends on not-yet-initialized global '%s' (dependency path via callee body: %s)",
+                            source_name,
+                            blocked_name,
+                            dep_path);
+                    } else {
+                        ir_set_error(error,
+                            external->line,
+                            external->column,
+                            "IR-LOWER-022: top-level initializer for global '%s' depends on not-yet-initialized global '%s' (dependency path: %s)",
+                            source_name,
+                            blocked_name,
+                            dep_path);
+                    }
+
+                    free(deps);
+                    return 0;
+                }
+            }
+
+            free(deps);
+        }
+
+        if (!ir_ensure_runtime_global_init_function(program, runtime_init_function, error)) {
+            return 0;
+        }
+        if (!*runtime_init_function ||
+            !ir_emit_runtime_initializer_assignment(program,
+                *runtime_init_function,
+                global,
+                external->declaration_initializer,
+                error)) {
+            return 0;
+        }
+
+        global->has_initializer = 0;
+        global->has_runtime_initializer = 1;
+        return 1;
     }
 
     if (!external->has_initializer) {
@@ -1027,6 +1321,14 @@ static int ir_lower_function(IrProgram *program,
 
     for (i = 0; i < function->parameter_count; ++i) {
         const char *parameter_name = function->locals[i].source_name;
+        size_t parameter_array_rank = (external->parameter_array_ranks && i < external->parameter_count)
+            ? external->parameter_array_ranks[i]
+            : 0u;
+        int parameter_is_const = (external->parameter_is_const && i < external->parameter_count)
+            ? external->parameter_is_const[i]
+            : 0;
+        size_t *parameter_array_extents = NULL;
+        size_t ignored_element_count = 0u;
 
         if (!parameter_name || parameter_name[0] == '\0') {
             ir_set_error(error,
@@ -1038,7 +1340,30 @@ static int ir_lower_function(IrProgram *program,
             goto cleanup;
         }
 
-        if (!ir_lower_scope_add_binding(&ctx.scopes, parameter_name, i)) {
+        if (parameter_array_rank > 0u &&
+            !ir_compute_array_extents(&ctx,
+                external->parameter_array_extent_exprs
+                    ? external->parameter_array_extent_exprs[i]
+                    : NULL,
+                parameter_array_rank,
+                1,
+                &parameter_array_extents,
+                &ignored_element_count)) {
+            goto cleanup;
+        }
+
+        if (!ir_lower_scope_add_binding_with_metadata(&ctx.scopes,
+                parameter_name,
+                i,
+                parameter_array_rank > 0u
+                    ? IR_LOWER_BINDING_ARRAY_PARAMETER
+                    : IR_LOWER_BINDING_SCALAR_LOCAL,
+                parameter_array_rank,
+                parameter_array_extents,
+                parameter_is_const,
+                0,
+                0)) {
+            free(parameter_array_extents);
             ir_set_error(error,
                 external->line,
                 external->column,
@@ -1046,6 +1371,7 @@ static int ir_lower_function(IrProgram *program,
                 parameter_name);
             goto cleanup;
         }
+        free(parameter_array_extents);
     }
 
     if (!ir_lower_statement(&ctx, external->function_body)) {

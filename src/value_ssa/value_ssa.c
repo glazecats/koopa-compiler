@@ -464,6 +464,7 @@ int value_ssa_program_append_global(ValueSsaProgram *program,
     global = &program->globals[program->global_count];
     global->id = program->global_count;
     global->name = value_ssa_strdup(name);
+    global->byte_size = 4u;
     global->has_initializer = 0;
     global->initializer_value = 0;
     global->has_runtime_initializer = 0;

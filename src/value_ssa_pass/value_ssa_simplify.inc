@@ -178,6 +178,15 @@ static int value_ssa_simplify_rewrite_use_site(ValueSsaFunction *function,
         case VALUE_SSA_USE_ROLE_STORE_VALUE:
             block->instructions[site->instruction_index].as.store.value = replacement;
             return 1;
+        case VALUE_SSA_USE_ROLE_LOAD_INDIRECT_ADDR:
+            block->instructions[site->instruction_index].as.load_indirect_addr = replacement;
+            return 1;
+        case VALUE_SSA_USE_ROLE_STORE_INDIRECT_ADDR:
+            block->instructions[site->instruction_index].as.store_indirect.addr = replacement;
+            return 1;
+        case VALUE_SSA_USE_ROLE_STORE_INDIRECT_VALUE:
+            block->instructions[site->instruction_index].as.store_indirect.value = replacement;
+            return 1;
         default:
             value_ssa_set_error(error, 0, 0, "VALUE-SSA-204: invalid instruction use-role during simplify");
             return 0;

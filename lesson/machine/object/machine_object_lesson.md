@@ -61,6 +61,9 @@
      - `riscv32-preview`
      - `i386-preview`
      这种 profile 名，而不是只露出一个数字枚举值
+6. global object byte-size honesty
+   - 现在不只是“有一个 global-object symbol”
+   - 它的真实 `byte_size` 也会在 object section / symbol 上继续保留
 
 所以现在这层除了“section/symbol/fixup 正式容器化”，还要记成：
 
@@ -188,6 +191,7 @@
 
 - `machine_object` 现在已经不只是“把东西装起来”
 - 它还会把当前 preview profile/policy 以更适合 consumer 直接阅读的形式带出来
+- 同时也开始把 array/global-object 的真实大小带进 object artifact，而不是默认都压回 4-byte scalar 壳
 
 ---
 

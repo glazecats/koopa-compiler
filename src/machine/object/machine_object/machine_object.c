@@ -331,18 +331,23 @@ static int machine_object_copy_section_bytes_from_report(const MachineBytesRepor
         const MachineBytesSymbolSummary *symbol = &symbols[symbol_index];
         const MachineEmitGlobal *global = machine_object_find_global_by_name(&report->program, symbol->name);
         uint32_t value;
+        size_t byte_count = symbol->byte_count ? symbol->byte_count : 4u;
 
-        if (!global || byte_cursor + 4u > section->byte_count) {
+        if (!global || byte_cursor + byte_count > section->byte_count) {
             free(bytes);
             machine_object_set_error(error, 0, 0, "MACHINE-OBJECT-135: invalid global section materialization");
             return 0;
         }
-        value = global->has_initializer ? (uint32_t)global->initializer_value : 0u;
-        bytes[byte_cursor + 0u] = (unsigned char)(value & 0xFFu);
-        bytes[byte_cursor + 1u] = (unsigned char)((value >> 8u) & 0xFFu);
-        bytes[byte_cursor + 2u] = (unsigned char)((value >> 16u) & 0xFFu);
-        bytes[byte_cursor + 3u] = (unsigned char)((value >> 24u) & 0xFFu);
-        byte_cursor += 4u;
+        if (global->has_initializer) {
+            size_t init_byte_count = byte_count < 4u ? byte_count : 4u;
+            size_t init_index;
+
+            value = (uint32_t)global->initializer_value;
+            for (init_index = 0u; init_index < init_byte_count; ++init_index) {
+                bytes[byte_cursor + init_index] = (unsigned char)((value >> (init_index * 8u)) & 0xFFu);
+            }
+        }
+        byte_cursor += byte_count;
     }
     *out_bytes = bytes;
     return 1;

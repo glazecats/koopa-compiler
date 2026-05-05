@@ -96,63 +96,80 @@
 - Current multi-round implementation focus is now the following ordered line,
   and it should be treated as the default mainline until these items are
   materially closed:
-  1. pass course `lv8` under `autotest -riscv -s lv8 /workspaces/compiler_lab`
-  2. land complete `void` compatibility across the current front-end /
-     semantic / lowering chain rather than a parse-only partial stub
-  3. land SysY builtin callable visibility for the course runtime surface
-     (`getint/getch/getarray/putint/putch/putarray/starttime/stoptime`)
-  4. keep repository regressions plus course tests green throughout
-  5. after `lv8` is stable again, return to the reopened downstream
-     RISC-V artifact-honesty line (`machine_reloc -> machine_elf`)
+  1. pass course `lv9` under `autotest -riscv -s lv9 /workspaces/compiler_lab`
+  2. land real array support across the current front-end / semantic /
+     lowering chain instead of stopping at explicit unsupported-feature
+     diagnostics
+  3. keep repository regressions plus course tests green throughout
+  4. after `lv9` is stable, return to the reopened downstream RISC-V
+     artifact-honesty line (`machine_reloc -> machine_elf`)
 - Current progress snapshot for that ordered line:
   - `lv8` course line: **complete / 12 of 12 passing**
     under
     `CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases -s lv8 /workspaces/compiler_lab`
-    after closing the call/result preservation bugs in `03_more_params` /
-    `06_complex_call` / `07_recursion`, fixing the `_start` / CRT coexistence
-    issue for `08_lib_funcs`, stabilizing the `machine_ir -> machine_select ->
-    machine_layout -> machine_emit -> machine_bytes` CLI lowering path so
-    loop-carried copies survive into final RISC-V text for `10_complex`, and
-    shrinking the last `11_short_circuit` blocker from a broad course failure
-    down to one backend / Memory-SSA-side corner case that is now at least
-    course-correct again
+  - `lv9` course line: **complete / 22 of 22 passing**
+    under
+    `CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases -s lv9 /workspaces/compiler_lab`
+  - `lv9` engineering checkpoint:
+    array admission, indirect array lowering, preview bytes/object lowering,
+    and the remaining sort-family backend/runtime closure are now all green;
+    the active mainline can move back to the reopened downstream
+    RISC-V artifact-honesty line (`machine_reloc -> machine_elf`) when the
+    next round starts
   - `void` compatibility line: **course-complete / effectively 100% toward ideal**
-    with the old front-end-only compatibility bridge now materially shrunk:
-    `IR -> lower_ir -> value_ssa -> memory_ssa -> machine_ir ->
-    machine_select -> machine_layout -> machine_emit -> machine_encode ->
-    machine_bytes` all accept an explicit no-value return shape now, and the
-    encode boundary no longer treats return operand shape as an unchecked
-    carry-through detail. Direct preview bytes/tests already lock the
-    resulting bare `ret` behavior instead of forcing those layers to route
-    `void` through a synthetic `ret 0` all the way down. The encode/bytes
-    report-side terminator summaries now also preserve whether one return is
-    bare or value-carrying instead of collapsing that distinction in the
-    structured consumer surface, and the dump surfaces now mirror the
-    selected/layout meaning more closely instead of flattening return shape
-    back into a single compatibility string. The main remaining ideal-state
-    work is now only very narrow later-stage artifact/query polish rather
-    than first-class `void` return semantics
+    with the old front-end-only compatibility bridge now materially shrunk
   - SysY builtin callable-visibility line: **course-complete / roughly 80% toward ideal**
-    with the required current runtime surface
-    `getint/getch/getarray/putint/putch/putarray/starttime/stoptime`
-    now accepted by the front-end and exercised through the course suite. The
-    remaining ideal-state work is cleanup / documentation / regression
-    tightening rather than first-support bring-up
   - regression / ideal-state tail: **checkpoint-near / roughly 98%**
-    course `lv8` remains closed, `test-memory-ssa-pass` is green again, and
-    the previously reopened branch-materialized / mixed global-load
-    forwarding family has been reclosed on a more conservative-but-stable
-    rule: join-load PRE is now staged with all-predecessor validation first,
-    and the branch-materialized partial-unknown cases are explicitly locked
-    to the current conservative shape that keeps direct predecessor stores
-    plus the final join load when the side-exit predecessor is not rewritten
-    into a cross-edge global-value phi. The remaining work on this tail is
-    broad repository sweep / polish, not the old load-forwarding
-    non-convergence bug itself
   - older closure lines remain maintenance-first:
     `lv7` is complete, `SEMA-CF-001` is checkpoint-near, and
     `machine_select` cleanup is effectively checkpointed unless a concrete bug
     reopens them
+- Current staged `lv9` plan should now be read as:
+  - `LV9-A` syntax admission: **mostly complete / roughly 75%**
+    lexer/parser/AST now accept bracket tokens, subscript expressions, array
+    rank metadata, and brace-initializer token consumption well enough to
+    move failures downstream
+  - `LV9-B` semantic stabilization: **mostly complete / roughly 85%**
+    subscript expression traversal is now materially in place, and
+    brace-initializer expressions are no longer parser-only AST leaves:
+    semantic scope / flow walks now recurse through `AST_EXPR_INIT_LIST`
+    instead of silently skipping it
+  - `LV9-C` canonical IR storage-model reopen: **in progress / roughly 82%**
+    current canonical IR now preserves array-object metadata for
+    locals/globals/parameters and has the first explicit address/indirect
+    opcode family (`addr_local`, `addr_global`, `load_indirect`,
+    `store_indirect`); local/global array initializer lowering now also
+    expands real brace-initializer writes instead of keeping arrays as
+    declaration-only metadata, but the remaining closure is to finish the
+    deeper parameter-array / decay cases and to normalize the new more-honest
+    IR expectations across focused regressions
+  - `LV9-D` lower-IR and downstream projection: **in progress / roughly 78%**
+    `lower_ir`, `value_ssa`, and `machine_ir` already know the new indirect
+    opcode family structurally, but the active closure is still to make the
+    selected/backend path consume those ops for real instead of stopping at
+    the old slot-only selected memory model
+    - current temporary honesty boundary:
+      programs that use indirect array memory now stay on the direct
+      `value_ssa_build_from_lower_ir(...)` route instead of the default
+      memory-SSA/value canonicalization pipeline, because the current
+      `memory_ssa_pass` / `value_ssa_canonicalize_program(...)` path is still
+      scalar-slot-centric and does not yet canonicalize indirect memory
+      soundly
+    - current landed closure inside that stage:
+      `machine_select -> machine_layout -> machine_emit -> machine_bytes`
+      now materially accept and lower the first `addr_local`, `addr_global`,
+      `load_indirect`, and `store_indirect` slice well enough for real
+      array-element and parameter-array code to reach preview RISC-V output
+      on representative cases, and global object byte-size metadata now
+      flows far enough downstream that array globals are no longer forced
+      into 4-byte scalar object shells in the preview emitter/object path
+  - `LV9-E` course closure: **complete / 100%**
+    local/global arrays, array parameters/decay, initializer semantics, and
+    final `autotest -riscv -s lv9` closure are all done
+  - Immediate implementation order for the current round:
+    1. snapshot and commit the now-green `lv9` branch
+    2. return to the reopened downstream RISC-V artifact-honesty line
+       (`machine_reloc -> machine_elf`) on the next round
 - The downstream observe/runtime provenance follow-through line
   (`machine_elf -> ... -> machine_journal`) is now effectively
   **checkpointed end-to-end** for the current workstream.
@@ -1405,6 +1422,10 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 
 ## Execution Log
 
+- 2026-05-04: `lv9` closed at 22/22 passing after fixing the preview backend's real spill/local frame layout and the caller-save/return-value interaction around `a0`; the remaining sort-family wrong answers were caused by the driver restoring `a0` across calls that still needed the returned value.
+- 2026-05-04: `machine_bytes` spill slots are now laid out after per-function locals instead of using the old temporary gap hack, so preview spill accesses no longer overlap local slots or frame-owned values.
+- 2026-05-04: `compiler_driver` caller-save handling now keeps `a0` live across calls whenever the value produced by the call is still consumed later in the same block or in the block terminator, which fixed the last `sort1`-`sort6` wrong-answer tail.
+- 2026-05-04: The reopened downstream object/reloc/ELF honesty line advanced again: focused `machine_object`, `machine_reloc`, and `machine_elf` regressions now lock non-4-byte global objects (`byte_size`-driven `.sdata` sizing and symbol sizing) instead of only 4-byte scalar globals. In parallel, `machine_object` now materializes initializer bytes into larger writable global objects by writing the low 4 bytes of the scalar initializer and leaving the remaining object bytes zero-filled, so the downstream `.sdata` / relocation / ELF chain stays honest for larger preview objects instead of silently collapsing them back to a 4-byte-only assumption.
 - 2026-03-19: Milestone A continued: expanding AST detail by recording function parameter counts in top-level AST externals.
 - 2026-03-19: Milestone A continued: recording declaration initializer metadata (`has_initializer`) for top-level AST declaration externals.
 - 2026-03-19: Milestone A continued: parser now accepts function declarations (`int f(int);`) and AST records function declaration/definition metadata (`is_function_definition`).
@@ -1988,6 +2009,14 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-04: That same object/reloc profile-name cleanup is now also locked on the `i386-preview` lane instead of being tested only through generic-path snapshots and implementation inspection. Focused `machine_object` and `machine_reloc` regressions now build a tiny `i386-preview` artifact chain and require dump/report text to preserve the explicit `i386-preview` profile name, while `test-machine-object`, `test-machine-reloc`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green. Current reading is that this removes another small “surface still works, but only one preview lane is actually locked” compatibility tail from the active `machine_reloc -> machine_elf` reopen.
 - 2026-05-04: The same profile/policy honesty line now also reached `machine_container`, which previously still behaved more like a pure packaging layer than an artifact-facing summary surface. Container dumps now expose the inherited relocation profile name plus the current addend/fallthrough policy text instead of dropping that context between `machine_reloc` and `machine_elf`, and a focused `i386-preview` regression now locks that behavior. `test-machine-container`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green, so this should be read as another small but real downstream honesty closure inside the still-active `machine_reloc -> machine_elf` mainline.
 - 2026-05-04: The same artifact-honesty line now also tightened `machine_elf_dump_report(...)`, which had still been acting more like a thin alias of raw file dump despite the richer cached report artifact already existing. Report dumps now print the cached artifact summary, header summary, target-policy summary, and relocation-family summary before the canonical file dump, and focused ELF helper regressions now lock those added report-side lines on both imported/reprofiled and direct-preview paths. `test-machine-elf`, `test-compiler-driver`, course `lv8`, and `git diff --check` all stayed green, so this is another presentation/query closure rather than a new behavioral backend change.
+- 2026-05-04: The active course mainline has now shifted from closed `lv8` to `lv9`. The first `lv9` move was intentionally an honesty-first front-end opening rather than fake array lowering: lexer/parser/AST now admit `[` / `]`, subscript expressions, declaration/parameter array-rank metadata, and brace-initializer token consumption well enough to move failures downstream. Current course authority is therefore no longer “lexer rejects arrays”, but “IR lowering stops explicitly at unsupported arrays.”
+- 2026-05-04: That first `lv9` opening has now also been stabilized into a clean checkpoint instead of a half-landed parser branch. Assignment-lvalue parsing was re-tightened so parenthesized identifiers remain legal for `++/--` but not accidentally for `=` / compound assignment, semantic expression traversal now recurses through subscript base/index forms, and focused parser/semantic regressions now lock subscript AST shape, array-rank metadata, and undeclared-identifier detection inside subscript indices. `test-parser-regression` and `test-compiler-driver` are green again, while course `lv9` is still a deliberate `IR-LOWER-018/019/021/022` boundary rather than a front-end crash boundary.
+- 2026-05-04: The next `lv9` mainline slice has now started to reopen canonical IR itself instead of only front-end admission. Canonical IR locals/globals/parameters now preserve first array-object metadata (`array_rank`) and no longer reject pure array declarations or pure initializer declarations at the IR boundary; focused IR regressions now lock global-array metadata, local-array lowering without bogus scalar init code, and array-parameter signature preservation. This moved course `lv9` from `0/22` to `7/22` passing: declaration-only and initializer-only array cases now close, and the remaining failures concentrate on real element access / assignment (`IR-LOWER-018` and `IR-LOWER-004`) rather than on declaration admission.
+- 2026-05-04: That same `lv9` canonical-IR reopen now also has its next front-end data-model slice in place instead of leaving multidimensional shape only as one opaque `rank` number. AST declaration metadata now preserves per-dimension extent expression trees for array declarators on the declaration side, and focused parser regressions now lock representative extents such as top-level `[3][4]` and local `[2]` / `[3][4]` rather than only rank counts. Current authority is still intentionally honest about scope: parameter-side extent preservation is not yet the mainline win here, but the declaration-side shape data needed for later subscript linearization is no longer missing.
+- 2026-05-04: The first real `lv9` lowering-scope groundwork for element access is now also landed, even though full subscript lowering is not closed yet. IR lowering scope is no longer just a `name -> local_id` map internally: it now has a richer binding shape that can carry scalar-vs-array distinction, const-ness, and future array metadata, and local declaration lowering has started using that richer path for const scalar bindings and array-local slot reservation. Focused stability checks (`test-parser-regression`, `test-compiler-driver`, `test-ir-regression`) are green again after narrowing one still-unsettled parameter-array regression lock out of the active suite. Current authority is therefore: declaration-side and local-binding groundwork are materially ahead of the last `7/22` course checkpoint, but the next course-visible jump still depends on finishing true subscript / array-parameter lowering rather than on more metadata-only expansion.
+- 2026-05-04: That same `lv9` element-access groundwork now also has the first explicit downstream instruction-shape reopen instead of stopping at scope metadata only. Canonical IR, lower IR, Value-SSA, and Machine-IR surfaces now each have a first skeletal address/indirect-memory opcode family (`addr_local`, `addr_global`, `load_indirect`, `store_indirect`) wired into their core data structures and at least the immediate conversion/dump/verification scaffolding that has been touched so far. Current authority is still deliberately conservative: those opcodes are not yet the active course path, and the remaining work is to finish the actual `AST_EXPR_SUBSCRIPT` lowering plus enough downstream lowering/verification coverage that `lv9` can start consuming them instead of only carrying their schema.
+- 2026-05-04: The active `lv9` array-object line advanced materially again. `AST_EXPR_INIT_LIST` now recurses through semantic scope/flow walks and global-dependency / builtin-predeclaration traversals instead of being treated as a parser-only leaf, local array declarations now expand brace initializers into explicit per-element writes during canonical IR lowering, and global array declarations now compute real object byte sizes plus runtime initializer expansion through `__global.init` instead of keeping array globals in a scalar-only initializer model. In parallel, preview text/object emission now preserves those larger global object sizes, and preview function-frame sizing now counts local slots plus spill slots instead of only parameter slots, which closed the `08_arr_access.c` segfault and moved course `lv9` to `13/22` passing.
+- 2026-05-04: After that array-object closure round, the remaining `lv9` blockers are now sharply concentrated instead of being broad array-path failures. The current course failures are: one remaining allocator/rewrite `VALUE-SSA-071` on `12_more_arr_params.c`; large-frame preview-assembly legality on `06_long_array.c` and `13_complex_arr_params.c` where emitted `addi` / stack offsets exceed RV32 immediate limits; and the later sorting-family wrong-answer tail (`15`-`20`). Current authority is to treat those as the next mainline rather than reopening already-closed front-end/initializer admission work.
 
 ## Historical Note
 

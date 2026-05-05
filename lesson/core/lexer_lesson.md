@@ -81,12 +81,14 @@ $$
 - 基础类：`TOKEN_IDENTIFIER`, `TOKEN_NUMBER`
 - 关键字：`int/void/const/return/if/else/while/for/break/continue`
 - 运算符：`+ - * / % ! ~ & ^ | && || = == != < <= > >= << >>` 及复合赋值
-- 符号：`() {} ; , ? :`
+- 符号：`() [] {} ; , ? :`
 
-最近还要记住两个非常具体的新点：
+最近还要记住三个非常具体的新点：
 
 - `void` 现在已经是正式关键字
   - `void f(){ return; }` 里的 `void` 会被切成 `TOKEN_KW_VOID`
+- `[` / `]` 现在也已经进入正式 token contract
+  - 数组声明、下标表达式、参数数组形状都会先从这里开始
 - 数字字面量现在已经不只是十进制
   - `0`
   - `01234`（八进制）
@@ -143,6 +145,8 @@ $$
   - 锁 `0 / 01234 / 0x133fAb / 42` 的数值结果
 - `test_const_keyword_tokenization`
   - 锁 `const int x = 1;` 会切出 `TOKEN_KW_CONST`
+- `lv9` 这轮 lexer 还要额外记住：
+  - bracket token 现在已经是后续数组语法的正式入口
 
 再加一个 lesson 里现在最好顺手记住的同步点：
 

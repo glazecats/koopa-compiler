@@ -34,6 +34,15 @@ static int value_ssa_alloc_rewrite_value_use(ValueSsaInstruction *instruction,
     case VALUE_SSA_USE_ROLE_STORE_VALUE:
         instruction->as.store.value = replacement;
         return 1;
+    case VALUE_SSA_USE_ROLE_LOAD_INDIRECT_ADDR:
+        instruction->as.load_indirect_addr = replacement;
+        return 1;
+    case VALUE_SSA_USE_ROLE_STORE_INDIRECT_ADDR:
+        instruction->as.store_indirect.addr = replacement;
+        return 1;
+    case VALUE_SSA_USE_ROLE_STORE_INDIRECT_VALUE:
+        instruction->as.store_indirect.value = replacement;
+        return 1;
     default:
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-031: unsupported spill use role");
         return 0;

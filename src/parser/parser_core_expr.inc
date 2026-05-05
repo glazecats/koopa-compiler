@@ -174,6 +174,21 @@ static int match_assignment_operator(Parser *p, const Token **out_op_tok) {
     return 0;
 }
 
+static int check_assignment_operator(const Parser *p) {
+    TokenType type;
+
+    if (!p) {
+        return 0;
+    }
+
+    type = peek((Parser *)p)->type;
+    return type == TOKEN_ASSIGN || type == TOKEN_PLUS_ASSIGN || type == TOKEN_MINUS_ASSIGN ||
+        type == TOKEN_STAR_ASSIGN || type == TOKEN_SLASH_ASSIGN ||
+        type == TOKEN_PERCENT_ASSIGN || type == TOKEN_AMP_ASSIGN ||
+        type == TOKEN_CARET_ASSIGN || type == TOKEN_PIPE_ASSIGN ||
+        type == TOKEN_SHIFT_LEFT_ASSIGN || type == TOKEN_SHIFT_RIGHT_ASSIGN;
+}
+
 static int token_slice_has_balanced_parens(const TokenArray *tokens,
     size_t start,
     size_t end,
@@ -244,9 +259,187 @@ static int token_slice_is_parenthesized_identifier_form(const TokenArray *tokens
     return end == start + 1 && tokens->data[start].type == TOKEN_IDENTIFIER;
 }
 
-static int parse_initializer_expression(Parser *p) {
-    /* C declarator initializers use assignment-expression, not comma-expression. */
-    return parse_assignment(p);
+static int token_slice_is_parenthesized_lvalue_form(const TokenArray *tokens,
+    size_t start,
+    size_t end) {
+    size_t i;
+
+    if (!tokens || !tokens->data || end <= start) {
+        return 0;
+    }
+
+    trim_wrapping_parentheses(tokens, &start, &end);
+    if (end <= start || tokens->data[start].type != TOKEN_IDENTIFIER) {
+        return 0;
+    }
+
+    i = start + 1u;
+    while (i < end) {
+        size_t bracket_depth = 0u;
+        size_t paren_depth = 0u;
+
+        if (tokens->data[i].type != TOKEN_LBRACKET) {
+            return 0;
+        }
+        ++i;
+        ++bracket_depth;
+        while (i < end && bracket_depth > 0u) {
+            if (tokens->data[i].type == TOKEN_LPAREN) {
+                ++paren_depth;
+            } else if (tokens->data[i].type == TOKEN_RPAREN) {
+                if (paren_depth > 0u) {
+                    --paren_depth;
+                }
+            } else if (tokens->data[i].type == TOKEN_LBRACKET) {
+                ++bracket_depth;
+            } else if (tokens->data[i].type == TOKEN_RBRACKET) {
+                --bracket_depth;
+                if (bracket_depth == 0u) {
+                    ++i;
+                    break;
+                }
+            }
+            ++i;
+        }
+        if (bracket_depth != 0u || paren_depth != 0u) {
+            return 0;
+        }
+    }
+
+    return i == end;
+}
+
+static int token_slice_is_assignment_lvalue_form(const TokenArray *tokens,
+    size_t start,
+    size_t end) {
+    size_t i;
+
+    if (!tokens || !tokens->data || end <= start) {
+        return 0;
+    }
+
+    if (tokens->data[start].type != TOKEN_IDENTIFIER) {
+        return 0;
+    }
+
+    i = start + 1u;
+    while (i < end) {
+        size_t bracket_depth = 0u;
+        size_t paren_depth = 0u;
+
+        if (tokens->data[i].type != TOKEN_LBRACKET) {
+            return 0;
+        }
+        ++i;
+        ++bracket_depth;
+        while (i < end && bracket_depth > 0u) {
+            if (tokens->data[i].type == TOKEN_LPAREN) {
+                ++paren_depth;
+            } else if (tokens->data[i].type == TOKEN_RPAREN) {
+                if (paren_depth > 0u) {
+                    --paren_depth;
+                }
+            } else if (tokens->data[i].type == TOKEN_LBRACKET) {
+                ++bracket_depth;
+            } else if (tokens->data[i].type == TOKEN_RBRACKET) {
+                --bracket_depth;
+                if (bracket_depth == 0u) {
+                    ++i;
+                    break;
+                }
+            }
+            ++i;
+        }
+        if (bracket_depth != 0u || paren_depth != 0u) {
+            return 0;
+        }
+    }
+
+    return i == end;
+}
+
+static AstExpression *alloc_ast_expression(AstExpressionKind kind,
+    int line,
+    int column);
+static int append_ast_expression_slot(Parser *p,
+    AstExpression ***items,
+    size_t *count,
+    size_t *capacity,
+    AstExpression *expr,
+    const Token *anchor_tok);
+
+static int parse_initializer_expression(Parser *p, AstExpression **out_expr, const Token *anchor_tok) {
+    AstExpression *expr = NULL;
+    size_t start = 0u;
+
+    if (out_expr) {
+        *out_expr = NULL;
+    }
+
+    if (match(p, TOKEN_LBRACE)) {
+        const Token *lbrace_tok = previous(p);
+        AstExpression **items = NULL;
+        size_t item_count = 0u;
+        size_t item_capacity = 0u;
+
+        expr = alloc_ast_expression(AST_EXPR_INIT_LIST,
+            lbrace_tok ? lbrace_tok->line : 0,
+            lbrace_tok ? lbrace_tok->column : 0);
+        if (!expr) {
+            set_error(p,
+                lbrace_tok ? lbrace_tok : (anchor_tok ? anchor_tok : peek(p)),
+                "Out of memory while building expression AST");
+            return 0;
+        }
+
+        if (!check(p, TOKEN_RBRACE)) {
+            do {
+                AstExpression *item = NULL;
+
+                if (!parse_initializer_expression(p, &item, lbrace_tok)) {
+                    free(items);
+                    parser_ast_expression_free(expr);
+                    return 0;
+                }
+                if (!append_ast_expression_slot(
+                        p,
+                        &items,
+                        &item_count,
+                        &item_capacity,
+                        item,
+                        lbrace_tok)) {
+                    free(items);
+                    parser_ast_expression_free(expr);
+                    return 0;
+                }
+            } while (match(p, TOKEN_COMMA) && !check(p, TOKEN_RBRACE));
+        }
+        if (!consume(p, TOKEN_RBRACE, "'}'")) {
+            free(items);
+            parser_ast_expression_free(expr);
+            return 0;
+        }
+
+        expr->as.init_list.items = items;
+        expr->as.init_list.item_count = item_count;
+        if (out_expr) {
+            *out_expr = expr;
+        } else {
+            parser_ast_expression_free(expr);
+        }
+        return 1;
+    }
+
+    start = p->current;
+    if (!parse_assignment(p)) {
+        return 0;
+    }
+    return build_expression_ast_from_slice(
+        p,
+        start,
+        p->current,
+        out_expr,
+        anchor_tok);
 }
 
 static AstStatement *alloc_ast_statement(Parser *p,
@@ -267,6 +460,8 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->declaration_is_const = 0;
     stmt->declaration_names = NULL;
     stmt->declaration_name_count = 0;
+    stmt->declaration_array_ranks = NULL;
+    stmt->declaration_array_extent_exprs = NULL;
     stmt->expressions = NULL;
     stmt->expression_count = 0;
     stmt->has_primary_expression = 0;
@@ -374,6 +569,41 @@ static int append_name_array_item(Parser *p,
 
     (*names)[*count] = name;
     (*count)++;
+    return 1;
+}
+
+static int append_size_t_array_item(Parser *p,
+    size_t **items,
+    size_t count,
+    size_t *capacity,
+    size_t value,
+    const Token *anchor_tok) {
+    size_t *new_items;
+    size_t next_capacity;
+
+    if (!items || !capacity) {
+        return 0;
+    }
+
+    if (count == *capacity) {
+        if (!parser_next_growth_capacity(*capacity, 4, sizeof(size_t), &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST array metadata");
+            return 0;
+        }
+        new_items = (size_t *)realloc(*items, next_capacity * sizeof(size_t));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST array metadata");
+            return 0;
+        }
+        *items = new_items;
+        *capacity = next_capacity;
+    }
+
+    (*items)[count] = value;
     return 1;
 }
 
@@ -522,11 +752,10 @@ static AstExpression *alloc_ast_expression(AstExpressionKind kind,
     if (!expr) {
         return NULL;
     }
+    memset(expr, 0, sizeof(*expr));
     expr->kind = kind;
     expr->line = line;
     expr->column = column;
-    expr->as.identifier.name = NULL;
-    expr->as.identifier.name_length = 0;
     return expr;
 }
 
@@ -578,6 +807,23 @@ static AstExpression *build_postfix_expression_node(Parser *p,
     return expr;
 }
 
+static AstExpression *build_subscript_expression_node(Parser *p,
+    const Token *lbracket_tok,
+    AstExpression *base,
+    AstExpression *index) {
+    AstExpression *expr = alloc_ast_expression(AST_EXPR_SUBSCRIPT, lbracket_tok->line, lbracket_tok->column);
+    if (!expr) {
+        set_error(p, lbracket_tok, "Out of memory while building expression AST");
+        parser_ast_expression_free(base);
+        parser_ast_expression_free(index);
+        return NULL;
+    }
+
+    expr->as.subscript.base = base;
+    expr->as.subscript.index = index;
+    return expr;
+}
+
 static void free_ast_expression_array(AstExpression **items, size_t count) {
     size_t i;
 
@@ -589,6 +835,31 @@ static void free_ast_expression_array(AstExpression **items, size_t count) {
         parser_ast_expression_free(items[i]);
     }
 
+    free(items);
+}
+
+static void free_ast_expression_matrix(AstExpression ***items,
+    const size_t *ranks,
+    size_t count) {
+    size_t i;
+
+    if (!items) {
+        return;
+    }
+
+    for (i = 0; i < count; ++i) {
+        size_t j;
+        AstExpression **row = items[i];
+        size_t rank = ranks ? ranks[i] : 0u;
+
+        if (!row) {
+            continue;
+        }
+        for (j = 0; j < rank; ++j) {
+            parser_ast_expression_free(row[j]);
+        }
+        free(row);
+    }
     free(items);
 }
 
@@ -670,6 +941,50 @@ static int append_ast_expression_slot(Parser *p,
     return 1;
 }
 
+static int append_ast_expression_list_slot(Parser *p,
+    AstExpression ****items,
+    size_t index,
+    size_t *capacity,
+    AstExpression **list,
+    const Token *anchor_tok) {
+    AstExpression ***new_items;
+    size_t next_capacity;
+
+    if (!items || !capacity) {
+        free(list);
+        return 0;
+    }
+
+    if (index >= *capacity) {
+        if (!parser_next_growth_capacity(*capacity,
+                4,
+                sizeof(AstExpression **),
+                &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building expression AST");
+            free(list);
+            return 0;
+        }
+        new_items = (AstExpression ***)realloc(*items, next_capacity * sizeof(AstExpression **));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building expression AST");
+            free(list);
+            return 0;
+        }
+        while (*capacity < next_capacity) {
+            new_items[*capacity] = NULL;
+            (*capacity)++;
+        }
+        *items = new_items;
+    }
+
+    (*items)[index] = list;
+    return 1;
+}
+
 static AstExpression *build_call_expression_node(Parser *p,
     const Token *lparen_tok,
     AstExpression *callee,
@@ -702,7 +1017,19 @@ static int ast_expression_is_identifier_lvalue(const AstExpression *expr) {
         return ast_expression_is_identifier_lvalue(expr->as.inner);
     }
 
+    if (expr->kind == AST_EXPR_SUBSCRIPT) {
+        return 1;
+    }
+
     return 0;
+}
+
+static int ast_expression_is_assignment_lvalue(const AstExpression *expr) {
+    if (!expr) {
+        return 0;
+    }
+
+    return expr->kind == AST_EXPR_IDENTIFIER || expr->kind == AST_EXPR_SUBSCRIPT;
 }
 
 static int ast_expression_is_callable_callee(const AstExpression *expr) {
@@ -913,6 +1240,27 @@ static AstExpression *parse_expression_ast_postfix(Parser *p) {
             }
 
             expr = build_call_expression_node(p, lparen_tok, expr, args, arg_count);
+            if (!expr) {
+                return NULL;
+            }
+            continue;
+        }
+
+        if (match(p, TOKEN_LBRACKET)) {
+            const Token *lbracket_tok = previous(p);
+            AstExpression *index_expr = parse_expression_ast_assignment(p);
+
+            if (!index_expr) {
+                parser_ast_expression_free(expr);
+                return NULL;
+            }
+            if (!consume(p, TOKEN_RBRACKET, "']'")) {
+                parser_ast_expression_free(expr);
+                parser_ast_expression_free(index_expr);
+                return NULL;
+            }
+
+            expr = build_subscript_expression_node(p, lbracket_tok, expr, index_expr);
             if (!expr) {
                 return NULL;
             }
@@ -1274,11 +1622,12 @@ static AstExpression *parse_expression_ast_assignment(Parser *p) {
         return NULL;
     }
 
-    if (!(left->kind == AST_EXPR_IDENTIFIER && match_assignment_operator(p, &op_tok))) {
+    if (!ast_expression_is_assignment_lvalue(left) || !check_assignment_operator(p)) {
         leave_expression_recursion(p);
         return left;
     }
 
+    (void)match_assignment_operator(p, &op_tok);
     right = parse_expression_ast_assignment(p);
     if (!right) {
         parser_ast_expression_free(left);
@@ -1402,6 +1751,18 @@ static int parse_postfix(Parser *p) {
             continue;
         }
 
+        if (match(p, TOKEN_LBRACKET)) {
+            if (!parse_assignment(p)) {
+                return 0;
+            }
+            if (!consume(p, TOKEN_RBRACKET, "']'")) {
+                return 0;
+            }
+            is_identifier_lvalue = 1;
+            is_callable_target = 0;
+            continue;
+        }
+
         if (match(p, TOKEN_PLUS_PLUS) || match(p, TOKEN_MINUS_MINUS)) {
             const Token *op_tok = previous(p);
 
@@ -1436,7 +1797,7 @@ static int parse_unary(Parser *p) {
         const Token *op_tok = previous(p);
         operand_start = p->current;
         ok = parse_unary(p);
-        if (ok && !token_slice_is_parenthesized_identifier_form(p->tokens, operand_start, p->current)) {
+        if (ok && !token_slice_is_parenthesized_lvalue_form(p->tokens, operand_start, p->current)) {
             set_error(p,
                 op_tok,
                 "Expected identifier lvalue for %s operand",
@@ -1624,19 +1985,22 @@ static int parse_conditional(Parser *p) {
 static int parse_assignment(Parser *p) {
     int ok;
     size_t start = p->current;
+    size_t lhs_end = 0u;
+    const Token *op_tok = NULL;
 
     if (!enter_expression_recursion(p, "assignment-expression")) {
         return 0;
     }
-
-    if (match(p, TOKEN_IDENTIFIER) && match_assignment_operator(p, NULL)) {
-        ok = parse_assignment(p);
-        leave_expression_recursion(p);
-        return ok;
-    }
-
-    p->current = start;
     ok = parse_conditional(p);
+    lhs_end = p->current;
+    if (ok && check_assignment_operator(p)) {
+        if (!token_slice_is_assignment_lvalue_form(p->tokens, start, lhs_end)) {
+            leave_expression_recursion(p);
+            return 1;
+        }
+        (void)match_assignment_operator(p, &op_tok);
+        ok = parse_assignment(p);
+    }
     leave_expression_recursion(p);
     return ok;
 }

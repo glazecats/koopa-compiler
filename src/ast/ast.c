@@ -39,12 +39,16 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "identifier";
     case AST_EXPR_NUMBER:
         return "number";
+    case AST_EXPR_INIT_LIST:
+        return "init_list";
     case AST_EXPR_PAREN:
         return "paren";
     case AST_EXPR_UNARY:
         return "unary";
     case AST_EXPR_POSTFIX:
         return "postfix";
+    case AST_EXPR_SUBSCRIPT:
+        return "subscript";
     case AST_EXPR_CALL:
         return "call";
     case AST_EXPR_BINARY:

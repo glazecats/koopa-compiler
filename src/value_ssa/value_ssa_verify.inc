@@ -250,6 +250,27 @@ static int value_ssa_verify_instruction(const ValueSsaProgram *program,
             }
         }
         return 1;
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
+        if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-055: bb.%zu instruction %zu addr_* must define an SSA result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        return value_ssa_verify_slot_ref(program,
+            function,
+            instruction->as.addr_slot,
+            instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL
+                ? VALUE_SSA_SLOT_LOCAL
+                : VALUE_SSA_SLOT_GLOBAL,
+            instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL
+                ? "addr_local slot"
+                : "addr_global slot",
+            error);
     case VALUE_SSA_INSTR_LOAD_LOCAL:
         if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
             value_ssa_set_error(error,
@@ -321,6 +342,38 @@ static int value_ssa_verify_instruction(const ValueSsaProgram *program,
             value_ssa_verify_value_ref(instruction->as.store.value,
                 function->next_value_id,
                 "store_global value",
+                error);
+    case VALUE_SSA_INSTR_LOAD_INDIRECT:
+        if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-056: bb.%zu instruction %zu load_indirect must define an SSA result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        return value_ssa_verify_value_ref(instruction->as.load_indirect_addr,
+            function->next_value_id,
+            "load_indirect addr",
+            error);
+    case VALUE_SSA_INSTR_STORE_INDIRECT:
+        if (instruction->has_result) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-057: bb.%zu instruction %zu store_indirect must not define a result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        return value_ssa_verify_value_ref(instruction->as.store_indirect.addr,
+                function->next_value_id,
+                "store_indirect addr",
+                error) &&
+            value_ssa_verify_value_ref(instruction->as.store_indirect.value,
+                function->next_value_id,
+                "store_indirect value",
                 error);
     default:
         value_ssa_set_error(error,
@@ -732,28 +785,6 @@ static int value_ssa_verify_phi_structure(const ValueSsaFunction *function,
     return 1;
 }
 
-static int value_ssa_check_available_value(ValueSsaValueRef value,
-    const unsigned char *available_row,
-    size_t next_value_id,
-    size_t block_id,
-    const char *role,
-    ValueSsaError *error) {
-    if (value.kind != VALUE_SSA_VALUE_ID) {
-        return 1;
-    }
-    if (!available_row || value.value_id >= next_value_id || !available_row[value.value_id]) {
-        value_ssa_set_error(error,
-            0,
-            0,
-            "VALUE-SSA-071: bb.%zu uses unavailable ssa.%zu as %s",
-            block_id,
-            value.value_id,
-            role ? role : "value");
-        return 0;
-    }
-    return 1;
-}
-
 static int value_ssa_verify_value_availability(const ValueSsaFunction *function,
     const unsigned char *reachable,
     const unsigned char *predecessor_matrix,
@@ -989,12 +1020,24 @@ static int value_ssa_verify_value_availability(const ValueSsaFunction *function,
                     }
                 }
                 break;
+            case VALUE_SSA_INSTR_ADDR_LOCAL:
+            case VALUE_SSA_INSTR_ADDR_GLOBAL:
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                    block->id, instruction_index, instruction->as.load_indirect_addr, "load_indirect addr");
+                break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
             case VALUE_SSA_INSTR_STORE_GLOBAL:
                 VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(block->id, instruction_index, instruction->as.store.value, "store value");
                 break;
-            case VALUE_SSA_INSTR_LOAD_LOCAL:
-            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                    block->id, instruction_index, instruction->as.store_indirect.addr, "store_indirect addr");
+                VALUE_SSA_REQUIRE_AVAILABLE_IN_BLOCK(
+                    block->id, instruction_index, instruction->as.store_indirect.value, "store_indirect value");
                 break;
             default:
                 free(dominates);

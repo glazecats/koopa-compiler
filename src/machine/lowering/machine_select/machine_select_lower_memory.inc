@@ -15,6 +15,14 @@ static int machine_select_lower_memory_instruction(const MachineIrInstruction *s
     }
 
     switch (src_op->kind) {
+        case MACHINE_IR_INSTR_ADDR_LOCAL:
+            dest_op->kind = MACHINE_SELECT_OP_ADDR_LOCAL;
+            dest_op->as.addr_slot = machine_select_lower_slot(src_op->as.addr_slot);
+            return 1;
+        case MACHINE_IR_INSTR_ADDR_GLOBAL:
+            dest_op->kind = MACHINE_SELECT_OP_ADDR_GLOBAL;
+            dest_op->as.addr_slot = machine_select_lower_slot(src_op->as.addr_slot);
+            return 1;
         case MACHINE_IR_INSTR_LOAD_LOCAL:
             dest_op->kind = MACHINE_SELECT_OP_LOAD_LOCAL;
             dest_op->as.load_slot = machine_select_lower_slot(src_op->as.load_slot);
@@ -36,6 +44,15 @@ static int machine_select_lower_memory_instruction(const MachineIrInstruction *s
                 : MACHINE_SELECT_OP_STORE_GLOBAL;
             dest_op->as.store.slot = machine_select_lower_slot(src_op->as.store.slot);
             dest_op->as.store.value = machine_select_lower_operand(src_op->as.store.value);
+            return 1;
+        case MACHINE_IR_INSTR_LOAD_INDIRECT:
+            dest_op->kind = MACHINE_SELECT_OP_LOAD_INDIRECT;
+            dest_op->as.load_indirect_addr = machine_select_lower_operand(src_op->as.load_indirect_addr);
+            return 1;
+        case MACHINE_IR_INSTR_STORE_INDIRECT:
+            dest_op->kind = MACHINE_SELECT_OP_STORE_INDIRECT;
+            dest_op->as.store_indirect.addr = machine_select_lower_operand(src_op->as.store_indirect.addr);
+            dest_op->as.store_indirect.value = machine_select_lower_operand(src_op->as.store_indirect.value);
             return 1;
         default:
             *out_handled = 0;

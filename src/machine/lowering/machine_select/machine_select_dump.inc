@@ -187,6 +187,18 @@ int machine_select_dump_program(const MachineSelectProgram *program,
                         }
                         break;
                     }
+                    case MACHINE_SELECT_OP_ADDR_LOCAL:
+                        if (!machine_select_append_format(&builder, "addr_local local.%zu", op->as.addr_slot.id)) {
+                            free(builder.data);
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_SELECT_OP_ADDR_GLOBAL:
+                        if (!machine_select_append_format(&builder, "addr_global global.%zu", op->as.addr_slot.id)) {
+                            free(builder.data);
+                            return 0;
+                        }
+                        break;
                     case MACHINE_SELECT_OP_LOAD_LOCAL:
                         if (!machine_select_append_format(&builder, "load_local local.%zu", op->as.load_slot.id)) {
                             free(builder.data);
@@ -223,6 +235,22 @@ int machine_select_dump_program(const MachineSelectProgram *program,
                     case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
                         if (!machine_select_append_format(&builder, "store_globali global.%zu, ", op->as.store.slot.id) ||
                             !machine_select_dump_operand(&builder, op->as.store.value)) {
+                            free(builder.data);
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_SELECT_OP_LOAD_INDIRECT:
+                        if (!machine_select_append_format(&builder, "load_indirect ") ||
+                            !machine_select_dump_operand(&builder, op->as.load_indirect_addr)) {
+                            free(builder.data);
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_SELECT_OP_STORE_INDIRECT:
+                        if (!machine_select_append_format(&builder, "store_indirect ") ||
+                            !machine_select_dump_operand(&builder, op->as.store_indirect.addr) ||
+                            !machine_select_append_format(&builder, ", ") ||
+                            !machine_select_dump_operand(&builder, op->as.store_indirect.value)) {
                             free(builder.data);
                             return 0;
                         }

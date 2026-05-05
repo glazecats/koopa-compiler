@@ -94,6 +94,11 @@ $$
 - 全量递归释放（避免泄漏）
 - Program 级动态扩容 append
 
+最近这层如果按 `lv9` 去看，最值得单独补一句的是：
+
+- AST 现在已经不只是“标量表达式树”
+- 它开始真的保留数组相关结构了
+
 ---
 
 ## 3. `ast.h`：数据模型怎么设计
@@ -121,7 +126,7 @@ $$
 可以写成代数数据类型：
 
 $$
-E = Id(name) \mid Num(v) \mid Paren(E) \mid Unary(op,E) \mid Postfix(op,E) \mid Call(E,[E]) \mid Binary(op,E,E) \mid Ternary(E,E,E)
+E = Id(name) \mid Num(v) \mid InitList([E]) \mid Paren(E) \mid Unary(op,E) \mid Postfix(op,E) \mid Subscript(E,E) \mid Call(E,[E]) \mid Binary(op,E,E) \mid Ternary(E,E,E)
 $$
 
 实现方案（解析时）就是：
@@ -133,6 +138,18 @@ if operator found:
     wire children pointers
 return root expression pointer
 ```
+
+最近这层新增的两个表达式种类很关键：
+
+- `AST_EXPR_INIT_LIST`
+  - 对应 `{1, 2, 3}`、`{{1,2},{3,4}}`
+- `AST_EXPR_SUBSCRIPT`
+  - 对应 `a[i]`
+
+所以现在 AST 不只是知道“调用”和“二元表达式”，也已经开始知道：
+
+- 一个 initializer 是一串 item
+- 一个下标访问有 `base` 和 `index`
 
 ### 3.3 语句节点 `AstStatement`
 
@@ -170,6 +187,23 @@ $$
 
 看成完全同一种 declaration statement，而是会把 const-qualification 稳定保留下来。
 
+这轮 `lv9` 里，statement-level declaration 还多了一组非常值得点名的数组元数据：
+
+- `declaration_array_ranks`
+- `declaration_array_extent_exprs`
+
+也就是说，像：
+
+```c
+int x[2], y[3][4];
+```
+
+在同一个 declaration statement 里，AST 现在能保住：
+
+- `x` 的 rank 是 `1`
+- `y` 的 rank 是 `2`
+- 各自的 extent expression 也分开存
+
 ### 3.4 外部节点 `AstExternal`
 
 `AstExternal` 当前是“精简外部契约”：主要保存顶层声明/定义的必要结构信息：
@@ -201,6 +235,26 @@ void log(int x) { putint(x); return; }
 ```
 
 在 AST contract 里，两者现在至少会在 `function_return_type` 这一位上分开。
+
+如果按 `lv9` 再往前走一步，`AstExternal` 还开始正式保留：
+
+- `declaration_array_rank`
+- `declaration_array_extent_exprs`
+- `parameter_array_ranks`
+- `parameter_array_extent_exprs`
+
+这意味着下面这些信息都已经是 AST public contract：
+
+```c
+int g[3][4];
+int f(int arr[], int grid[][]);
+```
+
+- `g` 是 top-level rank-2 declaration
+- `arr` 是 rank-1 parameter
+- `grid` 是 rank-2 parameter
+
+而不再只是 parser 一时知道、后面就丢掉。
 
 最近这层还要记住和 `const` 直接相关的三组字段：
 

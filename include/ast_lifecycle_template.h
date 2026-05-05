@@ -29,7 +29,24 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_STATEMENT_FREE_FN(AstStatement *stmt) {
     for (i = 0; i < stmt->declaration_name_count; ++i) {
         free(stmt->declaration_names[i]);
     }
+    if (stmt->declaration_array_extent_exprs) {
+        for (i = 0; i < stmt->declaration_name_count; ++i) {
+            size_t j;
+            AstExpression **extent_exprs = stmt->declaration_array_extent_exprs[i];
+            size_t rank = stmt->declaration_array_ranks ? stmt->declaration_array_ranks[i] : 0u;
+
+            if (!extent_exprs) {
+                continue;
+            }
+            for (j = 0; j < rank; ++j) {
+                AST_LIFECYCLE_EXPRESSION_FREE_FN(extent_exprs[j]);
+            }
+            free(extent_exprs);
+        }
+    }
     free(stmt->declaration_names);
+    free(stmt->declaration_array_ranks);
+    free(stmt->declaration_array_extent_exprs);
     free(stmt->expressions);
     free(stmt->children);
     free(stmt);
@@ -45,12 +62,37 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
     for (i = 0; i < program->count; ++i) {
         size_t j;
         free(program->externals[i].name);
+        if (program->externals[i].declaration_array_extent_exprs) {
+            for (j = 0; j < program->externals[i].declaration_array_rank; ++j) {
+                AST_LIFECYCLE_EXPRESSION_FREE_FN(program->externals[i].declaration_array_extent_exprs[j]);
+            }
+            free(program->externals[i].declaration_array_extent_exprs);
+        }
         if (program->externals[i].parameter_names) {
             for (j = 0; j < program->externals[i].parameter_count; ++j) {
                 free(program->externals[i].parameter_names[j]);
             }
         }
         free(program->externals[i].parameter_names);
+        if (program->externals[i].parameter_array_extent_exprs) {
+            for (j = 0; j < program->externals[i].parameter_count; ++j) {
+                size_t k;
+                AstExpression **extent_exprs = program->externals[i].parameter_array_extent_exprs[j];
+                size_t rank = program->externals[i].parameter_array_ranks
+                    ? program->externals[i].parameter_array_ranks[j]
+                    : 0u;
+
+                if (!extent_exprs) {
+                    continue;
+                }
+                for (k = 0; k < rank; ++k) {
+                    AST_LIFECYCLE_EXPRESSION_FREE_FN(extent_exprs[k]);
+                }
+                free(extent_exprs);
+            }
+            free(program->externals[i].parameter_array_extent_exprs);
+        }
+        free(program->externals[i].parameter_array_ranks);
         free(program->externals[i].parameter_is_const);
         free(program->externals[i].parameter_name_lines);
         free(program->externals[i].parameter_name_columns);
@@ -99,11 +141,15 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.function_return_type = AST_FUNCTION_RETURN_INT;
     external.name = NULL;
     external.name_length = 0;
+    external.declaration_array_rank = 0;
+    external.declaration_array_extent_exprs = NULL;
     external.is_const_qualified = 0;
     external.has_initializer = 0;
     external.declaration_initializer = NULL;
     external.parameter_count = 0;
     external.parameter_names = NULL;
+    external.parameter_array_ranks = NULL;
+    external.parameter_array_extent_exprs = NULL;
     external.parameter_is_const = NULL;
     external.parameter_name_lines = NULL;
     external.parameter_name_columns = NULL;
@@ -138,6 +184,14 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
     case AST_EXPR_IDENTIFIER:
         free(expr->as.identifier.name);
         break;
+    case AST_EXPR_INIT_LIST: {
+        size_t i;
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.init_list.items[i]);
+        }
+        free(expr->as.init_list.items);
+        break;
+    }
     case AST_EXPR_PAREN:
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.inner);
         break;
@@ -146,6 +200,10 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
         break;
     case AST_EXPR_POSTFIX:
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.postfix.operand);
+        break;
+    case AST_EXPR_SUBSCRIPT:
+        AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.subscript.base);
+        AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.subscript.index);
         break;
     case AST_EXPR_CALL: {
         size_t i;

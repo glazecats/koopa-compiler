@@ -162,6 +162,17 @@ static int walk_expression_postorder_with_depth(const AstExpression *expr,
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!walk_expression_postorder_with_depth(expr->as.init_list.items[i],
+                    visitor,
+                    ctx,
+                    error,
+                    depth + 1)) {
+                return 0;
+            }
+        }
+        break;
     case AST_EXPR_PAREN:
         if (!walk_expression_postorder_with_depth(expr->as.inner,
             visitor,
@@ -186,6 +197,20 @@ static int walk_expression_postorder_with_depth(const AstExpression *expr,
             ctx,
             error,
             depth + 1)) {
+            return 0;
+        }
+        break;
+    case AST_EXPR_SUBSCRIPT:
+        if (!walk_expression_postorder_with_depth(expr->as.subscript.base,
+                visitor,
+                ctx,
+                error,
+                depth + 1) ||
+            !walk_expression_postorder_with_depth(expr->as.subscript.index,
+                visitor,
+                ctx,
+                error,
+                depth + 1)) {
             return 0;
         }
         break;
@@ -606,6 +631,10 @@ static int flow_try_eval_guard_constant_int_with_state(const AstExpression *expr
         default:
             return 0;
         }
+    case AST_EXPR_INIT_LIST:
+        return 0;
+    case AST_EXPR_SUBSCRIPT:
+        return 0;
     case AST_EXPR_TERNARY:
         if (!flow_try_eval_guard_constant_int_with_state(base->as.ternary.condition,
                 set,
@@ -801,6 +830,11 @@ static int flow_update_guard_constant_state_from_expression(const AstExpression 
     case AST_EXPR_NUMBER:
     case AST_EXPR_IDENTIFIER:
         return 1;
+    case AST_EXPR_INIT_LIST:
+        if (out_supported) {
+            *out_supported = 0;
+        }
+        return 1;
     case AST_EXPR_PAREN:
         return flow_update_guard_constant_state_from_expression(base->as.inner, set, scopes, state, out_supported);
     case AST_EXPR_UNARY:
@@ -825,6 +859,22 @@ static int flow_update_guard_constant_state_from_expression(const AstExpression 
             return 1;
         }
         return flow_update_guard_constant_state_from_expression(base->as.postfix.operand, set, scopes, state, out_supported);
+    case AST_EXPR_SUBSCRIPT:
+        if (!flow_update_guard_constant_state_from_expression(base->as.subscript.base,
+                set,
+                scopes,
+                state,
+                out_supported)) {
+            return 0;
+        }
+        if (!out_supported || *out_supported) {
+            return flow_update_guard_constant_state_from_expression(base->as.subscript.index,
+                set,
+                scopes,
+                state,
+                out_supported);
+        }
+        return 1;
     case AST_EXPR_CALL:
         if (out_supported) {
             *out_supported = 0;
@@ -887,6 +937,11 @@ static void flow_collect_expression_identifiers(const AstExpression *expr,
                 expr->as.identifier.name,
                 expr->as.identifier.name_length));
         return;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            flow_collect_expression_identifiers(expr->as.init_list.items[i], set, scopes);
+        }
+        return;
     case AST_EXPR_PAREN:
         flow_collect_expression_identifiers(expr->as.inner, set, scopes);
         return;
@@ -895,6 +950,10 @@ static void flow_collect_expression_identifiers(const AstExpression *expr,
         return;
     case AST_EXPR_POSTFIX:
         flow_collect_expression_identifiers(expr->as.postfix.operand, set, scopes);
+        return;
+    case AST_EXPR_SUBSCRIPT:
+        flow_collect_expression_identifiers(expr->as.subscript.base, set, scopes);
+        flow_collect_expression_identifiers(expr->as.subscript.index, set, scopes);
         return;
     case AST_EXPR_CALL:
         flow_collect_expression_identifiers(expr->as.call.callee, set, scopes);
@@ -1352,6 +1411,16 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST: {
+        size_t i;
+
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (flow_expression_may_change_guard_state(expr->as.init_list.items[i], set, scopes)) {
+                return 1;
+            }
+        }
+        return 0;
+    }
     case AST_EXPR_PAREN:
         return flow_expression_may_change_guard_state(expr->as.inner, set, scopes);
     case AST_EXPR_UNARY:
@@ -1366,6 +1435,9 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
             return 1;
         }
         return flow_expression_may_change_guard_state(expr->as.postfix.operand, set, scopes);
+    case AST_EXPR_SUBSCRIPT:
+        return flow_expression_may_change_guard_state(expr->as.subscript.base, set, scopes) ||
+            flow_expression_may_change_guard_state(expr->as.subscript.index, set, scopes);
     case AST_EXPR_CALL:
         return 1;
     case AST_EXPR_BINARY:
@@ -1728,6 +1800,8 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
     case AST_EXPR_NUMBER:
         *out_value = expr->as.number_value;
         return 1;
+    case AST_EXPR_INIT_LIST:
+        return 0;
     case AST_EXPR_PAREN:
         return flow_try_eval_constant_int_with_depth(expr->as.inner, out_value, depth + 1);
     case AST_EXPR_UNARY:
@@ -1755,6 +1829,8 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         default:
             return 0;
         }
+    case AST_EXPR_SUBSCRIPT:
+        return 0;
     case AST_EXPR_TERNARY:
         if (!flow_try_eval_constant_int_with_depth(expr->as.ternary.condition,
             &cond_value,

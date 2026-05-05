@@ -55,6 +55,7 @@ static int machine_ir_copy_globals_from_value_ssa(const ValueSsaProgram *program
         if (!machine_ir_program_append_global(out_program, program->globals[global_index].name, &global, error) || !global) {
             return 0;
         }
+        global->byte_size = program->globals[global_index].byte_size;
         global->has_initializer = program->globals[global_index].has_initializer;
         global->initializer_value = program->globals[global_index].initializer_value;
         global->has_runtime_initializer = program->globals[global_index].has_runtime_initializer;
@@ -244,6 +245,12 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                     }
                     break;
                 }
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                    instruction.as.addr_slot = machine_ir_slot_local(source_instruction->as.addr_slot.id);
+                    break;
+                case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                    instruction.as.addr_slot = machine_ir_slot_global(source_instruction->as.addr_slot.id);
+                    break;
                 case VALUE_SSA_INSTR_LOAD_LOCAL:
                     instruction.as.load_slot = machine_ir_slot_local(source_instruction->as.load_slot.id);
                     break;
@@ -259,6 +266,16 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                     instruction.as.store.slot = machine_ir_slot_global(source_instruction->as.store.slot.id);
                     instruction.as.store.value =
                         machine_ir_lower_value_ref(machine_view, source_instruction->as.store.value, error);
+                    break;
+                case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                    instruction.as.load_indirect_addr =
+                        machine_ir_lower_value_ref(machine_view, source_instruction->as.load_indirect_addr, error);
+                    break;
+                case VALUE_SSA_INSTR_STORE_INDIRECT:
+                    instruction.as.store_indirect.addr =
+                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store_indirect.addr, error);
+                    instruction.as.store_indirect.value =
+                        machine_ir_lower_value_ref(machine_view, source_instruction->as.store_indirect.value, error);
                     break;
                 default:
                     machine_ir_instruction_free(&instruction);

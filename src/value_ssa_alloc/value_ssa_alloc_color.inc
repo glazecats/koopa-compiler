@@ -428,6 +428,34 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
         ++out_stats->allocation_rounds;
     }
 
+    {
+        ValueSsaProgramAllocationLayout current_layout;
+        ValueSsaProgramAllocationLayout next_layout;
+        int equivalent = 0;
+
+        value_ssa_program_allocation_layout_init(&current_layout);
+        value_ssa_program_allocation_layout_init(&next_layout);
+        if (!value_ssa_build_program_allocation_layout(current_result, &current_layout, error) ||
+            !value_ssa_build_program_allocation_layout(next_result, &next_layout, error)) {
+            value_ssa_program_allocation_layout_free(&current_layout);
+            value_ssa_program_allocation_layout_free(&next_layout);
+            return 0;
+        }
+
+        equivalent = value_ssa_program_allocation_layout_equivalent_ignoring_names(&current_layout, &next_layout);
+        value_ssa_program_allocation_layout_free(&current_layout);
+        value_ssa_program_allocation_layout_free(&next_layout);
+
+        if (equivalent) {
+            value_ssa_program_allocation_result_free(current_result);
+            *current_result = *next_result;
+            value_ssa_program_allocation_result_init(next_result);
+            out_result->reallocated_after_rewrite = 1u;
+            out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_CONVERGED;
+            return 1;
+        }
+    }
+
     out_result->reallocated_after_rewrite = 1u;
     out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_COMPLETED;
     return 1;

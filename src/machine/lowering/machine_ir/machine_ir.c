@@ -152,6 +152,7 @@ static int machine_ir_clone_value_ssa_program(const ValueSsaProgram *source,
             value_ssa_program_free(out_program);
             return 0;
         }
+        dest_global->byte_size = source->globals[global_index].byte_size;
         dest_global->has_initializer = source->globals[global_index].has_initializer;
         dest_global->initializer_value = source->globals[global_index].initializer_value;
         dest_global->has_runtime_initializer = source->globals[global_index].has_runtime_initializer;
@@ -315,6 +316,7 @@ static int machine_ir_clone_program(const MachineIrProgram *source,
             machine_ir_program_free(out_program);
             return 0;
         }
+        global->byte_size = source->globals[global_index].byte_size;
         global->has_initializer = source->globals[global_index].has_initializer;
         global->initializer_value = source->globals[global_index].initializer_value;
         global->has_runtime_initializer = source->globals[global_index].has_runtime_initializer;

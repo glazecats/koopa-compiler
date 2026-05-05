@@ -143,6 +143,24 @@
 - return-shape honesty
 - edge-copy / successor-boundary honesty
 
+如果按最新 `lv9` 这轮往前推，这层还要再补一个新的主线切口：
+
+3. **selected memory family 不再只盯着 local/global slot**
+   - 现在已经开始有
+     - `addr_local`
+     - `addr_global`
+     - `load_indirect`
+     - `store_indirect`
+   这组 selected op
+4. **只要程序用了 indirect memory，这层当前会主动跳过旧 cleanup 主线**
+   - 也就是说，当前 cleanup 还是标量 slot 模型更成熟
+   - `lv9` 这轮是先让 indirect-memory path honest 地通过，而不是假装 cleanup 已经完全懂它
+
+所以这层现在最准确的 lesson 口径变成：
+
+- selected op family 已经开始吃第一批 indirect-memory 形状
+- 但 selected cleanup 目前仍然是“标量 slot 路线最成熟、indirect 路线先保守直通”
+
 ---
 
 ## 1. 为什么需要 `machine_select`

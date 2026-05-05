@@ -255,6 +255,28 @@ static int value_ssa_convert_block_from_lower_ir_state(ValueSsaLowerIrConversion
                 free(args);
                 goto after_instruction_append;
             }
+        case LOWER_IR_INSTR_ADDR_LOCAL:
+            output_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
+            output_instruction.has_result = 1;
+            new_value_id = value_ssa_function_allocate_value(output_function);
+            if (new_value_id == (size_t)-1) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-178: SSA value allocation overflow while converting addr_local");
+                return 0;
+            }
+            output_instruction.result = value_ssa_value_id(new_value_id);
+            output_instruction.as.addr_slot = value_ssa_slot_local(input_instruction->as.addr_slot.id);
+            break;
+        case LOWER_IR_INSTR_ADDR_GLOBAL:
+            output_instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+            output_instruction.has_result = 1;
+            new_value_id = value_ssa_function_allocate_value(output_function);
+            if (new_value_id == (size_t)-1) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-179: SSA value allocation overflow while converting addr_global");
+                return 0;
+            }
+            output_instruction.result = value_ssa_value_id(new_value_id);
+            output_instruction.as.addr_slot = value_ssa_slot_global(input_instruction->as.addr_slot.id);
+            break;
         case LOWER_IR_INSTR_LOAD_LOCAL:
             output_instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
             output_instruction.has_result = 1;
@@ -297,6 +319,39 @@ static int value_ssa_convert_block_from_lower_ir_state(ValueSsaLowerIrConversion
                     state->rename_state,
                     temp_count,
                     &output_instruction.as.store.value,
+                    error)) {
+                return 0;
+            }
+            break;
+        case LOWER_IR_INSTR_LOAD_INDIRECT:
+            output_instruction.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
+            output_instruction.has_result = 1;
+            new_value_id = value_ssa_function_allocate_value(output_function);
+            if (new_value_id == (size_t)-1) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-180: SSA value allocation overflow while converting load_indirect");
+                return 0;
+            }
+            output_instruction.result = value_ssa_value_id(new_value_id);
+            if (!value_ssa_map_value_from_lower_ir_rename_state(input_instruction->as.load_indirect_addr,
+                    state->rename_state,
+                    temp_count,
+                    &output_instruction.as.load_indirect_addr,
+                    error)) {
+                return 0;
+            }
+            break;
+        case LOWER_IR_INSTR_STORE_INDIRECT:
+            output_instruction.kind = VALUE_SSA_INSTR_STORE_INDIRECT;
+            output_instruction.has_result = 0;
+            if (!value_ssa_map_value_from_lower_ir_rename_state(input_instruction->as.store_indirect.addr,
+                    state->rename_state,
+                    temp_count,
+                    &output_instruction.as.store_indirect.addr,
+                    error) ||
+                !value_ssa_map_value_from_lower_ir_rename_state(input_instruction->as.store_indirect.value,
+                    state->rename_state,
+                    temp_count,
+                    &output_instruction.as.store_indirect.value,
                     error)) {
                 return 0;
             }
@@ -727,6 +782,7 @@ static int value_ssa_copy_globals_from_lower_ir(const LowerIrProgram *input_prog
                 error)) {
             return 0;
         }
+        output_global->byte_size = input_global->byte_size;
         output_global->has_initializer = input_global->has_initializer;
         output_global->initializer_value = input_global->initializer_value;
         output_global->has_runtime_initializer = input_global->has_runtime_initializer;

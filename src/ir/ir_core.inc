@@ -62,6 +62,9 @@ static void ir_global_free(IrGlobal *global) {
 
     free(global->name);
     global->name = NULL;
+    free(global->array_extents);
+    global->array_extents = NULL;
+    global->byte_size = 4u;
     global->has_initializer = 0;
     global->initializer_value = 0;
     global->has_runtime_initializer = 0;
@@ -183,6 +186,9 @@ static int ir_program_append_global(IrProgram *program,
     global = &program->globals[program->global_count];
     global->id = program->global_count;
     global->name = NULL;
+    global->array_rank = 0;
+    global->array_extents = NULL;
+    global->byte_size = 4u;
     global->has_initializer = 0;
     global->initializer_value = 0;
     global->has_runtime_initializer = 0;
@@ -317,6 +323,7 @@ static int ir_function_append_local(IrFunction *function,
     local->id = local_id;
     local->source_name = NULL;
     local->is_parameter = is_parameter;
+    local->array_rank = 0;
 
     name_length = strlen(source_name);
     local->source_name = (char *)malloc(name_length + 1);
@@ -633,6 +640,71 @@ static int ir_emit_call(IrLowerContext *ctx,
     }
 
     return 1;
+}
+
+static int ir_emit_addr_local(IrLowerContext *ctx,
+    IrValueRef destination,
+    size_t local_id) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+
+    if (!ctx || !block) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_ADDR_LOCAL;
+    instruction.result = destination;
+    instruction.as.addr_local_id = local_id;
+    return ir_block_append_instruction(block, &instruction, ctx->error);
+}
+
+static int ir_emit_addr_global(IrLowerContext *ctx,
+    IrValueRef destination,
+    size_t global_id) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+
+    if (!ctx || !block) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_ADDR_GLOBAL;
+    instruction.result = destination;
+    instruction.as.addr_global_id = global_id;
+    return ir_block_append_instruction(block, &instruction, ctx->error);
+}
+
+static int ir_emit_load_indirect(IrLowerContext *ctx,
+    IrValueRef destination,
+    IrValueRef address) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+
+    if (!ctx || !block) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_LOAD_INDIRECT;
+    instruction.result = destination;
+    instruction.as.load_indirect_addr = address;
+    return ir_block_append_instruction(block, &instruction, ctx->error);
+}
+
+static int ir_emit_store_indirect(IrLowerContext *ctx,
+    IrValueRef address,
+    IrValueRef value) {
+    IrInstruction instruction;
+    IrBasicBlock *block = ir_lower_current_block(ctx);
+
+    if (!ctx || !block) {
+        return 0;
+    }
+
+    instruction.kind = IR_INSTR_STORE_INDIRECT;
+    instruction.result = ir_value_immediate(0);
+    instruction.as.store_indirect.addr = address;
+    instruction.as.store_indirect.value = value;
+    return ir_block_append_instruction(block, &instruction, ctx->error);
 }
 
 static size_t ir_allocate_temp(IrFunction *function) {

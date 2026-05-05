@@ -504,6 +504,16 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.init_list.items[i],
+                    scopes,
+                    error,
+                    depth + 1)) {
+                return 0;
+            }
+        }
+        return 1;
     case AST_EXPR_PAREN:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.inner,
             scopes,
@@ -519,6 +529,15 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
             scopes,
             error,
             depth + 1);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_scope_check_call_shadow_expression_with_depth(expr->as.subscript.base,
+                scopes,
+                error,
+                depth + 1) &&
+            semantic_scope_check_call_shadow_expression_with_depth(expr->as.subscript.index,
+                scopes,
+                error,
+                depth + 1);
     case AST_EXPR_BINARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.left,
             scopes,
@@ -846,6 +865,21 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
         return 1;
     case AST_EXPR_NUMBER:
         return 1;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!semantic_scope_check_expression_with_visibility_impl(expr->as.init_list.items[i],
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    in_call_callee,
+                    0,
+                    error,
+                    depth + 1)) {
+                return 0;
+            }
+        }
+        return 1;
     case AST_EXPR_PAREN:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.inner,
             program,
@@ -868,6 +902,25 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             depth + 1);
     case AST_EXPR_POSTFIX:
         return semantic_scope_check_expression_with_visibility_impl(expr->as.postfix.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                0,
+                error,
+                depth + 1);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_scope_check_expression_with_visibility_impl(expr->as.subscript.base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                0,
+                error,
+                depth + 1) &&
+            semantic_scope_check_expression_with_visibility_impl(expr->as.subscript.index,
                 program,
                 func_index,
                 include_current_external,

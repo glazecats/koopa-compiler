@@ -67,11 +67,24 @@ static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset(
 static const char *compiler_find_label_at_program_byte_offset(
     const MachineBytesReport *report,
     size_t program_byte_offset);
+static int compiler_append_stack_adjust(
+    CompilerStringBuilder *builder,
+    long long delta);
+static int compiler_append_stack_access(
+    CompilerStringBuilder *builder,
+    const char *op,
+    const char *reg,
+    const char *base,
+    size_t offset,
+    const char *scratch);
 static int compiler_append_caller_save_sequence(
     CompilerStringBuilder *builder,
     size_t call_save_area_offset,
     int is_store,
     int include_a0);
+static int compiler_call_result_needs_a0(
+    const MachineBytesBlock *block,
+    size_t call_emit_index);
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
@@ -312,18 +325,22 @@ static int compiler_append_pretty_symbol_name(
 
 static const char *compiler_find_global_name_for_gp_offset(const MachineBytesProgram *program, int32_t byte_offset) {
     size_t global_index;
+    size_t running_offset = 0u;
 
     if (!program || byte_offset < 0 || (byte_offset % 4) != 0) {
         return NULL;
     }
-    global_index = (size_t)(byte_offset / 4);
-    if (global_index >= program->global_count) {
-        return NULL;
+    for (global_index = 0u; program->globals && global_index < program->global_count; ++global_index) {
+        const MachineEmitGlobal *global = &program->globals[global_index];
+        size_t byte_size = global->byte_size ? global->byte_size : 4u;
+
+        if (byte_offset >= (int32_t)running_offset && byte_offset < (int32_t)(running_offset + byte_size) &&
+            global->name && global->name[0] != '\0') {
+            return global->name;
+        }
+        running_offset += byte_size;
     }
-    if (!program->globals || !program->globals[global_index].name || program->globals[global_index].name[0] == '\0') {
-        return NULL;
-    }
-    return program->globals[global_index].name;
+    return NULL;
 }
 
 static int compiler_emit_global_sections(
@@ -360,13 +377,15 @@ static int compiler_emit_global_sections(
             if (!global->name || global->name[0] == '\0' || global->has_initializer) {
                 continue;
             }
-            if (!compiler_builder_appendf(
+        if (!compiler_builder_appendf(
                     builder,
-                    ".globl %s\n.type %s, @object\n.size %s, 4\n.p2align 2\n%s:\n  .zero 4\n",
+                    ".globl %s\n.type %s, @object\n.size %s, %zu\n.p2align 2\n%s:\n  .zero %zu\n",
                     global->name,
                     global->name,
                     global->name,
-                    global->name)) {
+                    global->byte_size ? global->byte_size : 4u,
+                    global->name,
+                    global->byte_size ? global->byte_size : 4u)) {
                 return 0;
             }
         }
@@ -387,10 +406,11 @@ static int compiler_emit_global_sections(
             }
             if (!compiler_builder_appendf(
                     builder,
-                    ".globl %s\n.type %s, @object\n.size %s, 4\n.p2align 2\n%s:\n  .word %lld\n",
+                    ".globl %s\n.type %s, @object\n.size %s, %zu\n.p2align 2\n%s:\n  .word %lld\n",
                     global->name,
                     global->name,
                     global->name,
+                    global->byte_size ? global->byte_size : 4u,
                     global->name,
                     global->initializer_value)) {
                 return 0;
@@ -513,33 +533,209 @@ static const char *compiler_find_label_at_program_byte_offset(
     return NULL;
 }
 
+static int compiler_append_stack_adjust(
+    CompilerStringBuilder *builder,
+    long long delta) {
+    if (!builder) {
+        return 0;
+    }
+    if (delta >= -2048 && delta <= 2047) {
+        return compiler_builder_appendf(builder, "  addi sp, sp, %lld\n", delta);
+    }
+    return compiler_builder_appendf(
+        builder,
+        "  li t6, %lld\n"
+        "  add sp, sp, t6\n",
+        delta);
+}
+
+static int compiler_append_stack_access(
+    CompilerStringBuilder *builder,
+    const char *op,
+    const char *reg,
+    const char *base,
+    size_t offset,
+    const char *scratch) {
+    if (!builder || !op || !reg || !base || !scratch) {
+        return 0;
+    }
+    if (offset <= 2047u) {
+        return compiler_builder_appendf(builder, "  %s %s, %zu(%s)\n", op, reg, offset, base);
+    }
+    return compiler_builder_appendf(
+        builder,
+        "  li %s, %zu\n"
+        "  add %s, %s, %s\n"
+        "  %s %s, 0(%s)\n",
+        scratch,
+        offset,
+        scratch,
+        base,
+        scratch,
+        op,
+        reg,
+        scratch);
+}
+
 static int compiler_append_caller_save_sequence(
     CompilerStringBuilder *builder,
     size_t call_save_area_offset,
     int is_store,
     int include_a0) {
-    static const char *const saved_regs[] = {
+    static const char *const ordered_regs[] = {
+        "t5",
         "a0",
         "a1", "a2", "a3", "a4", "a5", "a6", "a7",
-        "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+        "t0", "t1", "t2", "t3", "t4",
+        "t6",
     };
-    size_t start_index = include_a0 ? 0u : 1u;
     size_t reg_index;
 
     if (!builder) {
         return 0;
     }
 
-    for (reg_index = start_index; reg_index < sizeof(saved_regs) / sizeof(saved_regs[0]); ++reg_index) {
-        if (!compiler_builder_appendf(
-                builder,
-                is_store ? "  sw %s, %zu(s11)\n" : "  lw %s, %zu(s11)\n",
-                saved_regs[reg_index],
-                call_save_area_offset + ((reg_index - start_index) * 4u))) {
+    for (reg_index = 0u; reg_index < sizeof(ordered_regs) / sizeof(ordered_regs[0]); ++reg_index) {
+        const char *reg = ordered_regs[reg_index];
+        size_t logical_index;
+        const char *scratch;
+
+        if (!include_a0 && strcmp(reg, "a0") == 0) {
+            continue;
+        }
+        if (!include_a0 && strcmp(reg, "t5") == 0) {
+            logical_index = 12u;
+        } else if (!include_a0 && strcmp(reg, "t6") == 0) {
+            logical_index = 13u;
+        } else if (include_a0 && strcmp(reg, "t5") == 0) {
+            logical_index = 13u;
+        } else if (include_a0 && strcmp(reg, "t6") == 0) {
+            logical_index = 14u;
+        } else if (strcmp(reg, "a0") == 0) {
+            logical_index = 0u;
+        } else if (reg[0] == 'a') {
+            logical_index = include_a0
+                ? (size_t)(reg[1] - '0')
+                : (size_t)(reg[1] - '1');
+        } else {
+            logical_index = (size_t)(reg[1] - '0') + (include_a0 ? 8u : 7u);
+        }
+
+        if (!is_store && strcmp(reg, "t6") == 0) {
+            continue;
+        }
+        scratch = (strcmp(reg, "t6") == 0) ? "t5" : "t6";
+        if (!compiler_append_stack_access(builder,
+                is_store ? "sw" : "lw",
+                reg,
+                "s11",
+                call_save_area_offset + (logical_index * 4u),
+                scratch)) {
             return 0;
         }
     }
     return 1;
+}
+
+static int compiler_operand_uses_a0(const MachineEmitOperand *operand) {
+    return operand && operand->kind == MACHINE_SELECT_OPERAND_REGISTER &&
+        operand->machine_register_id == 0u;
+}
+
+static int compiler_op_uses_a0(const MachineEmitOp *op) {
+    if (!op) {
+        return 0;
+    }
+    switch (op->kind) {
+        case MACHINE_SELECT_OP_COPY:
+            return compiler_operand_uses_a0(&op->as.copy_value);
+        case MACHINE_SELECT_OP_ALU:
+        case MACHINE_SELECT_OP_ALU_IMM:
+        case MACHINE_SELECT_OP_CMP:
+        case MACHINE_SELECT_OP_CMP_IMM:
+            return compiler_operand_uses_a0(&op->as.binary.lhs) ||
+                compiler_operand_uses_a0(&op->as.binary.rhs);
+        case MACHINE_SELECT_OP_STORE_LOCAL:
+        case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
+        case MACHINE_SELECT_OP_STORE_GLOBAL:
+        case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
+            return compiler_operand_uses_a0(&op->as.store.value);
+        case MACHINE_SELECT_OP_LOAD_INDIRECT:
+            return compiler_operand_uses_a0(&op->as.load_indirect_addr);
+        case MACHINE_SELECT_OP_STORE_INDIRECT:
+            return compiler_operand_uses_a0(&op->as.store_indirect.addr) ||
+                compiler_operand_uses_a0(&op->as.store_indirect.value);
+        case MACHINE_SELECT_OP_CALL:
+        case MACHINE_SELECT_OP_CALL_IMM:
+        case MACHINE_SELECT_OP_CALL_SPILL:
+        case MACHINE_SELECT_OP_CALL_IMM_SPILL:
+        case MACHINE_SELECT_OP_CALL_VOID:
+        case MACHINE_SELECT_OP_CALL_VOID_IMM:
+            for (size_t arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+                if (compiler_operand_uses_a0(&op->as.call.args[arg_index])) {
+                    return 1;
+                }
+            }
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+static int compiler_op_defines_a0(const MachineEmitOp *op) {
+    return op && op->has_result && op->result.kind == MACHINE_SELECT_OPERAND_REGISTER &&
+        op->result.machine_register_id == 0u;
+}
+
+static int compiler_terminator_uses_a0(const MachineEmitTerminator *terminator) {
+    if (!terminator) {
+        return 0;
+    }
+    switch (terminator->kind) {
+        case MACHINE_LAYOUT_TERM_RETURN:
+        case MACHINE_LAYOUT_TERM_RETURN_IMM:
+        case MACHINE_LAYOUT_TERM_RETURN_SPILL:
+            return compiler_operand_uses_a0(&terminator->as.return_value);
+        case MACHINE_LAYOUT_TERM_BRANCH:
+            return compiler_operand_uses_a0(&terminator->as.branch.condition);
+        case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
+            return compiler_operand_uses_a0(&terminator->as.branch_fallthrough.condition);
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH:
+            return compiler_operand_uses_a0(&terminator->as.compare_branch.lhs) ||
+                compiler_operand_uses_a0(&terminator->as.compare_branch.rhs);
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM:
+            return compiler_operand_uses_a0(&terminator->as.compare_branch.lhs) ||
+                compiler_operand_uses_a0(&terminator->as.compare_branch.rhs);
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
+            return compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.lhs) ||
+                compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.rhs);
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
+            return compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.lhs) ||
+                compiler_operand_uses_a0(&terminator->as.compare_branch_fallthrough.rhs);
+        default:
+            return 0;
+    }
+}
+
+static int compiler_call_result_needs_a0(
+    const MachineBytesBlock *block,
+    size_t call_emit_index) {
+    size_t op_index;
+
+    if (!block || call_emit_index >= block->block.op_count) {
+        return 0;
+    }
+    for (op_index = call_emit_index + 1u; op_index < block->block.op_count; ++op_index) {
+        const MachineEmitOp *op = &block->block.ops[op_index];
+
+        if (compiler_op_defines_a0(op)) {
+            return 0;
+        }
+        if (compiler_op_uses_a0(op)) {
+            return 1;
+        }
+    }
+    return compiler_terminator_uses_a0(&block->block.terminator);
 }
 
 static int compiler_append_riscv_preview_instruction(
@@ -829,21 +1025,13 @@ static int compiler_append_riscv_preview_instruction(
             if (rd == 0u && rs1 == 1u && imm == 0) {
                 if (epilogue_stack_size > 0u) {
                     if (epilogue_restores_ra) {
-                        return compiler_builder_appendf(
-                            builder,
-                            "  lw s11, %zu(sp)\n"
-                            "  lw ra, %zu(sp)\n"
-                            "  addi sp, sp, %zu\n"
-                            "  ret\n",
-                            epilogue_ra_offset - 4u,
-                            epilogue_ra_offset,
-                            epilogue_stack_size);
+                        return compiler_append_stack_access(builder, "lw", "s11", "sp", epilogue_ra_offset - 4u, "t6") &&
+                            compiler_append_stack_access(builder, "lw", "ra", "sp", epilogue_ra_offset, "t6") &&
+                            compiler_append_stack_adjust(builder, (long long)epilogue_stack_size) &&
+                            compiler_builder_appendf(builder, "  ret\n");
                     }
-                    return compiler_builder_appendf(
-                        builder,
-                        "  addi sp, sp, %zu\n"
-                        "  ret\n",
-                        epilogue_stack_size);
+                    return compiler_append_stack_adjust(builder, (long long)epilogue_stack_size) &&
+                        compiler_builder_appendf(builder, "  ret\n");
                 }
                 return compiler_builder_appendf(builder, "  ret\n");
             }
@@ -1107,6 +1295,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         size_t spill_slot_count = 0u;
         const MachineBytesFunctionSummary *function_summary = NULL;
         size_t frame_bytes = 0u;
+        size_t local_storage_bytes = 0u;
         size_t ra_save_offset = 0u;
         size_t s11_save_offset = 0u;
         size_t call_save_area_offset = 0u;
@@ -1133,17 +1322,15 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
             ok = 0;
             goto cleanup;
         }
-        (void)parameter_count;
-        (void)local_count;
-        (void)spill_slot_count;
         if (!has_body || !function_name || function_name[0] == '\0') {
             continue;
         }
-        frame_bytes = parameter_count * 4u;
+        local_storage_bytes = (local_count + spill_slot_count) * 4u;
+        frame_bytes = local_storage_bytes;
         if (function_summary->call_count > 0u) {
             frame_bytes += 4u;   /* ra */
             frame_bytes += 4u;   /* s11 */
-            frame_bytes += 14u * 4u; /* a1-a7,t0-t6 save area */
+            frame_bytes += 15u * 4u; /* t5,a0-a7,t0-t6 save area */
             frame_restores_ra = 1;
             save_caller_regs_around_call = 1;
         }
@@ -1153,7 +1340,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         if (function_summary->call_count > 0u) {
             ra_save_offset = frame_bytes - 4u;
             s11_save_offset = frame_bytes - 8u;
-            call_save_area_offset = frame_bytes - 8u - (14u * 4u);
+            call_save_area_offset = local_storage_bytes;
         }
 
         if (!compiler_builder_appendf(&builder, ".globl %s\n.type %s, @function\n%s:\n", function_name, function_name, function_name)) {
@@ -1164,19 +1351,15 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         if (frame_bytes > 0u) {
             size_t param_index;
 
-            if (!compiler_builder_appendf(&builder, "  addi sp, sp, -%zu\n", frame_bytes)) {
+            if (!compiler_append_stack_adjust(&builder, -(long long)frame_bytes)) {
                 compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
                 ok = 0;
                 goto cleanup;
             }
             if (function_summary->call_count > 0u &&
-                !compiler_builder_appendf(
-                    &builder,
-                    "  sw ra, %zu(sp)\n"
-                    "  sw s11, %zu(sp)\n"
-                    "  mv s11, sp\n",
-                    ra_save_offset,
-                    s11_save_offset)) {
+                (!compiler_append_stack_access(&builder, "sw", "ra", "sp", ra_save_offset, "t6") ||
+                    !compiler_append_stack_access(&builder, "sw", "s11", "sp", s11_save_offset, "t6") ||
+                    !compiler_builder_appendf(&builder, "  mv s11, sp\n"))) {
                 compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
                 ok = 0;
                 goto cleanup;
@@ -1184,7 +1367,13 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
 
             for (param_index = 0u; param_index < parameter_count; ++param_index) {
                 if (param_index < 8u) {
-                    if (!compiler_builder_appendf(&builder, "  sw a%zu, %zu(sp)\n", param_index, param_index * 4u)) {
+                    if (!compiler_append_stack_access(
+                            &builder,
+                            "sw",
+                            compiler_riscv_register_name((uint32_t)(10u + param_index)),
+                            "sp",
+                            param_index * 4u,
+                            "t6")) {
                         compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
                         ok = 0;
                         goto cleanup;
@@ -1192,11 +1381,8 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                 } else {
                     size_t caller_stack_offset = frame_bytes + ((param_index - 8u) * 4u);
 
-                    if (!compiler_builder_appendf(
-                            &builder,
-                            "  lw t5, %zu(sp)\n  sw t5, %zu(sp)\n",
-                            caller_stack_offset,
-                            param_index * 4u)) {
+                    if (!compiler_append_stack_access(&builder, "lw", "t5", "sp", caller_stack_offset, "t6") ||
+                        !compiler_append_stack_access(&builder, "sw", "t5", "sp", param_index * 4u, "t6")) {
                         compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
                         ok = 0;
                         goto cleanup;
@@ -1246,7 +1432,9 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                     call_fixup = compiler_find_call_fixup_covering_offset(&bytes_report, program_byte_offset);
                     if (call_fixup && call_fixup->emit_index < block->block.op_count) {
                         call_op = &block->block.ops[call_fixup->emit_index];
-                        include_a0 = !call_op->has_result;
+                        include_a0 = 0;
+                        (void)call_op;
+                        (void)compiler_call_result_needs_a0;
                     }
                 }
                 if (call_fixup && program_byte_offset == call_fixup->owner_byte_offset &&

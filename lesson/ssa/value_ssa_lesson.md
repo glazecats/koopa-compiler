@@ -187,10 +187,14 @@ $$
 - `MOV`
 - `BINARY`
 - `CALL`
+- `ADDR_LOCAL`
+- `ADDR_GLOBAL`
 - `LOAD_LOCAL`
 - `STORE_LOCAL`
 - `LOAD_GLOBAL`
 - `STORE_GLOBAL`
+- `LOAD_INDIRECT`
+- `STORE_INDIRECT`
 
 terminator：
 
@@ -203,6 +207,20 @@ terminator：
 `lower IR CFG + SSA value namespace + phi`
 
 不是新的控制流模型。
+
+如果按 `lv9` 这轮同步，最好再多加一句：
+
+- `value_ssa` 现在也开始承接第一批 address / indirect-memory op
+- 所以这层不再只覆盖“slot name 直接读写”的 lower-IR 子集
+
+但它当前仍然不是：
+
+- 完整 pointer IR
+- 完整 memory SSA replacement
+
+而是：
+
+- “把 lower IR 里第一批 address-value / indirect-memory 结构继续保留下来”
 
 ### 3.3.1 最近同步：bare `ret` 现在会原样穿过 Value SSA
 

@@ -328,6 +328,12 @@ int memory_ssa_verify_program(const MemorySsaProgram *program, MemorySsaError *e
                 size_t expected_access_count = 0;
 
                 switch (instruction->instruction.kind) {
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                case VALUE_SSA_INSTR_STORE_INDIRECT:
+                    expected_access_count = 0;
+                    break;
                 case VALUE_SSA_INSTR_LOAD_LOCAL:
                 case VALUE_SSA_INSTR_LOAD_GLOBAL:
                 case VALUE_SSA_INSTR_STORE_LOCAL:

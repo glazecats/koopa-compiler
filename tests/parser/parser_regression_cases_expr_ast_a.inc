@@ -771,6 +771,33 @@ static int test_expression_ast_accepts_parenthesized_zero_arg_call_result_chaini
     return 1;
 }
 
+static int test_expression_ast_parses_subscript_primary(void) {
+    const char *source = "a[i+1]\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_SUBSCRIPT ||
+        !expr->as.subscript.base || expr->as.subscript.base->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(expr->as.subscript.base->as.identifier.name, "a") != 0 ||
+        !expr->as.subscript.index || expr->as.subscript.index->kind != AST_EXPR_BINARY ||
+        expr->as.subscript.index->as.binary.op != TOKEN_PLUS) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected subscript tree a[i+1] with binary index\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
 static int test_expression_ast_assignment_rhs_bitwise_not(void) {
     const char *source = "a=~b\n";
     TokenArray tokens;
@@ -1117,4 +1144,3 @@ static int test_expression_ast_rejects_assignment_to_parenthesized_equality(void
         "EOF",
         "ASSIGN");
 }
-

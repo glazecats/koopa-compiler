@@ -71,10 +71,14 @@ typedef enum {
     MACHINE_IR_INSTR_MOV = 0,
     MACHINE_IR_INSTR_BINARY,
     MACHINE_IR_INSTR_CALL,
+    MACHINE_IR_INSTR_ADDR_LOCAL,
+    MACHINE_IR_INSTR_ADDR_GLOBAL,
     MACHINE_IR_INSTR_LOAD_LOCAL,
     MACHINE_IR_INSTR_STORE_LOCAL,
     MACHINE_IR_INSTR_LOAD_GLOBAL,
     MACHINE_IR_INSTR_STORE_GLOBAL,
+    MACHINE_IR_INSTR_LOAD_INDIRECT,
+    MACHINE_IR_INSTR_STORE_INDIRECT,
 } MachineIrInstructionKind;
 
 typedef struct {
@@ -93,11 +97,17 @@ typedef struct {
             MachineIrOperand *args;
             size_t arg_count;
         } call;
+        MachineIrSlotRef addr_slot;
         MachineIrSlotRef load_slot;
         struct {
             MachineIrSlotRef slot;
             MachineIrOperand value;
         } store;
+        MachineIrOperand load_indirect_addr;
+        struct {
+            MachineIrOperand addr;
+            MachineIrOperand value;
+        } store_indirect;
     } as;
 } MachineIrInstruction;
 
@@ -129,6 +139,7 @@ typedef struct {
 typedef struct {
     size_t id;
     char *name;
+    size_t byte_size;
     int has_initializer;
     long long initializer_value;
     int has_runtime_initializer;

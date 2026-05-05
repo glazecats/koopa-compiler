@@ -576,9 +576,16 @@ static int value_ssa_compact_value_ids(ValueSsaFunction *function, ValueSsaError
                     value_ssa_remap_value_ref(&instruction->as.call.args[arg_index], old_to_new_value);
                 }
                 break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                value_ssa_remap_value_ref(&instruction->as.load_indirect_addr, old_to_new_value);
+                break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
             case VALUE_SSA_INSTR_STORE_GLOBAL:
                 value_ssa_remap_value_ref(&instruction->as.store.value, old_to_new_value);
+                break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                value_ssa_remap_value_ref(&instruction->as.store_indirect.addr, old_to_new_value);
+                value_ssa_remap_value_ref(&instruction->as.store_indirect.value, old_to_new_value);
                 break;
             case VALUE_SSA_INSTR_LOAD_LOCAL:
             case VALUE_SSA_INSTR_LOAD_GLOBAL:

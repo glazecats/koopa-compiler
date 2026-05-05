@@ -116,6 +116,7 @@ $$
 
 - `const` rule family
 - `void + builtin` rule family
+- `lv9 array-admission` rule family
 
 也就是：
 
@@ -128,6 +129,11 @@ $$
 - 课程 builtin
   - `getint/getch/getarray/putint/putch/putarray/starttime/stoptime`
   现在已经进入 semantic 可见性合同，而不是“必须先手写声明”才能调
+- 数组这轮还没有进入完整类型系统
+  - 但 semantic 的 scope / flow walker 已经开始真的递归看
+    - `AST_EXPR_SUBSCRIPT`
+    - `AST_EXPR_INIT_LIST`
+    了
 
 ## 2.1 最近同步：这轮 semantic 最该更新的四件事
 
@@ -151,6 +157,25 @@ int bad() { return; }                // SEMA-RET-001
 void bad2() { return 1; }            // SEMA-RET-002
 int x() { return putint(1); }        // SEMA-CALL-007
 ```
+
+如果按 `lv9` 这轮再补一句，semantic 现在更准确的口径是：
+
+- **数组 admission 已经进入 semantic traversal**
+- 但**完整数组类型规则**还不是这轮 lesson 的主角
+
+最小例子：
+
+```c
+int main(){int a; int i; int x; x = a[i]; return x;}
+```
+
+这类程序现在至少会保证：
+
+- `a`
+- `i`
+- `x`
+
+都会被 scope walker 真正访问到；`a[i]` 不再是“parser 认了、semantic traversal 却没走进去”的死角。
 
 ---
 

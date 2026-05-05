@@ -290,6 +290,67 @@ static int test_semantic_rejects_undeclared_call_argument_across_statement_slots
     return 1;
 }
 
+static int test_semantic_accepts_subscript_identifier_visibility(void) {
+    const char *source =
+        "int main(){int a; int i; int x; x = a[i]; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: subscript identifier visibility should pass, got: %s\n",
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_undeclared_identifier_in_subscript_index(void) {
+    const char *source =
+        "int main(){int a; int x; x = a[i]; return x;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: undeclared subscript index identifier should fail\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(sema_err.message, "SEMA-SCOPE-002") == NULL ||
+        strstr(sema_err.message, "identifier=i") == NULL) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: expected undeclared subscript-index diagnostic, got: %s\n",
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_semantic_allows_block_shadowing(void) {
     const char *source = "int f(){int x; {int x; x=1;} x=2; return x;}\n";
     TokenArray tokens;

@@ -133,6 +133,11 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
             free(builder.data);
             return 0;
         }
+        if (global->array_rank > 0u &&
+            !ir_append_format(&builder, "[rank=%zu]", global->array_rank)) {
+            free(builder.data);
+            return 0;
+        }
         if (global->has_initializer &&
             !ir_append_format(&builder, " = %lld", global->initializer_value)) {
             free(builder.data);
@@ -165,6 +170,12 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
                 return 0;
             }
             if (!ir_append_value_name(&builder, program, function, ir_value_local(j))) {
+                free(builder.data);
+                return 0;
+            }
+            if (function->locals && j < function->local_count &&
+                function->locals[j].array_rank > 0u &&
+                !ir_append_format(&builder, "[rank=%zu]", function->locals[j].array_rank)) {
                 free(builder.data);
                 return 0;
             }
@@ -246,6 +257,41 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
                         }
                     }
                     if (!ir_append_string(&builder, ")\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_ADDR_LOCAL) {
+                    if (!ir_append_format(&builder, "addr_local local.%zu\n", instruction->as.addr_local_id)) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_ADDR_GLOBAL) {
+                    if (!ir_append_format(&builder, "addr_global global.%zu\n", instruction->as.addr_global_id)) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_LOAD_INDIRECT) {
+                    if (!ir_append_string(&builder, "load_indirect ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.load_indirect_addr) ||
+                        !ir_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                } else if (instruction->kind == IR_INSTR_STORE_INDIRECT) {
+                    if (!ir_append_string(&builder, "store_indirect ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.store_indirect.addr) ||
+                        !ir_append_string(&builder, ", ") ||
+                        !ir_append_value_name(&builder,
+                            program,
+                            function,
+                            instruction->as.store_indirect.value) ||
+                        !ir_append_string(&builder, "\n")) {
                         free(builder.data);
                         return 0;
                     }

@@ -183,6 +183,38 @@ static int machine_select_try_eval_selected_binary_immediate(MachineIrBinaryOp o
         out_value);
 }
 
+static int machine_select_program_uses_indirect_memory(const MachineSelectProgram *program) {
+    size_t function_index;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const MachineSelectFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const MachineSelectBasicBlock *block = &function->blocks[block_index];
+            size_t op_index;
+
+            for (op_index = 0; op_index < block->op_count; ++op_index) {
+                switch (block->ops[op_index].kind) {
+                case MACHINE_SELECT_OP_ADDR_LOCAL:
+                case MACHINE_SELECT_OP_ADDR_GLOBAL:
+                case MACHINE_SELECT_OP_LOAD_INDIRECT:
+                case MACHINE_SELECT_OP_STORE_INDIRECT:
+                    return 1;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int machine_select_lower_value_instruction(const MachineIrInstruction *src_op,
     MachineSelectOp *dest_op,
     int *out_handled);
@@ -298,6 +330,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             machine_select_program_free(out_program);
             return 0;
         }
+        dest->byte_size = src->byte_size;
         dest->has_initializer = src->has_initializer;
         dest->initializer_value = src->initializer_value;
         dest->has_runtime_initializer = src->has_runtime_initializer;
@@ -418,13 +451,15 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_program_free(out_program);
         return 0;
     }
-    if (!machine_select_cleanup_program(out_program, error)) {
-        machine_select_program_free(out_program);
-        return 0;
-    }
-    if (!machine_select_verify_program(out_program, error)) {
-        machine_select_program_free(out_program);
-        return 0;
+    if (!machine_select_program_uses_indirect_memory(out_program)) {
+        if (!machine_select_cleanup_program(out_program, error)) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (!machine_select_verify_program(out_program, error)) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
     }
     return 1;
 }

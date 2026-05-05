@@ -350,10 +350,12 @@ int ir_lower_program(const AstProgram *ast_program,
 - 复合赋值 `+= -= *= /= %= &= ^= |= <<= >>=`
 - 后缀 `x++` / `x--`
 - 直接调用表达式 `f(...)`
+- 下标表达式 `a[i]`
+- brace initializer `={...}`（当前主要作为数组初始化来源）
 
 ### 3.1.1 最近这几轮 IR 主要新增了什么
 
-如果只看最近几轮实现，不看更早的基线，重点其实集中在这 4 组：
+如果只看最近几轮实现，不看更早的基线，重点其实集中在这几组：
 
 1. global-aware IR  
    顶层 declaration 不再被直接跳过，而是会 lower 成 `IrGlobal`；标识符读写也变成“先查 local，再查 global”。
@@ -368,6 +370,14 @@ int ir_lower_program(const AstProgram *ast_program,
 5. `void + builtin` lowering line
    - `void` 函数现在能稳定 lower 出 bare `ret`
    - IR lowering 现在会预声明实际用到的课程 builtin 函数签名，而不是要求源码里一定先手写 prototype
+6. `lv9` array / indirect-memory line
+   - global / local / parameter 现在开始保留 array rank metadata
+   - canonical IR 现在也开始有
+     - `addr_local`
+     - `addr_global`
+     - `load_indirect`
+     - `store_indirect`
+   这组显式 address/indirect op
 
 ### 3.1.2 最近这 4 个“机制升级点”
 
@@ -386,7 +396,7 @@ int ir_lower_program(const AstProgram *ast_program,
 
 ### 3.2 当前明确不支持的形态
 
-下面这些不是“还没在测试里覆盖”，而是当前 lowering 会直接报错：
+下面这些不是“还没在测试里覆盖”，而是当前 lowering 会直接报错，或者仍然明显不完整：
 
 - callee 不是“直接标识符”的调用表达式
 - 在 non-void 函数里写没有返回值表达式的 `return`
@@ -396,6 +406,15 @@ int ir_lower_program(const AstProgram *ast_program,
 - 源码侧滥用 `__global.init` / `__program.init` 这类内部保留 helper 名
 - 跳过 semantic gate 后仍无法自洽的 call / declaration 形态
 - 任何不在上面支持列表里的 AST 节点
+
+如果按 `lv9` 这轮再更精确一点，当前 lesson 最稳的说法是：
+
+- **数组 admission 已经真实进入 canonical IR**
+- 但 canonical IR 这条线现在更偏
+  - array metadata
+  - address formation
+  - indirect load/store
+  而不是完整高层数组类型理论
 
 也就是说，当前 IR v1 更接近：
 

@@ -186,20 +186,28 @@ $$
 
 ### 3.3 指令种类
 
-当前 lower IR 指令种类共有 7 个：
+当前 lower IR 指令种类已经不止最早那 7 个了。
+
+标量/常规那一组仍然包括：
 
 - `LOWER_IR_INSTR_MOV`
 - `LOWER_IR_INSTR_BINARY`
 - `LOWER_IR_INSTR_CALL`
+- `LOWER_IR_INSTR_ADDR_LOCAL`
+- `LOWER_IR_INSTR_ADDR_GLOBAL`
 - `LOWER_IR_INSTR_LOAD_LOCAL`
 - `LOWER_IR_INSTR_STORE_LOCAL`
 - `LOWER_IR_INSTR_LOAD_GLOBAL`
 - `LOWER_IR_INSTR_STORE_GLOBAL`
+- `LOWER_IR_INSTR_LOAD_INDIRECT`
+- `LOWER_IR_INSTR_STORE_INDIRECT`
 
 其中：
 
 - `mov` / `binary` / `call` 都是 value-level 指令
 - `load_*` / `store_*` 是 slot 边界指令
+- `addr_*` 是显式取址指令
+- `load_indirect` / `store_indirect` 是第一批真正绕过 slot-name、走 address-value 的内存 op
 
 当前二元算子覆盖：
 
@@ -220,6 +228,18 @@ terminator 仍然保持 block-based CFG 结构：
 - 所以 lower IR 不会再把 bare `ret` 强行扁平成 `ret 0`
 
 也就是说，当前 lower IR 仍然刻意只改变“value/storage boundary”，不改变 CFG 形状。
+
+最近如果按 `lv9` 这轮来讲，这一层最值得单独补一句的是：
+
+- lower IR 现在开始允许“地址也是 value”
+- 但 slot/global/local 本身仍然不是普通 SSA value
+
+也就是：
+
+- `addr_local a`
+  - 先把地址 materialize 成 value
+- `load_indirect p`
+  - 再通过这个地址 value 去做真实内存访问
 
 ---
 

@@ -323,6 +323,24 @@ int machine_ir_verify_program(const MachineIrProgram *program, MachineIrError *e
                         }
                         break;
                     }
+                    case MACHINE_IR_INSTR_ADDR_LOCAL:
+                        if (!instruction->has_result ||
+                            !machine_ir_verify_result_operand(program, function, instruction->result, "addr_local", error) ||
+                            instruction->as.addr_slot.kind != MACHINE_IR_SLOT_LOCAL ||
+                            instruction->as.addr_slot.id >= function->local_count) {
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-136: invalid addr_local instruction");
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_IR_INSTR_ADDR_GLOBAL:
+                        if (!instruction->has_result ||
+                            !machine_ir_verify_result_operand(program, function, instruction->result, "addr_global", error) ||
+                            instruction->as.addr_slot.kind != MACHINE_IR_SLOT_GLOBAL ||
+                            instruction->as.addr_slot.id >= program->global_count) {
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-137: invalid addr_global instruction");
+                            return 0;
+                        }
+                        break;
                     case MACHINE_IR_INSTR_LOAD_LOCAL:
                     case MACHINE_IR_INSTR_LOAD_GLOBAL:
                         if (!instruction->has_result ||
@@ -336,6 +354,22 @@ int machine_ir_verify_program(const MachineIrProgram *program, MachineIrError *e
                         if (instruction->has_result ||
                             !machine_ir_verify_slot_ref(program, function, instruction->as.store.slot, "store slot", error) ||
                             !machine_ir_verify_operand(program, function, instruction->as.store.value, "store value", error)) {
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                        if (!instruction->has_result ||
+                            !machine_ir_verify_result_operand(program, function, instruction->result, "load_indirect", error) ||
+                            !machine_ir_verify_operand(program, function, instruction->as.load_indirect_addr, "load_indirect addr", error)) {
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-138: invalid load_indirect instruction");
+                            return 0;
+                        }
+                        break;
+                    case MACHINE_IR_INSTR_STORE_INDIRECT:
+                        if (instruction->has_result ||
+                            !machine_ir_verify_operand(program, function, instruction->as.store_indirect.addr, "store_indirect addr", error) ||
+                            !machine_ir_verify_operand(program, function, instruction->as.store_indirect.value, "store_indirect value", error)) {
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-139: invalid store_indirect instruction");
                             return 0;
                         }
                         break;

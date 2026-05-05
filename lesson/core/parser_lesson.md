@@ -142,10 +142,14 @@ $$
 
 不满足直接失败（常见报错：`Empty token stream` 或 `Token stream missing EOF terminator`）。
 
-最近 parser 这层还要同步两个很重要的扩展：
+最近 parser 这层还要同步三组很重要的扩展：
 
 - declaration / parameter / top-level external 已经开始显式接受 `const int`
 - function external signature 现在已经显式接受 `int` 和 `void`
+- `lv9` 这轮数组语法已经真正开始进入 parser contract：
+  - subscript primary：`a[i+1]`
+  - declaration rank：`int a[3][4];`
+  - brace initializer：`int a[3] = {1,2,3};`
 
 也就是说，parser 现在不只认：
 
@@ -159,6 +163,32 @@ $$
 - `int f(const int a) {...}`
 - `for (const int i = 0; ... )`
 - `void log(const int x) { putint(x); return; }`
+- `int a[3][4];`
+- `int f(int arr[], int grid[][]);`
+- `int x = a[i+1];`
+- `int a[3] = {1, 2, 3};`
+
+### 2.4 最近同步：数组语法现在已经不是“先拒绝再说”
+
+如果你按最近这轮未提交改动去讲 parser，现在最好把数组相关的 parser contract 直接分成三块：
+
+1. **postfix/subscript**
+   - `a[i]`
+   - `a[i+1]`
+   - `a[b[c]]`
+   会进 AST，而不是停在 unsupported syntax
+2. **declarator rank metadata**
+   - `int g[3][4];`
+   - `int x[2], y[3][4];`
+   parser 会把每个 declarator 自己的 rank 和 extent expression 保留下来
+3. **initializer form**
+   - `= { ... }`
+   现在不是一坨原始 token 混过去，而是会进真正的 `AST_EXPR_INIT_LIST`
+
+很适合记的两个测试名是：
+
+- `test_expression_ast_parses_subscript_primary`
+- `test_ast_records_array_rank_metadata`
 
 ---
 

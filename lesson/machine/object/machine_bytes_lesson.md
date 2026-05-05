@@ -102,10 +102,22 @@
    - bytes-side terminator summary 现在会保留
      - `has_return_value = 0` 的 bare `ret`
      - 和 `reti value` 区分开来
+8. `lv9` indirect-memory / array-object slice
+   - preview lowering 现在开始接受第一批
+     - `addr_local`
+     - `addr_global`
+     - `load_indirect`
+     - `store_indirect`
+   - global object 的 `byte_size` 也开始往下游流，不再默认都像 4-byte scalar shell
 
 所以这层现在除了“第一次有 `unsigned char[]`”，还可以理解成：
 
 - “第一层真正开始为直达 `RISC-V` preview asm / object / reloc / elf 提供现实物料的地方”
+
+如果按 `lv9` 这轮更具体地说：
+
+- `machine_bytes` 现在已经不是只为标量 slot 程序服务
+- 它开始承接“数组对象大小真实存在、部分内存访问要走地址值再间接访存”这条线
 
 ---
 

@@ -189,6 +189,50 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
         free(lowered_instruction.as.call.args);
         lowered_instruction.as.call.args = NULL;
         return 1;
+    case IR_INSTR_ADDR_LOCAL:
+        memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+        lowered_instruction.kind = LOWER_IR_INSTR_ADDR_LOCAL;
+        lowered_instruction.has_result = 1;
+        lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+        lowered_instruction.as.addr_slot = lower_ir_slot_local(instruction->as.addr_local_id);
+        return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+    case IR_INSTR_ADDR_GLOBAL:
+        memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+        lowered_instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+        lowered_instruction.has_result = 1;
+        lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+        lowered_instruction.as.addr_slot = lower_ir_slot_global(instruction->as.addr_global_id);
+        return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+    case IR_INSTR_LOAD_INDIRECT:
+        memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+        lowered_instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+        lowered_instruction.has_result = 1;
+        lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+        if (!lower_ir_lower_value_ref(&instruction->as.load_indirect_addr,
+                out_function,
+                out_block,
+                &lowered_instruction.as.load_indirect_addr,
+                error)) {
+            return 0;
+        }
+        return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+    case IR_INSTR_STORE_INDIRECT:
+        memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+        lowered_instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+        lowered_instruction.has_result = 0;
+        if (!lower_ir_lower_value_ref(&instruction->as.store_indirect.addr,
+                out_function,
+                out_block,
+                &lowered_instruction.as.store_indirect.addr,
+                error) ||
+            !lower_ir_lower_value_ref(&instruction->as.store_indirect.value,
+                out_function,
+                out_block,
+                &lowered_instruction.as.store_indirect.value,
+                error)) {
+            return 0;
+        }
+        return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
     default:
         lower_ir_set_error(error,
             0,
@@ -281,6 +325,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
             return 0;
         }
 
+        target_global->byte_size = source_global->byte_size;
         target_global->has_initializer = source_global->has_initializer;
         target_global->initializer_value = source_global->initializer_value;
         target_global->has_runtime_initializer = source_global->has_runtime_initializer;

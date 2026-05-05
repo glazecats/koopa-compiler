@@ -316,6 +316,169 @@ static const char *ir_extract_direct_call_callee_name(const AstExpression *calle
     return base->as.identifier.name;
 }
 
+typedef struct {
+    IrValueRef address;
+    size_t array_rank;
+    const size_t *array_extents;
+} IrLowerArrayAddress;
+
+typedef enum {
+    IR_LOWER_SCALAR_LVALUE_SLOT = 0,
+    IR_LOWER_SCALAR_LVALUE_INDIRECT,
+} IrLowerScalarLValueKind;
+
+typedef struct {
+    IrLowerScalarLValueKind kind;
+    IrValueRef slot;
+    IrValueRef address;
+} IrLowerScalarLValue;
+
+static int ir_emit_scaled_offset_add(IrLowerContext *ctx,
+    IrValueRef *io_address,
+    IrValueRef index_value,
+    size_t byte_stride) {
+    IrValueRef scaled_index;
+    IrValueRef new_address;
+    size_t temp_id;
+
+    if (!ctx || !io_address) {
+        return 0;
+    }
+
+    temp_id = ir_allocate_temp(ctx->function);
+    scaled_index = ir_value_temp(temp_id);
+    if (!ir_emit_binary(ctx,
+            scaled_index,
+            IR_BINARY_MUL,
+            index_value,
+            ir_value_immediate((long long)byte_stride))) {
+        return 0;
+    }
+
+    temp_id = ir_allocate_temp(ctx->function);
+    new_address = ir_value_temp(temp_id);
+    if (!ir_emit_binary(ctx,
+            new_address,
+            IR_BINARY_ADD,
+            *io_address,
+            scaled_index)) {
+        return 0;
+    }
+
+    *io_address = new_address;
+    return 1;
+}
+
+static int ir_lower_array_base_address(IrLowerContext *ctx,
+    const AstExpression *expr,
+    IrLowerArrayAddress *out_array) {
+    const AstExpression *base = ir_unwrap_paren_expression(expr);
+    IrLowerBindingInfo binding_info;
+    IrGlobal *global;
+    size_t temp_id;
+
+    if (out_array) {
+        memset(out_array, 0, sizeof(*out_array));
+    }
+    if (!ctx || !base || !out_array || base->kind != AST_EXPR_IDENTIFIER ||
+        !base->as.identifier.name) {
+        return 0;
+    }
+
+    if (ir_lower_scope_lookup_binding(&ctx->scopes, base->as.identifier.name, &binding_info)) {
+        if (binding_info.array_rank == 0u) {
+            return 0;
+        }
+        if (binding_info.kind == IR_LOWER_BINDING_ARRAY_PARAMETER) {
+            out_array->address = ir_value_local(binding_info.local_id);
+        } else {
+            temp_id = ir_allocate_temp(ctx->function);
+            out_array->address = ir_value_temp(temp_id);
+            if (!ir_emit_addr_local(ctx, out_array->address, binding_info.local_id)) {
+                return 0;
+            }
+        }
+        out_array->array_rank = binding_info.array_rank;
+        out_array->array_extents = binding_info.array_extents;
+        return 1;
+    }
+
+    if (!ctx->program) {
+        return 0;
+    }
+    global = ir_program_find_global_mut(ctx->program, base->as.identifier.name);
+    if (!global || global->array_rank == 0u) {
+        return 0;
+    }
+
+    temp_id = ir_allocate_temp(ctx->function);
+    out_array->address = ir_value_temp(temp_id);
+    if (!ir_emit_addr_global(ctx, out_array->address, global->id)) {
+        return 0;
+    }
+    out_array->array_rank = global->array_rank;
+    out_array->array_extents = global->array_extents;
+    return 1;
+}
+
+static int ir_lower_subscript_address(IrLowerContext *ctx,
+    const AstExpression *expr,
+    IrLowerArrayAddress *out_array) {
+    const AstExpression *base_expr;
+    IrValueRef index_value;
+    IrLowerArrayAddress base_array;
+    size_t stride_elements = 1u;
+    size_t stride_bytes;
+    size_t i;
+
+    if (!ctx || !expr || !out_array || expr->kind != AST_EXPR_SUBSCRIPT) {
+        return 0;
+    }
+
+    base_expr = ir_unwrap_paren_expression(expr->as.subscript.base);
+    if (!base_expr) {
+        return 0;
+    }
+
+    if (base_expr->kind == AST_EXPR_SUBSCRIPT) {
+        if (!ir_lower_subscript_address(ctx, base_expr, &base_array)) {
+            return 0;
+        }
+    } else {
+        if (!ir_lower_array_base_address(ctx, base_expr, &base_array)) {
+            return 0;
+        }
+    }
+
+    if (base_array.array_rank == 0u) {
+        return 0;
+    }
+
+    for (i = 1u; i < base_array.array_rank; ++i) {
+        if (!base_array.array_extents || base_array.array_extents[i] == 0u) {
+            ir_set_error(ctx->error,
+                expr->line,
+                expr->column,
+                "IR-LOWER-032: multidimensional array subscript needs known trailing extents");
+            return 0;
+        }
+        stride_elements *= base_array.array_extents[i];
+    }
+    stride_bytes = stride_elements * 4u;
+
+    if (!ir_lower_expression(ctx, expr->as.subscript.index, &index_value) ||
+        !ir_emit_scaled_offset_add(ctx, &base_array.address, index_value, stride_bytes)) {
+        return 0;
+    }
+
+    out_array->address = base_array.address;
+    out_array->array_rank = base_array.array_rank - 1u;
+    out_array->array_extents = base_array.array_extents
+        ? base_array.array_extents + 1u
+        : NULL;
+    return 1;
+}
+
 static int ir_extract_lvalue_ref(IrLowerContext *ctx,
     const AstExpression *expr,
     IrValueRef *out_lvalue) {
@@ -344,6 +507,70 @@ static int ir_extract_lvalue_ref(IrLowerContext *ctx,
     return 0;
 }
 
+static int ir_lower_scalar_lvalue(IrLowerContext *ctx,
+    const AstExpression *expr,
+    IrLowerScalarLValue *out_lvalue) {
+    const AstExpression *base = ir_unwrap_paren_expression(expr);
+    IrLowerArrayAddress array_address;
+
+    if (out_lvalue) {
+        memset(out_lvalue, 0, sizeof(*out_lvalue));
+    }
+    if (!ctx || !base || !out_lvalue) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_SUBSCRIPT) {
+        if (!ir_lower_subscript_address(ctx, base, &array_address) ||
+            array_address.array_rank > 0u) {
+            return 0;
+        }
+        out_lvalue->kind = IR_LOWER_SCALAR_LVALUE_INDIRECT;
+        out_lvalue->address = array_address.address;
+        return 1;
+    }
+
+    if (!ir_extract_lvalue_ref(ctx, base, &out_lvalue->slot)) {
+        return 0;
+    }
+
+    out_lvalue->kind = IR_LOWER_SCALAR_LVALUE_SLOT;
+    return 1;
+}
+
+static int ir_emit_scalar_lvalue_load(IrLowerContext *ctx,
+    const IrLowerScalarLValue *lvalue,
+    IrValueRef *out_value) {
+    size_t temp_id;
+
+    if (!ctx || !lvalue || !out_value || !ctx->function) {
+        return 0;
+    }
+
+    temp_id = ir_allocate_temp(ctx->function);
+    *out_value = ir_value_temp(temp_id);
+
+    if (lvalue->kind == IR_LOWER_SCALAR_LVALUE_INDIRECT) {
+        return ir_emit_load_indirect(ctx, *out_value, lvalue->address);
+    }
+
+    return ir_emit_mov(ctx, *out_value, lvalue->slot);
+}
+
+static int ir_emit_scalar_lvalue_store(IrLowerContext *ctx,
+    const IrLowerScalarLValue *lvalue,
+    IrValueRef value) {
+    if (!ctx || !lvalue) {
+        return 0;
+    }
+
+    if (lvalue->kind == IR_LOWER_SCALAR_LVALUE_INDIRECT) {
+        return ir_emit_store_indirect(ctx, lvalue->address, value);
+    }
+
+    return ir_emit_mov(ctx, lvalue->slot, value);
+}
+
 static int ir_lower_expression(IrLowerContext *ctx,
     const AstExpression *expr,
     IrValueRef *out_value) {
@@ -355,10 +582,10 @@ static int ir_lower_expression(IrLowerContext *ctx,
     IrFunction *callee_function;
     size_t arg_count;
     size_t i;
-    IrValueRef lvalue;
     int op_supported;
     IrBinaryOp op;
     size_t temp_id;
+    IrLowerScalarLValue scalar_lvalue;
 
     if (!ctx || !expr || !out_value) {
         ir_set_error(ctx ? ctx->error : NULL,
@@ -372,7 +599,29 @@ static int ir_lower_expression(IrLowerContext *ctx,
     case AST_EXPR_NUMBER:
         *out_value = ir_value_immediate(expr->as.number_value);
         return 1;
-    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_IDENTIFIER: {
+        IrLowerBindingInfo binding_info;
+
+        if (expr->as.identifier.name &&
+            ir_lower_scope_lookup_binding(&ctx->scopes, expr->as.identifier.name, &binding_info)) {
+            if (binding_info.array_rank > 0u) {
+                if (binding_info.kind == IR_LOWER_BINDING_ARRAY_PARAMETER) {
+                    *out_value = ir_value_local(binding_info.local_id);
+                    return 1;
+                }
+                {
+                    IrLowerArrayAddress array_value;
+
+                    if (!ir_lower_array_base_address(ctx, expr, &array_value)) {
+                        return 0;
+                    }
+                    *out_value = array_value.address;
+                    return 1;
+                }
+            }
+            *out_value = ir_value_local(binding_info.local_id);
+            return 1;
+        }
         if (expr->as.identifier.name &&
             ir_extract_lvalue_ref(ctx, expr, out_value)) {
             return 1;
@@ -383,6 +632,7 @@ static int ir_lower_expression(IrLowerContext *ctx,
             "IR-LOWER-002: unresolved identifier '%s' during IR lowering",
             expr->as.identifier.name ? expr->as.identifier.name : "<unnamed>");
         return 0;
+    }
     case AST_EXPR_PAREN:
         return ir_lower_expression(ctx, expr->as.inner, out_value);
     case AST_EXPR_CALL:
@@ -458,12 +708,17 @@ static int ir_lower_expression(IrLowerContext *ctx,
             IrBinaryOp update_op = expr->as.unary.op == TOKEN_PLUS_PLUS
                 ? IR_BINARY_ADD
                 : IR_BINARY_SUB;
+            IrValueRef current_value;
 
-            if (!ir_extract_lvalue_ref(ctx, expr->as.unary.operand, &lvalue)) {
+            if (!ir_lower_scalar_lvalue(ctx, expr->as.unary.operand, &scalar_lvalue)) {
                 ir_set_error(ctx->error,
                     expr->line,
                     expr->column,
-                    "IR-LOWER-014: prefix update target is not a supported identifier lvalue");
+                    "IR-LOWER-014: prefix update target is not a supported scalar lvalue");
+                return 0;
+            }
+
+            if (!ir_emit_scalar_lvalue_load(ctx, &scalar_lvalue, &current_value)) {
                 return 0;
             }
 
@@ -472,9 +727,9 @@ static int ir_lower_expression(IrLowerContext *ctx,
             if (!ir_emit_binary(ctx,
                     *out_value,
                     update_op,
-                    lvalue,
+                    current_value,
                     ir_value_immediate(1)) ||
-                !ir_emit_mov(ctx, lvalue, *out_value)) {
+                !ir_emit_scalar_lvalue_store(ctx, &scalar_lvalue, *out_value)) {
                 return 0;
             }
             return 1;
@@ -526,27 +781,32 @@ static int ir_lower_expression(IrLowerContext *ctx,
         if (expr->as.binary.op == TOKEN_ASSIGN) {
             const AstExpression *lhs_expr = expr->as.binary.left;
 
-            if (!ir_extract_lvalue_ref(ctx, lhs_expr, &lvalue)) {
+            if (!ir_lower_scalar_lvalue(ctx, lhs_expr, &scalar_lvalue)) {
                 ir_set_error(ctx->error,
                     expr->line,
                     expr->column,
-                    "IR-LOWER-004: assignment target is not a supported identifier lvalue");
+                    "IR-LOWER-004: assignment target is not a supported scalar lvalue");
                 return 0;
             }
             if (!ir_lower_expression(ctx, expr->as.binary.right, &rhs)) {
                 return 0;
             }
-            *out_value = lvalue;
-            return ir_emit_mov(ctx, *out_value, rhs);
+            *out_value = rhs;
+            return ir_emit_scalar_lvalue_store(ctx, &scalar_lvalue, rhs);
         }
 
         op = ir_binary_op_from_assignment_token(expr->as.binary.op, &op_supported);
         if (op_supported) {
-            if (!ir_extract_lvalue_ref(ctx, expr->as.binary.left, &lvalue)) {
+            IrValueRef current_value;
+
+            if (!ir_lower_scalar_lvalue(ctx, expr->as.binary.left, &scalar_lvalue)) {
                 ir_set_error(ctx->error,
                     expr->line,
                     expr->column,
-                    "IR-LOWER-015: compound assignment target is not a supported identifier lvalue");
+                    "IR-LOWER-015: compound assignment target is not a supported scalar lvalue");
+                return 0;
+            }
+            if (!ir_emit_scalar_lvalue_load(ctx, &scalar_lvalue, &current_value)) {
                 return 0;
             }
             if (!ir_lower_expression(ctx, expr->as.binary.right, &rhs)) {
@@ -554,10 +814,10 @@ static int ir_lower_expression(IrLowerContext *ctx,
             }
 
             temp_id = ir_allocate_temp(ctx->function);
-            lhs = lvalue;
+            lhs = current_value;
             *out_value = ir_value_temp(temp_id);
             if (!ir_emit_binary(ctx, *out_value, op, lhs, rhs) ||
-                !ir_emit_mov(ctx, lhs, *out_value)) {
+                !ir_emit_scalar_lvalue_store(ctx, &scalar_lvalue, *out_value)) {
                 return 0;
             }
             return 1;
@@ -592,18 +852,23 @@ static int ir_lower_expression(IrLowerContext *ctx,
                 : IR_BINARY_SUB;
             IrValueRef original_value;
             IrValueRef updated_value;
+            IrValueRef current_value;
 
-            if (!ir_extract_lvalue_ref(ctx, expr->as.postfix.operand, &lvalue)) {
+            if (!ir_lower_scalar_lvalue(ctx, expr->as.postfix.operand, &scalar_lvalue)) {
                 ir_set_error(ctx->error,
                     expr->line,
                     expr->column,
-                    "IR-LOWER-016: postfix update target is not a supported identifier lvalue");
+                    "IR-LOWER-016: postfix update target is not a supported scalar lvalue");
+                return 0;
+            }
+
+            if (!ir_emit_scalar_lvalue_load(ctx, &scalar_lvalue, &current_value)) {
                 return 0;
             }
 
             temp_id = ir_allocate_temp(ctx->function);
             original_value = ir_value_temp(temp_id);
-            if (!ir_emit_mov(ctx, original_value, lvalue)) {
+            if (!ir_emit_mov(ctx, original_value, current_value)) {
                 return 0;
             }
 
@@ -612,9 +877,9 @@ static int ir_lower_expression(IrLowerContext *ctx,
             if (!ir_emit_binary(ctx,
                     updated_value,
                     update_op,
-                    lvalue,
+                    current_value,
                     ir_value_immediate(1)) ||
-                !ir_emit_mov(ctx, lvalue, updated_value)) {
+                !ir_emit_scalar_lvalue_store(ctx, &scalar_lvalue, updated_value)) {
                 return 0;
             }
 
@@ -627,6 +892,25 @@ static int ir_lower_expression(IrLowerContext *ctx,
             "IR-LOWER-017: postfix operator '%s' is not supported in IR v1",
             lexer_token_type_name(expr->as.postfix.op));
         return 0;
+    case AST_EXPR_SUBSCRIPT:
+        {
+            IrLowerArrayAddress array_address;
+
+            if (!ir_lower_subscript_address(ctx, expr, &array_address)) {
+                ir_set_error(ctx->error,
+                    expr->line,
+                    expr->column,
+                    "IR-LOWER-018: array subscript expressions are not supported in IR v1 yet");
+                return 0;
+            }
+            if (array_address.array_rank > 0u) {
+                *out_value = array_address.address;
+                return 1;
+            }
+            temp_id = ir_allocate_temp(ctx->function);
+            *out_value = ir_value_temp(temp_id);
+            return ir_emit_load_indirect(ctx, *out_value, array_address.address);
+        }
     default:
         ir_set_error(ctx->error,
             expr->line,

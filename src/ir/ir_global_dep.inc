@@ -576,6 +576,22 @@ static int ir_trace_global_dependency_from_expr(IrGlobalDepTrace *trace,
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            int found = 0;
+
+            if (!ir_trace_global_dependency_from_expr(trace,
+                    expr->as.init_list.items[i],
+                    scope_stack,
+                    &found)) {
+                return 0;
+            }
+            if (found) {
+                *out_found = 1;
+                return 1;
+            }
+        }
+        return 1;
     case AST_EXPR_IDENTIFIER:
         if (!trace || !trace->program || !expr->as.identifier.name ||
             expr->as.identifier.name[0] == '\0' ||
@@ -1412,6 +1428,19 @@ static int ir_collect_global_dependencies_from_expr(IrGlobalDepCollector *collec
     }
 
     switch (expr->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!ir_collect_global_dependencies_from_expr(collector,
+                    expr->as.init_list.items[i],
+                    scope_stack,
+                    deps,
+                    dep_count,
+                    dep_capacity,
+                    error)) {
+                return 0;
+            }
+        }
+        return 1;
     case AST_EXPR_IDENTIFIER:
         if (!collector || !collector->program || !expr->as.identifier.name ||
             expr->as.identifier.name[0] == '\0' ||

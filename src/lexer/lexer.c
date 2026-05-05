@@ -408,6 +408,14 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (!add_token(&lx, TOKEN_RPAREN, tok_start, 1, 0, tok_line, tok_col))
                 goto oom;
             break;
+        case '[':
+            if (!add_token(&lx, TOKEN_LBRACKET, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
+        case ']':
+            if (!add_token(&lx, TOKEN_RBRACKET, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
         case '{':
             if (!add_token(&lx, TOKEN_LBRACE, tok_start, 1, 0, tok_line, tok_col))
                 goto oom;
@@ -641,6 +649,10 @@ const char *lexer_token_type_name(TokenType type) {
         return "LPAREN";
     case TOKEN_RPAREN:
         return "RPAREN";
+    case TOKEN_LBRACKET:
+        return "LBRACKET";
+    case TOKEN_RBRACKET:
+        return "RBRACKET";
     case TOKEN_LBRACE:
         return "LBRACE";
     case TOKEN_RBRACE:

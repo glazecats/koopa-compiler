@@ -18,9 +18,11 @@ typedef enum {
 typedef enum {
     AST_EXPR_IDENTIFIER = 0,
     AST_EXPR_NUMBER,
+    AST_EXPR_INIT_LIST,
     AST_EXPR_PAREN,
     AST_EXPR_UNARY,
     AST_EXPR_POSTFIX,
+    AST_EXPR_SUBSCRIPT,
     AST_EXPR_CALL,
     AST_EXPR_BINARY,
     AST_EXPR_TERNARY,
@@ -57,6 +59,10 @@ struct AstExpression {
             size_t name_length;
         } identifier;
         long long number_value;
+        struct {
+            AstExpression **items;
+            size_t item_count;
+        } init_list;
         AstExpression *inner;
         struct {
             TokenType op;
@@ -66,6 +72,10 @@ struct AstExpression {
             TokenType op;
             AstExpression *operand;
         } postfix;
+        struct {
+            AstExpression *base;
+            AstExpression *index;
+        } subscript;
         struct {
             AstExpression *callee;
             AstExpression **args;
@@ -91,6 +101,8 @@ struct AstStatement {
     int declaration_is_const;
     char **declaration_names;
     size_t declaration_name_count;
+    size_t *declaration_array_ranks;
+    AstExpression ***declaration_array_extent_exprs;
     AstExpression **expressions;
     size_t expression_count;
     int has_primary_expression;
@@ -110,11 +122,15 @@ typedef struct {
     AstFunctionReturnType function_return_type;
     char *name;
     size_t name_length;
+    size_t declaration_array_rank;
+    AstExpression **declaration_array_extent_exprs;
     int is_const_qualified;
     int has_initializer;
     AstExpression *declaration_initializer;
     size_t parameter_count;
     char **parameter_names;
+    size_t *parameter_array_ranks;
+    AstExpression ***parameter_array_extent_exprs;
     int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;

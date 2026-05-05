@@ -227,6 +227,8 @@ int main(void) {
     ok &= test_semantic_rejects_undeclared_local_identifier_use();
     ok &= test_semantic_rejects_call_with_undeclared_argument_identifier();
     ok &= test_semantic_rejects_undeclared_call_argument_across_statement_slots();
+    ok &= test_semantic_accepts_subscript_identifier_visibility();
+    ok &= test_semantic_rejects_undeclared_identifier_in_subscript_index();
     ok &= test_semantic_allows_block_shadowing();
     ok &= test_semantic_allows_for_init_declaration_visibility();
     ok &= test_semantic_rejects_parameter_redeclaration_in_function_body();

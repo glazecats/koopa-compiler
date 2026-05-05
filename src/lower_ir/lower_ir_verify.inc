@@ -881,6 +881,41 @@ static int lower_ir_verify_instruction(const LowerIrProgram *program,
         }
         return 1;
         }
+    case LOWER_IR_INSTR_ADDR_LOCAL:
+    case LOWER_IR_INSTR_ADDR_GLOBAL:
+        if (!instruction->has_result || instruction->result.kind != LOWER_IR_VALUE_TEMP) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-048: bb.%zu instruction %zu addr_* must produce a temp result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!lower_ir_verify_value_ref(instruction->result,
+                function->next_temp_id,
+                "addr_* result",
+                error) ||
+            !lower_ir_verify_slot_ref(program,
+                function,
+                instruction->as.addr_slot,
+                instruction->kind == LOWER_IR_INSTR_ADDR_LOCAL ? "addr_local slot" : "addr_global slot",
+                error)) {
+            return 0;
+        }
+        if ((instruction->kind == LOWER_IR_INSTR_ADDR_LOCAL &&
+                instruction->as.addr_slot.kind != LOWER_IR_SLOT_LOCAL) ||
+            (instruction->kind == LOWER_IR_INSTR_ADDR_GLOBAL &&
+                instruction->as.addr_slot.kind != LOWER_IR_SLOT_GLOBAL)) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-049: bb.%zu instruction %zu addr_* must reference the matching slot class",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        return 1;
     case LOWER_IR_INSTR_LOAD_LOCAL:
         if (!instruction->has_result || instruction->result.kind != LOWER_IR_VALUE_TEMP) {
             lower_ir_set_error(error,
@@ -1002,6 +1037,48 @@ static int lower_ir_verify_instruction(const LowerIrProgram *program,
                 "LOWER-IR-VERIFY-020: bb.%zu instruction %zu store_global must use a global slot",
                 block->id,
                 instruction_index);
+            return 0;
+        }
+        return 1;
+    case LOWER_IR_INSTR_LOAD_INDIRECT:
+        if (!instruction->has_result || instruction->result.kind != LOWER_IR_VALUE_TEMP) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-050: bb.%zu instruction %zu load_indirect must produce a temp result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!lower_ir_verify_value_ref(instruction->result,
+                function->next_temp_id,
+                "load_indirect result",
+                error) ||
+            !lower_ir_verify_value_ref(instruction->as.load_indirect_addr,
+                function->next_temp_id,
+                "load_indirect addr",
+                error)) {
+            return 0;
+        }
+        return 1;
+    case LOWER_IR_INSTR_STORE_INDIRECT:
+        if (instruction->has_result) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-051: bb.%zu instruction %zu store_indirect must not produce a result",
+                block->id,
+                instruction_index);
+            return 0;
+        }
+        if (!lower_ir_verify_value_ref(instruction->as.store_indirect.addr,
+                function->next_temp_id,
+                "store_indirect addr",
+                error) ||
+            !lower_ir_verify_value_ref(instruction->as.store_indirect.value,
+                function->next_temp_id,
+                "store_indirect value",
+                error)) {
             return 0;
         }
         return 1;

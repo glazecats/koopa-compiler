@@ -28,6 +28,8 @@ typedef struct {
     AstFunctionReturnType return_type;
     size_t parameter_count;
     char **parameter_names;
+    size_t *parameter_array_ranks;
+    AstExpression ***parameter_array_extent_exprs;
     int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;
@@ -63,6 +65,7 @@ static int append_ast_statement_expression(Parser *p,
     const Token *anchor_tok);
 
 static int parse_expression(Parser *p);
+static int parse_initializer_expression(Parser *p, AstExpression **out_expr, const Token *anchor_tok);
 static int parse_statement_with_local_control(Parser *p,
     ParserLocalControl *out_local_control,
     AstStatement **out_statement);
@@ -74,12 +77,16 @@ static int parse_declaration(Parser *p,
     int *out_declaration_is_const,
     char ***out_decl_names,
     size_t *out_decl_name_count,
+    size_t **out_decl_array_ranks,
+    AstExpression ****out_decl_array_extent_exprs,
     AstExpression ***out_decl_initializer_exprs,
     size_t *out_decl_initializer_expr_count);
 static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
+    size_t **out_parameter_array_ranks,
+    AstExpression ****out_parameter_array_extent_exprs,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns);
@@ -97,6 +104,8 @@ static int parse_function_external(Parser *p,
     AstFunctionReturnType *out_return_type,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    size_t **out_parameter_array_ranks,
+    AstExpression ****out_parameter_array_extent_exprs,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,

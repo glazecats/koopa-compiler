@@ -12,8 +12,11 @@ static void ir_lower_scope_stack_free(IrLowerScopeStack *stack) {
     }
 
     for (i = 0; i < stack->count; ++i) {
-        free(stack->frames[i].names);
-        free(stack->frames[i].local_ids);
+        size_t j;
+        for (j = 0; j < stack->frames[i].count; ++j) {
+            free(stack->frames[i].bindings[j].array_extents);
+        }
+        free(stack->frames[i].bindings);
     }
     free(stack->frames);
     stack->frames = NULL;
@@ -45,8 +48,7 @@ static int ir_lower_scope_stack_push(IrLowerScopeStack *stack) {
         stack->capacity = next_capacity;
     }
 
-    stack->frames[stack->count].names = NULL;
-    stack->frames[stack->count].local_ids = NULL;
+    stack->frames[stack->count].bindings = NULL;
     stack->frames[stack->count].count = 0;
     stack->frames[stack->count].capacity = 0;
     stack->count++;
@@ -61,22 +63,32 @@ static void ir_lower_scope_stack_pop(IrLowerScopeStack *stack) {
     }
 
     frame = &stack->frames[stack->count - 1];
-    free(frame->names);
-    free(frame->local_ids);
-    frame->names = NULL;
-    frame->local_ids = NULL;
+    if (frame->bindings) {
+        size_t i;
+        for (i = 0; i < frame->count; ++i) {
+            free(frame->bindings[i].array_extents);
+        }
+    }
+    free(frame->bindings);
+    frame->bindings = NULL;
     frame->count = 0;
     frame->capacity = 0;
     stack->count--;
 }
 
-static int ir_lower_scope_add_binding(IrLowerScopeStack *stack,
+static int ir_lower_scope_add_binding_with_metadata(IrLowerScopeStack *stack,
     const char *name,
-    size_t local_id) {
+    size_t local_id,
+    IrLowerBindingKind kind,
+    size_t array_rank,
+    const size_t *array_extents,
+    int is_const,
+    int has_const_value,
+    long long const_value) {
     IrLowerScope *frame;
-    const char **new_names;
-    size_t *new_local_ids;
+    IrLowerBinding *new_bindings;
     size_t next_capacity;
+    size_t *extent_copy = NULL;
 
     if (!stack || stack->count == 0 || !name) {
         return 0;
@@ -90,21 +102,34 @@ static int ir_lower_scope_add_binding(IrLowerScopeStack *stack,
                 &next_capacity)) {
             return 0;
         }
-        new_names = (const char **)realloc(frame->names, next_capacity * sizeof(const char *));
-        if (!new_names) {
+        new_bindings = (IrLowerBinding *)realloc(frame->bindings, next_capacity * sizeof(IrLowerBinding));
+        if (!new_bindings) {
             return 0;
         }
-        new_local_ids = (size_t *)realloc(frame->local_ids, next_capacity * sizeof(size_t));
-        if (!new_local_ids) {
-            return 0;
-        }
-        frame->names = new_names;
-        frame->local_ids = new_local_ids;
+        frame->bindings = new_bindings;
         frame->capacity = next_capacity;
     }
 
-    frame->names[frame->count] = name;
-    frame->local_ids[frame->count] = local_id;
+    if (array_rank > 0u) {
+        size_t i;
+
+        extent_copy = (size_t *)malloc(array_rank * sizeof(size_t));
+        if (!extent_copy) {
+            return 0;
+        }
+        for (i = 0; i < array_rank; ++i) {
+            extent_copy[i] = array_extents ? array_extents[i] : 0u;
+        }
+    }
+
+    frame->bindings[frame->count].name = name;
+    frame->bindings[frame->count].local_id = local_id;
+    frame->bindings[frame->count].kind = kind;
+    frame->bindings[frame->count].array_rank = array_rank;
+    frame->bindings[frame->count].array_extents = extent_copy;
+    frame->bindings[frame->count].is_const = is_const;
+    frame->bindings[frame->count].has_const_value = has_const_value;
+    frame->bindings[frame->count].const_value = const_value;
     frame->count++;
     return 1;
 }
@@ -123,9 +148,42 @@ static int ir_lower_scope_lookup(const IrLowerScopeStack *stack,
         const IrLowerScope *frame = &stack->frames[frame_index - 1];
 
         for (i = frame->count; i > 0; --i) {
-            if (strcmp(frame->names[i - 1], name) == 0) {
+            if (strcmp(frame->bindings[i - 1].name, name) == 0) {
                 if (out_local_id) {
-                    *out_local_id = frame->local_ids[i - 1];
+                    *out_local_id = frame->bindings[i - 1].local_id;
+                }
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
+    const char *name,
+    IrLowerBindingInfo *out_info) {
+    size_t frame_index;
+
+    if (!stack || !name) {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        size_t i;
+        const IrLowerScope *frame = &stack->frames[frame_index - 1];
+
+        for (i = frame->count; i > 0; --i) {
+            const IrLowerBinding *binding = &frame->bindings[i - 1];
+            if (strcmp(binding->name, name) == 0) {
+                if (out_info) {
+                    out_info->local_id = binding->local_id;
+                    out_info->kind = binding->kind;
+                    out_info->array_rank = binding->array_rank;
+                    out_info->array_extents = binding->array_extents;
+                    out_info->is_const = binding->is_const;
+                    out_info->has_const_value = binding->has_const_value;
+                    out_info->const_value = binding->const_value;
                 }
                 return 1;
             }

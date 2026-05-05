@@ -1151,6 +1151,113 @@ static int test_machine_reloc_surfaces_global_data_relocations(void) {
     return ok;
 }
 
+static int test_machine_reloc_preserves_global_object_byte_sizes(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineObjectFile object_file;
+    MachineRelocFile reloc_file;
+    MachineBytesError bytes_error;
+    MachineObjectError object_error;
+    MachineRelocError reloc_error;
+    const MachineRelocSection *section = NULL;
+    const MachineObjectSymbol *symbol = NULL;
+    int ok = 1;
+    size_t total_byte_count = 0u;
+    size_t object_section_count = 0u;
+    size_t symbol_count = 0u;
+    size_t relocation_section_count = 0u;
+    size_t relocation_count = 0u;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    memset(&object_error, 0, sizeof(object_error));
+    memset(&reloc_error, 0, sizeof(reloc_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+    machine_object_file_init(&object_file);
+    machine_reloc_file_init(&reloc_file);
+
+    emit_program.global_count = 2u;
+    emit_program.global_capacity = 2u;
+    emit_program.globals = (MachineEmitGlobal *)calloc(2u, sizeof(MachineEmitGlobal));
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.globals || !emit_program.functions) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    emit_program.globals[0].id = 0u;
+    emit_program.globals[0].name = dup_text("g");
+    emit_program.globals[0].byte_size = 4u;
+    emit_program.globals[1].id = 1u;
+    emit_program.globals[1].name = dup_text("h");
+    emit_program.globals[1].byte_size = 8u;
+    emit_program.globals[1].has_initializer = 1;
+    emit_program.globals[1].initializer_value = 7;
+
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1u;
+    emit_program.functions[0].block_capacity = 1u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!emit_program.globals[0].name || !emit_program.globals[1].name ||
+        !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    emit_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_immediate(0);
+    if (!emit_program.functions[0].blocks[0].label_name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        machine_object_file_free(&object_file);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    if (!machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_object_build_from_machine_bytes_program(&bytes_program, &object_file, &object_error) ||
+        !machine_reloc_build_from_machine_object_file(&object_file, &reloc_file, &reloc_error) ||
+        !machine_reloc_file_get_summary(
+            &reloc_file, &total_byte_count, &object_section_count, &symbol_count, &relocation_section_count, &relocation_count) ||
+        total_byte_count == 0u || object_section_count != 3u || symbol_count != 4u ||
+        relocation_section_count != 3u || relocation_count != 0u ||
+        !machine_reloc_file_get_section(&reloc_file, 1u, &section) || !section ||
+        strcmp(section->name, ".sbss") != 0 || section->byte_count != 4u || section->relocation_count != 0u ||
+        !machine_reloc_file_get_section(&reloc_file, 2u, &section) || !section ||
+        strcmp(section->name, ".sdata") != 0 || section->byte_count != 8u || section->relocation_count != 0u ||
+        !machine_object_file_find_symbol_by_name(&reloc_file.object_file, "g", NULL, &symbol) || !symbol ||
+        symbol->byte_count != 4u ||
+        !machine_object_file_find_symbol_by_name(&reloc_file.object_file, "h", NULL, &symbol) || !symbol ||
+        symbol->byte_count != 8u) {
+        fprintf(stderr, "[machine-reloc] FAIL: global byte-size relocation mismatch: %s\n", reloc_error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    machine_object_file_free(&object_file);
+    machine_reloc_file_free(&reloc_file);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1162,6 +1269,7 @@ int main(void) {
     ok &= test_machine_reloc_dump_uses_explicit_i386_preview_profile_name();
     ok &= test_machine_reloc_preview_verifier_rejects_addend_drift();
     ok &= test_machine_reloc_preserves_global_object_sections_without_fixups();
+    ok &= test_machine_reloc_preserves_global_object_byte_sizes();
     ok &= test_machine_reloc_surfaces_global_data_relocations();
 
     if (!ok) {

@@ -216,6 +216,22 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
                         return 0;
                     }
                     break;
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                    if (!value_ssa_append_value_name(&builder, instruction->result) ||
+                        !value_ssa_append_string(&builder,
+                            instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL
+                                ? " = addr_local "
+                                : " = addr_global ") ||
+                        !value_ssa_append_slot_name(&builder,
+                            program,
+                            function,
+                            instruction->as.addr_slot) ||
+                        !value_ssa_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
                 case VALUE_SSA_INSTR_LOAD_LOCAL:
                     if (!value_ssa_append_value_name(&builder, instruction->result) ||
                         !value_ssa_append_string(&builder, " = load_local ") ||
@@ -261,6 +277,25 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
                             instruction->as.store.slot) ||
                         !value_ssa_append_string(&builder, ", ") ||
                         !value_ssa_append_value_name(&builder, instruction->as.store.value) ||
+                        !value_ssa_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
+                case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                    if (!value_ssa_append_value_name(&builder, instruction->result) ||
+                        !value_ssa_append_string(&builder, " = load_indirect ") ||
+                        !value_ssa_append_value_name(&builder, instruction->as.load_indirect_addr) ||
+                        !value_ssa_append_string(&builder, "\n")) {
+                        free(builder.data);
+                        return 0;
+                    }
+                    break;
+                case VALUE_SSA_INSTR_STORE_INDIRECT:
+                    if (!value_ssa_append_string(&builder, "store_indirect ") ||
+                        !value_ssa_append_value_name(&builder, instruction->as.store_indirect.addr) ||
+                        !value_ssa_append_string(&builder, ", ") ||
+                        !value_ssa_append_value_name(&builder, instruction->as.store_indirect.value) ||
                         !value_ssa_append_string(&builder, "\n")) {
                         free(builder.data);
                         return 0;

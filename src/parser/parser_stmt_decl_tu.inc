@@ -134,6 +134,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
             AstStatement *decl_stmt = NULL;
             char **decl_names = NULL;
             size_t decl_name_count = 0;
+            size_t *decl_array_ranks = NULL;
+            AstExpression ***decl_array_extent_exprs = NULL;
             AstExpression **decl_init_exprs = NULL;
             size_t decl_init_expr_count = 0;
 
@@ -142,6 +144,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 &decl_is_const,
                 out_statement ? &decl_names : NULL,
                 out_statement ? &decl_name_count : NULL,
+                out_statement ? &decl_array_ranks : NULL,
+                out_statement ? &decl_array_extent_exprs : NULL,
                 out_statement ? &decl_init_exprs : NULL,
                 out_statement ? &decl_init_expr_count : NULL)) {
                 free_ast_statement_array(children, child_count);
@@ -151,6 +155,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt = alloc_ast_statement(p, AST_STMT_DECLARATION, decl_tok);
                 if (!decl_stmt) {
                     free_name_array(decl_names, decl_name_count);
+                    free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                    free(decl_array_ranks);
                     free_ast_expression_array(decl_init_exprs, decl_init_expr_count);
                     free_ast_statement_array(children, child_count);
                     return 0;
@@ -158,6 +164,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt->declaration_is_const = decl_is_const;
                 decl_stmt->declaration_names = decl_names;
                 decl_stmt->declaration_name_count = decl_name_count;
+                decl_stmt->declaration_array_ranks = decl_array_ranks;
+                decl_stmt->declaration_array_extent_exprs = decl_array_extent_exprs;
                 decl_stmt->expressions = decl_init_exprs;
                 decl_stmt->expression_count = decl_init_expr_count;
                 if (!append_ast_statement_child(p,
@@ -451,6 +459,8 @@ static int parse_for_statement_with_local_control(Parser *p,
     size_t for_init_decl_expr_count = 0;
     char **for_init_decl_names = NULL;
     size_t for_init_decl_name_count = 0;
+    size_t *for_init_decl_array_ranks = NULL;
+    AstExpression ***for_init_decl_array_extent_exprs = NULL;
     const Token *for_tok = previous(p);
 
     if (out_statement) {
@@ -469,6 +479,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             out_statement ? &for_init_decl_is_const : NULL,
             out_statement ? &for_init_decl_names : NULL,
             out_statement ? &for_init_decl_name_count : NULL,
+            out_statement ? &for_init_decl_array_ranks : NULL,
+            out_statement ? &for_init_decl_array_extent_exprs : NULL,
             out_statement ? &for_init_decl_exprs : NULL,
             out_statement ? &for_init_decl_expr_count : NULL)) {
             return 0;
@@ -480,6 +492,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         if (!check(p, TOKEN_SEMICOLON)) {
             if (!parse_expression(p)) {
                 free_name_array(for_init_decl_names, for_init_decl_name_count);
+                free_ast_expression_matrix(
+                    for_init_decl_array_extent_exprs,
+                    for_init_decl_array_ranks,
+                    for_init_decl_name_count);
+                free(for_init_decl_array_ranks);
                 return 0;
             }
             init_end = p->current;
@@ -489,11 +506,21 @@ static int parse_for_statement_with_local_control(Parser *p,
                 out_statement ? &init_expr : NULL,
                 for_tok)) {
                 free_name_array(for_init_decl_names, for_init_decl_name_count);
+                free_ast_expression_matrix(
+                    for_init_decl_array_extent_exprs,
+                    for_init_decl_array_ranks,
+                    for_init_decl_name_count);
+                free(for_init_decl_array_ranks);
                 return 0;
             }
         }
         if (!consume(p, TOKEN_SEMICOLON, "';'")) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
             return 0;
@@ -504,6 +531,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         cond_start = p->current;
         if (!parse_expression(p)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
             return 0;
@@ -514,6 +546,7 @@ static int parse_for_statement_with_local_control(Parser *p,
             out_statement ? &cond_expr : NULL,
             for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
             return 0;
@@ -524,6 +557,11 @@ static int parse_for_statement_with_local_control(Parser *p,
     }
     if (!consume(p, TOKEN_SEMICOLON, "';'")) {
         free_name_array(for_init_decl_names, for_init_decl_name_count);
+        free_ast_expression_matrix(
+            for_init_decl_array_extent_exprs,
+            for_init_decl_array_ranks,
+            for_init_decl_name_count);
+        free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
         parser_ast_expression_free(cond_expr);
@@ -536,6 +574,11 @@ static int parse_for_statement_with_local_control(Parser *p,
 
         if (!parse_expression(p)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
             parser_ast_expression_free(cond_expr);
@@ -548,6 +591,11 @@ static int parse_for_statement_with_local_control(Parser *p,
             out_statement ? &step_expr : NULL,
             for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
             parser_ast_expression_free(cond_expr);
@@ -556,6 +604,11 @@ static int parse_for_statement_with_local_control(Parser *p,
     }
     if (!consume(p, TOKEN_RPAREN, "')'")) {
         free_name_array(for_init_decl_names, for_init_decl_name_count);
+        free_ast_expression_matrix(
+            for_init_decl_array_extent_exprs,
+            for_init_decl_array_ranks,
+            for_init_decl_name_count);
+        free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
         parser_ast_expression_free(cond_expr);
@@ -569,6 +622,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         out_statement ? &body_stmt : NULL)) {
         p->loop_depth--;
         free_name_array(for_init_decl_names, for_init_decl_name_count);
+        free_ast_expression_matrix(
+            for_init_decl_array_extent_exprs,
+            for_init_decl_array_ranks,
+            for_init_decl_name_count);
+        free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
         parser_ast_expression_free(cond_expr);
@@ -581,6 +639,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         AstStatement *for_stmt = alloc_ast_statement(p, AST_STMT_FOR, for_tok);
         if (!for_stmt) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_statement_free(body_stmt);
             parser_ast_expression_free(init_expr);
@@ -592,6 +655,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         if (!for_stmt->children) {
             set_error(p, for_tok, "Out of memory while building statement AST");
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
@@ -610,6 +678,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         }
         if (init_expr && !append_ast_statement_expression(p, for_stmt, init_expr, for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
             parser_ast_expression_free(cond_expr);
@@ -622,6 +695,11 @@ static int parse_for_statement_with_local_control(Parser *p,
         }
         if (cond_expr && !append_ast_statement_expression(p, for_stmt, cond_expr, for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free_ast_expression_matrix(
+                for_init_decl_array_extent_exprs,
+                for_init_decl_array_ranks,
+                for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
             parser_ast_expression_free(step_expr);
@@ -633,6 +711,7 @@ static int parse_for_statement_with_local_control(Parser *p,
         }
         if (step_expr && !append_ast_statement_expression(p, for_stmt, step_expr, for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free(for_init_decl_array_ranks);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
             return 0;
@@ -644,11 +723,18 @@ static int parse_for_statement_with_local_control(Parser *p,
         for_stmt->declaration_is_const = for_init_decl_is_const;
         for_stmt->declaration_names = for_init_decl_names;
         for_stmt->declaration_name_count = for_init_decl_name_count;
+        for_stmt->declaration_array_ranks = for_init_decl_array_ranks;
+        for_stmt->declaration_array_extent_exprs = for_init_decl_array_extent_exprs;
         for_stmt->children[0] = body_stmt;
         for_stmt->child_count = 1;
         *out_statement = for_stmt;
     } else {
         free_name_array(for_init_decl_names, for_init_decl_name_count);
+        free_ast_expression_matrix(
+            for_init_decl_array_extent_exprs,
+            for_init_decl_array_ranks,
+            for_init_decl_name_count);
+        free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
     }
 
@@ -918,36 +1004,87 @@ static int parse_statement_with_local_control(Parser *p,
 
 static int parse_init_declarator(Parser *p,
     const Token **out_ident,
+    size_t *out_array_rank,
+    AstExpression ***out_array_extent_exprs,
     int *out_has_initializer,
-    size_t *out_initializer_start,
-    size_t *out_initializer_end) {
+    AstExpression **out_initializer_expr) {
+    AstExpression **array_extent_exprs = NULL;
+    size_t array_rank = 0u;
+    size_t array_extent_capacity = 0u;
+
+    if (out_array_rank) {
+        *out_array_rank = 0u;
+    }
+    if (out_array_extent_exprs) {
+        *out_array_extent_exprs = NULL;
+    }
     if (out_has_initializer) {
         *out_has_initializer = 0;
     }
-    if (out_initializer_start) {
-        *out_initializer_start = 0;
-    }
-    if (out_initializer_end) {
-        *out_initializer_end = 0;
+    if (out_initializer_expr) {
+        *out_initializer_expr = NULL;
     }
 
     if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", out_ident)) {
         return 0;
     }
+    while (match(p, TOKEN_LBRACKET)) {
+        size_t extent_start = p->current;
+        AstExpression *extent_expr = NULL;
+        if (!check(p, TOKEN_RBRACKET)) {
+            if (!parse_expression(p)) {
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                return 0;
+            }
+            if (!build_expression_ast_from_slice(p,
+                    extent_start,
+                    p->current,
+                    &extent_expr,
+                    out_ident ? *out_ident : NULL)) {
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                return 0;
+            }
+        }
+        if (!consume(p, TOKEN_RBRACKET, "']'")) {
+            parser_ast_expression_free(extent_expr);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            return 0;
+        }
+        if (!append_ast_expression_slot(p,
+                &array_extent_exprs,
+                &array_rank,
+                &array_extent_capacity,
+                extent_expr,
+                out_ident ? *out_ident : NULL)) {
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            return 0;
+        }
+    }
+    if (out_array_rank) {
+        *out_array_rank = array_rank;
+    }
+    if (out_array_extent_exprs) {
+        *out_array_extent_exprs = array_extent_exprs;
+    } else {
+        free_ast_expression_array(array_extent_exprs, array_rank);
+    }
     if (match(p, TOKEN_ASSIGN)) {
-        size_t init_start = p->current;
+        AstExpression *init_expr = NULL;
 
         if (out_has_initializer) {
             *out_has_initializer = 1;
         }
-        if (!parse_initializer_expression(p)) {
+        if (!parse_initializer_expression(p, &init_expr, out_ident ? *out_ident : NULL)) {
+            if (out_array_extent_exprs) {
+                *out_array_extent_exprs = NULL;
+            }
+            free_ast_expression_array(array_extent_exprs, array_rank);
             return 0;
         }
-        if (out_initializer_start) {
-            *out_initializer_start = init_start;
-        }
-        if (out_initializer_end) {
-            *out_initializer_end = p->current;
+        if (out_initializer_expr) {
+            *out_initializer_expr = init_expr;
+        } else {
+            parser_ast_expression_free(init_expr);
         }
     }
     return 1;
@@ -958,17 +1095,23 @@ static int parse_declaration(Parser *p,
     int *out_declaration_is_const,
     char ***out_decl_names,
     size_t *out_decl_name_count,
+    size_t **out_decl_array_ranks,
+    AstExpression ****out_decl_array_extent_exprs,
     AstExpression ***out_decl_initializer_exprs,
     size_t *out_decl_initializer_expr_count) {
     const Token *ident = NULL;
+    AstExpression **array_extent_exprs = NULL;
+    size_t array_rank = 0u;
     int declaration_is_const = 0;
     int has_initializer = 0;
-    size_t initializer_start = 0;
-    size_t initializer_end = 0;
     AstExpression *external_initializer_expr = NULL;
     char **decl_names = NULL;
     size_t decl_name_count = 0;
     size_t decl_name_capacity = 0;
+    size_t *decl_array_ranks = NULL;
+    size_t decl_array_rank_capacity = 0;
+    AstExpression ***decl_array_extent_exprs = NULL;
+    size_t decl_array_extent_capacity = 0;
     AstExpression **decl_initializer_exprs = NULL;
     size_t decl_initializer_expr_count = 0;
     size_t decl_initializer_expr_capacity = 0;
@@ -978,6 +1121,12 @@ static int parse_declaration(Parser *p,
     }
     if (out_decl_name_count) {
         *out_decl_name_count = 0;
+    }
+    if (out_decl_array_ranks) {
+        *out_decl_array_ranks = NULL;
+    }
+    if (out_decl_array_extent_exprs) {
+        *out_decl_array_extent_exprs = NULL;
     }
     if (out_declaration_is_const) {
         *out_declaration_is_const = 0;
@@ -997,45 +1146,31 @@ static int parse_declaration(Parser *p,
     }
     if (!parse_init_declarator(p,
         &ident,
+        &array_rank,
+        &array_extent_exprs,
         &has_initializer,
-        &initializer_start,
-        &initializer_end)) {
+        &external_initializer_expr)) {
         free_name_array(decl_names, decl_name_count);
-        free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
-        return 0;
-    }
-    if (top_level_program && has_initializer &&
-        !build_expression_ast_from_slice(p,
-            initializer_start,
-            initializer_end,
-            &external_initializer_expr,
-            ident)) {
-        free_name_array(decl_names, decl_name_count);
+        free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+        free(decl_array_ranks);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
     }
     if (out_decl_initializer_exprs) {
-        AstExpression *initializer_expr = NULL;
-        if (has_initializer &&
-            !build_expression_ast_from_slice(p,
-                initializer_start,
-                initializer_end,
-                &initializer_expr,
-                ident)) {
-            free_name_array(decl_names, decl_name_count);
-            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
-            return 0;
-        }
         if (!append_ast_expression_slot(p,
             &decl_initializer_exprs,
             &decl_initializer_expr_count,
             &decl_initializer_expr_capacity,
-            initializer_expr,
+            external_initializer_expr,
             ident)) {
             free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
+        external_initializer_expr = NULL;
     }
     if (out_decl_names) {
         char *name_copy = copy_token_identifier_lexeme(ident);
@@ -1046,67 +1181,89 @@ static int parse_declaration(Parser *p,
             name_copy,
             ident)) {
             free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
+        if (!append_size_t_array_item(p,
+                &decl_array_ranks,
+                decl_name_count - 1u,
+                &decl_array_rank_capacity,
+                array_rank,
+                ident)) {
+            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        if (!append_ast_expression_list_slot(p,
+                &decl_array_extent_exprs,
+                decl_name_count - 1u,
+                &decl_array_extent_capacity,
+                array_extent_exprs,
+                ident)) {
+            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        array_extent_exprs = NULL;
     }
     if (top_level_program && !parser_ast_program_add_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
         set_error(p, peek(p), "Out of memory while building AST");
         parser_ast_expression_free(external_initializer_expr);
         free_name_array(decl_names, decl_name_count);
+        free_ast_expression_array(array_extent_exprs, array_rank);
+        free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+        free(decl_array_ranks);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
     }
     if (top_level_program) {
+        top_level_program->externals[top_level_program->count - 1].declaration_array_rank = array_rank;
+        top_level_program->externals[top_level_program->count - 1].declaration_array_extent_exprs =
+            array_extent_exprs;
         top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
         top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
         top_level_program->externals[top_level_program->count - 1].declaration_initializer =
             external_initializer_expr;
         external_initializer_expr = NULL;
+        array_extent_exprs = NULL;
     }
 
     while (match(p, TOKEN_COMMA)) {
         if (!parse_init_declarator(p,
             &ident,
+            &array_rank,
+            &array_extent_exprs,
             &has_initializer,
-            &initializer_start,
-            &initializer_end)) {
+            &external_initializer_expr)) {
             free_name_array(decl_names, decl_name_count);
-            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
-            return 0;
-        }
-        if (top_level_program && has_initializer &&
-            !build_expression_ast_from_slice(p,
-                initializer_start,
-                initializer_end,
-                &external_initializer_expr,
-                ident)) {
-            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
         if (out_decl_initializer_exprs) {
-            AstExpression *initializer_expr = NULL;
-            if (has_initializer &&
-                !build_expression_ast_from_slice(p,
-                    initializer_start,
-                    initializer_end,
-                    &initializer_expr,
-                    ident)) {
-                free_name_array(decl_names, decl_name_count);
-                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
-                return 0;
-            }
             if (!append_ast_expression_slot(p,
                 &decl_initializer_exprs,
                 &decl_initializer_expr_count,
                 &decl_initializer_expr_capacity,
-                initializer_expr,
+                external_initializer_expr,
                 ident)) {
                 free_name_array(decl_names, decl_name_count);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
             }
+            external_initializer_expr = NULL;
         }
         if (out_decl_names) {
             char *name_copy = copy_token_identifier_lexeme(ident);
@@ -1117,29 +1274,68 @@ static int parse_declaration(Parser *p,
                 name_copy,
                 ident)) {
                 free_name_array(decl_names, decl_name_count);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
             }
+            if (!append_size_t_array_item(p,
+                    &decl_array_ranks,
+                    decl_name_count - 1u,
+                    &decl_array_rank_capacity,
+                    array_rank,
+                    ident)) {
+                free_name_array(decl_names, decl_name_count);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
+                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+                return 0;
+            }
+            if (!append_ast_expression_list_slot(p,
+                    &decl_array_extent_exprs,
+                    decl_name_count - 1u,
+                    &decl_array_extent_capacity,
+                    array_extent_exprs,
+                    ident)) {
+                free_name_array(decl_names, decl_name_count);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
+                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+                return 0;
+            }
+            array_extent_exprs = NULL;
         }
         if (top_level_program &&
             !parser_ast_program_add_external(top_level_program, AST_EXTERNAL_DECLARATION, ident)) {
             set_error(p, peek(p), "Out of memory while building AST");
             parser_ast_expression_free(external_initializer_expr);
             free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
         if (top_level_program) {
+            top_level_program->externals[top_level_program->count - 1].declaration_array_rank = array_rank;
+            top_level_program->externals[top_level_program->count - 1].declaration_array_extent_exprs =
+                array_extent_exprs;
             top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
             top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
             top_level_program->externals[top_level_program->count - 1].declaration_initializer =
                 external_initializer_expr;
             external_initializer_expr = NULL;
+            array_extent_exprs = NULL;
         }
     }
 
     if (!consume(p, TOKEN_SEMICOLON, "';'")) {
         free_name_array(decl_names, decl_name_count);
+        free_ast_expression_array(array_extent_exprs, array_rank);
+        free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+        free(decl_array_ranks);
         free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
         return 0;
     }
@@ -1151,6 +1347,16 @@ static int parse_declaration(Parser *p,
         }
     } else {
         free_name_array(decl_names, decl_name_count);
+    }
+    if (out_decl_array_extent_exprs) {
+        *out_decl_array_extent_exprs = decl_array_extent_exprs;
+    } else {
+        free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+    }
+    if (out_decl_array_ranks) {
+        *out_decl_array_ranks = decl_array_ranks;
+    } else {
+        free(decl_array_ranks);
     }
 
     if (out_decl_initializer_exprs) {
@@ -1172,14 +1378,21 @@ static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
+    size_t **out_parameter_array_ranks,
+    AstExpression ****out_parameter_array_extent_exprs,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns) {
     size_t count = 0;
     size_t name_capacity = 0;
+    size_t array_rank_capacity = 0;
+    size_t *parameter_array_ranks = NULL;
+    AstExpression ***parameter_array_extent_exprs = NULL;
+    size_t parameter_array_extent_capacity = 0;
     int *parameter_is_const = NULL;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_array_ranks != NULL) ||
         (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
@@ -1196,6 +1409,12 @@ static int parse_parameter_list(Parser *p,
     if (out_parameter_names) {
         *out_parameter_names = NULL;
     }
+    if (out_parameter_array_ranks) {
+        *out_parameter_array_ranks = NULL;
+    }
+    if (out_parameter_array_extent_exprs) {
+        *out_parameter_array_extent_exprs = NULL;
+    }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
     }
@@ -1209,6 +1428,12 @@ static int parse_parameter_list(Parser *p,
     if (check(p, TOKEN_RPAREN)) {
         if (out_parameter_names) {
             *out_parameter_names = parameter_names;
+        }
+        if (out_parameter_array_ranks) {
+            *out_parameter_array_ranks = parameter_array_ranks;
+        }
+        if (out_parameter_array_extent_exprs) {
+            *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
         }
         if (out_parameter_is_const) {
             *out_parameter_is_const = parameter_is_const;
@@ -1227,6 +1452,9 @@ static int parse_parameter_list(Parser *p,
         int parameter_is_const_flag = 0;
         int parameter_line = 0;
         int parameter_column = 0;
+        AstExpression **parameter_extent_exprs = NULL;
+        size_t parameter_extent_capacity = 0u;
+        size_t parameter_array_rank = 0u;
 
         if (match(p, TOKEN_KW_CONST)) {
             parameter_is_const_flag = 1;
@@ -1248,6 +1476,63 @@ static int parse_parameter_list(Parser *p,
                 *out_has_unnamed_parameter = 1;
             }
         }
+        while (match(p, TOKEN_LBRACKET)) {
+            size_t extent_start = p->current;
+            AstExpression *extent_expr = NULL;
+
+            if (!check(p, TOKEN_RBRACKET)) {
+                if (!parse_expression(p)) {
+                    free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    return 0;
+                }
+                if (!build_expression_ast_from_slice(p,
+                        extent_start,
+                        p->current,
+                        &extent_expr,
+                        parameter_name_tok ? parameter_name_tok : peek(p))) {
+                    free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    return 0;
+                }
+            }
+            if (!consume(p, TOKEN_RBRACKET, "']'")) {
+                free_name_array(parameter_names, count);
+                parser_ast_expression_free(extent_expr);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                free(parameter_array_ranks);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                return 0;
+            }
+            if (!append_ast_expression_slot(p,
+                    &parameter_extent_exprs,
+                    &parameter_array_rank,
+                    &parameter_extent_capacity,
+                    extent_expr,
+                    parameter_name_tok ? parameter_name_tok : peek(p))) {
+                free_name_array(parameter_names, count);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                free(parameter_array_ranks);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                return 0;
+            }
+        }
 
         if (capture_parameter_metadata) {
             char *parameter_name_copy = NULL;
@@ -1258,6 +1543,8 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok,
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
@@ -1271,11 +1558,44 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_copy,
                 parameter_name_tok)) {
                 free_name_array(parameter_names, count);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
                 return 0;
             }
+            if (!append_size_t_array_item(p,
+                    &parameter_array_ranks,
+                    count - 1u,
+                    &array_rank_capacity,
+                    parameter_array_rank,
+                    parameter_name_tok)) {
+                free_name_array(parameter_names, count);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                free(parameter_array_ranks);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                return 0;
+            }
+            if (!append_ast_expression_list_slot(p,
+                    &parameter_array_extent_exprs,
+                    count - 1u,
+                    &parameter_array_extent_capacity,
+                    parameter_extent_exprs,
+                    parameter_name_tok ? parameter_name_tok : peek(p))) {
+                free_name_array(parameter_names, count);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free(parameter_array_ranks);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                return 0;
+            }
+            parameter_extent_exprs = NULL;
             if (out_parameter_is_const) {
                 int *new_parameter_is_const;
 
@@ -1289,6 +1609,8 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
@@ -1310,6 +1632,8 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
@@ -1332,6 +1656,8 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
@@ -1347,6 +1673,7 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_columns[count - 1] = 0;
             }
         } else {
+            free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
             count++;
         }
     } while (match(p, TOKEN_COMMA));
@@ -1359,6 +1686,16 @@ static int parse_parameter_list(Parser *p,
         *out_parameter_names = parameter_names;
     } else {
         free_name_array(parameter_names, count);
+    }
+    if (out_parameter_array_ranks) {
+        *out_parameter_array_ranks = parameter_array_ranks;
+    } else {
+        free(parameter_array_ranks);
+    }
+    if (out_parameter_array_extent_exprs) {
+        *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
+    } else {
+        free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
@@ -1388,6 +1725,8 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
+    signature->parameter_array_ranks = NULL;
+    signature->parameter_array_extent_exprs = NULL;
     signature->parameter_is_const = NULL;
     signature->parameter_name_lines = NULL;
     signature->parameter_name_columns = NULL;
@@ -1400,6 +1739,10 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
     }
 
     free_name_array(signature->parameter_names, signature->parameter_count);
+    free_ast_expression_matrix(signature->parameter_array_extent_exprs,
+        signature->parameter_array_ranks,
+        signature->parameter_count);
+    free(signature->parameter_array_ranks);
     free(signature->parameter_is_const);
     free(signature->parameter_name_lines);
     free(signature->parameter_name_columns);
@@ -1407,10 +1750,14 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
 }
 
 static void parser_commit_parameter_names(char ***out_parameter_names,
+    size_t **out_parameter_array_ranks,
+    AstExpression ****out_parameter_array_extent_exprs,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
     char **parameter_names,
+    size_t *parameter_array_ranks,
+    AstExpression ***parameter_array_extent_exprs,
     int *parameter_is_const,
     int *parameter_name_lines,
     int *parameter_name_columns,
@@ -1419,6 +1766,16 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
         *out_parameter_names = parameter_names;
     } else {
         free_name_array(parameter_names, parameter_count);
+    }
+    if (out_parameter_array_ranks) {
+        *out_parameter_array_ranks = parameter_array_ranks;
+    } else {
+        free(parameter_array_ranks);
+    }
+    if (out_parameter_array_extent_exprs) {
+        *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
+    } else {
+        free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, parameter_count);
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
@@ -1461,6 +1818,8 @@ static int parse_function_external_signature(Parser *p,
         &out_signature->parameter_count,
         &out_signature->has_unnamed_parameter,
         capture_parameter_names ? &out_signature->parameter_names : NULL,
+        capture_parameter_names ? &out_signature->parameter_array_ranks : NULL,
+        capture_parameter_names ? &out_signature->parameter_array_extent_exprs : NULL,
         capture_parameter_names ? &out_signature->parameter_is_const : NULL,
         capture_parameter_names ? &out_signature->parameter_name_lines : NULL,
         capture_parameter_names ? &out_signature->parameter_name_columns : NULL)) {
@@ -1514,6 +1873,8 @@ static int parse_function_external(Parser *p,
     AstFunctionReturnType *out_return_type,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    size_t **out_parameter_array_ranks,
+    AstExpression ****out_parameter_array_extent_exprs,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
@@ -1523,6 +1884,7 @@ static int parse_function_external(Parser *p,
     ParsedFunctionSignature signature;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_array_ranks != NULL) ||
         (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
@@ -1539,6 +1901,12 @@ static int parse_function_external(Parser *p,
     }
     if (out_parameter_names) {
         *out_parameter_names = NULL;
+    }
+    if (out_parameter_array_ranks) {
+        *out_parameter_array_ranks = NULL;
+    }
+    if (out_parameter_array_extent_exprs) {
+        *out_parameter_array_extent_exprs = NULL;
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
@@ -1577,15 +1945,21 @@ static int parse_function_external(Parser *p,
 
     if (match(p, TOKEN_SEMICOLON)) {
         parser_commit_parameter_names(out_parameter_names,
+            out_parameter_array_ranks,
+            out_parameter_array_extent_exprs,
             out_parameter_is_const,
             out_parameter_name_lines,
             out_parameter_name_columns,
             signature.parameter_names,
+            signature.parameter_array_ranks,
+            signature.parameter_array_extent_exprs,
             signature.parameter_is_const,
             signature.parameter_name_lines,
             signature.parameter_name_columns,
             signature.parameter_count);
         signature.parameter_names = NULL;
+        signature.parameter_array_ranks = NULL;
+        signature.parameter_array_extent_exprs = NULL;
         signature.parameter_is_const = NULL;
         signature.parameter_name_lines = NULL;
         signature.parameter_name_columns = NULL;
@@ -1605,15 +1979,21 @@ static int parse_function_external(Parser *p,
             out_return_statement_count);
         if (body_ok) {
             parser_commit_parameter_names(out_parameter_names,
+                out_parameter_array_ranks,
+                out_parameter_array_extent_exprs,
                 out_parameter_is_const,
                 out_parameter_name_lines,
                 out_parameter_name_columns,
                 signature.parameter_names,
+                signature.parameter_array_ranks,
+                signature.parameter_array_extent_exprs,
                 signature.parameter_is_const,
                 signature.parameter_name_lines,
                 signature.parameter_name_columns,
                 signature.parameter_count);
             signature.parameter_names = NULL;
+            signature.parameter_array_ranks = NULL;
+            signature.parameter_array_extent_exprs = NULL;
             signature.parameter_is_const = NULL;
             signature.parameter_name_lines = NULL;
             signature.parameter_name_columns = NULL;
@@ -1678,6 +2058,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     AstFunctionReturnType external_return_type = AST_FUNCTION_RETURN_INT;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
+    size_t *external_parameter_array_ranks = NULL;
+    AstExpression ***external_parameter_array_extent_exprs = NULL;
     int *external_parameter_is_const = NULL;
     int *external_parameter_name_lines = NULL;
     int *external_parameter_name_columns = NULL;
@@ -1690,6 +2072,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_return_type : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
+        out_program ? &external_parameter_array_ranks : NULL,
+        out_program ? &external_parameter_array_extent_exprs : NULL,
         out_program ? &external_parameter_is_const : NULL,
         out_program ? &external_parameter_name_lines : NULL,
         out_program ? &external_parameter_name_columns : NULL,
@@ -1697,7 +2081,7 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
         out_program ? &external_function_body : NULL,
         out_program ? &external_return_statement_count : NULL)) {
         p->current = start;
-        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL, NULL);
+        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     }
 
     if (!out_program) {
@@ -1706,6 +2090,8 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     if (!parser_ast_program_add_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
         free_name_array(external_parameter_names, external_parameter_count);
+        free(external_parameter_array_ranks);
+        free(external_parameter_array_extent_exprs);
         free(external_parameter_is_const);
         free(external_parameter_name_lines);
         free(external_parameter_name_columns);
@@ -1717,6 +2103,9 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
     out_program->externals[out_program->count - 1].function_return_type = external_return_type;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
+    out_program->externals[out_program->count - 1].parameter_array_ranks = external_parameter_array_ranks;
+    out_program->externals[out_program->count - 1].parameter_array_extent_exprs =
+        external_parameter_array_extent_exprs;
     out_program->externals[out_program->count - 1].parameter_is_const = external_parameter_is_const;
     out_program->externals[out_program->count - 1].parameter_name_lines =
         external_parameter_name_lines;

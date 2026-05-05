@@ -37,9 +37,11 @@ static unsigned char machine_bytes_encode_compare_flags(
     unsigned char branch_on_true);
 static size_t machine_bytes_op_encoded_size_for_profile(
     MachineBytesTargetProfile profile,
+    const MachineBytesFunction *function,
     const MachineEmitOp *op);
 static size_t machine_bytes_terminator_encoded_size_for_profile(
     MachineBytesTargetProfile profile,
+    const MachineBytesFunction *function,
     const MachineEmitTerminator *terminator);
 static int machine_bytes_write_block_bytes_for_profile(
     MachineBytesTargetProfile profile,
@@ -134,30 +136,43 @@ static uint32_t machine_bytes_riscv_result_scratch_register(void);
 static uint32_t machine_bytes_riscv_effective_operand_register(
     const MachineEmitOperand *operand,
     uint32_t scratch_reg);
-static size_t machine_bytes_riscv_prepare_operand_size(const MachineEmitOperand *operand);
+static size_t machine_bytes_riscv_prepare_operand_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOperand *operand);
 static size_t machine_bytes_riscv_emit_prepare_operand(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *operand,
     uint32_t scratch_reg);
-static size_t machine_bytes_riscv_move_operand_to_register_size(const MachineEmitOperand *operand);
+static size_t machine_bytes_riscv_move_operand_to_register_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOperand *operand);
 static size_t machine_bytes_riscv_emit_move_operand_to_register(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *operand,
     uint32_t target_reg);
 static uint32_t machine_bytes_riscv_result_register(const MachineEmitOperand *result);
 static size_t machine_bytes_riscv_emit_writeback_result(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *result,
     uint32_t produced_reg);
 static size_t machine_bytes_riscv_writeback_result_size(
+    const MachineBytesFunction *function,
     const MachineEmitOperand *result,
     uint32_t produced_reg);
-static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op);
-static size_t machine_bytes_riscv_call_result_size(const MachineEmitOp *op);
+static size_t machine_bytes_riscv_call_setup_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op);
+static size_t machine_bytes_riscv_call_result_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op);
 static size_t machine_bytes_riscv_call_patch_offset(
+    const MachineBytesFunction *function,
     size_t owner_byte_offset,
     const MachineEmitOp *op);
 static uint32_t machine_bytes_riscv_scratch_register(void);
@@ -166,12 +181,17 @@ static uint32_t machine_bytes_riscv_map_register_id(size_t machine_register_id);
 static uint32_t machine_bytes_riscv_map_operand_register(const MachineEmitOperand *operand);
 static uint32_t machine_bytes_riscv_slot_base_register(const MachineEmitSlotRef *slot);
 static long long machine_bytes_riscv_slot_offset(const MachineEmitSlotRef *slot);
-static long long machine_bytes_riscv_spill_slot_offset(size_t spill_slot);
+static long long machine_bytes_riscv_spill_slot_offset(
+    const MachineBytesFunction *function,
+    size_t spill_slot);
 static int machine_bytes_riscv_can_encode_alu_imm_word(const MachineEmitOp *op);
 static int machine_bytes_riscv_can_encode_compare_branch_imm_word(const MachineEmitTerminator *terminator);
 static size_t machine_bytes_riscv_cmp_core_size(MachineIrBinaryOp op);
-static size_t machine_bytes_riscv_cmp_result_size(const MachineEmitOp *op);
+static size_t machine_bytes_riscv_cmp_result_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op);
 static size_t machine_bytes_riscv_emit_cmp_result(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOp *op);
@@ -228,6 +248,7 @@ static int machine_bytes_reference_patch_for_control(
 static int machine_bytes_reference_patch_for_global_access(
     MachineBytesTargetProfile profile,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     size_t owner_byte_offset,
     size_t owner_byte_count,
     size_t *out_patch_byte_offset,
@@ -254,6 +275,7 @@ static int machine_bytes_report_append_call_reference(
     size_t owner_byte_offset,
     size_t owner_byte_count,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     const MachineBytesProgram *program,
     const size_t *function_byte_offsets);
 static int machine_bytes_report_append_control_reference(
@@ -283,6 +305,7 @@ static int machine_bytes_report_append_global_data_reference(
     size_t owner_byte_offset,
     size_t owner_byte_count,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     const MachineBytesProgram *program);
 static int machine_bytes_report_populate_function_references(
     const MachineBytesReport *report,
@@ -520,6 +543,7 @@ static unsigned char machine_bytes_encode_compare_flags(
 
 static size_t machine_bytes_op_encoded_size_for_profile(
     MachineBytesTargetProfile profile,
+    const MachineBytesFunction *function,
     const MachineEmitOp *op) {
     const MachineEmitOperand *imm_operand = NULL;
 
@@ -530,67 +554,99 @@ static size_t machine_bytes_op_encoded_size_for_profile(
         switch (op->kind) {
             case MACHINE_SELECT_OP_COPY:
                 if (op->result.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                    return machine_bytes_riscv_move_operand_to_register_size(&op->as.copy_value) +
+                    return machine_bytes_riscv_move_operand_to_register_size(function, &op->as.copy_value) +
                         machine_bytes_riscv_writeback_result_size(
+                            function,
                             &op->result,
                             machine_bytes_riscv_result_scratch_register());
                 }
-                return machine_bytes_riscv_move_operand_to_register_size(&op->as.copy_value);
+                return machine_bytes_riscv_move_operand_to_register_size(function, &op->as.copy_value);
             case MACHINE_SELECT_OP_MATERIALIZE_IMM:
                 return machine_bytes_riscv_materialize_size(op->as.copy_value.immediate) +
                     machine_bytes_riscv_writeback_result_size(
+                        function,
+                        &op->result,
+                        machine_bytes_riscv_result_register(&op->result));
+            case MACHINE_SELECT_OP_ADDR_LOCAL:
+                return machine_bytes_riscv_materialize_size(
+                        machine_bytes_riscv_slot_offset(&op->as.addr_slot)) +
+                    4u +
+                    machine_bytes_riscv_writeback_result_size(
+                        function,
+                        &op->result,
+                        machine_bytes_riscv_result_register(&op->result));
+            case MACHINE_SELECT_OP_ADDR_GLOBAL:
+                return 8u +
+                    machine_bytes_riscv_writeback_result_size(
+                        function,
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_LOAD_LOCAL:
                 return machine_bytes_riscv_load_from_base_size(
                         machine_bytes_riscv_slot_offset(&op->as.load_slot)) +
                     machine_bytes_riscv_writeback_result_size(
+                        function,
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_LOAD_GLOBAL:
                 return 8u + machine_bytes_riscv_writeback_result_size(
+                        function,
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_STORE_LOCAL:
-                return machine_bytes_riscv_prepare_operand_size(&op->as.store.value) +
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value) +
                     machine_bytes_riscv_store_to_base_size(
                         machine_bytes_riscv_slot_offset(&op->as.store.slot));
             case MACHINE_SELECT_OP_STORE_GLOBAL:
-                return machine_bytes_riscv_prepare_operand_size(&op->as.store.value) + 8u;
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value) + 8u;
             case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
                 return machine_bytes_riscv_materialize_size(op->as.store.value.immediate) +
                     machine_bytes_riscv_store_to_base_size(
                         machine_bytes_riscv_slot_offset(&op->as.store.slot));
             case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
                 return machine_bytes_riscv_materialize_size(op->as.store.value.immediate) + 8u;
+            case MACHINE_SELECT_OP_LOAD_INDIRECT:
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.load_indirect_addr) +
+                    4u +
+                    machine_bytes_riscv_writeback_result_size(
+                        function,
+                        &op->result,
+                        machine_bytes_riscv_result_register(&op->result));
+            case MACHINE_SELECT_OP_STORE_INDIRECT:
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.store_indirect.addr) +
+                    machine_bytes_riscv_prepare_operand_size(function, &op->as.store_indirect.value) +
+                    4u;
             case MACHINE_SELECT_OP_CALL:
             case MACHINE_SELECT_OP_CALL_IMM:
             case MACHINE_SELECT_OP_CALL_SPILL:
             case MACHINE_SELECT_OP_CALL_IMM_SPILL:
             case MACHINE_SELECT_OP_CALL_VOID:
             case MACHINE_SELECT_OP_CALL_VOID_IMM:
-                return machine_bytes_riscv_call_setup_size(op) + 4u + machine_bytes_riscv_call_result_size(op);
+                return machine_bytes_riscv_call_setup_size(function, op) + 4u +
+                    machine_bytes_riscv_call_result_size(function, op);
             case MACHINE_SELECT_OP_ALU_IMM:
                 imm_operand = op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE
                     ? &op->as.binary.lhs
                     : &op->as.binary.rhs;
-                return machine_bytes_riscv_prepare_operand_size(&op->as.binary.lhs) +
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.lhs) +
                     (machine_bytes_riscv_can_encode_alu_imm_word(op)
                         ? 4u
                         : machine_bytes_riscv_materialize_size(imm_operand->immediate) + 4u) +
                     machine_bytes_riscv_writeback_result_size(
+                        function,
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_ALU:
-                return machine_bytes_riscv_prepare_operand_size(&op->as.binary.lhs) +
-                    machine_bytes_riscv_prepare_operand_size(&op->as.binary.rhs) +
+                return machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.lhs) +
+                    machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.rhs) +
                     4u +
                     machine_bytes_riscv_writeback_result_size(
+                        function,
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_CMP:
             case MACHINE_SELECT_OP_CMP_IMM:
-                return machine_bytes_riscv_cmp_result_size(op);
+                return machine_bytes_riscv_cmp_result_size(function, op);
             default:
                 return 4u;
         }
@@ -616,6 +672,7 @@ static size_t machine_bytes_op_encoded_size_for_profile(
 
 static size_t machine_bytes_terminator_encoded_size_for_profile(
     MachineBytesTargetProfile profile,
+    const MachineBytesFunction *function,
     const MachineEmitTerminator *terminator) {
     const MachineEmitOperand *imm_operand = NULL;
 
@@ -638,22 +695,22 @@ static size_t machine_bytes_terminator_encoded_size_for_profile(
                 return machine_bytes_riscv_materialize_size(terminator->as.return_value.immediate) + 4u;
             case MACHINE_LAYOUT_TERM_RETURN_SPILL:
                 return machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(terminator->as.return_value.spill_slot)) + 4u;
+                    machine_bytes_riscv_spill_slot_offset(function, terminator->as.return_value.spill_slot)) + 4u;
             case MACHINE_LAYOUT_TERM_BRANCH:
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.branch.condition) + 8u;
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.branch.condition) + 8u;
             case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.branch_fallthrough.condition) + 4u;
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.branch_fallthrough.condition) + 4u;
             case MACHINE_LAYOUT_TERM_COMPARE_BRANCH:
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch.lhs) +
-                    machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch.rhs) + 8u;
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch.lhs) +
+                    machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch.rhs) + 8u;
             case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch_fallthrough.lhs) +
-                    machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch_fallthrough.rhs) + 4u;
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch_fallthrough.lhs) +
+                    machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch_fallthrough.rhs) + 4u;
             case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM:
                 imm_operand = terminator->as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE
                     ? &terminator->as.compare_branch.lhs
                     : &terminator->as.compare_branch.rhs;
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch.lhs) +
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch.lhs) +
                     (machine_bytes_riscv_can_encode_compare_branch_imm_word(terminator)
                         ? 8u
                         : machine_bytes_riscv_materialize_size(imm_operand->immediate) + 8u);
@@ -661,7 +718,7 @@ static size_t machine_bytes_terminator_encoded_size_for_profile(
                 imm_operand = terminator->as.compare_branch_fallthrough.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE
                     ? &terminator->as.compare_branch_fallthrough.lhs
                     : &terminator->as.compare_branch_fallthrough.rhs;
-                return machine_bytes_riscv_prepare_operand_size(&terminator->as.compare_branch_fallthrough.lhs) +
+                return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.compare_branch_fallthrough.lhs) +
                     (machine_bytes_riscv_can_encode_compare_branch_imm_word(terminator)
                         ? 4u
                         : machine_bytes_riscv_materialize_size(imm_operand->immediate) + 4u);
@@ -838,6 +895,7 @@ static size_t machine_bytes_align_up(size_t value, size_t alignment) {
 }
 
 static size_t machine_bytes_riscv_emit_register_call_args(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOp *op,
@@ -917,7 +975,7 @@ static size_t machine_bytes_riscv_emit_register_call_args(
                     bytes,
                     offset,
                     target_reg,
-                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
+                    machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes,
                     machine_bytes_riscv_scratch_register());
             } else {
                 uint32_t source_reg = source_regs[ready_index];
@@ -954,6 +1012,7 @@ static size_t machine_bytes_riscv_emit_register_call_args(
 }
 
 static size_t machine_bytes_riscv_register_call_args_size(
+    const MachineBytesFunction *function,
     const MachineEmitOp *op,
     size_t stack_arg_bytes) {
     size_t arg_index;
@@ -1028,7 +1087,7 @@ static size_t machine_bytes_riscv_register_call_args_size(
                 size += machine_bytes_riscv_materialize_size(arg->immediate);
             } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                 size += machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
+                    machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes);
             } else {
                 uint32_t source_reg = source_regs[ready_index];
 
@@ -1215,7 +1274,9 @@ static uint32_t machine_bytes_riscv_effective_operand_register(
     }
 }
 
-static size_t machine_bytes_riscv_prepare_operand_size(const MachineEmitOperand *operand) {
+static size_t machine_bytes_riscv_prepare_operand_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOperand *operand) {
     if (!operand) {
         return 0u;
     }
@@ -1224,7 +1285,7 @@ static size_t machine_bytes_riscv_prepare_operand_size(const MachineEmitOperand 
             return machine_bytes_riscv_materialize_size(operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(operand->spill_slot));
+                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot));
         case MACHINE_SELECT_OPERAND_REGISTER:
         case MACHINE_SELECT_OPERAND_NONE:
         default:
@@ -1233,6 +1294,7 @@ static size_t machine_bytes_riscv_prepare_operand_size(const MachineEmitOperand 
 }
 
 static size_t machine_bytes_riscv_emit_prepare_operand(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *operand,
@@ -1249,7 +1311,7 @@ static size_t machine_bytes_riscv_emit_prepare_operand(
                 bytes,
                 offset,
                 scratch_reg,
-                machine_bytes_riscv_spill_slot_offset(operand->spill_slot),
+                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot),
                 machine_bytes_riscv_scratch_register());
         case MACHINE_SELECT_OPERAND_REGISTER:
         case MACHINE_SELECT_OPERAND_NONE:
@@ -1258,7 +1320,9 @@ static size_t machine_bytes_riscv_emit_prepare_operand(
     }
 }
 
-static size_t machine_bytes_riscv_move_operand_to_register_size(const MachineEmitOperand *operand) {
+static size_t machine_bytes_riscv_move_operand_to_register_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOperand *operand) {
     if (!operand) {
         return 0u;
     }
@@ -1267,7 +1331,7 @@ static size_t machine_bytes_riscv_move_operand_to_register_size(const MachineEmi
             return machine_bytes_riscv_materialize_size(operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(operand->spill_slot));
+                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot));
         case MACHINE_SELECT_OPERAND_REGISTER:
             return 4u;
         case MACHINE_SELECT_OPERAND_NONE:
@@ -1277,6 +1341,7 @@ static size_t machine_bytes_riscv_move_operand_to_register_size(const MachineEmi
 }
 
 static size_t machine_bytes_riscv_emit_move_operand_to_register(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *operand,
@@ -1293,7 +1358,7 @@ static size_t machine_bytes_riscv_emit_move_operand_to_register(
                 bytes,
                 offset,
                 target_reg,
-                machine_bytes_riscv_spill_slot_offset(operand->spill_slot),
+                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot),
                 machine_bytes_riscv_scratch_register());
         case MACHINE_SELECT_OPERAND_REGISTER:
             return machine_bytes_riscv_emit_copy_register(
@@ -1321,6 +1386,7 @@ static uint32_t machine_bytes_riscv_result_register(const MachineEmitOperand *re
 }
 
 static size_t machine_bytes_riscv_emit_writeback_result(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOperand *result,
@@ -1333,7 +1399,7 @@ static size_t machine_bytes_riscv_emit_writeback_result(
             bytes,
             offset,
             produced_reg,
-            machine_bytes_riscv_spill_slot_offset(result->spill_slot),
+            machine_bytes_riscv_spill_slot_offset(function, result->spill_slot),
             machine_bytes_riscv_scratch_register());
     }
     if (result->kind == MACHINE_SELECT_OPERAND_REGISTER) {
@@ -1348,6 +1414,7 @@ static size_t machine_bytes_riscv_emit_writeback_result(
 }
 
 static size_t machine_bytes_riscv_writeback_result_size(
+    const MachineBytesFunction *function,
     const MachineEmitOperand *result,
     uint32_t produced_reg) {
     if (!result) {
@@ -1355,7 +1422,7 @@ static size_t machine_bytes_riscv_writeback_result_size(
     }
     if (result->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
         return machine_bytes_riscv_store_to_stack_size(
-            machine_bytes_riscv_spill_slot_offset(result->spill_slot));
+            machine_bytes_riscv_spill_slot_offset(function, result->spill_slot));
     }
     if (result->kind == MACHINE_SELECT_OPERAND_REGISTER &&
         machine_bytes_riscv_map_register_id(result->machine_register_id) != produced_reg) {
@@ -1398,11 +1465,20 @@ static long long machine_bytes_riscv_slot_offset(const MachineEmitSlotRef *slot)
     return (long long)(slot->id * 4u);
 }
 
-static long long machine_bytes_riscv_spill_slot_offset(size_t spill_slot) {
-    return (long long)(spill_slot * 4u);
+static long long machine_bytes_riscv_spill_slot_offset(
+    const MachineBytesFunction *function,
+    size_t spill_slot) {
+    size_t spill_base = 0u;
+
+    if (function) {
+        spill_base = function->local_count;
+    }
+    return (long long)((spill_base + spill_slot) * 4u);
 }
 
-static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op) {
+static size_t machine_bytes_riscv_call_setup_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op) {
     size_t size = 0u;
     size_t arg_index;
     size_t stack_arg_bytes;
@@ -1414,7 +1490,7 @@ static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op) {
     if (stack_arg_bytes > 0u) {
         size += machine_bytes_riscv_adjust_sp_size(-(long long)stack_arg_bytes);
     }
-    size += machine_bytes_riscv_register_call_args_size(op, stack_arg_bytes);
+    size += machine_bytes_riscv_register_call_args_size(function, op, stack_arg_bytes);
     for (arg_index = 8u; arg_index < op->as.call.arg_count; ++arg_index) {
         const MachineEmitOperand *arg = &op->as.call.args[arg_index];
         long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
@@ -1424,7 +1500,7 @@ static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op) {
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
             size += machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes);
+                machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes);
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         } else {
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
@@ -1433,7 +1509,9 @@ static size_t machine_bytes_riscv_call_setup_size(const MachineEmitOp *op) {
     return size;
 }
 
-static size_t machine_bytes_riscv_call_result_size(const MachineEmitOp *op) {
+static size_t machine_bytes_riscv_call_result_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op) {
     size_t size = 0u;
     size_t stack_arg_bytes;
 
@@ -1452,15 +1530,16 @@ static size_t machine_bytes_riscv_call_result_size(const MachineEmitOp *op) {
     }
     if (op->result.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
         return size + machine_bytes_riscv_store_to_stack_size(
-            machine_bytes_riscv_spill_slot_offset(op->result.spill_slot));
+            machine_bytes_riscv_spill_slot_offset(function, op->result.spill_slot));
     }
     return size;
 }
 
 static size_t machine_bytes_riscv_call_patch_offset(
+    const MachineBytesFunction *function,
     size_t owner_byte_offset,
     const MachineEmitOp *op) {
-    return owner_byte_offset + machine_bytes_riscv_call_setup_size(op);
+    return owner_byte_offset + machine_bytes_riscv_call_setup_size(function, op);
 }
 
 static uint32_t machine_bytes_riscv_scratch_register(void) {
@@ -1535,7 +1614,9 @@ static size_t machine_bytes_riscv_cmp_core_size(MachineIrBinaryOp op) {
     }
 }
 
-static size_t machine_bytes_riscv_cmp_result_size(const MachineEmitOp *op) {
+static size_t machine_bytes_riscv_cmp_result_size(
+    const MachineBytesFunction *function,
+    const MachineEmitOp *op) {
     size_t size = 0u;
     uint32_t result_reg;
 
@@ -1545,10 +1626,10 @@ static size_t machine_bytes_riscv_cmp_result_size(const MachineEmitOp *op) {
     result_reg = machine_bytes_riscv_result_register(&op->result);
 
     if (op->kind == MACHINE_SELECT_OP_CMP) {
-        size += machine_bytes_riscv_prepare_operand_size(&op->as.binary.lhs);
-        size += machine_bytes_riscv_prepare_operand_size(&op->as.binary.rhs);
+        size += machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.lhs);
+        size += machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.rhs);
         return size + machine_bytes_riscv_cmp_core_size(op->as.binary.op) +
-            machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+            machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
     }
 
     if (op->kind == MACHINE_SELECT_OP_CMP_IMM) {
@@ -1556,50 +1637,51 @@ static size_t machine_bytes_riscv_cmp_result_size(const MachineEmitOp *op) {
             op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
             long long imm = op->as.binary.rhs.immediate;
 
-            size += machine_bytes_riscv_prepare_operand_size(&op->as.binary.lhs);
+            size += machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.lhs);
             switch (op->as.binary.op) {
                 case MACHINE_IR_BINARY_EQ:
                 case MACHINE_IR_BINARY_NE:
                     return size + (machine_bytes_riscv_is_signed_12_immediate(imm) ? 8u : machine_bytes_riscv_materialize_size(imm) + 8u) +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
                 case MACHINE_IR_BINARY_LT:
                     return size + (machine_bytes_riscv_is_signed_12_immediate(imm) ? 4u : machine_bytes_riscv_materialize_size(imm) + 4u) +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
                 case MACHINE_IR_BINARY_LE:
                     return size + ((imm < 2047ll && machine_bytes_riscv_is_signed_12_immediate(imm + 1ll))
                         ? 4u
                         : machine_bytes_riscv_materialize_size(imm) + 8u) +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
                 case MACHINE_IR_BINARY_GT:
                     return size + ((imm < 2047ll && machine_bytes_riscv_is_signed_12_immediate(imm + 1ll))
                         ? 8u
                         : machine_bytes_riscv_materialize_size(imm) + 4u) +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
                 case MACHINE_IR_BINARY_GE:
                     return size + (machine_bytes_riscv_is_signed_12_immediate(imm) ? 8u : machine_bytes_riscv_materialize_size(imm) + 8u) +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
                 default:
                     return size + machine_bytes_riscv_materialize_size(imm) + 4u +
-                        machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                        machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
             }
         }
 
         if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
             return machine_bytes_riscv_materialize_size(op->as.binary.lhs.immediate) +
-                machine_bytes_riscv_prepare_operand_size(&op->as.binary.rhs) +
+                machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.rhs) +
                 machine_bytes_riscv_cmp_core_size(op->as.binary.op) +
-                machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+                machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
         }
-        size += machine_bytes_riscv_prepare_operand_size(&op->as.binary.lhs);
+        size += machine_bytes_riscv_prepare_operand_size(function, &op->as.binary.lhs);
         return size + machine_bytes_riscv_materialize_size(op->as.binary.rhs.immediate) +
             machine_bytes_riscv_cmp_core_size(op->as.binary.op) +
-            machine_bytes_riscv_writeback_result_size(&op->result, result_reg);
+            machine_bytes_riscv_writeback_result_size(function, &op->result, result_reg);
     }
 
     return 4u;
 }
 
 static size_t machine_bytes_riscv_emit_cmp_result(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     const MachineEmitOp *op) {
@@ -1618,8 +1700,8 @@ static size_t machine_bytes_riscv_emit_cmp_result(
     if (op->kind == MACHINE_SELECT_OP_CMP) {
         rs1 = machine_bytes_riscv_effective_operand_register(&op->as.binary.lhs, lhs_scratch);
         rs2 = machine_bytes_riscv_effective_operand_register(&op->as.binary.rhs, rhs_scratch);
-        offset += machine_bytes_riscv_emit_prepare_operand(bytes, offset, &op->as.binary.lhs, rs1);
-        offset += machine_bytes_riscv_emit_prepare_operand(bytes, offset, &op->as.binary.rhs, rs2);
+        offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.lhs, rs1);
+        offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.rhs, rs2);
         switch (op->as.binary.op) {
             case MACHINE_IR_BINARY_LT:
             case MACHINE_IR_BINARY_GT:
@@ -1651,7 +1733,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                 offset += 4u;
                 break;
         }
-        offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+        offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
         return offset - start_offset;
     }
 
@@ -1663,7 +1745,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
         op->as.binary.rhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
         long long imm = op->as.binary.rhs.immediate;
         rs1 = machine_bytes_riscv_effective_operand_register(&op->as.binary.lhs, lhs_scratch);
-        offset += machine_bytes_riscv_emit_prepare_operand(bytes, offset, &op->as.binary.lhs, rs1);
+        offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.lhs, rs1);
 
         switch (op->as.binary.op) {
             case MACHINE_IR_BINARY_EQ:
@@ -1671,7 +1753,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x4u, rs1, imm));
                     machine_bytes_write_u32_le(bytes, offset + 4u, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x3u, rd, 1));
                     offset += 8u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1680,7 +1762,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x4u, rs1, imm));
                     machine_bytes_write_u32_le(bytes, offset + 4u, machine_bytes_riscv_encode_r_type(0x33u, rd, 0x3u, 0u, rd, 0x00u));
                     offset += 8u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1688,7 +1770,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                 if (machine_bytes_riscv_is_signed_12_immediate(imm)) {
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x2u, rs1, imm));
                     offset += 4u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1696,7 +1778,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                 if (imm < 2047ll && machine_bytes_riscv_is_signed_12_immediate(imm + 1ll)) {
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x2u, rs1, imm + 1ll));
                     offset += 4u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1705,7 +1787,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x2u, rs1, imm + 1ll));
                     machine_bytes_write_u32_le(bytes, offset + 4u, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x4u, rd, 1));
                     offset += 8u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1714,7 +1796,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
                     machine_bytes_write_u32_le(bytes, offset, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x2u, rs1, imm));
                     machine_bytes_write_u32_le(bytes, offset + 4u, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x4u, rd, 1));
                     offset += 8u;
-                    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+                    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
                     return offset - start_offset;
                 }
                 break;
@@ -1727,10 +1809,10 @@ static size_t machine_bytes_riscv_emit_cmp_result(
         rs1 = lhs_scratch;
         offset += machine_bytes_riscv_emit_materialize_immediate(bytes, offset, rs1, op->as.binary.lhs.immediate);
         rs2 = machine_bytes_riscv_effective_operand_register(&op->as.binary.rhs, rhs_scratch);
-        offset += machine_bytes_riscv_emit_prepare_operand(bytes, offset, &op->as.binary.rhs, rs2);
+        offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.rhs, rs2);
     } else {
         rs1 = machine_bytes_riscv_effective_operand_register(&op->as.binary.lhs, lhs_scratch);
-        offset += machine_bytes_riscv_emit_prepare_operand(bytes, offset, &op->as.binary.lhs, rs1);
+        offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.lhs, rs1);
         rs2 = rhs_scratch;
         offset += machine_bytes_riscv_emit_materialize_immediate(bytes, offset, rs2, op->as.binary.rhs.immediate);
     }
@@ -1748,7 +1830,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
         machine_bytes_write_u32_le(bytes, offset + 4u, machine_bytes_riscv_encode_i_type(0x13u, rd, 0x4u, rd, 1));
         offset += 8u;
     }
-    offset += machine_bytes_riscv_emit_writeback_result(bytes, offset, &op->result, rd);
+    offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
     return offset - start_offset;
 }
 
@@ -1952,24 +2034,27 @@ static int machine_bytes_write_block_bytes_for_profile(
         for (op_index = 0; op_index < dest_block->block.op_count; ++op_index) {
             const MachineEmitOp *op = &dest_block->block.ops[op_index];
 
-            if (byte_index + machine_bytes_op_encoded_size_for_profile(profile, op) > dest_block->byte_count) {
+            if (byte_index + machine_bytes_op_encoded_size_for_profile(profile, function, op) > dest_block->byte_count) {
                 return 0;
             }
             switch (op->kind) {
                 case MACHINE_SELECT_OP_COPY: {
                     if (op->result.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                         byte_index += machine_bytes_riscv_emit_move_operand_to_register(
+                            function,
                             dest_block->bytes,
                             byte_index,
                             &op->as.copy_value,
                             machine_bytes_riscv_result_scratch_register());
                         byte_index += machine_bytes_riscv_emit_writeback_result(
+                            function,
                             dest_block->bytes,
                             byte_index,
                             &op->result,
                             machine_bytes_riscv_result_scratch_register());
                     } else {
                         byte_index += machine_bytes_riscv_emit_move_operand_to_register(
+                            function,
                             dest_block->bytes,
                             byte_index,
                             &op->as.copy_value,
@@ -1986,7 +2071,39 @@ static int machine_bytes_write_block_bytes_for_profile(
                         result_reg,
                         op->as.copy_value.immediate);
                     byte_index += machine_bytes_riscv_emit_writeback_result(
-                        dest_block->bytes, byte_index, &op->result, result_reg);
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
+                    break;
+                }
+                case MACHINE_SELECT_OP_ADDR_LOCAL: {
+                    uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
+                    long long slot_offset = machine_bytes_riscv_slot_offset(&op->as.addr_slot);
+
+                    byte_index += machine_bytes_riscv_emit_materialize_immediate(
+                        dest_block->bytes, byte_index, result_reg, slot_offset);
+                    machine_bytes_write_u32_le(
+                        dest_block->bytes,
+                        byte_index,
+                        machine_bytes_riscv_encode_r_type(0x33u, result_reg, 0x0u, 2u, result_reg, 0x00u));
+                    byte_index += 4u;
+                    byte_index += machine_bytes_riscv_emit_writeback_result(
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
+                    break;
+                }
+                case MACHINE_SELECT_OP_ADDR_GLOBAL: {
+                    uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
+
+                    machine_bytes_write_u32_le(
+                        dest_block->bytes,
+                        byte_index,
+                        machine_bytes_riscv_encode_u_type(0x37u, result_reg, 0));
+                    byte_index += 4u;
+                    machine_bytes_write_u32_le(
+                        dest_block->bytes,
+                        byte_index,
+                        machine_bytes_riscv_encode_i_type(0x13u, result_reg, 0x0u, result_reg, 0));
+                    byte_index += 4u;
+                    byte_index += machine_bytes_riscv_emit_writeback_result(
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
                     break;
                 }
                 case MACHINE_SELECT_OP_ALU: {
@@ -1998,10 +2115,10 @@ static int machine_bytes_write_block_bytes_for_profile(
                         machine_bytes_riscv_secondary_scratch_register());
                     uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
 
-                    byte_index += machine_bytes_riscv_emit_prepare_operand(
-                        dest_block->bytes, byte_index, &op->as.binary.lhs, lhs_reg);
-                    byte_index += machine_bytes_riscv_emit_prepare_operand(
-                        dest_block->bytes, byte_index, &op->as.binary.rhs, rhs_reg);
+                        byte_index += machine_bytes_riscv_emit_prepare_operand(
+                            function, dest_block->bytes, byte_index, &op->as.binary.lhs, lhs_reg);
+                        byte_index += machine_bytes_riscv_emit_prepare_operand(
+                            function, dest_block->bytes, byte_index, &op->as.binary.rhs, rhs_reg);
                     machine_bytes_write_u32_le(
                         dest_block->bytes,
                         byte_index,
@@ -2012,7 +2129,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                             rhs_reg));
                     byte_index += 4u;
                     byte_index += machine_bytes_riscv_emit_writeback_result(
-                        dest_block->bytes, byte_index, &op->result, result_reg);
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
                     break;
                 }
                 case MACHINE_SELECT_OP_ALU_IMM:
@@ -2023,7 +2140,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                             machine_bytes_riscv_scratch_register());
 
                         byte_index += machine_bytes_riscv_emit_prepare_operand(
-                            dest_block->bytes, byte_index, &op->as.binary.lhs, lhs_reg);
+                            function, dest_block->bytes, byte_index, &op->as.binary.lhs, lhs_reg);
                         switch (op->as.binary.op) {
                             case MACHINE_IR_BINARY_ADD:
                                 machine_bytes_write_u32_le(
@@ -2083,7 +2200,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                         }
                         byte_index += 4u;
                         byte_index += machine_bytes_riscv_emit_writeback_result(
-                            dest_block->bytes, byte_index, &op->result, result_reg);
+                            function, dest_block->bytes, byte_index, &op->result, result_reg);
                     } else {
                         uint32_t rd = machine_bytes_riscv_result_register(&op->result);
                         uint32_t rs1;
@@ -2098,13 +2215,13 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 &op->as.binary.rhs,
                                 scratch);
                             byte_index += machine_bytes_riscv_emit_prepare_operand(
-                                dest_block->bytes, byte_index, &op->as.binary.rhs, rs2);
+                                function, dest_block->bytes, byte_index, &op->as.binary.rhs, rs2);
                         } else {
                             rs1 = machine_bytes_riscv_effective_operand_register(
                                 &op->as.binary.lhs,
                                 machine_bytes_riscv_scratch_register());
                             byte_index += machine_bytes_riscv_emit_prepare_operand(
-                                dest_block->bytes, byte_index, &op->as.binary.lhs, rs1);
+                                function, dest_block->bytes, byte_index, &op->as.binary.lhs, rs1);
                             byte_index += machine_bytes_riscv_emit_materialize_immediate(
                                 dest_block->bytes, byte_index, scratch, op->as.binary.rhs.immediate);
                             rs2 = scratch;
@@ -2115,14 +2232,14 @@ static int machine_bytes_write_block_bytes_for_profile(
                             machine_bytes_riscv_encode_alu_word_from_regs(op->as.binary.op, rd, rs1, rs2));
                         byte_index += 4u;
                         byte_index += machine_bytes_riscv_emit_writeback_result(
-                            dest_block->bytes, byte_index, &op->result, rd);
+                            function, dest_block->bytes, byte_index, &op->result, rd);
                     }
                     break;
                 case MACHINE_SELECT_OP_CMP:
-                    byte_index += machine_bytes_riscv_emit_cmp_result(dest_block->bytes, byte_index, op);
+                    byte_index += machine_bytes_riscv_emit_cmp_result(function, dest_block->bytes, byte_index, op);
                     break;
                 case MACHINE_SELECT_OP_CMP_IMM:
-                    byte_index += machine_bytes_riscv_emit_cmp_result(dest_block->bytes, byte_index, op);
+                    byte_index += machine_bytes_riscv_emit_cmp_result(function, dest_block->bytes, byte_index, op);
                     break;
                 case MACHINE_SELECT_OP_LOAD_LOCAL: {
                     uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
@@ -2134,7 +2251,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                         machine_bytes_riscv_slot_offset(&op->as.load_slot),
                         machine_bytes_riscv_secondary_scratch_register());
                     byte_index += machine_bytes_riscv_emit_writeback_result(
-                        dest_block->bytes, byte_index, &op->result, result_reg);
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
                     break;
                 }
                 case MACHINE_SELECT_OP_LOAD_GLOBAL: {
@@ -2152,7 +2269,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                         machine_bytes_riscv_encode_i_type(0x03u, result_reg, 0x2u, base_reg, 0));
                     byte_index += 4u;
                     byte_index += machine_bytes_riscv_emit_writeback_result(
-                        dest_block->bytes, byte_index, &op->result, result_reg);
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
                     break;
                 }
                 case MACHINE_SELECT_OP_STORE_LOCAL: {
@@ -2161,7 +2278,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                         machine_bytes_riscv_scratch_register());
 
                     byte_index += machine_bytes_riscv_emit_prepare_operand(
-                        dest_block->bytes, byte_index, &op->as.store.value, value_reg);
+                        function, dest_block->bytes, byte_index, &op->as.store.value, value_reg);
                     byte_index += machine_bytes_riscv_emit_store_to_base(
                         dest_block->bytes,
                         byte_index,
@@ -2178,7 +2295,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                     uint32_t base_reg = machine_bytes_riscv_secondary_scratch_register();
 
                     byte_index += machine_bytes_riscv_emit_prepare_operand(
-                        dest_block->bytes, byte_index, &op->as.store.value, value_reg);
+                        function, dest_block->bytes, byte_index, &op->as.store.value, value_reg);
                     machine_bytes_write_u32_le(
                         dest_block->bytes,
                         byte_index,
@@ -2219,6 +2336,42 @@ static int machine_bytes_write_block_bytes_for_profile(
                     byte_index += 4u;
                     break;
                 }
+                case MACHINE_SELECT_OP_LOAD_INDIRECT: {
+                    uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
+                    uint32_t base_reg = machine_bytes_riscv_effective_operand_register(
+                        &op->as.load_indirect_addr,
+                        machine_bytes_riscv_scratch_register());
+
+                    byte_index += machine_bytes_riscv_emit_prepare_operand(
+                        function, dest_block->bytes, byte_index, &op->as.load_indirect_addr, base_reg);
+                    machine_bytes_write_u32_le(
+                        dest_block->bytes,
+                        byte_index,
+                        machine_bytes_riscv_encode_i_type(0x03u, result_reg, 0x2u, base_reg, 0));
+                    byte_index += 4u;
+                    byte_index += machine_bytes_riscv_emit_writeback_result(
+                        function, dest_block->bytes, byte_index, &op->result, result_reg);
+                    break;
+                }
+                case MACHINE_SELECT_OP_STORE_INDIRECT: {
+                    uint32_t base_reg = machine_bytes_riscv_effective_operand_register(
+                        &op->as.store_indirect.addr,
+                        machine_bytes_riscv_scratch_register());
+                    uint32_t value_reg = machine_bytes_riscv_effective_operand_register(
+                        &op->as.store_indirect.value,
+                        machine_bytes_riscv_secondary_scratch_register());
+
+                    byte_index += machine_bytes_riscv_emit_prepare_operand(
+                        function, dest_block->bytes, byte_index, &op->as.store_indirect.addr, base_reg);
+                    byte_index += machine_bytes_riscv_emit_prepare_operand(
+                        function, dest_block->bytes, byte_index, &op->as.store_indirect.value, value_reg);
+                    machine_bytes_write_u32_le(
+                        dest_block->bytes,
+                        byte_index,
+                        machine_bytes_riscv_encode_s_type(0x23u, 0x2u, base_reg, value_reg, 0));
+                    byte_index += 4u;
+                    break;
+                }
                 case MACHINE_SELECT_OP_CALL:
                 case MACHINE_SELECT_OP_CALL_IMM:
                 case MACHINE_SELECT_OP_CALL_SPILL:
@@ -2236,11 +2389,6 @@ static int machine_bytes_write_block_bytes_for_profile(
                             byte_index,
                             -(long long)stack_arg_bytes);
                     }
-                    byte_index = machine_bytes_riscv_emit_register_call_args(
-                        dest_block->bytes,
-                        byte_index,
-                        op,
-                        stack_arg_bytes);
                     for (arg_index = 8u; arg_index < op->as.call.arg_count; ++arg_index) {
                         const MachineEmitOperand *arg = &op->as.call.args[arg_index];
                         long long stack_byte_offset = (long long)((arg_index - 8u) * 4u);
@@ -2262,7 +2410,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 dest_block->bytes,
                                 byte_index,
                                 machine_bytes_riscv_secondary_scratch_register(),
-                                machine_bytes_riscv_spill_slot_offset(arg->spill_slot) + (long long)stack_arg_bytes,
+                                machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes,
                                 machine_bytes_riscv_scratch_register());
                             byte_index += machine_bytes_riscv_emit_store_to_stack(
                                 dest_block->bytes,
@@ -2279,6 +2427,12 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 machine_bytes_riscv_scratch_register());
                         }
                     }
+                    byte_index = machine_bytes_riscv_emit_register_call_args(
+                        function,
+                        dest_block->bytes,
+                        byte_index,
+                        op,
+                        stack_arg_bytes);
                     if (machine_bytes_riscv_resolve_call_target_byte_offset(
                             program, function_byte_offsets, op, &target_byte_offset)) {
                         call_imm = machine_bytes_riscv_pc_relative_imm(
@@ -2312,7 +2466,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 dest_block->bytes,
                                 byte_index,
                                 10u,
-                                machine_bytes_riscv_spill_slot_offset(op->result.spill_slot),
+                                machine_bytes_riscv_spill_slot_offset(function, op->result.spill_slot),
                                 machine_bytes_riscv_scratch_register());
                         }
                     }
@@ -2351,7 +2505,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                     dest_block->bytes,
                     byte_index,
                     10u,
-                    machine_bytes_riscv_spill_slot_offset(dest_block->block.terminator.as.return_value.spill_slot),
+                    machine_bytes_riscv_spill_slot_offset(function, dest_block->block.terminator.as.return_value.spill_slot),
                     machine_bytes_riscv_scratch_register());
                 machine_bytes_write_u32_le(dest_block->bytes, byte_index, machine_bytes_riscv_encode_return_word());
                 byte_index += 4u;
@@ -2412,6 +2566,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                     return 0;
                 }
                 byte_index += machine_bytes_riscv_emit_prepare_operand(
+                    function,
                     dest_block->bytes,
                     byte_index,
                     condition,
@@ -2501,6 +2656,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                     lhs,
                     machine_bytes_riscv_scratch_register());
                 byte_index += machine_bytes_riscv_emit_prepare_operand(
+                    function,
                     dest_block->bytes,
                     byte_index,
                     lhs,
@@ -2515,6 +2671,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                         rhs,
                         machine_bytes_riscv_secondary_scratch_register());
                     byte_index += machine_bytes_riscv_emit_prepare_operand(
+                        function,
                         dest_block->bytes,
                         byte_index,
                         rhs,
@@ -2566,7 +2723,7 @@ static int machine_bytes_write_block_bytes_for_profile(
 
     for (op_index = 0; op_index < dest_block->block.op_count; ++op_index) {
         const MachineEmitOp *op = &dest_block->block.ops[op_index];
-        size_t op_size = machine_bytes_op_encoded_size_for_profile(profile, op);
+        size_t op_size = machine_bytes_op_encoded_size_for_profile(profile, function, op);
 
         if (byte_index + op_size > dest_block->byte_count) {
             return 0;
@@ -2609,7 +2766,7 @@ static int machine_bytes_write_block_bytes_for_profile(
 
     {
         const MachineEmitTerminator *terminator = &dest_block->block.terminator;
-        size_t term_size = machine_bytes_terminator_encoded_size_for_profile(profile, terminator);
+        size_t term_size = machine_bytes_terminator_encoded_size_for_profile(profile, function, terminator);
 
         if (byte_index + term_size > dest_block->byte_count) {
             return 0;
@@ -2766,6 +2923,7 @@ static int machine_bytes_reference_patch_for_control(
 static int machine_bytes_reference_patch_for_global_access(
     MachineBytesTargetProfile profile,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     size_t owner_byte_offset,
     size_t owner_byte_count,
     size_t *out_patch_byte_offset,
@@ -2793,7 +2951,7 @@ static int machine_bytes_reference_patch_for_global_access(
             return 1;
         }
         *out_patch_byte_offset = owner_byte_offset +
-            machine_bytes_riscv_prepare_operand_size(&op->as.store.value);
+            machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value);
         *out_patch_byte_count = 4u;
         return 1;
     }
@@ -2803,6 +2961,11 @@ static int machine_bytes_reference_patch_for_global_access(
         }
         *out_patch_byte_offset = owner_byte_offset +
             machine_bytes_riscv_materialize_size(op->as.store.value.immediate);
+        *out_patch_byte_count = 4u;
+        return 1;
+    }
+    if (op->kind == MACHINE_SELECT_OP_ADDR_GLOBAL) {
+        *out_patch_byte_offset = owner_byte_offset;
         *out_patch_byte_count = 4u;
         return 1;
     }
@@ -2961,6 +3124,8 @@ static size_t machine_bytes_function_reference_count(const MachineBytesFunction 
 
             if (machine_bytes_op_has_call_payload(op_kind)) {
                 ++reference_count;
+            } else if (op_kind == MACHINE_SELECT_OP_ADDR_GLOBAL) {
+                reference_count += 2u;
             } else if (op_kind == MACHINE_SELECT_OP_LOAD_GLOBAL ||
                 op_kind == MACHINE_SELECT_OP_STORE_GLOBAL ||
                 op_kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) {
@@ -2996,6 +3161,7 @@ static int machine_bytes_report_append_call_reference(
     size_t owner_byte_offset,
     size_t owner_byte_count,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     const MachineBytesProgram *program,
     const size_t *function_byte_offsets) {
     size_t target_function_index = 0;
@@ -3013,7 +3179,7 @@ static int machine_bytes_report_append_call_reference(
     summary->owner_byte_offset = owner_byte_offset;
     summary->owner_byte_count = owner_byte_count;
     if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
-        summary->patch_byte_offset = machine_bytes_riscv_call_patch_offset(owner_byte_offset, op);
+        summary->patch_byte_offset = machine_bytes_riscv_call_patch_offset(function, owner_byte_offset, op);
         summary->patch_byte_count = 4u;
     } else {
         if (!machine_bytes_reference_patch_for_call(
@@ -3094,6 +3260,7 @@ static int machine_bytes_report_append_global_data_reference(
     size_t owner_byte_offset,
     size_t owner_byte_count,
     const MachineEmitOp *op,
+    const MachineBytesFunction *function,
     const MachineBytesProgram *program) {
     const MachineEmitSlotRef *slot = NULL;
     const MachineEmitGlobal *global = NULL;
@@ -3104,6 +3271,9 @@ static int machine_bytes_report_append_global_data_reference(
         return 0;
     }
     switch (op->kind) {
+        case MACHINE_SELECT_OP_ADDR_GLOBAL:
+            slot = &op->as.addr_slot;
+            break;
         case MACHINE_SELECT_OP_LOAD_GLOBAL:
             slot = &op->as.load_slot;
             break;
@@ -3123,9 +3293,10 @@ static int machine_bytes_report_append_global_data_reference(
     }
     for (prior_index = 0u; prior_index < slot->id; ++prior_index) {
         const MachineEmitGlobal *prior_global = &program->globals[prior_index];
+        size_t prior_byte_size = prior_global->byte_size ? prior_global->byte_size : 4u;
 
         if (prior_global->has_initializer == global->has_initializer) {
-            target_byte_offset += 4u;
+            target_byte_offset += prior_byte_size;
         }
     }
 
@@ -3139,6 +3310,7 @@ static int machine_bytes_report_append_global_data_reference(
     if (!machine_bytes_reference_patch_for_global_access(
             profile,
             op,
+            function,
             owner_byte_offset,
             owner_byte_count,
             &summary->patch_byte_offset,
@@ -3148,18 +3320,26 @@ static int machine_bytes_report_append_global_data_reference(
     if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
         size_t prepare_size = 0u;
 
-        if (op->kind == MACHINE_SELECT_OP_STORE_GLOBAL) {
-            prepare_size = machine_bytes_riscv_prepare_operand_size(&op->as.store.value);
+        if (op->kind == MACHINE_SELECT_OP_ADDR_GLOBAL) {
+            if (kind == MACHINE_BYTES_REFERENCE_DATA_ADDR) {
+                summary->patch_byte_offset = owner_byte_offset;
+                summary->patch_byte_count = 4u;
+            } else if (kind == MACHINE_BYTES_REFERENCE_DATA_LOAD) {
+                summary->patch_byte_offset = owner_byte_offset + 4u;
+                summary->patch_byte_count = 4u;
+            }
+        } else if (op->kind == MACHINE_SELECT_OP_STORE_GLOBAL) {
+            prepare_size = machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value);
         } else if (op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) {
             prepare_size = machine_bytes_riscv_materialize_size(op->as.store.value.immediate);
         }
-        if (kind == MACHINE_BYTES_REFERENCE_DATA_ADDR) {
+        if (op->kind != MACHINE_SELECT_OP_ADDR_GLOBAL && kind == MACHINE_BYTES_REFERENCE_DATA_ADDR) {
             summary->patch_byte_offset = owner_byte_offset + prepare_size;
             summary->patch_byte_count = 4u;
-        } else if (kind == MACHINE_BYTES_REFERENCE_DATA_LOAD) {
+        } else if (op->kind != MACHINE_SELECT_OP_ADDR_GLOBAL && kind == MACHINE_BYTES_REFERENCE_DATA_LOAD) {
             summary->patch_byte_offset = owner_byte_offset + 4u;
             summary->patch_byte_count = 4u;
-        } else if (kind == MACHINE_BYTES_REFERENCE_DATA_STORE) {
+        } else if (op->kind != MACHINE_SELECT_OP_ADDR_GLOBAL && kind == MACHINE_BYTES_REFERENCE_DATA_STORE) {
             summary->patch_byte_offset = owner_byte_offset + prepare_size + 4u;
             summary->patch_byte_count = 4u;
         }
@@ -3195,7 +3375,7 @@ static int machine_bytes_report_populate_function_references(
 
         for (op_index = 0; op_index < block->block.op_count; ++op_index) {
             const MachineEmitOp *op = &block->block.ops[op_index];
-            size_t op_size = machine_bytes_op_encoded_size_for_profile(report->program.target_profile, op);
+            size_t op_size = machine_bytes_op_encoded_size_for_profile(report->program.target_profile, function, op);
 
             if (machine_bytes_op_has_call_payload(op->kind)) {
                 if (!machine_bytes_report_append_call_reference(
@@ -3207,8 +3387,36 @@ static int machine_bytes_report_populate_function_references(
                         program_byte_offset,
                         op_size,
                         op,
+                        function,
                         &report->program,
                         report->function_byte_offsets)) {
+                    return 0;
+                }
+            } else if (op->kind == MACHINE_SELECT_OP_ADDR_GLOBAL) {
+                if (!machine_bytes_report_append_global_data_reference(
+                        &report->reference_summaries[reference_index++],
+                        MACHINE_BYTES_REFERENCE_DATA_ADDR,
+                        report->program.target_profile,
+                        function_index,
+                        block_index,
+                        block,
+                        program_byte_offset,
+                        4u,
+                        op,
+                        function,
+                        &report->program) ||
+                    !machine_bytes_report_append_global_data_reference(
+                        &report->reference_summaries[reference_index++],
+                        MACHINE_BYTES_REFERENCE_DATA_LOAD,
+                        report->program.target_profile,
+                        function_index,
+                        block_index,
+                        block,
+                        program_byte_offset,
+                        8u,
+                        op,
+                        function,
+                        &report->program)) {
                     return 0;
                 }
             } else if (op->kind == MACHINE_SELECT_OP_LOAD_GLOBAL ||
@@ -3224,6 +3432,7 @@ static int machine_bytes_report_populate_function_references(
                         program_byte_offset,
                         op_size,
                         op,
+                        function,
                         &report->program) ||
                     !machine_bytes_report_append_global_data_reference(
                         &report->reference_summaries[reference_index++],
@@ -3237,6 +3446,7 @@ static int machine_bytes_report_populate_function_references(
                         program_byte_offset,
                         op_size,
                         op,
+                        function,
                         &report->program)) {
                     return 0;
                 }
@@ -3250,7 +3460,7 @@ static int machine_bytes_report_populate_function_references(
                 (report->function_byte_offsets ? report->function_byte_offsets[function_index] : 0) +
                 block->terminator_byte_offset;
             size_t owner_byte_count = machine_bytes_terminator_encoded_size_for_profile(
-                report->program.target_profile, &block->block.terminator);
+                report->program.target_profile, function, &block->block.terminator);
             size_t patch_byte_offset = 0;
             size_t patch_byte_count = 0;
 
@@ -3606,6 +3816,7 @@ static int machine_bytes_report_populate_symbols(MachineBytesReport *report) {
     for (global_index = 0u; global_index < report->program.global_count; ++global_index) {
         const MachineEmitGlobal *global = &report->program.globals[global_index];
         MachineBytesSymbolSummary *symbol;
+        size_t byte_size = global->byte_size ? global->byte_size : 4u;
 
         if (!global->name || global->name[0] == '\0' || global->has_initializer) {
             continue;
@@ -3620,13 +3831,14 @@ static int machine_bytes_report_populate_symbols(MachineBytesReport *report) {
         symbol->section_index = 1u;
         symbol->has_byte_offset = 1;
         symbol->byte_offset = sbss_byte_offset;
-        symbol->byte_count = 4u;
-        sbss_byte_offset += 4u;
+        symbol->byte_count = byte_size;
+        sbss_byte_offset += byte_size;
     }
 
     for (global_index = 0u; global_index < report->program.global_count; ++global_index) {
         const MachineEmitGlobal *global = &report->program.globals[global_index];
         MachineBytesSymbolSummary *symbol;
+        size_t byte_size = global->byte_size ? global->byte_size : 4u;
 
         if (!global->name || global->name[0] == '\0' || !global->has_initializer) {
             continue;
@@ -3641,8 +3853,8 @@ static int machine_bytes_report_populate_symbols(MachineBytesReport *report) {
         symbol->section_index = 2u;
         symbol->has_byte_offset = 1;
         symbol->byte_offset = sdata_byte_offset;
-        symbol->byte_count = 4u;
-        sdata_byte_offset += 4u;
+        symbol->byte_count = byte_size;
+        sdata_byte_offset += byte_size;
     }
 
     for (reference_index = 0; reference_index < report->total_reference_summary_count; ++reference_index) {

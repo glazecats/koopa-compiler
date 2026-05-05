@@ -4,6 +4,38 @@
 #include "value_ssa_pass.c"
 #else
 
+static int value_ssa_lower_ir_uses_indirect_memory(const LowerIrProgram *program) {
+    size_t function_index;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const LowerIrFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const LowerIrBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                switch (block->instructions[instruction_index].kind) {
+                case LOWER_IR_INSTR_ADDR_LOCAL:
+                case LOWER_IR_INSTR_ADDR_GLOBAL:
+                case LOWER_IR_INSTR_LOAD_INDIRECT:
+                case LOWER_IR_INSTR_STORE_INDIRECT:
+                    return 1;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int value_ssa_build_from_lower_ir_with_bridge(const LowerIrProgram *program,
     ValueSsaProgram *out_program,
     int (*bridge_fn)(const LowerIrProgram *, ValueSsaProgram *, ValueSsaError *),
@@ -73,6 +105,9 @@ int value_ssa_build_from_lower_ir_with_canonicalization(const LowerIrProgram *pr
 int value_ssa_build_default_from_lower_ir(const LowerIrProgram *program,
     ValueSsaProgram *out_program,
     ValueSsaError *error) {
+    if (value_ssa_lower_ir_uses_indirect_memory(program)) {
+        return value_ssa_build_from_lower_ir(program, out_program, error);
+    }
     return value_ssa_build_from_lower_ir_with_canonicalization(
         program, VALUE_SSA_LOWER_IR_CANONICALIZE_DEFAULT, out_program, error);
 }

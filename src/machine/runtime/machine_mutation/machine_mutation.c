@@ -128,8 +128,11 @@ static int machine_mutation_classify_known_op(unsigned char tag_value,
         case MACHINE_SELECT_OP_ALU_IMM:
         case MACHINE_SELECT_OP_CMP:
         case MACHINE_SELECT_OP_CMP_IMM:
+        case MACHINE_SELECT_OP_ADDR_LOCAL:
+        case MACHINE_SELECT_OP_ADDR_GLOBAL:
         case MACHINE_SELECT_OP_LOAD_LOCAL:
         case MACHINE_SELECT_OP_LOAD_GLOBAL:
+        case MACHINE_SELECT_OP_LOAD_INDIRECT:
             *out_resolution_kind = MACHINE_MUTATION_RESOLUTION_DEFERRED_REGISTER_RESULT;
             *out_effect_kind = MACHINE_MUTATION_EFFECT_VALUE_RESULT;
             return 1;
@@ -140,6 +143,7 @@ static int machine_mutation_classify_known_op(unsigned char tag_value,
             return 1;
         case MACHINE_SELECT_OP_STORE_GLOBAL:
         case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
+        case MACHINE_SELECT_OP_STORE_INDIRECT:
             *out_resolution_kind = MACHINE_MUTATION_RESOLUTION_DEFERRED_GLOBAL_SLOT;
             *out_effect_kind = MACHINE_MUTATION_EFFECT_GLOBAL_SLOT;
             return 1;

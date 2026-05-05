@@ -85,6 +85,7 @@ int main(void) {
     ok &= test_expression_ast_accepts_nested_parenthesized_call_chaining();
     ok &= test_expression_ast_accepts_parenthesized_call_result_chaining();
     ok &= test_expression_ast_accepts_parenthesized_zero_arg_call_result_chaining();
+    ok &= test_expression_ast_parses_subscript_primary();
     ok &= test_expression_ast_assignment_rhs_unary();
     ok &= test_expression_ast_assignment_rhs_logical_not();
     ok &= test_expression_ast_assignment_rhs_bitwise_not();
@@ -183,6 +184,7 @@ int main(void) {
     ok &= test_ast_records_declaration_initializer_metadata();
     ok &= test_ast_aligns_initializer_slots_with_declarator_order();
     ok &= test_ast_collects_all_top_level_declarators();
+    ok &= test_ast_records_array_rank_metadata();
     ok &= test_ast_failure_clears_previous_program();
     ok &= test_ast_failure_clears_complex_previous_program();
     ok &= test_deep_assignment_hits_recursion_limit();

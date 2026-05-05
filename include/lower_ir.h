@@ -55,10 +55,14 @@ typedef enum {
     LOWER_IR_INSTR_MOV = 0,
     LOWER_IR_INSTR_BINARY,
     LOWER_IR_INSTR_CALL,
+    LOWER_IR_INSTR_ADDR_LOCAL,
+    LOWER_IR_INSTR_ADDR_GLOBAL,
     LOWER_IR_INSTR_LOAD_LOCAL,
     LOWER_IR_INSTR_STORE_LOCAL,
     LOWER_IR_INSTR_LOAD_GLOBAL,
     LOWER_IR_INSTR_STORE_GLOBAL,
+    LOWER_IR_INSTR_LOAD_INDIRECT,
+    LOWER_IR_INSTR_STORE_INDIRECT,
 } LowerIrInstructionKind;
 
 typedef struct {
@@ -70,6 +74,7 @@ typedef struct {
 typedef struct {
     size_t id;
     char *name;
+    size_t byte_size;
     int has_initializer;
     long long initializer_value;
     int has_runtime_initializer;
@@ -91,11 +96,17 @@ typedef struct {
             LowerIrValueRef *args;
             size_t arg_count;
         } call;
+        LowerIrSlotRef addr_slot;
         LowerIrSlotRef load_slot;
         struct {
             LowerIrSlotRef slot;
             LowerIrValueRef value;
         } store;
+        LowerIrValueRef load_indirect_addr;
+        struct {
+            LowerIrValueRef addr;
+            LowerIrValueRef value;
+        } store_indirect;
     } as;
 } LowerIrInstruction;
 

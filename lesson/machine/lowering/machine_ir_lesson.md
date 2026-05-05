@@ -115,6 +115,24 @@
 - `machine_select` 是出 `ret` 还是 `reti`
 - `machine_bytes` 最后 summary/dump 里是不是还保留 bare-return 事实
 
+如果按 `lv9` 这轮最新变化，这层还要再补一组同样重要的新点：
+
+- `machine_ir` 现在也开始承接第一批数组/间接内存 op
+  - `addr_local`
+  - `addr_global`
+  - `load_indirect`
+  - `store_indirect`
+- global object 也开始带 `byte_size`
+
+这意味着现在的 `machine_ir` 不再只是“scalar local/global slot + reg/spill/imm” 那一代模型，
+而是已经向：
+
+- address-forming
+- indirect-memory
+- array-object-sized global
+
+这条线迈出第一步了。
+
 ---
 
 ## 1. 为什么需要 `machine_ir`
