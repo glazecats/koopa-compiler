@@ -13,6 +13,7 @@ void value_ssa_allocator_move_worklist_init(ValueSsaAllocatorMoveWorklist *workl
     worklist->item_count = 0;
     worklist->items = NULL;
     worklist->value_work_indices = NULL;
+    worklist->root_work_indices = NULL;
 }
 
 void value_ssa_allocator_move_worklist_free(ValueSsaAllocatorMoveWorklist *worklist) {
@@ -22,6 +23,7 @@ void value_ssa_allocator_move_worklist_free(ValueSsaAllocatorMoveWorklist *workl
 
     free(worklist->items);
     free(worklist->value_work_indices);
+    free(worklist->root_work_indices);
     value_ssa_allocator_move_worklist_init(worklist);
 }
 
@@ -97,6 +99,19 @@ static int value_ssa_alloc_move_work_item_is_before(const ValueSsaAllocatorMoveW
     return lhs->root_value_id < rhs->root_value_id;
 }
 
+static int value_ssa_alloc_move_work_item_compare_qsort(const void *lhs_ptr, const void *rhs_ptr) {
+    const ValueSsaAllocatorMoveWorkItem *lhs = (const ValueSsaAllocatorMoveWorkItem *)lhs_ptr;
+    const ValueSsaAllocatorMoveWorkItem *rhs = (const ValueSsaAllocatorMoveWorkItem *)rhs_ptr;
+
+    if (value_ssa_alloc_move_work_item_is_before(lhs, rhs)) {
+        return -1;
+    }
+    if (value_ssa_alloc_move_work_item_is_before(rhs, lhs)) {
+        return 1;
+    }
+    return 0;
+}
+
 int value_ssa_compute_allocator_move_worklist(const ValueSsaFunction *function,
     const ValueSsaAllocatorMoveFamilyAnalysis *family_analysis,
     const ValueSsaAllocatorPlan *plan,
@@ -107,6 +122,7 @@ int value_ssa_compute_allocator_move_worklist(const ValueSsaFunction *function,
     ValueSsaAllocatorPlan owned_plan;
     const ValueSsaAllocatorMoveFamilyAnalysis *active_family_analysis = family_analysis;
     const ValueSsaAllocatorPlan *active_plan = plan;
+    size_t *root_base_priorities = NULL;
     size_t family_index;
     int ok = 0;
 
@@ -143,20 +159,40 @@ int value_ssa_compute_allocator_move_worklist(const ValueSsaFunction *function,
         worklist->item_count ? worklist->item_count : 1, sizeof(ValueSsaAllocatorMoveWorkItem));
     worklist->value_work_indices =
         (size_t *)malloc((worklist->value_count ? worklist->value_count : 1) * sizeof(size_t));
-    if (!worklist->items || !worklist->value_work_indices) {
+    worklist->root_work_indices =
+        (size_t *)malloc((worklist->value_count ? worklist->value_count : 1) * sizeof(size_t));
+    root_base_priorities =
+        (size_t *)calloc((worklist->value_count ? worklist->value_count : 1), sizeof(size_t));
+    if (!worklist->items || !worklist->value_work_indices || !worklist->root_work_indices || !root_base_priorities) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-111: out of memory preparing move-worklist");
         goto cleanup;
     }
 
     for (family_index = 0; family_index < worklist->value_count; ++family_index) {
         worklist->value_work_indices[family_index] = (size_t)-1;
+        worklist->root_work_indices[family_index] = (size_t)-1;
+    }
+
+    if (active_plan && active_plan->items) {
+        size_t plan_index;
+
+        for (plan_index = 0; plan_index < active_plan->item_count; ++plan_index) {
+            const ValueSsaAllocatorPlanItem *plan_item = &active_plan->items[plan_index];
+            size_t root_value_id = plan_item->coalesce_root_value_id;
+
+            if (root_value_id >= worklist->value_count) {
+                continue;
+            }
+            if (plan_item->priority > root_base_priorities[root_value_id]) {
+                root_base_priorities[root_value_id] = plan_item->priority;
+            }
+        }
     }
 
     for (family_index = 0; family_index < active_family_analysis->family_count; ++family_index) {
         const ValueSsaAllocatorMoveFamilyItem *family_item = &active_family_analysis->items[family_index];
         ValueSsaAllocatorMoveWorkItem *work_item = &worklist->items[family_index];
         size_t priority = 0;
-        size_t plan_index;
 
         work_item->root_value_id = family_item->root_value_id;
         work_item->work_class = value_ssa_alloc_classify_move_work_item(family_item);
@@ -171,16 +207,8 @@ int value_ssa_compute_allocator_move_worklist(const ValueSsaFunction *function,
         work_item->external_affinity_weight_sum = family_item->external_affinity_weight_sum;
         work_item->simplify_removed_count = family_item->simplify_removed_count;
         work_item->spill_removed_count = family_item->spill_removed_count;
-
-        for (plan_index = 0; plan_index < active_plan->item_count; ++plan_index) {
-            const ValueSsaAllocatorPlanItem *plan_item = &active_plan->items[plan_index];
-
-            if (plan_item->coalesce_root_value_id != family_item->root_value_id) {
-                continue;
-            }
-            if (plan_item->priority > priority) {
-                priority = plan_item->priority;
-            }
+        if (family_item->root_value_id < worklist->value_count) {
+            priority = root_base_priorities[family_item->root_value_id];
         }
         priority += family_item->coalesce_ready_neighbor_family_count * 16;
         priority += family_item->coalesce_ready_affinity_weight_sum * 8;
@@ -192,38 +220,38 @@ int value_ssa_compute_allocator_move_worklist(const ValueSsaFunction *function,
         work_item->priority = priority;
     }
 
+    if (worklist->item_count > 1) {
+        qsort(worklist->items,
+            worklist->item_count,
+            sizeof(ValueSsaAllocatorMoveWorkItem),
+            value_ssa_alloc_move_work_item_compare_qsort);
+    }
+
     for (family_index = 0; family_index < worklist->item_count; ++family_index) {
-        size_t scan_index;
+        size_t root_value_id = worklist->items[family_index].root_value_id;
 
-        for (scan_index = family_index + 1; scan_index < worklist->item_count; ++scan_index) {
-            ValueSsaAllocatorMoveWorkItem temp;
-
-            if (!value_ssa_alloc_move_work_item_is_before(&worklist->items[scan_index], &worklist->items[family_index])) {
-                continue;
-            }
-            temp = worklist->items[family_index];
-            worklist->items[family_index] = worklist->items[scan_index];
-            worklist->items[scan_index] = temp;
+        if (root_value_id < worklist->value_count) {
+            worklist->root_work_indices[root_value_id] = family_index;
         }
     }
 
     for (family_index = 0; family_index < active_family_analysis->value_count; ++family_index) {
         size_t family_item_index = active_family_analysis->value_family_indices[family_index];
-        size_t work_index;
+        size_t root_value_id;
 
-        for (work_index = 0; work_index < worklist->item_count; ++work_index) {
-            if (worklist->items[work_index].root_value_id !=
-                active_family_analysis->items[family_item_index].root_value_id) {
-                continue;
-            }
-            worklist->value_work_indices[family_index] = work_index;
-            break;
+        if (family_item_index >= active_family_analysis->family_count) {
+            continue;
+        }
+        root_value_id = active_family_analysis->items[family_item_index].root_value_id;
+        if (root_value_id < worklist->value_count) {
+            worklist->value_work_indices[family_index] = worklist->root_work_indices[root_value_id];
         }
     }
 
     ok = 1;
 
 cleanup:
+    free(root_base_priorities);
     value_ssa_allocator_plan_free(&owned_plan);
     value_ssa_allocator_move_family_analysis_free(&owned_family_analysis);
     if (!ok) {
@@ -237,20 +265,33 @@ int value_ssa_allocator_move_worklist_find_root(const ValueSsaAllocatorMoveWorkl
     size_t *out_index,
     const ValueSsaAllocatorMoveWorkItem **out_item) {
     size_t work_index;
+    size_t item_index;
 
-    if (!worklist) {
+    if (!worklist || root_value_id >= worklist->value_count) {
         return 0;
     }
+    if (worklist->root_work_indices) {
+        work_index = worklist->root_work_indices[root_value_id];
+        if (work_index < worklist->item_count && worklist->items[work_index].root_value_id == root_value_id) {
+            if (out_index) {
+                *out_index = work_index;
+            }
+            if (out_item) {
+                *out_item = &worklist->items[work_index];
+            }
+            return 1;
+        }
+    }
 
-    for (work_index = 0; work_index < worklist->item_count; ++work_index) {
-        if (worklist->items[work_index].root_value_id != root_value_id) {
+    for (item_index = 0; item_index < worklist->item_count; ++item_index) {
+        if (worklist->items[item_index].root_value_id != root_value_id) {
             continue;
         }
         if (out_index) {
-            *out_index = work_index;
+            *out_index = item_index;
         }
         if (out_item) {
-            *out_item = &worklist->items[work_index];
+            *out_item = &worklist->items[item_index];
         }
         return 1;
     }

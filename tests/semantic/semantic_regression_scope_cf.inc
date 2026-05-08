@@ -1167,6 +1167,18 @@ static const CfCase kCfMustPassOrFailNow[] = {
     {"CF-79", "int f(int a){for(;a;){return 1;} return 0;}\n", CF_EXPECT_ACCEPT},
     {"CF-80", "int f(){while(1){break;return 1;}}\n", CF_EXPECT_REJECT},
     {"CF-81", "int f(){for(;;){break;return 1;}}\n", CF_EXPECT_REJECT},
+    {"CF-82",
+    "int f(int a){while(1){if(a){return 1;}for(;a<2;a=a+1){if(a){return 2;}}a=1;}}\n",
+    CF_EXPECT_ACCEPT},
+    {"CF-83",
+    "int f(int a){for(;1;a=1){if(a){return 1;}while(a<2){if(a){return 2;}}}}\n",
+    CF_EXPECT_ACCEPT},
+    {"CF-84",
+    "int f(int a){for(;1;a=1){if(a){return 1;}for(;a<2;a=a+1){if(a){return 2;}}}}\n",
+    CF_EXPECT_ACCEPT},
+    {"CF-85",
+    "int f(int a){while(1){if(a){return 1;}a=1;for(;a<2;a=a+1){if(a){return 2;}}}}\n",
+    CF_EXPECT_ACCEPT},
 };
 
 /* conservative_loop_acceptance: body/step updates keep loop exits plausible. */

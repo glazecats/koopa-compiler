@@ -1654,6 +1654,7 @@ static int value_ssa_alloc_result_value_is_rewriteable_spill(const ValueSsaFunct
 static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
     const size_t *spill_local_floors,
+    unsigned char *out_rewritten_functions,
     int *out_rewrote_any,
     ValueSsaError *error) {
     size_t function_index;
@@ -1688,6 +1689,9 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
                     function, value_id, function_result->spill_slots[value_id], error)) {
                 return 0;
             }
+            if (out_rewritten_functions) {
+                out_rewritten_functions[function_index] = 1u;
+            }
             rewrote_any = 1;
         }
     }
@@ -1704,6 +1708,7 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
 static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
     const size_t *spill_local_floors,
+    unsigned char *out_rewritten_functions,
     int *out_split_rewrote_any,
     int *out_spill_rewrote_any,
     int *out_rewrote_any,
@@ -1711,6 +1716,11 @@ static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
     ValueSsaError *error) {
     int split_rewrote_any = 0;
     int spill_rewrote_any = 0;
+    int uses_indirect_memory = 0;
+    size_t function_index;
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (out_split_rewrote_any) {
         *out_split_rewrote_any = 0;
@@ -1730,27 +1740,76 @@ static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
         return 0;
     }
 
-    if (!value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(
-            program, result, &split_rewrote_any, error)) {
+    if (!value_ssa_rewrite_program_block_local_spill_splits_with_change_map(
+            program, result, out_rewritten_functions, &split_rewrote_any, error)) {
         return 0;
     }
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("rewrite-stage block-local-split", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
     if (!value_ssa_alloc_rewrite_program_rewriteable_spills(
-            program, result, spill_local_floors, &spill_rewrote_any, error)) {
+            program, result, spill_local_floors, out_rewritten_functions, &spill_rewrote_any, error)) {
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("rewrite-stage spill-rewrite", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
     }
 
     *out_split_rewrote_any = split_rewrote_any;
     *out_spill_rewrote_any = spill_rewrote_any;
     *out_rewrote_any = split_rewrote_any || spill_rewrote_any;
     if (!*out_rewrote_any) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-stage total", value_ssa_alloc_now_s() - total_start);
+        }
         return 1;
     }
     if (!spill_rewrote_any) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-stage total", value_ssa_alloc_now_s() - total_start);
+        }
+        return 1;
+    }
+
+    for (function_index = 0; function_index < program->function_count && !uses_indirect_memory; ++function_index) {
+        const ValueSsaFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0; block_index < function->block_count && !uses_indirect_memory; ++block_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                switch (block->instructions[instruction_index].kind) {
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                case VALUE_SSA_INSTR_STORE_INDIRECT:
+                    uses_indirect_memory = 1;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+
+    if (uses_indirect_memory) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-stage indirect-memory-scan", value_ssa_alloc_now_s() - stage_start);
+            value_ssa_alloc_trace_timing("rewrite-stage total", value_ssa_alloc_now_s() - total_start);
+        }
         return 1;
     }
 
     if (!value_ssa_canonicalize_program(program, error)) {
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("rewrite-stage post-rewrite-canonicalize", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_timing("rewrite-stage total", value_ssa_alloc_now_s() - total_start);
     }
     *out_canonicalized_after_rewrite = 1;
     return 1;
@@ -2320,8 +2379,9 @@ static int value_ssa_alloc_rewrite_edge_phi_spill_split_for_value(ValueSsaFuncti
     return 1;
 }
 
-int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsaProgram *program,
+static int value_ssa_rewrite_program_block_local_spill_splits_with_change_map(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
+    unsigned char *out_rewritten_functions,
     int *out_rewrote_any,
     ValueSsaError *error) {
     size_t function_index;
@@ -2339,6 +2399,7 @@ int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsa
         ValueSsaFunction *function = &program->functions[function_index];
         const ValueSsaAllocationResult *function_result = &result->function_results[function_index];
         size_t value_id;
+        int function_rewrote_any = 0;
 
         if (!function->has_body) {
             continue;
@@ -2357,7 +2418,11 @@ int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsa
                 return 0;
             }
             rewrote = rewrote_local || rewrote_edge;
+            function_rewrote_any = function_rewrote_any || rewrote;
             rewrote_any = rewrote_any || rewrote;
+        }
+        if (out_rewritten_functions && function_rewrote_any) {
+            out_rewritten_functions[function_index] = 1u;
         }
     }
 
@@ -2365,6 +2430,14 @@ int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsa
         *out_rewrote_any = rewrote_any;
     }
     return value_ssa_verify_program(program, error);
+}
+
+int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsaProgram *program,
+    const ValueSsaProgramAllocationResult *result,
+    int *out_rewrote_any,
+    ValueSsaError *error) {
+    return value_ssa_rewrite_program_block_local_spill_splits_with_change_map(
+        program, result, NULL, out_rewrote_any, error);
 }
 
 int value_ssa_rewrite_program_block_local_spill_splits(ValueSsaProgram *program,

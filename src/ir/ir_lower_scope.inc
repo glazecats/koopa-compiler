@@ -193,4 +193,35 @@ static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
     return 0;
 }
 
+static int ir_lower_scope_update_binding_const_value_by_local_id(IrLowerScopeStack *stack,
+    size_t local_id,
+    int has_const_value,
+    long long const_value) {
+    size_t frame_index;
+
+    if (!stack) {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        size_t i;
+        IrLowerScope *frame = &stack->frames[frame_index - 1];
+
+        for (i = frame->count; i > 0; --i) {
+            IrLowerBinding *binding = &frame->bindings[i - 1];
+
+            if (binding->local_id != local_id ||
+                binding->kind != IR_LOWER_BINDING_SCALAR_LOCAL) {
+                continue;
+            }
+
+            binding->has_const_value = has_const_value ? 1 : 0;
+            binding->const_value = const_value;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 #endif

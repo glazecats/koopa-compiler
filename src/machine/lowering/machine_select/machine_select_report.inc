@@ -4,6 +4,27 @@
 #include "machine_select.c"
 #else
 
+static int machine_select_program_has_phi_nodes(const MachineIrProgram *program) {
+    size_t function_index;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const MachineIrFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            if (function->blocks[block_index].phi_count != 0) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static void machine_select_lower_report_clear_shape(MachineSelectLowerReport *report) {
     if (!report) {
         return;
@@ -234,6 +255,9 @@ int machine_select_build_program_from_machine_ir_report(const MachineIrAllocateR
     if (!machine_ir_allocate_rewrite_report_get_program(report, &program) || !program) {
         machine_select_set_error(error, 0, 0, "MACHINE-SELECT-401: machine-ir report does not expose program");
         return 0;
+    }
+    if (machine_select_program_has_phi_nodes(program)) {
+        return machine_select_lower_canonicalized_program_from_machine_ir(program, out_program, error);
     }
     return machine_select_lower_program_from_machine_ir(program, out_program, error);
 }

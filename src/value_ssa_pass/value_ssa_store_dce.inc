@@ -48,6 +48,122 @@ static int value_ssa_compact_removed_instructions(ValueSsaBasicBlock *block,
     return 1;
 }
 
+static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-264: invalid unread-scalar-local-store contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        unsigned char *slot_observed = NULL;
+        size_t block_index;
+        int has_candidate = 0;
+
+        if (!function->has_body || function->local_count == 0u) {
+            continue;
+        }
+
+        slot_observed = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+        if (!slot_observed) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-265: out of memory while preparing unread scalar local-store cleanup in function '%s'",
+                function->name ? function->name : "<anon>");
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->local_count; ++block_index) {
+            if (function->locals[block_index].array_rank > 0u) {
+                slot_observed[block_index] = 1u;
+            }
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                switch (instruction->kind) {
+                case VALUE_SSA_INSTR_LOAD_LOCAL:
+                    if (instruction->as.load_slot.id < function->local_count) {
+                        slot_observed[instruction->as.load_slot.id] = 1u;
+                    }
+                    break;
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                    if (instruction->as.addr_slot.id < function->local_count) {
+                        slot_observed[instruction->as.addr_slot.id] = 1u;
+                    }
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
+        for (block_index = 0; block_index < function->local_count; ++block_index) {
+            if (!slot_observed[block_index]) {
+                has_candidate = 1;
+                break;
+            }
+        }
+
+        if (has_candidate) {
+            for (block_index = 0; block_index < function->block_count; ++block_index) {
+                ValueSsaBasicBlock *block = &function->blocks[block_index];
+                unsigned char *remove_flags = NULL;
+                size_t instruction_index;
+
+                if (block->instruction_count == 0u) {
+                    continue;
+                }
+
+                remove_flags = (unsigned char *)calloc(block->instruction_count, sizeof(unsigned char));
+                if (!remove_flags) {
+                    free(slot_observed);
+                    value_ssa_set_error(error,
+                        0,
+                        0,
+                        "VALUE-SSA-266: out of memory while marking unread scalar local stores in function '%s'",
+                        function->name ? function->name : "<anon>");
+                    return 0;
+                }
+
+                for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                    const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                    if (instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL &&
+                        instruction->as.store.slot.id < function->local_count &&
+                        !slot_observed[instruction->as.store.slot.id]) {
+                        remove_flags[instruction_index] = 1u;
+                    }
+                }
+
+                if (!value_ssa_compact_removed_instructions(block, remove_flags)) {
+                    free(remove_flags);
+                    free(slot_observed);
+                    value_ssa_set_error(error,
+                        0,
+                        0,
+                        "VALUE-SSA-267: failed to compact unread scalar local-store cleanup results");
+                    return 0;
+                }
+
+                free(remove_flags);
+            }
+        }
+
+        free(slot_observed);
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_eliminate_redundant_local_stores_enter_block(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t block_id,

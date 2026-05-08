@@ -297,7 +297,7 @@ static int test_machine_delta_mainline(void) {
         1,
         1,
         "machine_delta profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x1c observed-status=ready observed-pc=0x1001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x1e observed-status=ready observed-pc=0x1001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_delta_clone_file(&delta_file, &cloned_delta_file, &delta_error) ||
         cloned_delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -315,7 +315,7 @@ static int test_machine_delta_mainline(void) {
         MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_DELTA_RESOLUTION_PREVIEW_STATE_DELTA,
         "machine_delta profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x1c observed-status=ready observed-pc=0x1001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n"
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x1e observed-status=ready observed-pc=0x1001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: observe=preview-state status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -443,7 +443,7 @@ static int test_machine_delta_custom_step_cases(void) {
     machine_delta_report_free(&delta_report);
     machine_delta_file_free(&delta_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x1eu, store_local_imm_payload, 1u, 1, 0xaau) ||
+    if (!overwrite_step_bytes(&step_file, 0x20u, store_local_imm_payload, 1u, 1, 0xaau) ||
         !machine_delta_build_from_machine_step_file(&step_file, &delta_file, &delta_error)) {
         fprintf(stderr, "[machine-delta] FAIL: store-local-imm setup failed: %s\n", delta_error.message);
         ok = 0;
@@ -463,11 +463,11 @@ static int test_machine_delta_custom_step_cases(void) {
         1,
         1,
         "machine_delta profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x1e observed-status=ready observed-pc=0x1002 observed-byte=0xaa status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x20 value=0x10 known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x20 observed-status=ready observed-pc=0x1002 observed-byte=0xaa status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_delta_file_free(&delta_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x21u, store_global_imm_payload, 1u, 1, 0xabu) ||
+    if (!overwrite_step_bytes(&step_file, 0x23u, store_global_imm_payload, 1u, 1, 0xabu) ||
         !machine_delta_build_from_machine_step_file(&step_file, &delta_file, &delta_error)) {
         fprintf(stderr, "[machine-delta] FAIL: store-global-imm setup failed: %s\n", delta_error.message);
         ok = 0;
@@ -487,7 +487,7 @@ static int test_machine_delta_custom_step_cases(void) {
         1,
         1,
         "machine_delta profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x21 observed-status=ready observed-pc=0x1002 observed-byte=0xab status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x23 value=0x13 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready origin-pc=0x1000 origin-byte=0x23 observed-status=ready observed-pc=0x1002 observed-byte=0xab status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_delta_file_free(&delta_file);
 
@@ -555,10 +555,10 @@ static int test_machine_delta_i386_bridge(void) {
 
     ok &= expect_text("delta i386 dump wrapper", dump_text,
         "machine_delta profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x8048000 origin-byte=0x1c observed-status=ready observed-pc=0x8048001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x8048000 origin-byte=0x1e observed-status=ready observed-pc=0x8048001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("delta i386 report dump wrapper", report_dump_text,
         "machine_delta profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans observe=preview-state origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x8048000 origin-byte=0x1c observed-status=ready observed-pc=0x8048001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n"
+        "delta: resolution=preview-state-delta kind=state observe=preview-state apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready origin-pc=0x8048000 origin-byte=0x1e observed-status=ready observed-pc=0x8048001 observed-byte=0x8a status-changed=no pc-changed=yes fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: observe=preview-state status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

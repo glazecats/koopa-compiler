@@ -50,6 +50,162 @@ static void machine_ir_allocate_rewrite_report_clear_shape(MachineIrAllocateRewr
     report->function_indices_register_only = NULL;
 }
 
+static int machine_ir_value_ssa_program_needs_conservative_lowering(const ValueSsaProgram *program) {
+    size_t function_index;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const ValueSsaFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        if (function->parameter_count > 16u) {
+            return 1;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                if (instruction->kind == VALUE_SSA_INSTR_CALL &&
+                    instruction->as.call.arg_count > 16u) {
+                    return 1;
+                }
+                switch (instruction->kind) {
+                case VALUE_SSA_INSTR_ADDR_LOCAL:
+                case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                case VALUE_SSA_INSTR_STORE_INDIRECT:
+                    return 1;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int machine_ir_value_ssa_program_needs_all_spill_lowering(const ValueSsaProgram *program) {
+    size_t function_index;
+    size_t total_block_count = 0;
+    size_t total_instruction_count = 0;
+    size_t total_value_count = 0;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const ValueSsaFunction *function = &program->functions[function_index];
+        size_t function_instruction_count = 0;
+        size_t block_index;
+
+        if (function->parameter_count > 1024u) {
+            return 1;
+        }
+
+        total_block_count += function->block_count;
+        total_value_count += function->next_value_id;
+        if (total_block_count > 5000u || total_value_count > 50000u) {
+            return 1;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            function_instruction_count += block->phi_count + block->instruction_count;
+            total_instruction_count += block->phi_count + block->instruction_count;
+            if (function_instruction_count > 15000u || total_instruction_count > 30000u) {
+                return 1;
+            }
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                if (instruction->kind == VALUE_SSA_INSTR_CALL &&
+                    instruction->as.call.arg_count > 1024u) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int machine_ir_build_all_spill_allocation_result(const ValueSsaProgram *program,
+    ValueSsaProgramAllocationResult *out_result,
+    MachineIrError *error) {
+    size_t function_index;
+
+    if (!program || !out_result) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-413: invalid all-spill allocation result contract");
+        return 0;
+    }
+
+    value_ssa_program_allocation_result_free(out_result);
+    out_result->function_count = program->function_count;
+    if (program->function_count == 0) {
+        return 1;
+    }
+
+    out_result->function_results =
+        (ValueSsaAllocationResult *)calloc(program->function_count, sizeof(ValueSsaAllocationResult));
+    if (!out_result->function_results) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-414: out of memory building all-spill allocation result");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaAllocationResult *function_result = &out_result->function_results[function_index];
+        size_t value_id;
+
+        value_ssa_allocation_result_init(function_result);
+        function_result->value_count = function->next_value_id;
+        function_result->spill_slot_count = function->next_value_id;
+        if (function->name) {
+            function_result->function_name = machine_ir_strdup(function->name);
+            if (!function_result->function_name) {
+                machine_ir_set_error(error, 0, 0, "MACHINE-IR-415: out of memory copying all-spill function name");
+                value_ssa_program_allocation_result_free(out_result);
+                return 0;
+            }
+        }
+        if (function_result->value_count == 0) {
+            continue;
+        }
+
+        function_result->spill_flags =
+            (unsigned char *)calloc(function_result->value_count, sizeof(unsigned char));
+        function_result->spill_confirmed_flags =
+            (unsigned char *)calloc(function_result->value_count, sizeof(unsigned char));
+        function_result->spill_slots =
+            (size_t *)malloc(function_result->value_count * sizeof(size_t));
+        if (!function_result->spill_flags || !function_result->spill_confirmed_flags || !function_result->spill_slots) {
+            machine_ir_set_error(error, 0, 0, "MACHINE-IR-416: out of memory building all-spill placement tables");
+            value_ssa_program_allocation_result_free(out_result);
+            return 0;
+        }
+
+        for (value_id = 0; value_id < function_result->value_count; ++value_id) {
+            function_result->spill_flags[value_id] = 1;
+            function_result->spill_confirmed_flags[value_id] = 1;
+            function_result->spill_slots[value_id] = value_id;
+        }
+    }
+
+    return 1;
+}
+
 int machine_ir_allocate_rewrite_report_refresh_shape(MachineIrAllocateRewriteReport *report,
     MachineIrError *error) {
     size_t total_block_summary_count = 0;
@@ -313,7 +469,12 @@ int machine_ir_allocate_and_rewrite_program_single_block_spills(const ValueSsaPr
     ValueSsaProgramAllocationLayout layout;
     ValueSsaProgramMachineAllocationView machine_view;
     ValueSsaError value_error;
+    const ValueSsaProgram *lowering_source = NULL;
+    const ValueSsaProgram *layout_context_source = NULL;
     int ok = 0;
+    int trace_timing = machine_ir_trace_enabled();
+    double total_start = trace_timing ? machine_ir_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (!program || !bank || !out_program) {
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-403: invalid allocate+rewrite machine-IR contract");
@@ -326,18 +487,81 @@ int machine_ir_allocate_and_rewrite_program_single_block_spills(const ValueSsaPr
     value_ssa_program_machine_allocation_view_init(&machine_view);
     memset(&value_error, 0, sizeof(value_error));
 
-    if (!machine_ir_clone_value_ssa_program(program, &rewritten_program, error)) {
-        goto cleanup;
+    if (machine_ir_value_ssa_program_needs_all_spill_lowering(program)) {
+        if (!machine_ir_build_all_spill_allocation_result(program, &result, error)) {
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("all-spill-result", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        lowering_source = program;
+        layout_context_source = program;
+    } else if (machine_ir_value_ssa_program_needs_conservative_lowering(program)) {
+        if (!value_ssa_allocate_program(program, color_budget, &result, &value_error)) {
+            machine_ir_set_error_from_value_ssa(error, &value_error);
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("conservative-allocate", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        lowering_source = program;
+        layout_context_source = program;
+    } else {
+        if (!machine_ir_clone_value_ssa_program(program, &rewritten_program, error)) {
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("clone-value-ssa", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        if (!value_ssa_allocate_and_rewrite_program_single_block_spills(
+                &rewritten_program, color_budget, &result, &value_error)) {
+            machine_ir_set_error_from_value_ssa(error, &value_error);
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("allocate+rewrite", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        lowering_source = &rewritten_program;
+        layout_context_source = &rewritten_program;
     }
-    if (!value_ssa_allocate_and_rewrite_program_single_block_spills(
-            &rewritten_program, color_budget, &result, &value_error) ||
-        !value_ssa_build_program_allocation_layout(&result, &layout, &value_error) ||
-        !value_ssa_program_allocation_layout_attach_program_context(&layout, &rewritten_program, &value_error) ||
-        !value_ssa_build_program_machine_allocation_view(&layout, bank, &machine_view, &value_error)) {
+
+    if (!value_ssa_build_program_allocation_layout(&result, &layout, &value_error)) {
         machine_ir_set_error_from_value_ssa(error, &value_error);
         goto cleanup;
     }
-    ok = machine_ir_lower_program_from_value_ssa(&rewritten_program, &machine_view, bank, out_program, error);
+    if (trace_timing) {
+        machine_ir_trace_timing("build-layout", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+    if (!value_ssa_program_allocation_layout_attach_program_context(
+            &layout,
+            layout_context_source ? layout_context_source : lowering_source,
+            &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+    if (trace_timing) {
+        machine_ir_trace_timing("attach-layout-context", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+    if (!value_ssa_build_program_machine_allocation_view(&layout, bank, &machine_view, &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+    if (trace_timing) {
+        machine_ir_trace_timing("build-machine-view", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+    ok = machine_ir_lower_program_from_value_ssa(
+        lowering_source ? lowering_source : &rewritten_program, &machine_view, bank, out_program, error);
+    if (trace_timing) {
+        machine_ir_trace_timing("lower-machine-ir", machine_ir_now_s() - stage_start);
+        machine_ir_trace_timing("total", machine_ir_now_s() - total_start);
+    }
 
 cleanup:
     value_ssa_program_machine_allocation_view_free(&machine_view);
@@ -433,7 +657,12 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_report(
     ValueSsaProgramAllocationLayout layout;
     ValueSsaProgramMachineAllocationView machine_view;
     ValueSsaError value_error;
+    const ValueSsaProgram *lowering_source = NULL;
+    const ValueSsaProgram *layout_context_source = NULL;
     int ok = 0;
+    int trace_timing = machine_ir_trace_enabled();
+    double total_start = trace_timing ? machine_ir_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (!program || !bank || !out_report) {
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-407: invalid allocate+rewrite machine-ir report contract");
@@ -448,21 +677,88 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_report(
     value_ssa_program_machine_allocation_view_init(&machine_view);
     memset(&value_error, 0, sizeof(value_error));
 
-    if (!machine_ir_clone_value_ssa_program(program, &rewritten_program, error)) {
-        goto cleanup;
+    if (machine_ir_value_ssa_program_needs_all_spill_lowering(program)) {
+        if (!machine_ir_build_all_spill_allocation_result(program, &result, error)) {
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("report all-spill-result", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        stats.allocation_rounds = 0;
+        stats.rewrite_rounds = 0;
+        lowering_source = program;
+        layout_context_source = program;
+    } else if (machine_ir_value_ssa_program_needs_conservative_lowering(program)) {
+        if (!value_ssa_allocate_program(program, color_budget, &result, &value_error)) {
+            machine_ir_set_error_from_value_ssa(error, &value_error);
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("report conservative-allocate", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        stats.allocation_rounds = 1;
+        stats.rewrite_rounds = 0;
+        lowering_source = program;
+        layout_context_source = program;
+    } else {
+        if (!machine_ir_clone_value_ssa_program(program, &rewritten_program, error)) {
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("report clone-value-ssa", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        if (!value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(
+                &rewritten_program, color_budget, &result, &stats, &value_error)) {
+            machine_ir_set_error_from_value_ssa(error, &value_error);
+            goto cleanup;
+        }
+        if (trace_timing) {
+            machine_ir_trace_timing("report allocate+rewrite", machine_ir_now_s() - stage_start);
+            stage_start = machine_ir_now_s();
+        }
+        lowering_source = &rewritten_program;
+        layout_context_source = &rewritten_program;
     }
-    if (!value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(
-            &rewritten_program, color_budget, &result, &stats, &value_error) ||
-        !value_ssa_build_program_allocation_layout(&result, &layout, &value_error) ||
-        !value_ssa_program_allocation_layout_attach_program_context(&layout, &rewritten_program, &value_error) ||
-        !value_ssa_build_program_machine_allocation_view(&layout, bank, &machine_view, &value_error)) {
+
+    if (!value_ssa_build_program_allocation_layout(&result, &layout, &value_error)) {
         machine_ir_set_error_from_value_ssa(error, &value_error);
         goto cleanup;
     }
+    if (trace_timing) {
+        machine_ir_trace_timing("report build-layout", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+    if (!value_ssa_program_allocation_layout_attach_program_context(
+            &layout,
+            layout_context_source ? layout_context_source : lowering_source,
+            &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+    if (trace_timing) {
+        machine_ir_trace_timing("report attach-layout-context", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+    if (!value_ssa_build_program_machine_allocation_view(&layout, bank, &machine_view, &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+    if (trace_timing) {
+        machine_ir_trace_timing("report build-machine-view", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
+
     out_report->allocation_rounds = stats.allocation_rounds;
     out_report->rewrite_rounds = stats.rewrite_rounds;
     ok = machine_ir_lower_program_from_value_ssa(
-        &rewritten_program, &machine_view, bank, &out_report->program, error);
+        lowering_source ? lowering_source : &rewritten_program, &machine_view, bank, &out_report->program, error);
+    if (trace_timing) {
+        machine_ir_trace_timing("report lower-machine-ir", machine_ir_now_s() - stage_start);
+        stage_start = machine_ir_now_s();
+    }
     if (!ok) {
         goto cleanup;
     }
@@ -470,6 +766,10 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_report(
     if (!machine_ir_allocate_rewrite_report_refresh_shape(out_report, error)) {
         ok = 0;
         goto cleanup;
+    }
+    if (trace_timing) {
+        machine_ir_trace_timing("report refresh-shape", machine_ir_now_s() - stage_start);
+        machine_ir_trace_timing("report total", machine_ir_now_s() - total_start);
     }
 
 cleanup:
@@ -506,6 +806,45 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_repor
     }
     ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_report(
         program, color_budget, &bank, out_report, error);
+    value_ssa_machine_register_bank_free(&bank);
+    return ok;
+}
+
+int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+    const ValueSsaProgram *program,
+    size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error) {
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    if (!program || !out_report) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-531: invalid flat program-only machine-ir report contract");
+        return 0;
+    }
+
+    machine_ir_allocate_rewrite_report_free(out_report);
+    machine_ir_allocate_rewrite_report_init(out_report);
+    value_ssa_machine_register_bank_init(&bank);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (!value_ssa_build_flat_machine_register_bank(machine_register_count, &bank, &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+
+    ok = machine_ir_allocate_and_rewrite_program_single_block_spills(
+        program, color_budget, &bank, &out_report->program, error);
+    if (ok) {
+        out_report->allocation_rounds = 0u;
+        out_report->rewrite_rounds = 0u;
+    } else {
+        machine_ir_allocate_rewrite_report_free(out_report);
+    }
+
+cleanup:
     value_ssa_machine_register_bank_free(&bank);
     return ok;
 }

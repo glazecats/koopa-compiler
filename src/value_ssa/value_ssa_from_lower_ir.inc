@@ -824,6 +824,7 @@ static int value_ssa_convert_function_from_lower_ir(const LowerIrProgram *input_
                 error)) {
             return 0;
         }
+        output_function->locals[i].array_rank = input_function->locals[i].array_rank;
     }
 
     if (!input_function->has_body) {

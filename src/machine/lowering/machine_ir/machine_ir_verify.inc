@@ -305,10 +305,10 @@ int machine_ir_verify_program(const MachineIrProgram *program, MachineIrError *e
                     case MACHINE_IR_INSTR_CALL: {
                         size_t arg_index;
 
-                        if (!instruction->has_result ||
-                            !machine_ir_verify_result_operand(program, function, instruction->result, "call", error) ||
+                        if ((instruction->has_result &&
+                                !machine_ir_verify_result_operand(program, function, instruction->result, "call", error)) ||
                             !instruction->as.call.callee_name || instruction->as.call.callee_name[0] == '\0') {
-                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-134: calls require callee name and result");
+                            machine_ir_set_error(error, 0, 0, "MACHINE-IR-134: calls require callee name and any present result must be valid");
                             return 0;
                         }
                         if (instruction->as.call.arg_count > 0 && !instruction->as.call.args) {

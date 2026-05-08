@@ -9,6 +9,8 @@ typedef struct {
     unsigned char *is_const_flags;
     size_t count;
     size_t capacity;
+    size_t *name_index_slots;
+    size_t name_index_capacity;
 } ScopeFrame;
 
 typedef struct {
@@ -44,6 +46,121 @@ static int scope_next_growth_capacity(size_t current,
     return 1;
 }
 
+static size_t scope_hash_name(const char *name) {
+    const unsigned char *cursor = (const unsigned char *)name;
+    size_t hash = 1469598103934665603ull;
+
+    if (!name) {
+        return 0u;
+    }
+
+    while (*cursor != '\0') {
+        hash ^= (size_t)(*cursor++);
+        hash *= 1099511628211ull;
+    }
+
+    return hash;
+}
+
+static int scope_frame_rebuild_name_index(ScopeFrame *frame, size_t new_capacity) {
+    size_t *new_slots;
+    size_t index;
+
+    if (!frame) {
+        return 0;
+    }
+    if (new_capacity == 0u) {
+        free(frame->name_index_slots);
+        frame->name_index_slots = NULL;
+        frame->name_index_capacity = 0u;
+        return 1;
+    }
+
+    new_slots = (size_t *)calloc(new_capacity, sizeof(size_t));
+    if (!new_slots) {
+        return 0;
+    }
+
+    for (index = 0u; index < frame->count; ++index) {
+        const char *name = frame->names[index];
+        size_t slot;
+
+        if (!name || name[0] == '\0') {
+            continue;
+        }
+
+        slot = scope_hash_name(name) % new_capacity;
+        while (new_slots[slot] != 0u) {
+            slot = (slot + 1u) % new_capacity;
+        }
+        new_slots[slot] = index + 1u;
+    }
+
+    free(frame->name_index_slots);
+    frame->name_index_slots = new_slots;
+    frame->name_index_capacity = new_capacity;
+    return 1;
+}
+
+static int scope_frame_ensure_name_index_capacity(ScopeFrame *frame, size_t next_count) {
+    size_t desired_capacity;
+
+    if (!frame) {
+        return 0;
+    }
+    if (next_count == 0u) {
+        return 1;
+    }
+
+    desired_capacity = frame->name_index_capacity > 0u ? frame->name_index_capacity : 16u;
+    while (next_count * 2u >= desired_capacity) {
+        if (desired_capacity > ((size_t)-1) / 2u) {
+            return 0;
+        }
+        desired_capacity *= 2u;
+    }
+
+    if (desired_capacity == frame->name_index_capacity) {
+        return 1;
+    }
+
+    return scope_frame_rebuild_name_index(frame, desired_capacity);
+}
+
+static int scope_frame_lookup_name_index(const ScopeFrame *frame,
+    const char *name,
+    size_t *out_index) {
+    size_t slot;
+    size_t start_slot;
+
+    if (out_index) {
+        *out_index = 0u;
+    }
+    if (!frame || !name || name[0] == '\0' || !frame->name_index_slots || frame->name_index_capacity == 0u) {
+        return 0;
+    }
+
+    slot = scope_hash_name(name) % frame->name_index_capacity;
+    start_slot = slot;
+    while (frame->name_index_slots[slot] != 0u) {
+        size_t name_index = frame->name_index_slots[slot] - 1u;
+        const char *candidate = frame->names[name_index];
+
+        if (candidate && strcmp(candidate, name) == 0) {
+            if (out_index) {
+                *out_index = name_index;
+            }
+            return 1;
+        }
+        slot = (slot + 1u) % frame->name_index_capacity;
+        if (slot == start_slot) {
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static void scope_frame_free(ScopeFrame *frame) {
     if (!frame) {
         return;
@@ -51,10 +168,13 @@ static void scope_frame_free(ScopeFrame *frame) {
 
     free(frame->names);
     free(frame->is_const_flags);
+    free(frame->name_index_slots);
     frame->names = NULL;
     frame->is_const_flags = NULL;
+    frame->name_index_slots = NULL;
     frame->count = 0;
     frame->capacity = 0;
+    frame->name_index_capacity = 0;
 }
 
 static void scope_stack_free(ScopeStack *stack) {
@@ -99,8 +219,10 @@ static int scope_stack_push(ScopeStack *stack) {
 
     stack->frames[stack->count].names = NULL;
     stack->frames[stack->count].is_const_flags = NULL;
+    stack->frames[stack->count].name_index_slots = NULL;
     stack->frames[stack->count].count = 0;
     stack->frames[stack->count].capacity = 0;
+    stack->frames[stack->count].name_index_capacity = 0;
     stack->count++;
     return 1;
 }
@@ -115,20 +237,10 @@ static void scope_stack_pop(ScopeStack *stack) {
 }
 
 static int scope_frame_contains_name(const ScopeFrame *frame, const char *name) {
-    size_t i;
-
     if (!frame || !name || name[0] == '\0') {
         return 0;
     }
-
-    for (i = 0; i < frame->count; ++i) {
-        const char *candidate = frame->names[i];
-        if (candidate && strcmp(candidate, name) == 0) {
-            return 1;
-        }
-    }
-
-    return 0;
+    return scope_frame_lookup_name_index(frame, name, NULL);
 }
 
 static int scope_stack_contains_local_name(const ScopeStack *stack, const char *name) {
@@ -181,6 +293,17 @@ static int scope_stack_add_to_current(ScopeStack *stack, const char *name, int i
     frame->names[frame->count] = name;
     frame->is_const_flags[frame->count] = (unsigned char)(is_const_qualified != 0);
     frame->count++;
+    if (!scope_frame_ensure_name_index_capacity(frame, frame->count)) {
+        return 0;
+    }
+    {
+        size_t slot = scope_hash_name(name) % frame->name_index_capacity;
+
+        while (frame->name_index_slots[slot] != 0u) {
+            slot = (slot + 1u) % frame->name_index_capacity;
+        }
+        frame->name_index_slots[slot] = frame->count;
+    }
     return 1;
 }
 
@@ -189,7 +312,6 @@ static int scope_stack_lookup_local_const_flag(const ScopeStack *stack,
     int *out_found,
     int *out_is_const) {
     size_t frame_index;
-    size_t name_index;
 
     if (out_found) {
         *out_found = 0;
@@ -203,19 +325,16 @@ static int scope_stack_lookup_local_const_flag(const ScopeStack *stack,
 
     for (frame_index = stack->count; frame_index > 0; --frame_index) {
         const ScopeFrame *frame = &stack->frames[frame_index - 1];
+        size_t name_index = 0u;
 
-        for (name_index = 0; name_index < frame->count; ++name_index) {
-            const char *candidate = frame->names[name_index];
-
-            if (candidate && strcmp(candidate, name) == 0) {
-                if (out_found) {
-                    *out_found = 1;
-                }
-                if (out_is_const) {
-                    *out_is_const = frame->is_const_flags && frame->is_const_flags[name_index] != 0;
-                }
-                return 1;
+        if (scope_frame_lookup_name_index(frame, name, &name_index)) {
+            if (out_found) {
+                *out_found = 1;
             }
+            if (out_is_const) {
+                *out_is_const = frame->is_const_flags && frame->is_const_flags[name_index] != 0;
+            }
+            return 1;
         }
     }
 

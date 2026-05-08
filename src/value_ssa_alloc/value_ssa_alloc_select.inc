@@ -2383,26 +2383,6 @@ static int value_ssa_alloc_compare_retry_recovery_candidates(const ValueSsaAlloc
         return 1;
     }
 
-    if (value_ssa_alloc_select_option_requires_eviction(candidate_option) &&
-        value_ssa_alloc_select_option_requires_eviction(best_option)) {
-        if (!value_ssa_alloc_compare_retry_generic_eviction_options(prep,
-                coalesce_analysis,
-                interference,
-                plan,
-                result,
-                candidate_option,
-                best_option,
-                color_budget,
-                &eviction_compare,
-                error)) {
-            return 0;
-        }
-        if (eviction_compare != 0) {
-            *out_compare = eviction_compare;
-            return 1;
-        }
-    }
-
     if (value_ssa_alloc_retry_candidate_has_heavier_runtime_family_color_support(plan,
             coalesce_analysis,
             result,
@@ -2442,6 +2422,26 @@ static int value_ssa_alloc_compare_retry_recovery_candidates(const ValueSsaAlloc
     if (value_ssa_alloc_retry_candidate_has_heavier_family_pressure(plan, best_value_id, candidate_value_id)) {
         *out_compare = -1;
         return 1;
+    }
+
+    if (value_ssa_alloc_select_option_requires_eviction(candidate_option) &&
+        value_ssa_alloc_select_option_requires_eviction(best_option)) {
+        if (!value_ssa_alloc_compare_retry_generic_eviction_options(prep,
+                coalesce_analysis,
+                interference,
+                plan,
+                result,
+                candidate_option,
+                best_option,
+                color_budget,
+                &eviction_compare,
+                error)) {
+            return 0;
+        }
+        if (eviction_compare != 0) {
+            *out_compare = eviction_compare;
+            return 1;
+        }
     }
 
     if (value_ssa_alloc_select_option_requires_eviction(candidate_option) &&
@@ -2944,6 +2944,10 @@ static int value_ssa_alloc_run_execute_step(const ValueSsaFunction *function,
     ValueSsaAllocationResult *result,
     ValueSsaAllocationExecuteStepResult *out_result,
     ValueSsaError *error) {
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
+
     if (out_result) {
         value_ssa_alloc_execute_step_result_init(out_result);
     }
@@ -2960,8 +2964,17 @@ static int value_ssa_alloc_run_execute_step(const ValueSsaFunction *function,
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-190: select-phase ended in unknown state");
         return 0;
     }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "execute-step select-phase", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
     if (!value_ssa_alloc_assign_spill_slots(prep, interference, result, error)) {
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(
+            function->name, "execute-step spill-slot-assign", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_function_timing(function->name, "execute-step total", value_ssa_alloc_now_s() - total_start);
     }
 
     out_result->spill_slots_assigned = 1u;

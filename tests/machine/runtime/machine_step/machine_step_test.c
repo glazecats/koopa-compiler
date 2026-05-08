@@ -130,7 +130,7 @@ static int verify_step_file_with_profile(const MachineStepFile *step_file,
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_step profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
             "current_segment: rseg.0 .text\n"
-            "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c\n",
+            "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1e\n",
             machine_elf_target_profile_name(profile),
             machine_elf_target_profile_name(origin_profile),
             machine_elf_relocation_semantics_name(semantics),
@@ -173,7 +173,7 @@ static int verify_step_file_with_profile(const MachineStepFile *step_file,
         fetch_summary.byte_memory_offset != 0u ||
         fetch_summary.segment_index != 0u ||
         !fetch_summary.segment_name || strcmp(fetch_summary.segment_name, ".text") != 0 ||
-        fetch_summary.byte_value != 0x1cu ||
+        fetch_summary.byte_value != 0x1eu ||
         !machine_step_dump_file(step_file, &dump_text, &step_error)) {
         fprintf(stderr,
             "[machine-step] FAIL: %s validation mismatch: %s\n",
@@ -221,7 +221,7 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_step profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
             "current_segment: rseg.0 .text\n"
-            "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c\n"
+            "fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1e\n"
             "report_overview:\n"
             "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x%zx sp=0x%zx\n"
             "  elf_source: target=%s origin=%s semantics=%s\n"
@@ -230,7 +230,7 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
             "  initial-stack: base=0x%zx end=0x%zx bytes=20 word=4 argc=0\n"
             "  runtime-memory: base=0x%zx end=0x%zx span-bytes=12288 mapped-bytes=8192 entry-offset=0x0 sp-offset=0x3000\n"
             "  current-segment: rseg.0 .text perms=r-x\n"
-            "  fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c segment=0 .text\n",
+            "  fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1e segment=0 .text\n",
             machine_elf_target_profile_name(profile),
             machine_elf_target_profile_name(origin_profile),
             machine_elf_relocation_semantics_name(semantics),
@@ -291,7 +291,7 @@ static int verify_step_report_with_profile(const MachineStepReport *report,
         !machine_step_report_overview_artifact_get_current_segment_summary_artifact(&overview_artifact, &current_segment_summary) ||
         !current_segment_summary || !current_segment_summary->executable ||
         !machine_step_report_overview_artifact_get_fetch_summary_artifact(&overview_artifact, &fetch_summary) ||
-        !fetch_summary || fetch_summary->byte_value != 0x1cu ||
+        !fetch_summary || fetch_summary->byte_value != 0x1eu ||
         !machine_step_dump_report(report, &dump_text, &step_error)) {
         fprintf(stderr,
             "[machine-step] FAIL: %s report mismatch: %s\n",
@@ -570,11 +570,11 @@ static int test_machine_step_ir_bridge_and_profile(void) {
     ok &= expect_text("step ir dump wrapper", dump_text,
         "machine_step profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
-        "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c\n");
+        "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1e\n");
     ok &= expect_text("step ir report-dump wrapper", report_dump_text,
         "machine_step profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
-        "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c\n"
+        "fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1e\n"
         "report_overview:\n"
         "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -583,7 +583,7 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         "  initial-stack: base=0x3fec end=0x4000 bytes=20 word=4 argc=0\n"
         "  runtime-memory: base=0x1000 end=0x4000 span-bytes=12288 mapped-bytes=8192 entry-offset=0x0 sp-offset=0x3000\n"
         "  current-segment: rseg.0 .text perms=r-x\n"
-        "  fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c segment=0 .text\n");
+        "  fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1e segment=0 .text\n");
 
     free(dump_text);
     dump_text = NULL;
@@ -629,11 +629,11 @@ static int test_machine_step_ir_bridge_and_profile(void) {
     ok &= expect_text("step i386 dump wrapper", dump_text,
         "machine_step profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
-        "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c\n");
+        "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1e\n");
     ok &= expect_text("step i386 report-dump wrapper", report_dump_text,
         "machine_step profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 launch_registers=2 runtime_segments=2 mapped_bytes=8192\n"
         "current_segment: rseg.0 .text\n"
-        "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c\n"
+        "fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1e\n"
         "report_overview:\n"
         "  status=ready launch-registers=2 runtime-segments=2 mapped-bytes=8192 current-segment=0 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
@@ -642,7 +642,7 @@ static int test_machine_step_ir_bridge_and_profile(void) {
         "  initial-stack: base=0x804afec end=0x804b000 bytes=20 word=4 argc=0\n"
         "  runtime-memory: base=0x8048000 end=0x804b000 span-bytes=12288 mapped-bytes=8192 entry-offset=0x0 sp-offset=0x3000\n"
         "  current-segment: rseg.0 .text perms=r-x\n"
-        "  fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c segment=0 .text\n");
+        "  fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1e segment=0 .text\n");
 
 cleanup:
     free(report_dump_text);

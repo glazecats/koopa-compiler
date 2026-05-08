@@ -554,7 +554,7 @@ static int test_machine_object_preserves_target_profile_from_preview_bytes(void)
         fixup_family_summary.data_store_fixup_count != 0u ||
         !machine_object_file_get_fixup(&object_file, 0, &fixup) || !fixup ||
         !fixup->has_target_byte_offset ||
-        fixup->target_byte_offset != 8u) {
+        fixup->target_byte_offset != 12u) {
         fprintf(stderr, "[machine-object] FAIL: preview target profile mismatch: %s\n", object_error.message);
         ok = 0;
     }

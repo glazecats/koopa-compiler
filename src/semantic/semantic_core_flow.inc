@@ -1325,16 +1325,43 @@ static int flow_statement_prove_obvious_false_exit_backedge(const AstStatement *
         const AstExpression *nested_cond_expr = statement_get_condition_expression(stmt);
         const AstExpression *nested_step_expr = statement_get_for_step_expression(stmt);
         const AstStatement *nested_body_stmt = stmt->child_count >= 1 ? stmt->children[0] : NULL;
-        int nested_cond_always_true = (stmt->kind == AST_STMT_FOR && !stmt->has_condition_expression)
-            ? 1
-            : expression_is_constant_true_for_flow(nested_cond_expr);
+        int nested_cond_always_true = 0;
         int nested_body_fallthrough = 1;
         int nested_body_must_return = 0;
         FlowLoopExitSummary nested_exit_summary = {0, 0};
         FlowGuardIdentifierSet nested_guard_ids;
+        long long nested_cond_value = 0;
+        int nested_cond_known = 0;
+
+        if (stmt->kind == AST_STMT_FOR && !stmt->has_condition_expression) {
+            nested_cond_always_true = 1;
+        } else {
+            nested_cond_always_true = expression_is_constant_true_for_flow(nested_cond_expr);
+            if (!nested_cond_always_true && nested_cond_expr) {
+                nested_cond_known = flow_try_eval_guard_constant_int_with_state(
+                    nested_cond_expr,
+                    guard_ids,
+                    scopes,
+                    state,
+                    &nested_cond_value,
+                    0);
+                if (nested_cond_known) {
+                    if (nested_cond_value == 0) {
+                        if (out_has_fallthrough) {
+                            *out_has_fallthrough = 1;
+                        }
+                        return 1;
+                    }
+                    nested_cond_always_true = 1;
+                }
+            }
+        }
 
         if (!nested_cond_always_true) {
-            return 0;
+            if (out_has_fallthrough) {
+                *out_has_fallthrough = 1;
+            }
+            return 1;
         }
         if (!flow_statement_prove_obvious_false_exit_backedge(nested_body_stmt,
                 guard_ids,
@@ -1343,6 +1370,12 @@ static int flow_statement_prove_obvious_false_exit_backedge(const AstStatement *
                 exit_guards,
                 &nested_body_fallthrough)) {
             return 0;
+        }
+        if (nested_cond_known && nested_cond_value != 0 && !nested_body_fallthrough) {
+            if (out_has_fallthrough) {
+                *out_has_fallthrough = 0;
+            }
+            return 1;
         }
         nested_guard_ids = *guard_ids;
         nested_exit_summary = flow_collect_loop_exit_summary(nested_body_stmt, &nested_guard_ids, scopes);
@@ -1604,6 +1637,205 @@ static int flow_expression_range_may_change_guard_state(const AstStatement *stmt
     }
 
     return 0;
+}
+
+static void flow_state_track_declaration_stmt(const AstStatement *stmt,
+    FlowGuardIdentifierSet *tracked_ids,
+    FlowIdentifierScopeStack *scopes,
+    FlowGuardConstantState *state) {
+    size_t decl_index;
+    size_t scope_base_count;
+
+    if (!stmt || stmt->kind != AST_STMT_DECLARATION || !tracked_ids || !scopes || !state ||
+        tracked_ids->overflowed || scopes->overflowed) {
+        return;
+    }
+
+    scope_base_count = scopes->count;
+    for (decl_index = 0; decl_index < stmt->declaration_name_count; ++decl_index) {
+        const char *name = stmt->declaration_names ? stmt->declaration_names[decl_index] : NULL;
+        const AstExpression *initializer_expr =
+            (stmt->expressions && decl_index < stmt->expression_count) ? stmt->expressions[decl_index] : NULL;
+        size_t binding;
+        size_t tracked_index;
+        long long value = 0;
+
+        if (!name || name[0] == '\0') {
+            continue;
+        }
+
+        binding = scope_base_count + decl_index + 1u;
+        tracked_index = tracked_ids->count;
+        flow_guard_identifier_set_add(tracked_ids, name, strlen(name), binding);
+        if (tracked_ids->overflowed || tracked_index >= tracked_ids->count) {
+            continue;
+        }
+
+        if (initializer_expr &&
+            flow_try_eval_guard_constant_int_with_state(
+                initializer_expr, tracked_ids, scopes, state, &value, 0)) {
+            state->known[tracked_index] = 1u;
+            state->values[tracked_index] = value;
+        } else {
+            state->known[tracked_index] = 0u;
+        }
+    }
+
+    flow_scope_stack_add_declaration_names(scopes,
+        stmt->declaration_names,
+        stmt->declaration_name_count);
+}
+
+static void flow_state_apply_expression_stmt(const AstStatement *stmt,
+    const FlowGuardIdentifierSet *tracked_ids,
+    const FlowIdentifierScopeStack *scopes,
+    FlowGuardConstantState *state) {
+    size_t expr_index;
+
+    if (!stmt || stmt->kind != AST_STMT_EXPRESSION || !tracked_ids || !scopes || !state ||
+        tracked_ids->overflowed || scopes->overflowed) {
+        return;
+    }
+
+    for (expr_index = 0; expr_index < stmt->expression_count; ++expr_index) {
+        int supported = 1;
+
+        if (!flow_update_guard_constant_state_from_expression(
+                stmt->expressions[expr_index], tracked_ids, scopes, state, &supported) ||
+            !supported) {
+            return;
+        }
+    }
+}
+
+static int flow_statement_proves_must_return_with_state(const AstStatement *stmt,
+    const FlowGuardIdentifierSet *tracked_ids,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state) {
+    if (!stmt) {
+        return 0;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_RETURN:
+        return 1;
+    case AST_STMT_IF: {
+        const AstExpression *cond_expr = statement_get_condition_expression(stmt);
+        int has_else = stmt->child_count >= 2;
+        long long cond_value = 0;
+
+        if (cond_expr &&
+            flow_try_eval_guard_constant_int_with_state(
+                cond_expr, tracked_ids, scopes, state, &cond_value, 0)) {
+            if (cond_value != 0) {
+                return stmt->child_count >= 1
+                    ? flow_statement_proves_must_return_with_state(
+                          stmt->children[0], tracked_ids, scopes, state)
+                    : 0;
+            }
+            return has_else
+                ? flow_statement_proves_must_return_with_state(
+                      stmt->children[1], tracked_ids, scopes, state)
+                : 0;
+        }
+
+        if (expression_is_constant_true_for_flow(cond_expr)) {
+            return stmt->child_count >= 1
+                ? flow_statement_proves_must_return_with_state(
+                      stmt->children[0], tracked_ids, scopes, state)
+                : 0;
+        }
+        if (expression_is_constant_false_for_flow(cond_expr)) {
+            return has_else
+                ? flow_statement_proves_must_return_with_state(
+                      stmt->children[1], tracked_ids, scopes, state)
+                : 0;
+        }
+        if (!has_else) {
+            return 0;
+        }
+        return flow_statement_proves_must_return_with_state(
+                   stmt->children[0], tracked_ids, scopes, state) &&
+            flow_statement_proves_must_return_with_state(
+                   stmt->children[1], tracked_ids, scopes, state);
+    }
+    case AST_STMT_WHILE:
+    case AST_STMT_FOR: {
+        const AstExpression *cond_expr = statement_get_condition_expression(stmt);
+        int cond_always_true = (stmt->kind == AST_STMT_FOR && !stmt->has_condition_expression) ? 1 : 0;
+        long long cond_value = 0;
+
+        if (!cond_always_true) {
+            cond_always_true = expression_is_constant_true_for_flow(cond_expr);
+            if (!cond_always_true && cond_expr &&
+                flow_try_eval_guard_constant_int_with_state(
+                    cond_expr, tracked_ids, scopes, state, &cond_value, 0)) {
+                if (cond_value == 0) {
+                    return 0;
+                }
+                cond_always_true = 1;
+            }
+        }
+
+        if (!cond_always_true) {
+            return 0;
+        }
+        return stmt->child_count >= 1
+            ? flow_statement_proves_must_return_with_state(
+                  stmt->children[0], tracked_ids, scopes, state)
+            : 0;
+    }
+    case AST_STMT_COMPOUND: {
+        FlowGuardIdentifierSet local_tracked = {{0}, {0}, {0}, 0, 0};
+        FlowIdentifierScopeStack local_scopes = {0};
+        FlowGuardConstantState local_state = {{0}, {0}};
+        size_t child_index;
+
+        if (tracked_ids) {
+            local_tracked = *tracked_ids;
+        }
+        if (scopes) {
+            local_scopes = *scopes;
+        }
+        if (state) {
+            local_state = *state;
+        }
+        if (!flow_scope_stack_push(&local_scopes)) {
+            return 0;
+        }
+
+        for (child_index = 0; child_index < stmt->child_count; ++child_index) {
+            const AstStatement *child = stmt->children[child_index];
+            int child_may_fallthrough = 1;
+
+            if (flow_statement_proves_must_return_with_state(
+                    child, &local_tracked, &local_scopes, &local_state)) {
+                return 1;
+            }
+            if (!semantic_analyze_statement_flow(
+                    child, NULL, &child_may_fallthrough, NULL, NULL, NULL)) {
+                return 0;
+            }
+            if (!child_may_fallthrough) {
+                return 0;
+            }
+
+            if (child && child->kind == AST_STMT_DECLARATION) {
+                flow_state_track_declaration_stmt(
+                    child, &local_tracked, &local_scopes, &local_state);
+                if (local_tracked.overflowed || local_scopes.overflowed) {
+                    return 0;
+                }
+            } else if (child && child->kind == AST_STMT_EXPRESSION) {
+                flow_state_apply_expression_stmt(
+                    child, &local_tracked, &local_scopes, &local_state);
+            }
+        }
+        return 0;
+    }
+    default:
+        return 0;
+    }
 }
 
 static int flow_statement_may_change_guard_state(const AstStatement *stmt,
@@ -2287,7 +2519,13 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
         int block_may_break = 0;
         int block_may_continue_loop = 0;
         int block_may_non_terminating = 0;
+        FlowGuardIdentifierSet tracked_ids = {{0}, {0}, {0}, 0, 0};
+        FlowIdentifierScopeStack block_scopes = {0};
+        FlowGuardConstantState block_state = {{0}, {0}};
 
+        if (!flow_scope_stack_push(&block_scopes)) {
+            return 0;
+        }
         for (i = 0; i < stmt->child_count; ++i) {
             int child_guaranteed_return = 0;
             int child_may_fallthrough = 1;
@@ -2295,7 +2533,12 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
             int child_may_continue_loop = 0;
             int child_may_non_terminating = 0;
 
-            if (!semantic_analyze_statement_flow(stmt->children[i],
+            if (block_may_fallthrough &&
+                flow_statement_proves_must_return_with_state(
+                    stmt->children[i], &tracked_ids, &block_scopes, &block_state)) {
+                child_guaranteed_return = 1;
+                child_may_fallthrough = 0;
+            } else if (!semantic_analyze_statement_flow(stmt->children[i],
                 &child_guaranteed_return,
                 &child_may_fallthrough,
                 &child_may_break,
@@ -2324,6 +2567,19 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
                 } else {
                     block_guaranteed_return = 0;
                 }
+            }
+
+            if (block_may_fallthrough && stmt->children[i] &&
+                stmt->children[i]->kind == AST_STMT_DECLARATION) {
+                flow_state_track_declaration_stmt(
+                    stmt->children[i], &tracked_ids, &block_scopes, &block_state);
+                if (tracked_ids.overflowed || block_scopes.overflowed) {
+                    return 0;
+                }
+            } else if (block_may_fallthrough && stmt->children[i] &&
+                stmt->children[i]->kind == AST_STMT_EXPRESSION) {
+                flow_state_apply_expression_stmt(
+                    stmt->children[i], &tracked_ids, &block_scopes, &block_state);
             }
         }
 

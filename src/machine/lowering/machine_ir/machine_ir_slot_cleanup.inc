@@ -149,6 +149,18 @@ static void machine_ir_mark_global_slots_observed(size_t slot_count,
     }
 }
 
+static void machine_ir_mark_all_slots_observed(size_t slot_count,
+    MachineIrObservedSlotState *states) {
+    size_t slot_index;
+
+    if (!states) {
+        return;
+    }
+    for (slot_index = 0; slot_index < slot_count; ++slot_index) {
+        states[slot_index].observed = 1u;
+    }
+}
+
 static int machine_ir_known_slot_values_equal(size_t slot_count,
     const MachineIrKnownSlotValue *lhs,
     const MachineIrKnownSlotValue *rhs) {
@@ -1399,7 +1411,7 @@ static void machine_ir_compute_block_exit_observed_slot_states(const MachineIrPr
 static int machine_ir_compute_block_entry_observed_slot_states(const MachineIrProgram *program,
     const MachineIrFunction *function,
     size_t slot_count,
-    const MachineIrGlobalCallEffectSummary *call_effects,
+    const MachineIrGlobalCallEffectSummary *unused_call_effects,
     MachineIrObservedSlotState *block_entry_states,
     MachineIrObservedSlotState *block_exit_states,
     MachineIrError *error) {
@@ -1411,6 +1423,7 @@ static int machine_ir_compute_block_entry_observed_slot_states(const MachineIrPr
         machine_ir_set_error(error, 0, 0, "MACHINE-IR-535: invalid observed-slot backward analysis contract");
         return 0;
     }
+    (void)unused_call_effects;
 
     local_states = (MachineIrObservedSlotState *)calloc(slot_count, sizeof(MachineIrObservedSlotState));
     if (!local_states) {
@@ -1449,6 +1462,10 @@ static int machine_ir_compute_block_entry_observed_slot_states(const MachineIrPr
                             local_states[slot_index].observed = 1u;
                         }
                         break;
+                    case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                    case MACHINE_IR_INSTR_STORE_INDIRECT:
+                        machine_ir_mark_all_slots_observed(slot_count, local_states);
+                        break;
                     case MACHINE_IR_INSTR_STORE_LOCAL:
                     case MACHINE_IR_INSTR_STORE_GLOBAL:
                         slot_index = machine_ir_slot_fact_index(program, function, instruction->as.store.slot);
@@ -1457,13 +1474,7 @@ static int machine_ir_compute_block_entry_observed_slot_states(const MachineIrPr
                         }
                         break;
                     case MACHINE_IR_INSTR_CALL:
-                        for (slot_index = 0; slot_index < slot_count; ++slot_index) {
-                            if (local_states[slot_index].slot.kind == MACHINE_IR_SLOT_GLOBAL &&
-                                machine_ir_call_may_read_global(
-                                    program, call_effects, instruction, local_states[slot_index].slot.id)) {
-                                local_states[slot_index].observed = 1u;
-                            }
-                        }
+                        machine_ir_mark_all_slots_observed(slot_count, local_states);
                         break;
                     default:
                         break;
@@ -1530,6 +1541,10 @@ static int machine_ir_eliminate_dead_slot_stores(const MachineIrProgram *program
                         local_states[slot_index].observed = 1u;
                     }
                     break;
+                case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                case MACHINE_IR_INSTR_STORE_INDIRECT:
+                    machine_ir_mark_all_slots_observed(slot_count, local_states);
+                    break;
                 case MACHINE_IR_INSTR_STORE_LOCAL:
                 case MACHINE_IR_INSTR_STORE_GLOBAL:
                     slot_index = machine_ir_slot_fact_index(program, function, instruction->as.store.slot);
@@ -1545,11 +1560,7 @@ static int machine_ir_eliminate_dead_slot_stores(const MachineIrProgram *program
                     }
                     break;
                 case MACHINE_IR_INSTR_CALL:
-                    for (slot_index = 0; slot_index < slot_count; ++slot_index) {
-                        if (local_states[slot_index].slot.kind == MACHINE_IR_SLOT_GLOBAL) {
-                            local_states[slot_index].observed = 1u;
-                        }
-                    }
+                    machine_ir_mark_all_slots_observed(slot_count, local_states);
                     break;
                 default:
                     break;

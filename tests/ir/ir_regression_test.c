@@ -1613,6 +1613,47 @@ static int test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_o
         "int f(){int i=0; for(;;i=i+1){return 1;}}\n");
 }
 
+static int test_ir_lowers_strict_local_state_while_return_family(void) {
+    return expect_ir_lower_succeeds("IR-STRICT-LOCAL-STATE-WHILE-RETURN",
+        "int f(){int b=1; while(b<2){ if(b){ return 2; } }}\n");
+}
+
+static int test_ir_lowers_strict_local_state_for_return_family(void) {
+    return expect_ir_lower_succeeds("IR-STRICT-LOCAL-STATE-FOR-RETURN",
+        "int f(){int b=1; for(;b<2;b=b+1){ if(b){ return 2; } }}\n");
+}
+
+static int test_ir_lowers_strict_assigned_local_state_loop_return_family(void) {
+    return expect_ir_lower_succeeds("IR-STRICT-ASSIGNED-LOCAL-STATE-LOOP-RETURN",
+        "int f(){int b=0; b=1; while(b<2){ if(b){ return 2; } }}\n");
+}
+
+static int test_ir_preserves_loop_condition_after_unknown_if_state_update(void) {
+    return expect_ir_dump("IR-LOOP-COND-PRESERVED-AFTER-UNKNOWN-IF-STATE",
+        "int getint(); int main(){ int mon = 1; while(mon <= 12){ if(getint()) mon = mon + 1; } return 0; }\n",
+        "declare getint()\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    mon.0 = mov 1\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = le mon.0, 12\n"
+        "    br tmp.0, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    tmp.1 = call getint()\n"
+        "    br tmp.1, bb.4, bb.5\n"
+        "  bb.3:\n"
+        "    ret 0\n"
+        "  bb.4:\n"
+        "    tmp.2 = add mon.0, 1\n"
+        "    mon.0 = mov tmp.2\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    jmp bb.1\n"
+        "}\n");
+}
+
 static int test_ir_lowers_while_break_exit(void) {
     return expect_ir_dump("IR-WHILE-BREAK",
         "int f(int a){while(a){if(a<3) break; a=a-1;} return a;}\n",
@@ -1655,7 +1696,7 @@ static int test_ir_lowers_for_init_step_cfg(void) {
         "}\n");
 }
 
-    static int test_ir_lowers_nested_loop_break_continue(void) {
+static int test_ir_lowers_nested_loop_break_continue(void) {
         return expect_ir_dump("IR-NESTED-LOOP-CONTROL",
         "int f(int a){for(;a;a=a-1){while(a){break;} continue;} return a;}\n",
         "func f(a.0) {\n"
@@ -1679,6 +1720,8 @@ static int test_ir_lowers_for_init_step_cfg(void) {
         "    jmp bb.3\n"
         "}\n");
     }
+
+#include "strict_loop_return_alias.cases.inc"
 
 int main(void) {
     int ok = 1;
@@ -1780,6 +1823,11 @@ int main(void) {
     ok &= test_ir_lowers_constant_true_while_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_or_step_block();
+    ok &= test_ir_lowers_strict_local_state_while_return_family();
+    ok &= test_ir_lowers_strict_local_state_for_return_family();
+    ok &= test_ir_lowers_strict_assigned_local_state_loop_return_family();
+    ok &= test_ir_preserves_loop_condition_after_unknown_if_state_update();
+    ok &= test_ir_lowers_nested_loop_alias_return_family_without_malformed_exit_block();
     ok &= test_ir_lowers_while_break_exit();
     ok &= test_ir_lowers_for_init_step_cfg();
     ok &= test_ir_lowers_nested_loop_break_continue();

@@ -283,7 +283,7 @@ static int test_machine_event_mainline(void) {
         MACHINE_EVENT_RESOLUTION_PREVIEW_EVENT,
         MACHINE_EVENT_KIND_REGISTER_RESULT,
         "machine_event profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_event_clone_file(&event_file, &cloned_event_file, &event_error) ||
         cloned_event_file.trace_file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -301,7 +301,7 @@ static int test_machine_event_mainline(void) {
         MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_EVENT_RESOLUTION_PREVIEW_EVENT,
         "machine_event profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
+        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: trace=preview-trace status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -417,7 +417,7 @@ static int test_machine_event_custom_step_cases(void) {
     machine_event_report_free(&event_report);
     machine_event_file_free(&event_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x1eu, store_local_imm_payload, 1u, 1, 0xaau) ||
+    if (!overwrite_step_bytes(&step_file, 0x20u, store_local_imm_payload, 1u, 1, 0xaau) ||
         !machine_event_build_from_machine_step_file(&step_file, &event_file, &event_error)) {
         fprintf(stderr, "[machine-event] FAIL: store-local-imm setup failed: %s\n", event_error.message);
         ok = 0;
@@ -433,11 +433,11 @@ static int test_machine_event_custom_step_cases(void) {
         MACHINE_EVENT_RESOLUTION_PREVIEW_EVENT,
         MACHINE_EVENT_KIND_LOCAL_STORE,
         "machine_event profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "event: resolution=preview-event kind=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x20 value=0x10 known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_event_file_free(&event_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x21u, store_global_imm_payload, 1u, 1, 0xabu) ||
+    if (!overwrite_step_bytes(&step_file, 0x23u, store_global_imm_payload, 1u, 1, 0xabu) ||
         !machine_event_build_from_machine_step_file(&step_file, &event_file, &event_error)) {
         fprintf(stderr, "[machine-event] FAIL: store-global-imm setup failed: %s\n", event_error.message);
         ok = 0;
@@ -453,7 +453,7 @@ static int test_machine_event_custom_step_cases(void) {
         MACHINE_EVENT_RESOLUTION_PREVIEW_EVENT,
         MACHINE_EVENT_KIND_GLOBAL_STORE,
         "machine_event profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "event: resolution=preview-event kind=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x23 value=0x13 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_event_file_free(&event_file);
 
@@ -517,10 +517,10 @@ static int test_machine_event_i386_bridge(void) {
 
     ok &= expect_text("event i386 dump wrapper", dump_text,
         "machine_event profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("event i386 report dump wrapper", report_dump_text,
         "machine_event profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans trace=preview-trace origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
+        "event: resolution=preview-event kind=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: trace=preview-trace status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

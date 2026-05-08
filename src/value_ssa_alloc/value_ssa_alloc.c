@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 typedef struct {
     char *data;
@@ -51,6 +52,17 @@ typedef struct {
     size_t freeze_step_count;
     size_t simplify_remove_step_count;
     size_t spill_remove_step_count;
+    size_t family_member_rebuild_count;
+    size_t general_refresh_count;
+    size_t coalesce_refresh_count;
+    size_t refresh_affected_family_root_total;
+    size_t refresh_affected_family_root_max;
+    size_t phase_entry_rebuild_count;
+    size_t simplify_candidate_scan_total;
+    size_t freeze_candidate_scan_total;
+    size_t spill_candidate_scan_total;
+    size_t simplify_pair_scan_total;
+    size_t freeze_pair_scan_total;
     unsigned char published_plan_artifacts;
     unsigned char published_trace_artifacts;
 } ValueSsaAllocatorMoveEngineRunResult;
@@ -63,6 +75,9 @@ static int value_ssa_alloc_next_growth_capacity(size_t current,
 static int value_ssa_alloc_prepare_result(ValueSsaAllocationResult *result,
     size_t value_count,
     size_t color_budget,
+    ValueSsaError *error);
+static int value_ssa_clone_allocation_result(const ValueSsaAllocationResult *src,
+    ValueSsaAllocationResult *dst,
     ValueSsaError *error);
 static int value_ssa_alloc_result_find_preferred_color(const ValueSsaAllocationPrep *prep,
     const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
@@ -114,16 +129,64 @@ static int value_ssa_alloc_insert_instruction(ValueSsaBasicBlock *block,
 static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
     const size_t *spill_local_floors,
+    unsigned char *out_rewritten_functions,
+    int *out_rewrote_any,
+    ValueSsaError *error);
+static int value_ssa_rewrite_program_block_local_spill_splits_with_change_map(ValueSsaProgram *program,
+    const ValueSsaProgramAllocationResult *result,
+    unsigned char *out_rewritten_functions,
     int *out_rewrote_any,
     ValueSsaError *error);
 static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
     const size_t *spill_local_floors,
+    unsigned char *out_rewritten_functions,
     int *out_split_rewrote_any,
     int *out_spill_rewrote_any,
     int *out_rewrote_any,
     int *out_canonicalized_after_rewrite,
     ValueSsaError *error);
+static int value_ssa_alloc_trace_enabled(void);
+static double value_ssa_alloc_now_s(void);
+static void value_ssa_alloc_trace_timing(const char *stage, double elapsed_s);
+static void value_ssa_alloc_trace_function_timing(const char *function_name,
+    const char *stage,
+    double elapsed_s);
+
+static int value_ssa_alloc_trace_enabled(void) {
+    const char *flag = getenv("VALUE_SSA_TRACE_TIMING");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static double value_ssa_alloc_now_s(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+}
+
+static void value_ssa_alloc_trace_timing(const char *stage, double elapsed_s) {
+    if (!stage || !value_ssa_alloc_trace_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "[value-ssa-alloc-timing] %s %.3f\n", stage, elapsed_s);
+}
+
+static void value_ssa_alloc_trace_function_timing(const char *function_name,
+    const char *stage,
+    double elapsed_s) {
+    if (!stage || !value_ssa_alloc_trace_enabled()) {
+        return;
+    }
+
+    fprintf(stderr,
+        "[value-ssa-alloc-timing] fn=%s %s %.3f\n",
+        function_name ? function_name : "<anon>",
+        stage,
+        elapsed_s);
+}
 int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
     int *out_rewrote_any,

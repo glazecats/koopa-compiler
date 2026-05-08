@@ -125,7 +125,7 @@ static int verify_decode_file_with_profile(const MachineDecodeFile *decode_file,
 
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_decode profile=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
-            "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n",
+            "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n",
             machine_elf_target_profile_name(profile),
             base_virtual_address,
             base_virtual_address + 0x3000u,
@@ -155,11 +155,11 @@ static int verify_decode_file_with_profile(const MachineDecodeFile *decode_file,
         !current_segment_summary.name || strcmp(current_segment_summary.name, ".text") != 0 ||
         !machine_decode_file_get_fetch_summary(decode_file, &fetch_summary) ||
         fetch_summary.byte_virtual_address != base_virtual_address ||
-        fetch_summary.byte_value != 0x1cu ||
+        fetch_summary.byte_value != 0x1eu ||
         !machine_decode_file_get_tag_summary(decode_file, &tag_summary) ||
         tag_summary.tag_class != MACHINE_DECODE_TAG_OP ||
-        tag_summary.raw_byte != 0x1cu ||
-        tag_summary.tag_value != 0x0cu ||
+        tag_summary.raw_byte != 0x1eu ||
+        tag_summary.tag_value != 0x0eu ||
         !tag_summary.is_known ||
         !tag_summary.tag_name || strcmp(tag_summary.tag_name, "load-local") != 0 ||
         !machine_decode_dump_file(decode_file, &dump_text, &decode_error)) {
@@ -204,13 +204,13 @@ static int verify_decode_report_with_profile(const MachineDecodeReport *report,
 
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_decode profile=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
-            "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n"
+            "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n"
             "report_overview:\n"
             "  status=ready current-segment=0 mapped-bytes=8192 pc=0x%zx sp=0x%zx\n"
             "  policy: profile=%s op-base=0x10 term-base=0x80\n"
             "  runtime-launch: pc=0x%zx sp=0x%zx stack-segment=1\n"
-            "  fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1c segment=0 .text\n"
-            "  tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n",
+            "  fetch: vaddr=0x%zx mem-offset=0x0 byte=0x1e segment=0 .text\n"
+            "  tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n",
             machine_elf_target_profile_name(profile),
             base_virtual_address,
             base_virtual_address + 0x3000u,
@@ -241,7 +241,7 @@ static int verify_decode_report_with_profile(const MachineDecodeReport *report,
         !machine_decode_report_get_current_segment_summary_artifact(report, &current_segment_summary) ||
         !current_segment_summary || strcmp(current_segment_summary->name, ".text") != 0 ||
         !machine_decode_report_get_fetch_summary_artifact(report, &fetch_summary) ||
-        !fetch_summary || fetch_summary->byte_value != 0x1cu ||
+        !fetch_summary || fetch_summary->byte_value != 0x1eu ||
         !machine_decode_report_get_tag_summary_artifact(report, &tag_summary) ||
         !tag_summary || strcmp(tag_summary->tag_name, "load-local") != 0 ||
         !machine_decode_report_overview_artifact_get_runtime_launch_summary_artifact(&overview_artifact, &runtime_launch_summary) ||
@@ -453,16 +453,16 @@ static int test_machine_decode_ir_bridge_and_profile(void) {
         0x1000u);
     ok &= expect_text("decode ir dump wrapper", dump_text,
         "machine_decode profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n");
+        "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n");
     ok &= expect_text("decode ir report-dump wrapper", report_dump_text,
         "machine_decode profile=generic-elf32 status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n"
+        "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  policy: profile=generic-elf32 op-base=0x10 term-base=0x80\n"
         "  runtime-launch: pc=0x1000 sp=0x4000 stack-segment=1\n"
-        "  fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1c segment=0 .text\n"
-        "  tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n");
+        "  fetch: vaddr=0x1000 mem-offset=0x0 byte=0x1e segment=0 .text\n"
+        "  tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n");
 
     free(dump_text);
     dump_text = NULL;
@@ -499,16 +499,16 @@ static int test_machine_decode_ir_bridge_and_profile(void) {
         0x08048000u);
     ok &= expect_text("decode i386 dump wrapper", dump_text,
         "machine_decode profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n");
+        "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n");
     ok &= expect_text("decode i386 report-dump wrapper", report_dump_text,
         "machine_decode profile=i386-preview status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n"
+        "tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  policy: profile=i386-preview op-base=0x10 term-base=0x80\n"
         "  runtime-launch: pc=0x8048000 sp=0x804b000 stack-segment=1\n"
-        "  fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1c segment=0 .text\n"
-        "  tag: class=op raw=0x1c value=0x0c known=yes name=load-local\n");
+        "  fetch: vaddr=0x8048000 mem-offset=0x0 byte=0x1e segment=0 .text\n"
+        "  tag: class=op raw=0x1e value=0x0e known=yes name=load-local\n");
 
 cleanup:
     free(report_dump_text);

@@ -375,6 +375,1301 @@ static int build_lower_ir_memory_fold_program(LowerIrProgram *program, LowerIrEr
     return 1;
 }
 
+static int build_lower_ir_indirect_safe_global_forward_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *scalar_global = NULL;
+    LowerIrGlobal *array_global = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+    size_t temp2;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "g", &scalar_global, error) ||
+        !lower_ir_program_append_global(program, "arr", &array_global, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    array_global->byte_size = 16u;
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    temp2 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1 || temp2 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = lower_ir_slot_global(scalar_global->id);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_global(scalar_global->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.addr_slot = lower_ir_slot_global(array_global->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp1);
+    instruction.as.store_indirect.value = lower_ir_value_temp(temp0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp2);
+    instruction.as.load_slot = lower_ir_slot_global(scalar_global->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp2), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_tiny_helper_inline_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *hashmod = NULL;
+    LowerIrGlobal *arr = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+    size_t temp2;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "hashmod", &hashmod, error) ||
+        !lower_ir_program_append_global(program, "arr", &arr, error) ||
+        !lower_ir_program_append_function(program, "hash", 1, &helper, error) ||
+        !lower_ir_function_append_local(helper, "k", 1, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    arr->byte_size = 16u;
+
+    temp0 = lower_ir_function_allocate_temp(helper);
+    temp1 = lower_ir_function_allocate_temp(helper);
+    temp2 = lower_ir_function_allocate_temp(helper);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1 || temp2 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.load_slot = lower_ir_slot_global(hashmod->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp2);
+    instruction.as.binary.op = LOWER_IR_BINARY_MOD;
+    instruction.as.binary.lhs = lower_ir_value_temp(temp0);
+    instruction.as.binary.rhs = lower_ir_value_temp(temp1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp2), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    block = NULL;
+    if (!lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(main_function);
+    temp1 = lower_ir_function_allocate_temp(main_function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.addr_slot = lower_ir_slot_global(arr->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.call.callee_name = "hash";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (LowerIrValueRef *)calloc(1u, sizeof(LowerIrValueRef));
+    if (!instruction.as.call.args) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = lower_ir_value_immediate(9);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp1), error)) {
+        free(instruction.as.call.args);
+        lower_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    return 1;
+}
+
+static int build_lower_ir_unused_scalar_local_store_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *sink = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "sink", &sink, error) ||
+        !lower_ir_program_append_function(program, "helper", 1, &helper, error) ||
+        !lower_ir_function_append_local(helper, "tmp", 0, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    sink->byte_size = 16u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0u);
+    instruction.as.store.value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    block = NULL;
+    if (!lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(main_function);
+    temp1 = lower_ir_function_allocate_temp(main_function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.addr_slot = lower_ir_slot_global(sink->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 0u;
+    instruction.as.call.args = NULL;
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp1), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_array_local_store_preserved_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *sink = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "sink", &sink, error) ||
+        !lower_ir_program_append_function(program, "helper", 1, &helper, error) ||
+        !lower_ir_function_append_local(helper, "arr", 0, NULL, error) ||
+        !lower_ir_function_append_local(helper, "arr", 0, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    sink->byte_size = 16u;
+    helper->locals[0].array_rank = 1u;
+    helper->locals[1].array_rank = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0u);
+    instruction.as.store.value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(1u);
+    instruction.as.store.value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    block = NULL;
+    if (!lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(main_function);
+    temp1 = lower_ir_function_allocate_temp(main_function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.addr_slot = lower_ir_slot_global(sink->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 0u;
+    instruction.as.call.args = NULL;
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp1), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_unique_pred_repeated_indirect_load_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *head = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *succ = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3, t4, t5, t6, t7;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "head", &head, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "idx", 1, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &succ, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    head->byte_size = 16u;
+
+    t0 = lower_ir_function_allocate_temp(function);
+    t1 = lower_ir_function_allocate_temp(function);
+    t2 = lower_ir_function_allocate_temp(function);
+    t3 = lower_ir_function_allocate_temp(function);
+    t4 = lower_ir_function_allocate_temp(function);
+    t5 = lower_ir_function_allocate_temp(function);
+    t6 = lower_ir_function_allocate_temp(function);
+    t7 = lower_ir_function_allocate_temp(function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1 ||
+        t4 == (size_t)-1 || t5 == (size_t)-1 || t6 == (size_t)-1 || t7 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.binary.op = LOWER_IR_BINARY_MUL;
+    instruction.as.binary.lhs = lower_ir_value_temp(t1);
+    instruction.as.binary.rhs = lower_ir_value_immediate(4);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_temp(t2);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t4);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(t3);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t5);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(succ, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t6);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t5);
+    instruction.as.binary.rhs = lower_ir_value_temp(t2);
+    if (!lower_ir_block_append_instruction(succ, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t7);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(t6);
+    if (!lower_ir_block_append_instruction(succ, &instruction, error) ||
+        !lower_ir_block_set_return(succ, lower_ir_value_temp(t7), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_repeated_addr_root_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *head = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3, t4, t5, t6;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "head", &head, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "idx", 1, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    head->byte_size = 16u;
+
+    t0 = lower_ir_function_allocate_temp(function);
+    t1 = lower_ir_function_allocate_temp(function);
+    t2 = lower_ir_function_allocate_temp(function);
+    t3 = lower_ir_function_allocate_temp(function);
+    t4 = lower_ir_function_allocate_temp(function);
+    t5 = lower_ir_function_allocate_temp(function);
+    t6 = lower_ir_function_allocate_temp(function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1 ||
+        t4 == (size_t)-1 || t5 == (size_t)-1 || t6 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.binary.op = LOWER_IR_BINARY_MUL;
+    instruction.as.binary.lhs = lower_ir_value_temp(t1);
+    instruction.as.binary.rhs = lower_ir_value_immediate(4);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_temp(t2);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t4);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t5);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t4);
+    instruction.as.binary.rhs = lower_ir_value_temp(t2);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t6);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(t5);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(t6), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_repeated_pure_internal_call_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *base = NULL;
+    LowerIrGlobal *arr = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *header = NULL;
+    LowerIrBasicBlock *body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrBasicBlock *main_block = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3, t4, t5, t6, t7;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "base", &base, error) ||
+        !lower_ir_program_append_global(program, "arr", &arr, error) ||
+        !lower_ir_program_append_function(program, "helper", 2, &helper, error) ||
+        !lower_ir_function_append_local(helper, "x", 1, NULL, error) ||
+        !lower_ir_function_append_local(helper, "count", 1, NULL, error) ||
+        !lower_ir_function_append_local(helper, "i", 0, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &entry, error) ||
+        !lower_ir_function_append_block(helper, NULL, &header, error) ||
+        !lower_ir_function_append_block(helper, NULL, &body, error) ||
+        !lower_ir_function_append_block(helper, NULL, &exit_block, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &main_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    base->byte_size = 4u;
+    base->has_initializer = 1;
+    base->initializer_value = 3;
+    base->has_runtime_initializer = 0;
+    arr->byte_size = 16u;
+
+    t0 = lower_ir_function_allocate_temp(helper);
+    t1 = lower_ir_function_allocate_temp(helper);
+    t2 = lower_ir_function_allocate_temp(helper);
+    t3 = lower_ir_function_allocate_temp(helper);
+    t4 = lower_ir_function_allocate_temp(helper);
+    t5 = lower_ir_function_allocate_temp(helper);
+    t6 = lower_ir_function_allocate_temp(helper);
+    t7 = lower_ir_function_allocate_temp(helper);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1 ||
+        t4 == (size_t)-1 || t5 == (size_t)-1 || t6 == (size_t)-1 || t7 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(2u);
+    instruction.as.store.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.load_slot = lower_ir_slot_local(2u);
+    if (!lower_ir_block_append_instruction(header, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_slot = lower_ir_slot_local(1u);
+    if (!lower_ir_block_append_instruction(header, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.binary.op = LOWER_IR_BINARY_LT;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_temp(t1);
+    if (!lower_ir_block_append_instruction(header, &instruction, error) ||
+        !lower_ir_block_set_branch(header, lower_ir_value_temp(t2), 2u, 3u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t4);
+    instruction.as.load_slot = lower_ir_slot_global(base->id);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t5);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t3);
+    instruction.as.binary.rhs = lower_ir_value_temp(t4);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0u);
+    instruction.as.store.value = lower_ir_value_temp(t5);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t6);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(2u);
+    instruction.as.store.value = lower_ir_value_temp(t6);
+    if (!lower_ir_block_append_instruction(body, &instruction, error) ||
+        !lower_ir_block_set_jump(body, 1u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t7);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(exit_block, &instruction, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(t7), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    t0 = lower_ir_function_allocate_temp(main_function);
+    t1 = lower_ir_function_allocate_temp(main_function);
+    t2 = lower_ir_function_allocate_temp(main_function);
+    t3 = lower_ir_function_allocate_temp(main_function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.addr_slot = lower_ir_slot_global(arr->id);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(t1);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (LowerIrValueRef *)calloc(2u, sizeof(LowerIrValueRef));
+    if (!instruction.as.call.args) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = lower_ir_value_immediate(5);
+    instruction.as.call.args[1] = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        free(instruction.as.call.args);
+        lower_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (LowerIrValueRef *)calloc(2u, sizeof(LowerIrValueRef));
+    if (!instruction.as.call.args) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = lower_ir_value_immediate(5);
+    instruction.as.call.args[1] = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        free(instruction.as.call.args);
+        lower_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_temp(t2);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error) ||
+        !lower_ir_block_set_return(main_block, lower_ir_value_temp(t3), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_redundant_binary_fixed_point_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *arr = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3, t4, t5;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "arr", &arr, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "idx", 1, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    arr->byte_size = 16u;
+
+    t0 = lower_ir_function_allocate_temp(function);
+    t1 = lower_ir_function_allocate_temp(function);
+    t2 = lower_ir_function_allocate_temp(function);
+    t3 = lower_ir_function_allocate_temp(function);
+    t4 = lower_ir_function_allocate_temp(function);
+    t5 = lower_ir_function_allocate_temp(function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 ||
+        t3 == (size_t)-1 || t4 == (size_t)-1 || t5 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.addr_slot = lower_ir_slot_global(arr->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(t0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t1);
+    instruction.as.binary.rhs = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t1);
+    instruction.as.binary.rhs = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t4);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t3);
+    instruction.as.binary.rhs = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t5);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t2);
+    instruction.as.binary.rhs = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(t4), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_same_block_indirect_load_forward_across_param_store_program(LowerIrProgram *program,
+    LowerIrError *error) {
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "main", 2, &function, error) ||
+        !lower_ir_function_append_local(function, "arr", 1, NULL, error) ||
+        !lower_ir_function_append_local(function, "head", 0, NULL, error) ||
+        !lower_ir_function_append_local(function, "tmp", 0, NULL, error) ||
+        !lower_ir_function_append_block(function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    function->locals[0].array_rank = 1u;
+    function->locals[1].array_rank = 1u;
+
+    t0 = lower_ir_function_allocate_temp(function);
+    t1 = lower_ir_function_allocate_temp(function);
+    t2 = lower_ir_function_allocate_temp(function);
+    t3 = lower_ir_function_allocate_temp(function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.addr_slot = lower_ir_slot_local(1u);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(t0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(2u);
+    instruction.as.store.value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(t2);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(t0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(t3), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_repeated_pure_internal_call_across_store_indirect_program(LowerIrProgram *program,
+    LowerIrError *error) {
+    LowerIrGlobal *base = NULL;
+    LowerIrGlobal *arr = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *header = NULL;
+    LowerIrBasicBlock *body = NULL;
+    LowerIrBasicBlock *exit_block = NULL;
+    LowerIrBasicBlock *main_block = NULL;
+    LowerIrInstruction instruction;
+    size_t t0, t1, t2, t3, t4, t5, t6, t7;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "base", &base, error) ||
+        !lower_ir_program_append_global(program, "arr", &arr, error) ||
+        !lower_ir_program_append_function(program, "helper", 2, &helper, error) ||
+        !lower_ir_function_append_local(helper, "x", 1, NULL, error) ||
+        !lower_ir_function_append_local(helper, "count", 1, NULL, error) ||
+        !lower_ir_function_append_local(helper, "i", 0, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &entry, error) ||
+        !lower_ir_function_append_block(helper, NULL, &header, error) ||
+        !lower_ir_function_append_block(helper, NULL, &body, error) ||
+        !lower_ir_function_append_block(helper, NULL, &exit_block, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &main_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    base->byte_size = 4u;
+    base->has_initializer = 1;
+    base->initializer_value = 3;
+    base->has_runtime_initializer = 0;
+    arr->byte_size = 16u;
+
+    t0 = lower_ir_function_allocate_temp(helper);
+    t1 = lower_ir_function_allocate_temp(helper);
+    t2 = lower_ir_function_allocate_temp(helper);
+    t3 = lower_ir_function_allocate_temp(helper);
+    t4 = lower_ir_function_allocate_temp(helper);
+    t5 = lower_ir_function_allocate_temp(helper);
+    t6 = lower_ir_function_allocate_temp(helper);
+    t7 = lower_ir_function_allocate_temp(helper);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1 || t3 == (size_t)-1 ||
+        t4 == (size_t)-1 || t5 == (size_t)-1 || t6 == (size_t)-1 || t7 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(2u);
+    instruction.as.store.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_jump(entry, 1u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.load_slot = lower_ir_slot_local(2u);
+    if (!lower_ir_block_append_instruction(header, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.load_slot = lower_ir_slot_local(1u);
+    if (!lower_ir_block_append_instruction(header, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.binary.op = LOWER_IR_BINARY_LT;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_temp(t1);
+    if (!lower_ir_block_append_instruction(header, &instruction, error) ||
+        !lower_ir_block_set_branch(header, lower_ir_value_temp(t2), 2u, 3u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t3);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t4);
+    instruction.as.load_slot = lower_ir_slot_global(base->id);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t5);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t3);
+    instruction.as.binary.rhs = lower_ir_value_temp(t4);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0u);
+    instruction.as.store.value = lower_ir_value_temp(t5);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t6);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(t0);
+    instruction.as.binary.rhs = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(body, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(2u);
+    instruction.as.store.value = lower_ir_value_temp(t6);
+    if (!lower_ir_block_append_instruction(body, &instruction, error) ||
+        !lower_ir_block_set_jump(body, 1u, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t7);
+    instruction.as.load_slot = lower_ir_slot_local(0u);
+    if (!lower_ir_block_append_instruction(exit_block, &instruction, error) ||
+        !lower_ir_block_set_return(exit_block, lower_ir_value_temp(t7), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    t0 = lower_ir_function_allocate_temp(main_function);
+    t1 = lower_ir_function_allocate_temp(main_function);
+    t2 = lower_ir_function_allocate_temp(main_function);
+    if (t0 == (size_t)-1 || t1 == (size_t)-1 || t2 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t0);
+    instruction.as.addr_slot = lower_ir_slot_global(arr->id);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(t0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t1);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (LowerIrValueRef *)calloc(2u, sizeof(LowerIrValueRef));
+    if (!instruction.as.call.args) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = lower_ir_value_immediate(5);
+    instruction.as.call.args[1] = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        free(instruction.as.call.args);
+        lower_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(t0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(t2);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (LowerIrValueRef *)calloc(2u, sizeof(LowerIrValueRef));
+    if (!instruction.as.call.args) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = lower_ir_value_immediate(5);
+    instruction.as.call.args[1] = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(main_block, &instruction, error) ||
+        !lower_ir_block_set_return(main_block, lower_ir_value_temp(t2), error)) {
+        free(instruction.as.call.args);
+        lower_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    return 1;
+}
+
 static int build_lower_ir_loop_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrBasicBlock *entry = NULL;
@@ -994,6 +2289,54 @@ static int build_lower_ir_dead_call_program(LowerIrProgram *program, LowerIrErro
     instruction.as.call.arg_count = 0;
     if (!lower_ir_block_append_instruction(block, &instruction, error) ||
         !lower_ir_block_set_return(block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_extreme_param_decl_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrFunction *decl = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t parameter_index;
+    size_t result_temp;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_function(program, "helper_decl", 0, &decl, error) ||
+        !lower_ir_program_append_function(program, "main", 513, &main_function, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    (void)decl;
+    for (parameter_index = 0; parameter_index < 513u; ++parameter_index) {
+        if (!lower_ir_function_append_local(main_function, "p", 1, NULL, error)) {
+            lower_ir_program_free(program);
+            return 0;
+        }
+    }
+    if (!lower_ir_function_append_block(main_function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    result_temp = lower_ir_function_allocate_temp(main_function);
+    if (result_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(result_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(result_temp), error)) {
         lower_ir_program_free(program);
         return 0;
     }
@@ -1937,6 +3280,135 @@ static int build_dead_call_program(ValueSsaProgram *program, ValueSsaError *erro
     return 1;
 }
 
+static int build_local_address_taken_no_forward_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t local_a_id;
+    size_t addr_value;
+    size_t load_value;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "a", 1, &local_a_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    addr_value = value_ssa_function_allocate_value(function);
+    load_value = value_ssa_function_allocate_value(function);
+    if (addr_value == (size_t)-1 || load_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.has_result = 0;
+    instruction.as.store.slot = value_ssa_slot_local(local_a_id);
+    instruction.as.store.value = value_ssa_value_immediate(7);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(addr_value);
+    instruction.as.addr_slot = value_ssa_slot_local(local_a_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(load_value);
+    instruction.as.load_slot = value_ssa_slot_local(local_a_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(load_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_perf_hotspot_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+    size_t value2;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "base", &global, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    global->byte_size = 4u;
+    global->has_initializer = 1;
+    global->initializer_value = 16;
+    global->has_runtime_initializer = 0;
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    value2 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1 || value2 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_MUL;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(4);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value2);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value1);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value2), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+
+
 static int build_dangerous_dead_binary_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *block = NULL;
@@ -2002,6 +3474,68 @@ static int build_constant_fold_binary_program(ValueSsaProgram *program, ValueSsa
     instruction.as.binary.rhs = value_ssa_value_immediate(2);
     if (!value_ssa_block_append_instruction(block, &instruction, error) ||
         !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_mov_chain_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+    size_t value2;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    value2 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1 || value2 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.mov_value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value2);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value1);
+    instruction.as.binary.rhs = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value2), error)) {
         value_ssa_program_free(program);
         return 0;
     }
@@ -4190,6 +5724,59 @@ static int expect_local_load_forwarded_dump(const char *case_id,
     return ok;
 }
 
+static int expect_perf_hotspot_optimized_dump(const char *case_id,
+    int (*builder)(ValueSsaProgram *program, ValueSsaError *error),
+    const char *expected_text) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok;
+
+    if (!builder || !expected_text) {
+        return 0;
+    }
+
+    if (!builder(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s setup failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_optimize_perf_hotspots(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s perf-hotspot optimize failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s perf-hotspot dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int expect_global_load_forwarded_dump(const char *case_id,
     int (*builder)(ValueSsaProgram *program, ValueSsaError *error),
     const char *expected_text) {
@@ -4405,6 +5992,8 @@ static int expect_redundant_binary_eliminated_dump(const char *case_id,
     value_ssa_program_free(&program);
     return ok;
 }
+
+
 
 static int expect_cfg_simplified_dump(const char *case_id,
     int run_value_simplify_first,
@@ -4990,6 +6579,68 @@ cleanup:
     lower_ir_program_free(&lower_program);
     value_ssa_program_free(&default_program);
     value_ssa_program_free(&mode_program);
+    return ok;
+}
+
+static int expect_default_matches_direct_dump(const char *case_id,
+    int (*builder)(LowerIrProgram *program, LowerIrError *error)) {
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram default_program;
+    ValueSsaProgram direct_program;
+    ValueSsaError ssa_error;
+    char *default_text = NULL;
+    char *direct_text = NULL;
+    int ok = 1;
+
+    if (!builder) {
+        return 0;
+    }
+
+    if (!builder(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s lower-ir setup failed at %d:%d: %s\n",
+            case_id,
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_default_from_lower_ir(&lower_program, &default_program, &ssa_error) ||
+        !value_ssa_build_from_lower_ir(&lower_program, &direct_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default/direct conversion failed at %d:%d: %s\n",
+            case_id,
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&default_program, &default_text) ||
+        !value_ssa_dump_program(&direct_program, &direct_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strcmp(default_text, direct_text) != 0) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s default/direct dump mismatch\ndefault:\n%s\ndirect:\n%s\n",
+            case_id,
+            default_text,
+            direct_text);
+        ok = 0;
+    }
+
+cleanup:
+    free(default_text);
+    free(direct_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&default_program);
+    value_ssa_program_free(&direct_program);
     return ok;
 }
 
@@ -6203,6 +7854,18 @@ static int test_value_ssa_fold_constant_binary(void) {
         "}\n");
 }
 
+static int test_value_ssa_fold_constant_mov_chain(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-CONSTANT-MOV-CHAIN",
+        build_constant_fold_mov_chain_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 1\n"
+        "    ssa.1 = mov 3\n"
+        "    ssa.2 = mov 6\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
 static int test_value_ssa_fold_preserves_dangerous_binary(void) {
     return expect_constant_folded_dump("VALUE-SSA-FOLD-PRESERVE-DANGEROUS-BINARY",
         build_dangerous_dead_binary_program,
@@ -6309,6 +7972,32 @@ static int test_value_ssa_forward_local_loads_do_not_cross_join(void) {
         "  bb.3:\n"
         "    ssa.1 = load_local a.0\n"
         "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_forward_local_loads_skip_address_taken_local(void) {
+    return expect_local_load_forwarded_dump("VALUE-SSA-FORWARD-LOCAL-ADDRESS-TAKEN-NO-FORWARD",
+        build_local_address_taken_no_forward_program,
+        "func main(a.0) {\n"
+        "  bb.0:\n"
+        "    store_local a.0, 7\n"
+        "    ssa.0 = addr_local a.0\n"
+        "    ssa.1 = load_local a.0\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-BASIC",
+        build_perf_hotspot_program,
+        "global base.0 = 16\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 16\n"
+        "    ssa.1 = shl ssa.0, 2\n"
+        "    ssa.2 = add ssa.1, 1\n"
+        "    ret ssa.2\n"
         "}\n");
 }
 
@@ -7647,6 +9336,8 @@ static int test_value_ssa_canonicalize_program_preserves_dead_result_call(void) 
         "}\n");
 }
 
+
+
 static int test_value_ssa_canonicalize_program_preserves_dangerous_dead_binary(void) {
     return expect_canonicalized_dump("VALUE-SSA-CANONICALIZE-DANGEROUS-BINARY",
         build_dangerous_dead_binary_program,
@@ -7837,10 +9528,234 @@ static int test_value_ssa_default_conversion_fold_program(void) {
         "}\n");
 }
 
+static int test_value_ssa_default_conversion_indirect_safe_global_forward_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-INDIRECT-SAFE-GLOBAL-FORWARD",
+        build_lower_ir_indirect_safe_global_forward_program,
+        "global g.0\n"
+        "global arr.1\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 7\n"
+        "    ssa.0 = addr_global arr.1\n"
+        "    store_indirect ssa.0, 7\n"
+        "    ret 7\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_tiny_helper_inline_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-TINY-HELPER-INLINE",
+        build_lower_ir_tiny_helper_inline_program,
+        "global hashmod.0\n"
+        "global arr.1\n"
+        "\n"
+        "func hash(k.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local k.0\n"
+        "    ssa.1 = load_global hashmod.0\n"
+        "    ssa.2 = mod ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global arr.1\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = load_global hashmod.0\n"
+        "    ssa.2 = mod 9, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_eliminates_unread_scalar_local_store_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-UNREAD-SCALAR-LOCAL-STORE-DCE",
+        build_lower_ir_unused_scalar_local_store_program,
+        "global sink.0\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global sink.0\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = call helper()\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_preserves_array_local_store_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-PRESERVE-ARRAY-LOCAL-STORES",
+        build_lower_ir_array_local_store_preserved_program,
+        "global sink.0\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    store_local arr.0, 1\n"
+        "    store_local arr.1, 2\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global sink.0\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = call helper()\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_reuses_unique_pred_repeated_indirect_load_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-UNIQUE-PRED-INDIRECT-LOAD-FORWARD",
+        build_lower_ir_unique_pred_repeated_indirect_load_program,
+        "global head.0\n"
+        "\n"
+        "func main(idx.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global head.0\n"
+        "    ssa.1 = load_local idx.0\n"
+        "    ssa.2 = mul ssa.1, 4\n"
+        "    ssa.3 = add ssa.0, ssa.2\n"
+        "    ssa.4 = load_indirect ssa.3\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ret ssa.4\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_reuses_repeated_addr_root_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-REPEATED-ADDR-ROOT-REUSE",
+        build_lower_ir_repeated_addr_root_program,
+        "global head.0\n"
+        "\n"
+        "func main(idx.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global head.0\n"
+        "    ssa.1 = load_local idx.0\n"
+        "    ssa.2 = mul ssa.1, 4\n"
+        "    ssa.3 = add ssa.0, ssa.2\n"
+        "    ssa.4 = load_indirect ssa.3\n"
+        "    ret ssa.4\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-REPEATED-PURE-INTERNAL-CALL-REUSE",
+        build_lower_ir_repeated_pure_internal_call_program,
+        "global base.0 = 3\n"
+        "global arr.1\n"
+        "\n"
+        "func helper(x.0, count.1) {\n"
+        "  bb.0:\n"
+        "    store_local i.2, 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = load_local i.2\n"
+        "    ssa.1 = load_local count.1\n"
+        "    ssa.2 = lt ssa.0, ssa.1\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = load_local x.0\n"
+        "    ssa.4 = load_global base.0\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    store_local x.0, ssa.5\n"
+        "    ssa.6 = add ssa.0, 1\n"
+        "    store_local i.2, ssa.6\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.7 = load_local x.0\n"
+        "    ret ssa.7\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global arr.1\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = call helper(5, 2)\n"
+        "    ssa.2 = add ssa.1, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_reaches_redundant_binary_fixed_point(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-REDUNDANT-BINARY-FIXED-POINT",
+        build_lower_ir_redundant_binary_fixed_point_program,
+        "global arr.0\n"
+        "\n"
+        "func main(idx.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global arr.0\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = load_local idx.0\n"
+        "    ssa.2 = add ssa.1, 1\n"
+        "    ssa.3 = add ssa.2, 2\n"
+        "    ret ssa.3\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_forwards_same_block_indirect_load_across_param_store(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-SAME-BLOCK-INDIRECT-LOAD-FORWARD-PARAM-NONALIAS",
+        build_lower_ir_same_block_indirect_load_forward_across_param_store_program,
+        "func main(arr.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_local head.1\n"
+        "    ssa.1 = load_indirect ssa.0\n"
+        "    ssa.2 = load_local arr.0\n"
+        "    store_indirect ssa.2, 7\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls_across_store_indirect(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-REPEATED-PURE-INTERNAL-CALL-ACROSS-STORE-INDIRECT",
+        build_lower_ir_repeated_pure_internal_call_across_store_indirect_program,
+        "global base.0 = 3\n"
+        "global arr.1\n"
+        "\n"
+        "func helper(x.0, count.1) {\n"
+        "  bb.0:\n"
+        "    store_local i.2, 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = load_local i.2\n"
+        "    ssa.1 = load_local count.1\n"
+        "    ssa.2 = lt ssa.0, ssa.1\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = load_local x.0\n"
+        "    ssa.4 = load_global base.0\n"
+        "    ssa.5 = add ssa.3, ssa.4\n"
+        "    store_local x.0, ssa.5\n"
+        "    ssa.6 = add ssa.0, 1\n"
+        "    store_local i.2, ssa.6\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.7 = load_local x.0\n"
+        "    ret ssa.7\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global arr.1\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = call helper(5, 2)\n"
+        "    store_indirect ssa.0, 1\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
 static int test_value_ssa_default_matches_memory_full_mode(void) {
     return expect_default_matches_mode_dump("VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL",
         build_lower_ir_join_preserved_local_program,
         VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL);
+}
+
+static int test_value_ssa_default_matches_direct_on_extreme_param_program(void) {
+    return expect_default_matches_direct_dump("VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM",
+        build_lower_ir_extreme_param_decl_program);
 }
 
 static int test_value_ssa_canonicalize_program_rejects_invalid_input(void) {
@@ -8008,6 +9923,8 @@ int main(void) {
     ok &= test_value_ssa_forward_local_repeated_loads();
     ok &= test_value_ssa_forward_local_loads_across_straight_chain();
     ok &= test_value_ssa_forward_local_loads_do_not_cross_join();
+    ok &= test_value_ssa_forward_local_loads_skip_address_taken_local();
+    ok &= test_value_ssa_optimize_perf_hotspots();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();
@@ -8037,6 +9954,7 @@ int main(void) {
     ok &= test_value_ssa_simplify_identity_eq_self();
     ok &= test_value_ssa_simplify_identity_div_one();
     ok &= test_value_ssa_fold_constant_binary();
+    ok &= test_value_ssa_fold_constant_mov_chain();
     ok &= test_value_ssa_fold_preserves_dangerous_binary();
     ok &= test_value_ssa_simplify_cfg_same_target_branch();
     ok &= test_value_ssa_simplify_cfg_same_return_diamond();
@@ -8105,7 +10023,18 @@ int main(void) {
     ok &= test_value_ssa_mode_conversion_memory_full_fold();
     ok &= test_value_ssa_mode_conversion_rejects_unknown_mode();
     ok &= test_value_ssa_default_conversion_fold_program();
+    ok &= test_value_ssa_default_conversion_indirect_safe_global_forward_program();
+    ok &= test_value_ssa_default_conversion_tiny_helper_inline_program();
+    ok &= test_value_ssa_default_conversion_eliminates_unread_scalar_local_store_program();
+    ok &= test_value_ssa_default_conversion_preserves_array_local_store_program();
+    ok &= test_value_ssa_default_conversion_reuses_unique_pred_repeated_indirect_load_program();
+    ok &= test_value_ssa_default_conversion_reuses_repeated_addr_root_program();
+    ok &= test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls();
+    ok &= test_value_ssa_default_conversion_reaches_redundant_binary_fixed_point();
+    ok &= test_value_ssa_default_conversion_forwards_same_block_indirect_load_across_param_store();
+    ok &= test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls_across_store_indirect();
     ok &= test_value_ssa_default_matches_memory_full_mode();
+    ok &= test_value_ssa_default_matches_direct_on_extreme_param_program();
     ok &= test_value_ssa_canonicalize_program_rejects_invalid_input();
     ok &= test_value_ssa_builder_rejects_declaration_block_append();
     ok &= test_value_ssa_builder_rejects_declaration_allocate_value();

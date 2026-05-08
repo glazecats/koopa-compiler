@@ -317,7 +317,7 @@ Current approximate position inside that larger stage:
   - retry now already has explicit family field / phase protocol, step-result
     status, unified phase-entry artifacts, and a field-driven outer loop shape
 - `Phase C / Briggs-Chaitin-style mainline consolidation`: roughly **96-99%**
-  - this is now best read as a **checkpointed near-closed stage**
+  - this is now best read as a **reclosed near-closed stage**
   - recent work pulled allocator orchestration into nested result-bearing
     drivers across move engine, select side, execute side, ordinary-entry
     artifact build, program-level entry, and allocate+rewrite fixed-point
@@ -325,6 +325,19 @@ Current approximate position inside that larger stage:
     representative-owned on the write side: rebuilding/collecting phase-entry
     state now resolves representative roots up front instead of leaning as
     heavily on later root-indexed normalization
+  - the latest reopened allocator-maintenance tail has now been reclosed in the
+    current tree. Focused witnesses around `family-freeze`,
+    `released-simplify-family`, `coalesce-opportunity`, explicit
+    move-transition coalesce/freeze traces, spill-family tie-breaking,
+    targeted/weighted recolor, and the reopened retry-family path are green
+    again, and the aggregate allocator suite
+    `./build/value_ssa/value_ssa_alloc_test` is green too
+  - the key implementation lesson from that tail is now recorded in the tree:
+    hand-built allocator artifacts must keep graceful fallback lookup paths
+    even when their derived index tables are absent. Current authority is that
+    both manual coalesce-pair lookup and manual move-work root lookup now have
+    that fallback, and the no-move allocator-plan fast path also preserves
+    coalesced effective-degree/class facts instead of flattening them away
 - `live-range splitting`: roughly **99%**
   - this is now best read as a **checkpointed near-closed stage**
   - the current landed slice now covers conservative block-local spill splits

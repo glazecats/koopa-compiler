@@ -285,7 +285,7 @@ static int test_machine_history_mainline(void) {
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_VALUE_HISTORY,
         "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     if (!machine_history_clone_file(&history_file, &cloned_history_file, &history_error) ||
         cloned_history_file.outcome_file.event_file.trace_file.delta_file.observe_file.apply_file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -303,7 +303,7 @@ static int test_machine_history_mainline(void) {
         MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS,
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
+        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: outcome=preview-outcome status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000 entries=1\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -419,7 +419,7 @@ static int test_machine_history_custom_step_cases(void) {
     machine_history_report_free(&history_report);
     machine_history_file_free(&history_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x1eu, store_local_imm_payload, 1u, 1, 0xaau) ||
+    if (!overwrite_step_bytes(&step_file, 0x20u, store_local_imm_payload, 1u, 1, 0xaau) ||
         !machine_history_build_from_machine_step_file(&step_file, &history_file, &history_error)) {
         fprintf(stderr, "[machine-history] FAIL: store-local-imm setup failed: %s\n", history_error.message);
         ok = 0;
@@ -435,11 +435,11 @@ static int test_machine_history_custom_step_cases(void) {
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_LOCAL_UPDATE_HISTORY,
         "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=local-update-history outcome=local-updated event=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "history: resolution=preview-history kind=local-update-history outcome=local-updated event=local-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-local-application commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x20 value=0x10 known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_history_file_free(&history_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x21u, store_global_imm_payload, 1u, 1, 0xabu) ||
+    if (!overwrite_step_bytes(&step_file, 0x23u, store_global_imm_payload, 1u, 1, 0xabu) ||
         !machine_history_build_from_machine_step_file(&step_file, &history_file, &history_error)) {
         fprintf(stderr, "[machine-history] FAIL: store-global-imm setup failed: %s\n", history_error.message);
         ok = 0;
@@ -455,7 +455,7 @@ static int test_machine_history_custom_step_cases(void) {
         MACHINE_HISTORY_RESOLUTION_PREVIEW_HISTORY,
         MACHINE_HISTORY_KIND_GLOBAL_UPDATE_HISTORY,
         "machine_history profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=global-update-history outcome=global-updated event=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "history: resolution=preview-history kind=global-update-history outcome=global-updated event=global-store trace=preview-trace change-class=program-counter-and-fetch apply=pending-global-application commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x23 value=0x13 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
 
     machine_history_file_free(&history_file);
 
@@ -519,10 +519,10 @@ static int test_machine_history_i386_bridge(void) {
 
     ok &= expect_text("history i386 dump wrapper", dump_text,
         "machine_history profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
+        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n");
     ok &= expect_text("history i386 report dump wrapper", report_dump_text,
         "machine_history profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans outcome=preview-outcome origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192 entries=1\n"
-        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
+        "history: resolution=preview-history kind=value-history outcome=value-available event=register-result trace=preview-trace change-class=program-counter-and-fetch apply=pending-register-application commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- exact=no single-entry=yes entries=1 origin-status=ready observed-status=ready status-changed=no pc-changed=yes stack-changed=no fetch-changed=yes targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: outcome=preview-outcome status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000 entries=1\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

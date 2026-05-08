@@ -174,25 +174,6 @@ static int machine_ir_compute_global_call_effect_summary(const MachineIrProgram 
     return 1;
 }
 
-static int machine_ir_call_may_read_global(const MachineIrProgram *program,
-    const MachineIrGlobalCallEffectSummary *summary,
-    const MachineIrInstruction *instruction,
-    size_t global_id) {
-    size_t callee_index;
-
-    if (!program || !instruction || instruction->kind != MACHINE_IR_INSTR_CALL) {
-        return 0;
-    }
-    callee_index = machine_ir_find_function_index_by_name(program, instruction->as.call.callee_name);
-    if (callee_index == (size_t)-1 || !summary || !program->functions[callee_index].has_body) {
-        return 1;
-    }
-    if (global_id >= summary->global_count || callee_index >= summary->function_count) {
-        return 1;
-    }
-    return summary->global_reads[(callee_index * summary->global_count) + global_id] != 0;
-}
-
 static int machine_ir_call_may_write_global(const MachineIrProgram *program,
     const MachineIrGlobalCallEffectSummary *summary,
     const MachineIrInstruction *instruction,

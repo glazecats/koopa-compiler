@@ -226,6 +226,7 @@ typedef struct {
     size_t total_fixup_summary_count;
     MachineBytesSymbolSummary *symbol_summaries;
     size_t total_symbol_summary_count;
+    MachineBytesSymbolSummary **symbol_summaries_by_name;
     MachineBytesSectionSummary *section_summaries;
     size_t total_section_summary_count;
     size_t functions_with_calls_count;

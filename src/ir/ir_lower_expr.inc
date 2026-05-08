@@ -560,12 +560,38 @@ static int ir_emit_scalar_lvalue_load(IrLowerContext *ctx,
 static int ir_emit_scalar_lvalue_store(IrLowerContext *ctx,
     const IrLowerScalarLValue *lvalue,
     IrValueRef value) {
+    long long known_value = 0;
+    int has_known_value = 0;
+
     if (!ctx || !lvalue) {
         return 0;
     }
 
     if (lvalue->kind == IR_LOWER_SCALAR_LVALUE_INDIRECT) {
         return ir_emit_store_indirect(ctx, lvalue->address, value);
+    }
+
+    if (value.kind == IR_VALUE_IMMEDIATE) {
+        has_known_value = 1;
+        known_value = value.immediate;
+    } else if (value.kind == IR_VALUE_LOCAL && ctx->scopes.count > 0) {
+        IrLowerBindingInfo binding_info;
+
+        if (ir_function_get_local(ctx->function, value.id) &&
+            ir_lower_scope_lookup_binding(&ctx->scopes,
+                ir_function_get_local(ctx->function, value.id)->source_name,
+                &binding_info) &&
+            binding_info.has_const_value) {
+            has_known_value = 1;
+            known_value = binding_info.const_value;
+        }
+    }
+
+    if (!ir_lower_scope_update_binding_const_value_by_local_id(&ctx->scopes,
+            lvalue->slot.id,
+            has_known_value,
+            known_value)) {
+        /* Best-effort metadata update only; lowering still succeeds without it. */
     }
 
     return ir_emit_mov(ctx, lvalue->slot, value);
@@ -619,6 +645,10 @@ static int ir_lower_expression(IrLowerContext *ctx,
                     *out_value = array_value.address;
                     return 1;
                 }
+            }
+            if (binding_info.is_const && binding_info.has_const_value) {
+                *out_value = ir_value_immediate(binding_info.const_value);
+                return 1;
             }
             *out_value = ir_value_local(binding_info.local_id);
             return 1;

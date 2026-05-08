@@ -131,7 +131,17 @@ int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *
             return 0;
         }
     }
-    if (!machine_bytes_report_populate_symbols(report) || !machine_bytes_report_populate_fixups(report)) {
+    if (!machine_bytes_report_populate_symbols(report)) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-406: failed to populate symbol/fixup summaries");
+        machine_bytes_report_clear_shape(report);
+        return 0;
+    }
+    if (!machine_bytes_report_build_symbol_name_index(report)) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-409: failed to build symbol lookup index");
+        machine_bytes_report_clear_shape(report);
+        return 0;
+    }
+    if (!machine_bytes_report_populate_fixups(report)) {
         machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-406: failed to populate symbol/fixup summaries");
         machine_bytes_report_clear_shape(report);
         return 0;

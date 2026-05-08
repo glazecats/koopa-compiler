@@ -8,6 +8,36 @@ static LowerIrBinaryOp lower_ir_binary_op_from_ir(IrBinaryOp op) {
     return (LowerIrBinaryOp)op;
 }
 
+static int lower_ir_builtin_call_returns_void(const char *callee_name) {
+    if (!callee_name || callee_name[0] == '\0') {
+        return 0;
+    }
+    return strcmp(callee_name, "putint") == 0 ||
+        strcmp(callee_name, "putch") == 0 ||
+        strcmp(callee_name, "putarray") == 0 ||
+        strcmp(callee_name, "starttime") == 0 ||
+        strcmp(callee_name, "stoptime") == 0;
+}
+
+static int lower_ir_append_call_result_zero_definition(LowerIrFunction *out_function,
+    LowerIrBasicBlock *out_block,
+    size_t temp_id,
+    LowerIrError *error) {
+    LowerIrInstruction lowered_instruction;
+
+    if (!out_function || !out_block) {
+        lower_ir_set_error(error, 0, 0, "LOWER-IR-042: invalid void-call result synthesis contract");
+        return 0;
+    }
+
+    memset(&lowered_instruction, 0, sizeof(lowered_instruction));
+    lowered_instruction.kind = LOWER_IR_INSTR_MOV;
+    lowered_instruction.has_result = 1;
+    lowered_instruction.result = lower_ir_value_temp(temp_id);
+    lowered_instruction.as.mov_value = lower_ir_value_immediate(0);
+    return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
+}
+
 static int lower_ir_lower_value_ref(const IrValueRef *value,
     LowerIrFunction *out_function,
     LowerIrBasicBlock *out_block,
@@ -154,8 +184,10 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
     case IR_INSTR_CALL:
         memset(&lowered_instruction, 0, sizeof(lowered_instruction));
         lowered_instruction.kind = LOWER_IR_INSTR_CALL;
-        lowered_instruction.has_result = 1;
-        lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+        lowered_instruction.has_result = lower_ir_builtin_call_returns_void(instruction->as.call.callee_name) ? 0 : 1;
+        if (lowered_instruction.has_result) {
+            lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
+        }
         lowered_instruction.as.call.callee_name = instruction->as.call.callee_name;
         lowered_instruction.as.call.arg_count = instruction->as.call.arg_count;
 
@@ -181,6 +213,13 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
         }
 
         if (!lower_ir_block_append_instruction(out_block, &lowered_instruction, error)) {
+            free(lowered_instruction.as.call.args);
+            lowered_instruction.as.call.args = NULL;
+            return 0;
+        }
+
+        if (!lowered_instruction.has_result &&
+            !lower_ir_append_call_result_zero_definition(out_function, out_block, instruction->result.id, error)) {
             free(lowered_instruction.as.call.args);
             lowered_instruction.as.call.args = NULL;
             return 0;
@@ -358,6 +397,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
                 lower_ir_program_free(out_program);
                 return 0;
             }
+            target_function->locals[local_index].array_rank = source_local->array_rank;
         }
 
         if (!source_function->has_body) {

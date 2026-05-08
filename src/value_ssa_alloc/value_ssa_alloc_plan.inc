@@ -14,6 +14,7 @@ void value_ssa_allocator_plan_init(ValueSsaAllocatorPlan *plan) {
     plan->items = NULL;
     plan->final_runtime_coalesce_roots = NULL;
     plan->final_runtime_coalesce_class_sizes = NULL;
+    plan->value_item_indices = NULL;
 }
 
 void value_ssa_allocator_plan_free(ValueSsaAllocatorPlan *plan) {
@@ -24,6 +25,7 @@ void value_ssa_allocator_plan_free(ValueSsaAllocatorPlan *plan) {
     free(plan->items);
     free(plan->final_runtime_coalesce_roots);
     free(plan->final_runtime_coalesce_class_sizes);
+    free(plan->value_item_indices);
     value_ssa_allocator_plan_init(plan);
 }
 
@@ -162,6 +164,25 @@ static int value_ssa_alloc_coalesce_analysis_is_usable(const ValueSsaAllocatorCo
     return analysis && analysis->value_count == value_count && analysis->value_roots && analysis->class_sizes;
 }
 
+static int value_ssa_alloc_coalesce_analysis_has_nontrivial_classes(const ValueSsaAllocatorCoalesceAnalysis *analysis,
+    size_t value_count) {
+    size_t value_id;
+
+    if (!value_ssa_alloc_coalesce_analysis_is_usable(analysis, value_count)) {
+        return 0;
+    }
+
+    for (value_id = 0; value_id < value_count; ++value_id) {
+        if (analysis->value_roots[value_id] != value_id) {
+            return 1;
+        }
+        if (analysis->class_sizes[value_id] > 1) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static size_t value_ssa_alloc_plan_effective_root(const ValueSsaAllocatorCoalesceAnalysis *analysis,
     size_t value_count,
     size_t value_id) {
@@ -226,6 +247,7 @@ static void value_ssa_alloc_recompute_active_effective_degrees(const ValueSsaInt
     const unsigned char *scheduled,
     const size_t *active_degrees,
     size_t *scratch_roots,
+    unsigned char *scratch_root_flags,
     size_t *out_active_effective_degrees) {
     size_t value_id;
     int use_coalesce;
@@ -258,8 +280,6 @@ static void value_ssa_alloc_recompute_active_effective_degrees(const ValueSsaInt
 
         for (neighbor_value_id = 0; neighbor_value_id < interference_graph->value_count; ++neighbor_value_id) {
             size_t neighbor_root_value_id;
-            size_t seen_index;
-            int already_seen = 0;
 
             if (neighbor_value_id == value_id || scheduled[neighbor_value_id]) {
                 continue;
@@ -274,19 +294,36 @@ static void value_ssa_alloc_recompute_active_effective_degrees(const ValueSsaInt
             if (neighbor_root_value_id == root_value_id) {
                 continue;
             }
-
-            for (seen_index = 0; seen_index < seen_count; ++seen_index) {
-                if (scratch_roots[seen_index] == neighbor_root_value_id) {
-                    already_seen = 1;
-                    break;
+            if (scratch_root_flags) {
+                if (scratch_root_flags[neighbor_root_value_id]) {
+                    continue;
                 }
-            }
-            if (already_seen) {
-                continue;
+                scratch_root_flags[neighbor_root_value_id] = 1u;
+            } else {
+                size_t seen_index;
+                int already_seen = 0;
+
+                for (seen_index = 0; seen_index < seen_count; ++seen_index) {
+                    if (scratch_roots[seen_index] == neighbor_root_value_id) {
+                        already_seen = 1;
+                        break;
+                    }
+                }
+                if (already_seen) {
+                    continue;
+                }
             }
 
             scratch_roots[seen_count++] = neighbor_root_value_id;
             ++effective_degree;
+        }
+
+        if (scratch_root_flags) {
+            size_t seen_index;
+
+            for (seen_index = 0; seen_index < seen_count; ++seen_index) {
+                scratch_root_flags[scratch_roots[seen_index]] = 0u;
+            }
         }
 
         out_active_effective_degrees[value_id] = effective_degree;
@@ -544,16 +581,16 @@ static ValueSsaAllocatorMoveWorkClass value_ssa_alloc_classify_plan_move_work(
     if (active_family_member_count == 0) {
         return VALUE_SSA_ALLOC_MOVE_WORK_INTERNAL;
     }
-    if (!initial_effective_move_related) {
-        return VALUE_SSA_ALLOC_MOVE_WORK_INTERNAL;
-    }
     if (was_frozen) {
         return VALUE_SSA_ALLOC_MOVE_WORK_FREEZE_PENDING;
     }
-    if (coalesce_ready_neighbor_count > 0) {
-        return VALUE_SSA_ALLOC_MOVE_WORK_COALESCE_READY;
+    if (initial_effective_move_related) {
+        if (coalesce_ready_neighbor_count > 0) {
+            return VALUE_SSA_ALLOC_MOVE_WORK_COALESCE_READY;
+        }
+        return VALUE_SSA_ALLOC_MOVE_WORK_RELEASED;
     }
-    return VALUE_SSA_ALLOC_MOVE_WORK_RELEASED;
+    return VALUE_SSA_ALLOC_MOVE_WORK_INTERNAL;
 }
 
 static void value_ssa_alloc_recompute_active_family_move_work_classes(
@@ -722,26 +759,14 @@ static int value_ssa_alloc_plan_item_is_better(const ValueSsaAllocatorPlanItem *
     return lhs->value_id < rhs->value_id;
 }
 
-static void value_ssa_alloc_build_plan_item_preview(const ValueSsaAllocationPrep *prep,
-    const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
-    const size_t *runtime_coalesce_roots,
-    const size_t *runtime_coalesce_class_sizes,
-    const ValueSsaAllocationFamilyRuntimeFacts *active_family_runtime_facts,
+static void value_ssa_alloc_build_plan_item_preview_base(const ValueSsaAllocationPrep *prep,
     const ValueSsaAllocationWorkItem *work_item,
     const size_t *initial_effective_degrees,
-    const size_t *active_degrees,
-    const size_t *active_effective_degrees,
-    const unsigned char *initial_family_move_related,
     const unsigned char *initial_effective_move_related,
-    const unsigned char *active_move_related,
-    const unsigned char *active_effective_move_related,
-    const unsigned char *was_frozen,
-    size_t color_budget,
     ValueSsaAllocatorPlanItem *out_item) {
-    const ValueSsaAllocationFamilyRuntimeFacts *family_facts = NULL;
     size_t value_id;
 
-    if (!prep || !work_item || !active_degrees || !active_move_related || !out_item) {
+    if (!prep || !work_item || !out_item) {
         return;
     }
 
@@ -767,8 +792,35 @@ static void value_ssa_alloc_build_plan_item_preview(const ValueSsaAllocationPrep
     out_item->split_child_value = prep->split_child_values ? prep->split_child_values[value_id] : 0u;
     out_item->split_child_depth = prep->split_child_depths ? prep->split_child_depths[value_id] : 0;
     out_item->initial_degree = prep->interference_degrees[value_id];
-    out_item->active_degree = active_degrees[value_id];
     out_item->initial_move_related = prep->move_related[value_id];
+    out_item->initial_effective_degree =
+        initial_effective_degrees ? initial_effective_degrees[value_id] : out_item->initial_degree;
+    out_item->initial_effective_move_related =
+        initial_effective_move_related ? initial_effective_move_related[value_id] : out_item->initial_move_related;
+}
+
+static void value_ssa_alloc_finish_plan_item_preview_dynamic(const ValueSsaAllocationPrep *prep,
+    const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
+    const size_t *runtime_coalesce_roots,
+    const size_t *runtime_coalesce_class_sizes,
+    const ValueSsaAllocationFamilyRuntimeFacts *active_family_runtime_facts,
+    const size_t *active_degrees,
+    const size_t *active_effective_degrees,
+    const unsigned char *initial_family_move_related,
+    const unsigned char *active_move_related,
+    const unsigned char *active_effective_move_related,
+    const unsigned char *was_frozen,
+    size_t color_budget,
+    ValueSsaAllocatorPlanItem *out_item) {
+    const ValueSsaAllocationFamilyRuntimeFacts *family_facts = NULL;
+    size_t value_id;
+
+    if (!prep || !out_item || !active_degrees || !active_move_related) {
+        return;
+    }
+
+    value_id = out_item->value_id;
+    out_item->active_degree = active_degrees[value_id];
     out_item->active_move_related = active_move_related[value_id];
     out_item->coalesce_root_value_id =
         runtime_coalesce_roots ? runtime_coalesce_roots[value_id]
@@ -782,12 +834,8 @@ static void value_ssa_alloc_build_plan_item_preview(const ValueSsaAllocationPrep
     } else if (value_ssa_alloc_coalesce_analysis_is_usable(coalesce_analysis, prep->value_count)) {
         out_item->coalesce_class_size = coalesce_analysis->class_sizes[out_item->coalesce_root_value_id];
     }
-    out_item->initial_effective_degree =
-        initial_effective_degrees ? initial_effective_degrees[value_id] : out_item->initial_degree;
     out_item->active_effective_degree =
         active_effective_degrees ? active_effective_degrees[value_id] : out_item->active_degree;
-    out_item->initial_effective_move_related =
-        initial_effective_move_related ? initial_effective_move_related[value_id] : out_item->initial_move_related;
     out_item->active_effective_move_related =
         active_effective_move_related ? active_effective_move_related[value_id] : out_item->active_move_related;
     out_item->was_frozen = was_frozen ? was_frozen[value_id] : 0u;
@@ -843,6 +891,212 @@ static void value_ssa_alloc_build_plan_item_preview(const ValueSsaAllocationPrep
     out_item->removal_kind = VALUE_SSA_ALLOCATOR_REMOVE_SIMPLIFY;
 }
 
+static int value_ssa_alloc_plan_has_no_move_related_values(const ValueSsaAllocationPrep *prep,
+    const ValueSsaFunction *function) {
+    size_t value_id;
+
+    if (!prep || !function || !prep->move_related || prep->value_count != function->next_value_id) {
+        return 0;
+    }
+
+    for (value_id = 0; value_id < function->next_value_id; ++value_id) {
+        if (prep->move_related[value_id]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_alloc_build_no_move_allocator_plan(const ValueSsaFunction *function,
+    const ValueSsaAllocationPrep *prep,
+    const ValueSsaAllocationWorklist *worklist,
+    const ValueSsaInterferenceGraph *interference_graph,
+    const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
+    size_t color_budget,
+    ValueSsaAllocatorPlan *plan,
+    ValueSsaError *error) {
+    ValueSsaAllocatorPlanItem *base_items = NULL;
+    size_t *active_degrees = NULL;
+    size_t *active_effective_degrees = NULL;
+    size_t *scratch_roots = NULL;
+    unsigned char *scratch_root_flags = NULL;
+    unsigned char *scheduled = NULL;
+    int use_effective_degree_tracking = 0;
+    size_t item_index;
+    size_t output_index;
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+
+    if (!function || !prep || !worklist || !interference_graph || !plan) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-238: invalid no-move allocator-plan contract");
+        return 0;
+    }
+    if (prep->value_count != function->next_value_id || worklist->item_count > function->next_value_id ||
+        interference_graph->value_count != function->next_value_id) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-239: inconsistent no-move allocator-plan artifacts");
+        return 0;
+    }
+
+    value_ssa_allocator_plan_free(plan);
+    plan->value_count = function->next_value_id;
+    plan->item_count = worklist->item_count;
+    plan->items = (ValueSsaAllocatorPlanItem *)calloc(plan->item_count ? plan->item_count : 1, sizeof(ValueSsaAllocatorPlanItem));
+    plan->final_runtime_coalesce_roots =
+        (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    plan->final_runtime_coalesce_class_sizes =
+        (size_t *)calloc((function->next_value_id ? function->next_value_id : 1), sizeof(size_t));
+    plan->value_item_indices =
+        (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    base_items =
+        (ValueSsaAllocatorPlanItem *)calloc(worklist->item_count ? worklist->item_count : 1, sizeof(ValueSsaAllocatorPlanItem));
+    active_degrees = (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    active_effective_degrees =
+        (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    scratch_roots = (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    scratch_root_flags =
+        (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
+    scheduled = (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
+    if (!plan->items || !plan->final_runtime_coalesce_roots || !plan->final_runtime_coalesce_class_sizes ||
+        !plan->value_item_indices || !base_items || !active_degrees || !active_effective_degrees || !scratch_roots ||
+        !scratch_root_flags || !scheduled) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-240: out of memory building no-move allocator plan");
+        goto fail;
+    }
+
+    for (item_index = 0; item_index < function->next_value_id; ++item_index) {
+        plan->value_item_indices[item_index] = (size_t)-1;
+        if (coalesce_analysis && coalesce_analysis->value_roots && coalesce_analysis->class_sizes &&
+            coalesce_analysis->value_count == function->next_value_id) {
+            plan->final_runtime_coalesce_roots[item_index] = coalesce_analysis->value_roots[item_index];
+            plan->final_runtime_coalesce_class_sizes[item_index] = coalesce_analysis->class_sizes[item_index];
+        } else {
+            plan->final_runtime_coalesce_roots[item_index] = item_index;
+            plan->final_runtime_coalesce_class_sizes[item_index] = 1;
+        }
+    }
+    for (item_index = 0; item_index < worklist->item_count; ++item_index) {
+        value_ssa_alloc_build_plan_item_preview_base(
+            prep, &worklist->items[item_index], prep->interference_degrees, prep->move_related, &base_items[item_index]);
+    }
+    value_ssa_alloc_recompute_active_degrees(interference_graph, scheduled, active_degrees);
+    use_effective_degree_tracking =
+        value_ssa_alloc_coalesce_analysis_has_nontrivial_classes(coalesce_analysis, function->next_value_id);
+    if (use_effective_degree_tracking) {
+        value_ssa_alloc_recompute_active_effective_degrees(interference_graph,
+            coalesce_analysis,
+            scheduled,
+            active_degrees,
+            scratch_roots,
+            scratch_root_flags,
+            active_effective_degrees);
+    }
+
+    for (output_index = 0; output_index < worklist->item_count; ++output_index) {
+        size_t best_item_index = (size_t)-1;
+        ValueSsaAllocatorPlanItem best_item;
+        int found = 0;
+
+        memset(&best_item, 0, sizeof(best_item));
+        for (item_index = 0; item_index < worklist->item_count; ++item_index) {
+            ValueSsaAllocatorPlanItem candidate;
+            size_t value_id = worklist->items[item_index].value_id;
+
+            if (value_id >= function->next_value_id || scheduled[value_id]) {
+                continue;
+            }
+
+            candidate = base_items[item_index];
+            candidate.active_degree = active_degrees[value_id];
+            candidate.active_effective_degree =
+                use_effective_degree_tracking ? active_effective_degrees[value_id] : active_degrees[value_id];
+            candidate.active_move_related = 0u;
+            candidate.active_effective_move_related = 0u;
+            candidate.was_frozen = 0u;
+            if (use_effective_degree_tracking) {
+                candidate.coalesce_root_value_id =
+                    value_ssa_alloc_plan_effective_root(coalesce_analysis, function->next_value_id, value_id);
+                candidate.coalesce_class_size = value_ssa_alloc_plan_runtime_coalesce_class_size(
+                    NULL, coalesce_analysis, function->next_value_id, value_id);
+            } else {
+                candidate.coalesce_root_value_id = value_id;
+                candidate.coalesce_class_size = 1;
+            }
+            candidate.move_work_class = VALUE_SSA_ALLOC_MOVE_WORK_INTERNAL;
+            candidate.move_work_next_class = VALUE_SSA_ALLOC_MOVE_WORK_INTERNAL;
+            candidate.move_work_priority = value_ssa_alloc_compute_plan_move_work_priority(
+                candidate.priority, candidate.coalesce_class_size, 0, 0, 0, 0, 0, 0);
+            candidate.family_spill_removed_count = 0;
+            candidate.family_active_member_count = 1;
+            candidate.family_active_member_count_after = 0;
+            candidate.family_best_coalesce_ready_partner_root_value_id = (size_t)-1;
+            candidate.family_best_coalesce_ready_partner_root_value_id_after = (size_t)-1;
+            candidate.phase = value_ssa_alloc_classify_phase(prep, 0, candidate.active_effective_degree, color_budget);
+            candidate.removal_kind = candidate.phase == VALUE_SSA_ALLOCATOR_PHASE_SPILL
+                ? VALUE_SSA_ALLOCATOR_REMOVE_SPILL
+                : VALUE_SSA_ALLOCATOR_REMOVE_SIMPLIFY;
+
+            if (!found || value_ssa_alloc_plan_item_is_better(&candidate, &best_item)) {
+                best_item_index = item_index;
+                best_item = candidate;
+                found = 1;
+            }
+        }
+
+        if (!found || best_item_index == (size_t)-1 || best_item.value_id >= function->next_value_id) {
+            value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-241: no-move allocator plan underflow");
+            goto fail;
+        }
+
+        plan->items[output_index] = best_item;
+        plan->value_item_indices[best_item.value_id] = output_index;
+        scheduled[best_item.value_id] = 1u;
+
+        active_degrees[best_item.value_id] = 0;
+        active_effective_degrees[best_item.value_id] = 0;
+        for (item_index = 0; item_index < function->next_value_id; ++item_index) {
+            if (item_index == best_item.value_id || scheduled[item_index]) {
+                continue;
+            }
+            if (!interference_graph->interferes[best_item.value_id * function->next_value_id + item_index]) {
+                continue;
+            }
+            if (active_degrees[item_index] > 0) {
+                --active_degrees[item_index];
+            }
+        }
+        if (use_effective_degree_tracking) {
+            value_ssa_alloc_recompute_active_effective_degrees(interference_graph,
+                coalesce_analysis,
+                scheduled,
+                active_degrees,
+                scratch_roots,
+                scratch_root_flags,
+                active_effective_degrees);
+        }
+    }
+
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "no-move-plan total", value_ssa_alloc_now_s() - total_start);
+    }
+    free(base_items);
+    free(active_degrees);
+    free(active_effective_degrees);
+    free(scratch_roots);
+    free(scratch_root_flags);
+    free(scheduled);
+    return 1;
+
+fail:
+    free(base_items);
+    free(active_degrees);
+    free(active_effective_degrees);
+    free(scratch_roots);
+    free(scratch_root_flags);
+    free(scheduled);
+    value_ssa_allocator_plan_free(plan);
+    return 0;
+}
+
 int value_ssa_compute_allocator_plan(const ValueSsaFunction *function,
     const ValueSsaAllocationPrep *prep,
     const ValueSsaAllocationWorklist *worklist,
@@ -857,6 +1111,12 @@ int value_ssa_compute_allocator_plan(const ValueSsaFunction *function,
     if (!function || !plan) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-067: invalid allocator-plan contract");
         return 0;
+    }
+
+    if (prep && worklist && interference_graph &&
+        value_ssa_alloc_plan_has_no_move_related_values(prep, function)) {
+        return value_ssa_alloc_build_no_move_allocator_plan(
+            function, prep, worklist, interference_graph, coalesce_analysis, color_budget, plan, error);
     }
 
     value_ssa_alloc_move_engine_run_result_init(&run_result);
@@ -886,24 +1146,39 @@ int value_ssa_allocator_plan_find_value(const ValueSsaAllocatorPlan *plan,
     const ValueSsaAllocatorPlanItem **out_item) {
     size_t item_index;
 
-    if (!plan) {
+    if (!plan || value_id >= plan->value_count) {
         return 0;
     }
 
-    for (item_index = 0; item_index < plan->item_count; ++item_index) {
+    if (plan->value_item_indices) {
+        item_index = plan->value_item_indices[value_id];
+        if (item_index >= plan->item_count) {
+            return 0;
+        }
         if (plan->items[item_index].value_id != value_id) {
-            continue;
+            return 0;
         }
-        if (out_index) {
-            *out_index = item_index;
+    } else {
+        if (!plan->items) {
+            return 0;
         }
-        if (out_item) {
-            *out_item = &plan->items[item_index];
+        for (item_index = 0; item_index < plan->item_count; ++item_index) {
+            if (plan->items[item_index].value_id == value_id) {
+                break;
+            }
         }
-        return 1;
+        if (item_index >= plan->item_count) {
+            return 0;
+        }
+    }
+    if (out_index) {
+        *out_index = item_index;
+    }
+    if (out_item) {
+        *out_item = &plan->items[item_index];
     }
 
-    return 0;
+    return 1;
 }
 
 int value_ssa_allocator_plan_get_spill_cost(const ValueSsaAllocatorPlan *plan,

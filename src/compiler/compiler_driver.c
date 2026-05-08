@@ -29,6 +29,20 @@ typedef struct {
     size_t capacity;
 } CompilerStringBuilder;
 
+typedef struct {
+    size_t program_byte_offset;
+    const char *function_name;
+    size_t block_index;
+} CompilerBlockLabelCacheEntry;
+
+typedef struct {
+    const MachineBytesFixupSummary **fixups_by_patch;
+    const MachineBytesFixupSummary **fixups_by_owner;
+    size_t fixup_count;
+    CompilerBlockLabelCacheEntry *block_labels;
+    size_t block_label_count;
+} CompilerRiscvPreviewCache;
+
 static void compiler_set_error(CompilerError *error, int line, int column, const char *message);
 static char *compiler_read_file_text(const char *path, CompilerError *error);
 static void compiler_copy_stage_error(CompilerError *error,
@@ -54,18 +68,34 @@ static int compiler_append_pretty_symbol_name(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
     const char *raw_label_name);
+static void compiler_riscv_preview_cache_init(CompilerRiscvPreviewCache *cache);
+static void compiler_riscv_preview_cache_free(CompilerRiscvPreviewCache *cache);
+static int compiler_riscv_preview_cache_build(
+    const MachineBytesReport *report,
+    CompilerRiscvPreviewCache *cache);
 static const char *compiler_find_global_name_for_gp_offset(const MachineBytesProgram *program, int32_t byte_offset);
 static int compiler_emit_global_sections(
     CompilerStringBuilder *builder,
     const MachineBytesProgram *program);
-static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset(
-    const MachineBytesReport *report,
+static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
     size_t patch_byte_offset);
-static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset(
+static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_and_kind_cached(
+    const CompilerRiscvPreviewCache *cache,
+    size_t patch_byte_offset,
+    MachineBytesFixupKind kind);
+static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
+    size_t program_byte_offset);
+static int compiler_call_requires_a0_preservation(
     const MachineBytesReport *report,
+    size_t function_index,
     size_t program_byte_offset);
 static const char *compiler_find_label_at_program_byte_offset(
     const MachineBytesReport *report,
+    size_t program_byte_offset);
+static const CompilerBlockLabelCacheEntry *compiler_find_block_label_at_program_byte_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
     size_t program_byte_offset);
 static int compiler_append_stack_adjust(
     CompilerStringBuilder *builder,
@@ -77,6 +107,34 @@ static int compiler_append_stack_access(
     const char *base,
     size_t offset,
     const char *scratch);
+static int compiler_riscv_is_stack_load_word(uint32_t word, uint32_t rd, int32_t offset);
+static int compiler_riscv_is_stack_adjust_word(uint32_t word, size_t stack_bytes);
+static int compiler_riscv_is_ret_word(uint32_t word);
+static int compiler_riscv_preview_detect_tail_call_epilogue(
+    const unsigned char *block_bytes,
+    size_t block_byte_count,
+    size_t byte_offset,
+    uint32_t word,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset,
+    int epilogue_restores_ra,
+    size_t *skip_byte_count);
+static int compiler_append_riscv_preview_tail_call(
+    CompilerStringBuilder *builder,
+    const MachineBytesReport *report,
+    const char *target_name,
+    const CompilerBlockLabelCacheEntry *cached_label,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset);
+static int compiler_riscv_preview_line_is_jal_ra(const char *line, char *target, size_t target_size);
+static int compiler_riscv_preview_line_is_restore_from_s11(const char *line);
+static int compiler_riscv_preview_line_is_restore_from_sp(
+    const char *line,
+    const char *reg_name,
+    int *out_offset);
+static int compiler_riscv_preview_line_is_addi_sp(const char *line, int *out_delta);
+static int compiler_riscv_preview_line_is_ret(const char *line);
+static int compiler_optimize_riscv_preview_tail_calls(char **io_text);
 static int compiler_append_caller_save_sequence(
     CompilerStringBuilder *builder,
     size_t call_save_area_offset,
@@ -85,6 +143,7 @@ static int compiler_append_caller_save_sequence(
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
+    const CompilerRiscvPreviewCache *cache,
     size_t program_byte_offset,
     uint32_t word,
     size_t epilogue_stack_size,
@@ -175,6 +234,186 @@ static int compiler_builder_appendf(CompilerStringBuilder *builder, const char *
     vsnprintf(builder->data + builder->length, builder->capacity - builder->length, fmt, args);
     va_end(args);
     builder->length += (size_t)needed;
+    return 1;
+}
+
+static void compiler_riscv_preview_cache_init(CompilerRiscvPreviewCache *cache) {
+    if (!cache) {
+        return;
+    }
+    cache->fixups_by_patch = NULL;
+    cache->fixups_by_owner = NULL;
+    cache->fixup_count = 0u;
+    cache->block_labels = NULL;
+    cache->block_label_count = 0u;
+}
+
+static void compiler_riscv_preview_cache_free(CompilerRiscvPreviewCache *cache) {
+    if (!cache) {
+        return;
+    }
+    free(cache->fixups_by_patch);
+    free(cache->fixups_by_owner);
+    free(cache->block_labels);
+    compiler_riscv_preview_cache_init(cache);
+}
+
+static int compiler_compare_fixup_patch_ptrs(const void *lhs, const void *rhs) {
+    const MachineBytesFixupSummary *const *left = (const MachineBytesFixupSummary *const *)lhs;
+    const MachineBytesFixupSummary *const *right = (const MachineBytesFixupSummary *const *)rhs;
+
+    if ((*left)->patch_byte_offset < (*right)->patch_byte_offset) {
+        return -1;
+    }
+    if ((*left)->patch_byte_offset > (*right)->patch_byte_offset) {
+        return 1;
+    }
+    return 0;
+}
+
+static int compiler_compare_fixup_owner_ptrs(const void *lhs, const void *rhs) {
+    const MachineBytesFixupSummary *const *left = (const MachineBytesFixupSummary *const *)lhs;
+    const MachineBytesFixupSummary *const *right = (const MachineBytesFixupSummary *const *)rhs;
+
+    if ((*left)->owner_byte_offset < (*right)->owner_byte_offset) {
+        return -1;
+    }
+    if ((*left)->owner_byte_offset > (*right)->owner_byte_offset) {
+        return 1;
+    }
+    if ((*left)->patch_byte_offset < (*right)->patch_byte_offset) {
+        return -1;
+    }
+    if ((*left)->patch_byte_offset > (*right)->patch_byte_offset) {
+        return 1;
+    }
+    return 0;
+}
+
+static int compiler_compare_block_label_offsets(const void *lhs, const void *rhs) {
+    const CompilerBlockLabelCacheEntry *left = (const CompilerBlockLabelCacheEntry *)lhs;
+    const CompilerBlockLabelCacheEntry *right = (const CompilerBlockLabelCacheEntry *)rhs;
+
+    if (left->program_byte_offset < right->program_byte_offset) {
+        return -1;
+    }
+    if (left->program_byte_offset > right->program_byte_offset) {
+        return 1;
+    }
+    return 0;
+}
+
+static int compiler_riscv_preview_cache_build(
+    const MachineBytesReport *report,
+    CompilerRiscvPreviewCache *cache) {
+    size_t fixup_count = 0u;
+    size_t function_count = 0u;
+    size_t total_block_summary_count = 0u;
+    size_t function_index;
+    size_t fixup_index;
+    size_t block_label_write_index = 0u;
+
+    if (!report || !cache) {
+        return 0;
+    }
+
+    compiler_riscv_preview_cache_free(cache);
+    if (!machine_bytes_report_get_fixup_summary_count(report, &fixup_count) ||
+        !machine_bytes_report_get_summary(report, NULL, NULL, &function_count, &total_block_summary_count)) {
+        return 0;
+    }
+
+    if (fixup_count > 0u) {
+        cache->fixups_by_patch =
+            (const MachineBytesFixupSummary **)malloc(fixup_count * sizeof(MachineBytesFixupSummary *));
+        cache->fixups_by_owner =
+            (const MachineBytesFixupSummary **)malloc(fixup_count * sizeof(MachineBytesFixupSummary *));
+        if (!cache->fixups_by_patch || !cache->fixups_by_owner) {
+            compiler_riscv_preview_cache_free(cache);
+            return 0;
+        }
+        cache->fixup_count = fixup_count;
+        for (fixup_index = 0u; fixup_index < fixup_count; ++fixup_index) {
+            const MachineBytesFixupSummary *fixup = NULL;
+
+            if (!machine_bytes_report_get_fixup_summary(report, fixup_index, &fixup) || !fixup) {
+                compiler_riscv_preview_cache_free(cache);
+                return 0;
+            }
+            cache->fixups_by_patch[fixup_index] = fixup;
+            cache->fixups_by_owner[fixup_index] = fixup;
+        }
+        qsort(cache->fixups_by_patch,
+            cache->fixup_count,
+            sizeof(MachineBytesFixupSummary *),
+            compiler_compare_fixup_patch_ptrs);
+        qsort(cache->fixups_by_owner,
+            cache->fixup_count,
+            sizeof(MachineBytesFixupSummary *),
+            compiler_compare_fixup_owner_ptrs);
+    }
+
+    if (total_block_summary_count > 0u) {
+        cache->block_labels =
+            (CompilerBlockLabelCacheEntry *)calloc(total_block_summary_count, sizeof(CompilerBlockLabelCacheEntry));
+        if (!cache->block_labels) {
+            compiler_riscv_preview_cache_free(cache);
+            return 0;
+        }
+    }
+
+    for (function_index = 0u; function_index < function_count; ++function_index) {
+        const MachineBytesFunction *function = NULL;
+        const char *function_name = NULL;
+        int has_body = 0;
+        size_t parameter_count = 0u;
+        size_t local_count = 0u;
+        size_t block_count = 0u;
+        size_t spill_slot_count = 0u;
+        size_t function_start = 0u;
+        size_t block_index;
+
+        if (!machine_bytes_report_get_function(report, function_index, &function) || !function ||
+            !machine_bytes_function_get_summary(
+                function,
+                &function_name,
+                &has_body,
+                &parameter_count,
+                &local_count,
+                &block_count,
+                &spill_slot_count) ||
+            !machine_bytes_report_get_function_byte_span(report, function_index, &function_start, NULL)) {
+            compiler_riscv_preview_cache_free(cache);
+            return 0;
+        }
+        (void)parameter_count;
+        (void)local_count;
+        (void)spill_slot_count;
+        if (!has_body || !function_name) {
+            continue;
+        }
+        for (block_index = 0u; block_index < block_count; ++block_index) {
+            const MachineBytesBlockSummary *block_summary = NULL;
+
+            if (!machine_bytes_report_get_block_summary(report, function_index, block_index, &block_summary) ||
+                !block_summary || !block_summary->label_name || block_summary->label_name[0] == '\0') {
+                continue;
+            }
+            cache->block_labels[block_label_write_index].program_byte_offset =
+                function_start + block_summary->start_byte_offset;
+            cache->block_labels[block_label_write_index].function_name = function_name;
+            cache->block_labels[block_label_write_index].block_index = block_index;
+            ++block_label_write_index;
+        }
+    }
+
+    cache->block_label_count = block_label_write_index;
+    if (cache->block_label_count > 1u) {
+        qsort(cache->block_labels,
+            cache->block_label_count,
+            sizeof(CompilerBlockLabelCacheEntry),
+            compiler_compare_block_label_offsets);
+    }
     return 1;
 }
 
@@ -421,50 +660,142 @@ static int compiler_emit_global_sections(
     return 1;
 }
 
-static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset(
-    const MachineBytesReport *report,
+static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
     size_t patch_byte_offset) {
-    size_t fixup_count = 0u;
-    size_t fixup_index;
+    size_t lo = 0u;
+    size_t hi;
 
-    if (!report || !machine_bytes_report_get_fixup_summary_count(report, &fixup_count)) {
+    if (!cache || !cache->fixups_by_patch || cache->fixup_count == 0u) {
         return NULL;
     }
-    for (fixup_index = 0u; fixup_index < fixup_count; ++fixup_index) {
-        const MachineBytesFixupSummary *fixup = NULL;
 
-        if (!machine_bytes_report_get_fixup_summary(report, fixup_index, &fixup) || !fixup) {
-            return NULL;
+    hi = cache->fixup_count;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        const MachineBytesFixupSummary *fixup = cache->fixups_by_patch[mid];
+
+        if (fixup->patch_byte_offset < patch_byte_offset) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
         }
-        if (fixup->patch_byte_offset == patch_byte_offset) {
-            return fixup;
-        }
+    }
+    if (lo < cache->fixup_count && cache->fixups_by_patch[lo]->patch_byte_offset == patch_byte_offset) {
+        return cache->fixups_by_patch[lo];
     }
     return NULL;
 }
 
-static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset(
-    const MachineBytesReport *report,
-    size_t program_byte_offset) {
-    size_t fixup_count = 0u;
-    size_t fixup_index;
+static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_and_kind_cached(
+    const CompilerRiscvPreviewCache *cache,
+    size_t patch_byte_offset,
+    MachineBytesFixupKind kind) {
+    const MachineBytesFixupSummary *fixup = NULL;
+    size_t lo = 0u;
+    size_t hi;
+    size_t index;
 
-    if (!report || !machine_bytes_report_get_fixup_summary_count(report, &fixup_count)) {
+    if (!cache || !cache->fixups_by_patch || cache->fixup_count == 0u) {
         return NULL;
     }
-    for (fixup_index = 0u; fixup_index < fixup_count; ++fixup_index) {
-        const MachineBytesFixupSummary *fixup = NULL;
 
-        if (!machine_bytes_report_get_fixup_summary(report, fixup_index, &fixup) || !fixup) {
-            return NULL;
+    hi = cache->fixup_count;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        const MachineBytesFixupSummary *mid_fixup = cache->fixups_by_patch[mid];
+
+        if (mid_fixup->patch_byte_offset < patch_byte_offset) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+    for (index = lo; index < cache->fixup_count; ++index) {
+        const MachineBytesFixupSummary *candidate = cache->fixups_by_patch[index];
+
+        if (candidate->patch_byte_offset != patch_byte_offset) {
+            break;
+        }
+        if (candidate->kind == kind) {
+            return candidate;
+        }
+        if (!fixup) {
+            fixup = candidate;
+        }
+    }
+    return fixup;
+}
+
+static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
+    size_t program_byte_offset) {
+    size_t lo = 0u;
+    size_t hi;
+
+    if (!cache || !cache->fixups_by_owner || cache->fixup_count == 0u) {
+        return NULL;
+    }
+
+    hi = cache->fixup_count;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        const MachineBytesFixupSummary *fixup = cache->fixups_by_owner[mid];
+
+        if (fixup->owner_byte_offset <= program_byte_offset) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+
+    while (lo > 0u) {
+        const MachineBytesFixupSummary *fixup = cache->fixups_by_owner[lo - 1u];
+
+        if (fixup->owner_byte_offset > program_byte_offset) {
+            --lo;
+            continue;
         }
         if (fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
             program_byte_offset >= fixup->owner_byte_offset &&
             program_byte_offset < fixup->owner_byte_offset + fixup->owner_byte_count) {
             return fixup;
         }
+        if (program_byte_offset >= fixup->owner_byte_offset + fixup->owner_byte_count) {
+            break;
+        }
+        --lo;
     }
+
     return NULL;
+}
+
+static int compiler_call_requires_a0_preservation(
+    const MachineBytesReport *report,
+    size_t function_index,
+    size_t program_byte_offset) {
+    const MachineBytesReferenceSummary *references = NULL;
+    size_t reference_count = 0u;
+    size_t reference_index;
+
+    if (!report ||
+        !machine_bytes_report_get_function_reference_summaries(
+            report, function_index, &reference_count, &references) ||
+        !references) {
+        return 0;
+    }
+
+    for (reference_index = 0u; reference_index < reference_count; ++reference_index) {
+        const MachineBytesReferenceSummary *reference = &references[reference_index];
+
+        if (reference->kind != MACHINE_BYTES_REFERENCE_CALL ||
+            reference->owner_byte_offset != program_byte_offset) {
+            continue;
+        }
+        return reference->op_kind == MACHINE_SELECT_OP_CALL_VOID ||
+            reference->op_kind == MACHINE_SELECT_OP_CALL_VOID_IMM;
+    }
+    return 0;
 }
 
 static const char *compiler_find_label_at_program_byte_offset(
@@ -530,6 +861,34 @@ static const char *compiler_find_label_at_program_byte_offset(
     return NULL;
 }
 
+static const CompilerBlockLabelCacheEntry *compiler_find_block_label_at_program_byte_offset_cached(
+    const CompilerRiscvPreviewCache *cache,
+    size_t program_byte_offset) {
+    size_t lo = 0u;
+    size_t hi;
+
+    if (!cache || !cache->block_labels || cache->block_label_count == 0u) {
+        return NULL;
+    }
+
+    hi = cache->block_label_count;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        const CompilerBlockLabelCacheEntry *entry = &cache->block_labels[mid];
+
+        if (entry->program_byte_offset < program_byte_offset) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo < cache->block_label_count &&
+        cache->block_labels[lo].program_byte_offset == program_byte_offset) {
+        return &cache->block_labels[lo];
+    }
+    return NULL;
+}
+
 static int compiler_append_stack_adjust(
     CompilerStringBuilder *builder,
     long long delta) {
@@ -572,6 +931,1849 @@ static int compiler_append_stack_access(
         op,
         reg,
         scratch);
+}
+
+static int compiler_riscv_is_stack_load_word(uint32_t word, uint32_t rd, int32_t offset) {
+    return (word & 0x7Fu) == 0x03u &&
+        ((word >> 12u) & 0x7u) == 0x2u &&
+        ((word >> 7u) & 0x1Fu) == rd &&
+        ((word >> 15u) & 0x1Fu) == 2u &&
+        compiler_riscv_decode_i_imm(word) == offset;
+}
+
+static int compiler_riscv_is_stack_adjust_word(uint32_t word, size_t stack_bytes) {
+    return (word & 0x7Fu) == 0x13u &&
+        ((word >> 12u) & 0x7u) == 0x0u &&
+        ((word >> 7u) & 0x1Fu) == 2u &&
+        ((word >> 15u) & 0x1Fu) == 2u &&
+        compiler_riscv_decode_i_imm(word) == (int32_t)stack_bytes;
+}
+
+static int compiler_riscv_is_ret_word(uint32_t word) {
+    return (word & 0x7Fu) == 0x67u &&
+        ((word >> 12u) & 0x7u) == 0x0u &&
+        ((word >> 7u) & 0x1Fu) == 0u &&
+        ((word >> 15u) & 0x1Fu) == 1u &&
+        compiler_riscv_decode_i_imm(word) == 0;
+}
+
+static int compiler_riscv_preview_detect_tail_call_epilogue(
+    const unsigned char *block_bytes,
+    size_t block_byte_count,
+    size_t byte_offset,
+    uint32_t word,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset,
+    int epilogue_restores_ra,
+    size_t *skip_byte_count) {
+    uint32_t load_s11_word;
+    uint32_t load_ra_word;
+    uint32_t adjust_sp_word;
+    uint32_t ret_word;
+
+    if (!block_bytes || !skip_byte_count) {
+        return 0;
+    }
+    if ((word & 0x7Fu) != 0x6Fu || ((word >> 7u) & 0x1Fu) != 1u) {
+        return 0;
+    }
+    if (!epilogue_restores_ra || epilogue_stack_size == 0u || epilogue_ra_offset < 4u) {
+        return 0;
+    }
+    if (byte_offset + 20u > block_byte_count) {
+        return 0;
+    }
+
+    load_s11_word = compiler_read_u32_le(block_bytes + byte_offset + 4u);
+    load_ra_word = compiler_read_u32_le(block_bytes + byte_offset + 8u);
+    adjust_sp_word = compiler_read_u32_le(block_bytes + byte_offset + 12u);
+    ret_word = compiler_read_u32_le(block_bytes + byte_offset + 16u);
+
+    if (!compiler_riscv_is_stack_load_word(load_s11_word, 27u, (int32_t)(epilogue_ra_offset - 4u)) ||
+        !compiler_riscv_is_stack_load_word(load_ra_word, 1u, (int32_t)epilogue_ra_offset) ||
+        !compiler_riscv_is_stack_adjust_word(adjust_sp_word, epilogue_stack_size) ||
+        !compiler_riscv_is_ret_word(ret_word)) {
+        return 0;
+    }
+
+    *skip_byte_count = 20u;
+    return 1;
+}
+
+static int compiler_append_riscv_preview_tail_call(
+    CompilerStringBuilder *builder,
+    const MachineBytesReport *report,
+    const char *target_name,
+    const CompilerBlockLabelCacheEntry *cached_label,
+    size_t epilogue_stack_size,
+    size_t epilogue_ra_offset) {
+    if (!builder || !report ||
+        ((!target_name || target_name[0] == '\0') && !cached_label) ||
+        epilogue_stack_size == 0u || epilogue_ra_offset < 4u) {
+        return 0;
+    }
+    return compiler_append_stack_access(builder, "lw", "s11", "sp", epilogue_ra_offset - 4u, "t6") &&
+        compiler_append_stack_access(builder, "lw", "ra", "sp", epilogue_ra_offset, "t6") &&
+        compiler_append_stack_adjust(builder, (long long)epilogue_stack_size) &&
+        compiler_builder_appendf(builder, "  j ") &&
+        ((cached_label &&
+            compiler_builder_appendf(
+                builder, ".L%s_%zu", cached_label->function_name, cached_label->block_index)) ||
+            compiler_append_pretty_symbol_name(builder, report, target_name)) &&
+        compiler_builder_appendf(builder, "\n");
+}
+
+static int compiler_riscv_preview_line_is_jal_ra(const char *line, char *target, size_t target_size) {
+    if (!line || !target || target_size == 0u) {
+        return 0;
+    }
+    target[0] = '\0';
+    return sscanf(line, "  jal ra, %255s", target) == 1;
+}
+
+static int compiler_riscv_preview_line_is_restore_from_s11(const char *line) {
+    char reg_name[32];
+    int offset = 0;
+
+    if (!line) {
+        return 0;
+    }
+    if (sscanf(line, "  lw %31[^,], %d(s11)", reg_name, &offset) != 2) {
+        return 0;
+    }
+    return strcmp(reg_name, "s11") != 0;
+}
+
+static int compiler_riscv_preview_line_is_restore_from_sp(
+    const char *line,
+    const char *reg_name,
+    int *out_offset) {
+    char actual_reg[32];
+    int offset = 0;
+
+    if (!line || !reg_name) {
+        return 0;
+    }
+    if (sscanf(line, "  lw %31[^,], %d(sp)", actual_reg, &offset) != 2) {
+        return 0;
+    }
+    if (strcmp(actual_reg, reg_name) != 0) {
+        return 0;
+    }
+    if (out_offset) {
+        *out_offset = offset;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_addi_sp(const char *line, int *out_delta) {
+    int delta = 0;
+
+    if (!line) {
+        return 0;
+    }
+    if (sscanf(line, "  addi sp, sp, %d", &delta) != 1) {
+        return 0;
+    }
+    if (out_delta) {
+        *out_delta = delta;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_ret(const char *line) {
+    return line && strcmp(line, "  ret") == 0;
+}
+
+static int compiler_riscv_preview_line_loads_immediate(
+    const char *line,
+    char *reg_name,
+    size_t reg_name_size,
+    int *out_imm) {
+    int imm = 0;
+
+    if (out_imm) {
+        *out_imm = 0;
+    }
+    if (!line || !reg_name || reg_name_size == 0u) {
+        return 0;
+    }
+    reg_name[0] = '\0';
+    if (sscanf(line, "  li %31[^,], %d", reg_name, &imm) != 2) {
+        reg_name[0] = '\0';
+        if (sscanf(line, "  addi %31[^,], zero, %d", reg_name, &imm) != 2) {
+            return 0;
+        }
+    }
+    if (out_imm) {
+        *out_imm = imm;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_li_zero(const char *line, char *reg_name, size_t reg_name_size) {
+    int imm = 1;
+
+    if (!compiler_riscv_preview_line_loads_immediate(line, reg_name, reg_name_size, &imm)) {
+        return 0;
+    }
+    return imm == 0;
+}
+
+static int compiler_riscv_preview_line_is_li_four(const char *line, char *reg_name, size_t reg_name_size) {
+    int imm = 0;
+
+    if (!compiler_riscv_preview_line_loads_immediate(line, reg_name, reg_name_size, &imm)) {
+        return 0;
+    }
+    return imm == 4;
+}
+
+static int compiler_riscv_preview_line_is_li_one(const char *line, char *reg_name, size_t reg_name_size) {
+    int imm = 0;
+
+    if (!compiler_riscv_preview_line_loads_immediate(line, reg_name, reg_name_size, &imm)) {
+        return 0;
+    }
+    return imm == 1;
+}
+
+static int compiler_riscv_preview_line_is_addi_sp_imm(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    int *out_imm) {
+    int imm = 0;
+
+    if (out_imm) {
+        *out_imm = 0;
+    }
+    if (!line || !rd || rd_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    if (sscanf(line, "  addi %31[^,], sp, %d", rd, &imm) != 2) {
+        rd[0] = '\0';
+        return 0;
+    }
+    if (out_imm) {
+        *out_imm = imm;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_mv_sp(
+    const char *line,
+    char *rd,
+    size_t rd_size) {
+    if (!line || !rd || rd_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    return sscanf(line, "  mv %31[^,], sp", rd) == 1;
+}
+
+static int compiler_riscv_preview_line_is_sw_sp_reg(
+    const char *line,
+    char *rs,
+    size_t rs_size,
+    int *out_offset) {
+    int offset = 0;
+
+    if (out_offset) {
+        *out_offset = 0;
+    }
+    if (!line || !rs || rs_size == 0u) {
+        return 0;
+    }
+    rs[0] = '\0';
+    if (sscanf(line, "  sw %31[^,], %d(sp)", rs, &offset) != 2) {
+        rs[0] = '\0';
+        return 0;
+    }
+    if (out_offset) {
+        *out_offset = offset;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_lw_sp_reg(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    int *out_offset) {
+    int offset = 0;
+
+    if (out_offset) {
+        *out_offset = 0;
+    }
+    if (!line || !rd || rd_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    if (sscanf(line, "  lw %31[^,], %d(sp)", rd, &offset) != 2) {
+        rd[0] = '\0';
+        return 0;
+    }
+    if (out_offset) {
+        *out_offset = offset;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_lw_reg_offset(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    int *out_offset,
+    char *base,
+    size_t base_size) {
+    int offset = 0;
+
+    if (out_offset) {
+        *out_offset = 0;
+    }
+    if (!line || !rd || !base || rd_size == 0u || base_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    base[0] = '\0';
+    if (sscanf(line, "  lw %31[^,], %d(%31[^)])", rd, &offset, base) != 3) {
+        rd[0] = '\0';
+        base[0] = '\0';
+        return 0;
+    }
+    if (out_offset) {
+        *out_offset = offset;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_sw_reg_offset(
+    const char *line,
+    char *rs,
+    size_t rs_size,
+    int *out_offset,
+    char *base,
+    size_t base_size) {
+    int offset = 0;
+
+    if (out_offset) {
+        *out_offset = 0;
+    }
+    if (!line || !rs || !base || rs_size == 0u || base_size == 0u) {
+        return 0;
+    }
+    rs[0] = '\0';
+    base[0] = '\0';
+    if (sscanf(line, "  sw %31[^,], %d(%31[^)])", rs, &offset, base) != 3) {
+        rs[0] = '\0';
+        base[0] = '\0';
+        return 0;
+    }
+    if (out_offset) {
+        *out_offset = offset;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_add_regs(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    char *rs2,
+    size_t rs2_size) {
+    if (!line || !rd || !rs1 || !rs2 || rd_size == 0u || rs1_size == 0u || rs2_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    rs2[0] = '\0';
+    return sscanf(line, "  add %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
+}
+
+static int compiler_riscv_preview_line_is_mul_regs(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    char *rs2,
+    size_t rs2_size) {
+    if (!line || !rd || !rs1 || !rs2 || rd_size == 0u || rs1_size == 0u || rs2_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    rs2[0] = '\0';
+    return sscanf(line, "  mul %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
+}
+
+static int compiler_riscv_preview_line_is_sub_regs(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    char *rs2,
+    size_t rs2_size) {
+    if (!line || !rd || !rs1 || !rs2 || rd_size == 0u || rs1_size == 0u || rs2_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    rs2[0] = '\0';
+    return sscanf(line, "  sub %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
+}
+
+static int compiler_riscv_preview_line_is_slli_by_two(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size) {
+    unsigned imm = 0u;
+
+    if (!line || !rd || !rs1 || rd_size == 0u || rs1_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    if (sscanf(line, "  slli %31[^,], %31[^,], %u", rd, rs1, &imm) != 3 || imm != 2u) {
+        rd[0] = '\0';
+        rs1[0] = '\0';
+        return 0;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_slli_imm(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    unsigned *out_imm) {
+    unsigned imm = 0u;
+
+    if (out_imm) {
+        *out_imm = 0u;
+    }
+    if (!line || !rd || !rs1 || rd_size == 0u || rs1_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    if (sscanf(line, "  slli %31[^,], %31[^,], %u", rd, rs1, &imm) != 3) {
+        rd[0] = '\0';
+        rs1[0] = '\0';
+        return 0;
+    }
+    if (out_imm) {
+        *out_imm = imm;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_line_is_label(const char *line) {
+    size_t length;
+
+    if (!line) {
+        return 0;
+    }
+    length = strlen(line);
+    return length > 0u && line[length - 1u] == ':';
+}
+
+static void compiler_riscv_preview_tokenize_line(const char *line,
+    char tokens[][32],
+    size_t *out_token_count) {
+    size_t src_index = 0u;
+    size_t token_count = 0u;
+    size_t token_char_index = 0u;
+    char current[32];
+
+    if (out_token_count) {
+        *out_token_count = 0u;
+    }
+    if (!line) {
+        return;
+    }
+
+    while (line[src_index] != '\0') {
+        char ch = line[src_index++];
+        if (ch == ',' || ch == '(' || ch == ')' || ch == ':') {
+            ch = ' ';
+        }
+        if (ch == ' ' || ch == '\t') {
+            if (token_char_index > 0u && token_count < 8u) {
+                current[token_char_index] = '\0';
+                strncpy(tokens[token_count], current, 31u);
+                tokens[token_count][31u] = '\0';
+                ++token_count;
+                token_char_index = 0u;
+            }
+            continue;
+        }
+        if (token_char_index + 1u < sizeof(current)) {
+            current[token_char_index++] = ch;
+        }
+    }
+    if (token_char_index > 0u && token_count < 8u) {
+        current[token_char_index] = '\0';
+        strncpy(tokens[token_count], current, 31u);
+        tokens[token_count][31u] = '\0';
+        ++token_count;
+    }
+    if (out_token_count) {
+        *out_token_count = token_count;
+    }
+}
+
+static int compiler_riscv_preview_mnemonic_defines_first_operand(const char *mnemonic) {
+    if (!mnemonic || mnemonic[0] == '\0') {
+        return 0;
+    }
+    return strcmp(mnemonic, "li") == 0 ||
+        strcmp(mnemonic, "addi") == 0 ||
+        strcmp(mnemonic, "mv") == 0 ||
+        strcmp(mnemonic, "lui") == 0 ||
+        strcmp(mnemonic, "lw") == 0 ||
+        strcmp(mnemonic, "add") == 0 ||
+        strcmp(mnemonic, "sub") == 0 ||
+        strcmp(mnemonic, "mul") == 0 ||
+        strcmp(mnemonic, "div") == 0 ||
+        strcmp(mnemonic, "rem") == 0 ||
+        strcmp(mnemonic, "slli") == 0 ||
+        strcmp(mnemonic, "srai") == 0 ||
+        strcmp(mnemonic, "andi") == 0 ||
+        strcmp(mnemonic, "xori") == 0 ||
+        strcmp(mnemonic, "ori") == 0 ||
+        strcmp(mnemonic, "slti") == 0 ||
+        strcmp(mnemonic, "sltiu") == 0 ||
+        strcmp(mnemonic, "xor") == 0 ||
+        strcmp(mnemonic, "or") == 0 ||
+        strcmp(mnemonic, "and") == 0 ||
+        strcmp(mnemonic, "sll") == 0 ||
+        strcmp(mnemonic, "srl") == 0 ||
+        strcmp(mnemonic, "sra") == 0 ||
+        strcmp(mnemonic, "slt") == 0 ||
+        strcmp(mnemonic, "sltu") == 0 ||
+        strcmp(mnemonic, "jal") == 0 ||
+        strcmp(mnemonic, "jalr") == 0;
+}
+
+static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name) {
+    char tokens[8][32];
+    size_t token_count = 0u;
+
+    if (!line || !reg_name || reg_name[0] == '\0' || compiler_riscv_preview_line_is_label(line)) {
+        return 0;
+    }
+    compiler_riscv_preview_tokenize_line(line, tokens, &token_count);
+    if (token_count < 2u) {
+        return 0;
+    }
+    return compiler_riscv_preview_mnemonic_defines_first_operand(tokens[0]) &&
+        strcmp(tokens[1], reg_name) == 0;
+}
+
+static int compiler_riscv_preview_line_uses_reg(const char *line, const char *reg_name) {
+    char tokens[8][32];
+    size_t token_count = 0u;
+    size_t token_index = 1u;
+
+    if (!line || !reg_name || reg_name[0] == '\0' || compiler_riscv_preview_line_is_label(line)) {
+        return 0;
+    }
+    compiler_riscv_preview_tokenize_line(line, tokens, &token_count);
+    if (token_count < 2u) {
+        return 0;
+    }
+    if (compiler_riscv_preview_mnemonic_defines_first_operand(tokens[0])) {
+        token_index = 2u;
+    }
+    for (; token_index < token_count; ++token_index) {
+        if (strcmp(tokens[token_index], reg_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int compiler_riscv_preview_reg_is_used_again_before_redefinition(
+    char **lines,
+    size_t line_count,
+    size_t start_index,
+    const char *reg_name) {
+    size_t index;
+
+    if (!lines || !reg_name || reg_name[0] == '\0') {
+        return 0;
+    }
+    for (index = start_index; index < line_count; ++index) {
+        const char *line = lines[index];
+
+        if (!line) {
+            continue;
+        }
+        if (compiler_riscv_preview_line_is_label(line)) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_uses_reg(line, reg_name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int compiler_optimize_riscv_preview_tail_calls(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char target_name[256];
+        size_t scan_index = index + 1u;
+        int s11_offset = 0;
+        int ra_offset = 0;
+        int sp_delta = 0;
+
+        if (compiler_riscv_preview_line_is_jal_ra(lines[index], target_name, sizeof(target_name))) {
+            while (scan_index < line_count &&
+                compiler_riscv_preview_line_is_restore_from_s11(lines[scan_index])) {
+                ++scan_index;
+            }
+            if (scan_index + 3u < line_count &&
+                compiler_riscv_preview_line_is_restore_from_sp(lines[scan_index], "s11", &s11_offset) &&
+                compiler_riscv_preview_line_is_restore_from_sp(lines[scan_index + 1u], "ra", &ra_offset) &&
+                compiler_riscv_preview_line_is_addi_sp(lines[scan_index + 2u], &sp_delta) &&
+                compiler_riscv_preview_line_is_ret(lines[scan_index + 3u]) &&
+                ra_offset - s11_offset == 4 &&
+                sp_delta > 0) {
+                size_t emit_index;
+
+                if (!compiler_builder_appendf(&builder, "  lw s11, %d(sp)\n", s11_offset) ||
+                    !compiler_builder_appendf(&builder, "  lw ra, %d(sp)\n", ra_offset) ||
+                    !compiler_builder_appendf(&builder, "  addi sp, sp, %d\n", sp_delta) ||
+                    !compiler_builder_appendf(&builder, "  j %s\n", target_name)) {
+                    goto cleanup;
+                }
+                index = scan_index + 4u;
+                for (emit_index = index; emit_index < line_count && lines[emit_index][0] == '\0'; ++emit_index) {
+                    if (!compiler_builder_appendf(&builder, "\n")) {
+                        goto cleanup;
+                    }
+                }
+                index = emit_index;
+                continue;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_zero_adds(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char zero_reg[32];
+        char rd[32];
+        char rs1[32];
+        char rs2[32];
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_li_zero(lines[index], zero_reg, sizeof(zero_reg)) &&
+            compiler_riscv_preview_line_is_add_regs(lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
+            (strcmp(rs1, zero_reg) == 0 || strcmp(rs2, zero_reg) == 0) &&
+            (!compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                    lines, line_count, index + 2u, zero_reg) ||
+                strcmp(rd, zero_reg) == 0)) {
+            const char *kept_reg = strcmp(rs1, zero_reg) == 0 ? rs2 : rs1;
+
+            if (strcmp(rd, kept_reg) != 0) {
+                if (!compiler_builder_appendf(&builder, "  mv %s, %s\n", rd, kept_reg)) {
+                    goto cleanup;
+                }
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_mul_by_four(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char scale_reg[32];
+        char rd[32];
+        char rs1[32];
+        char rs2[32];
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_li_four(lines[index], scale_reg, sizeof(scale_reg)) &&
+            compiler_riscv_preview_line_is_mul_regs(lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
+            strcmp(rs2, scale_reg) == 0 &&
+            !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                lines, line_count, index + 2u, scale_reg)) {
+            if (!compiler_builder_appendf(&builder, "  slli %s, %s, 2\n", rd, rs1)) {
+                goto cleanup;
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_sub_by_one(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char one_reg[32];
+        char rd[32];
+        char rs1[32];
+        char rs2[32];
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_li_one(lines[index], one_reg, sizeof(one_reg)) &&
+            compiler_riscv_preview_line_is_sub_regs(lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
+            strcmp(rs2, one_reg) == 0 &&
+            !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                lines, line_count, index + 2u, one_reg)) {
+            if (!compiler_builder_appendf(&builder, "  addi %s, %s, -1\n", rd, rs1)) {
+                goto cleanup;
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char tmp_reg[32];
+        char store_reg[32];
+        int tmp_imm = 0;
+        int store_offset = 0;
+        size_t scan_index;
+        size_t end_index;
+        int replaced_any = 0;
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_addi_sp_imm(lines[index], tmp_reg, sizeof(tmp_reg), &tmp_imm) &&
+            compiler_riscv_preview_line_is_sw_sp_reg(lines[index + 1u], store_reg, sizeof(store_reg), &store_offset) &&
+            strcmp(tmp_reg, store_reg) == 0 &&
+            !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                lines, line_count, index + 2u, tmp_reg)) {
+            end_index = line_count;
+
+            for (scan_index = index + 2u; scan_index < line_count; ++scan_index) {
+                char load_reg[32];
+                int load_offset = 0;
+
+                if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
+                    compiler_riscv_preview_line_defines_reg(lines[scan_index], "sp")) {
+                    end_index = scan_index;
+                    break;
+                }
+                if (compiler_riscv_preview_line_is_sw_sp_reg(
+                        lines[scan_index], store_reg, sizeof(store_reg), &load_offset) &&
+                    load_offset == store_offset) {
+                    end_index = scan_index;
+                    break;
+                }
+                if (compiler_riscv_preview_line_is_lw_sp_reg(
+                        lines[scan_index], load_reg, sizeof(load_reg), &load_offset) &&
+                    load_offset == store_offset) {
+                    replaced_any = 1;
+                }
+            }
+
+            if (replaced_any) {
+                for (scan_index = index + 2u; scan_index < end_index; ++scan_index) {
+                    char load_reg[32];
+                    int load_offset = 0;
+
+                    if (compiler_riscv_preview_line_is_lw_sp_reg(
+                            lines[scan_index], load_reg, sizeof(load_reg), &load_offset) &&
+                        load_offset == store_offset) {
+                        if (!compiler_builder_appendf(&builder, "  addi %s, sp, %d\n", load_reg, tmp_imm)) {
+                            goto cleanup;
+                        }
+                    } else {
+                        if (!compiler_builder_appendf(&builder, "%s\n", lines[scan_index])) {
+                            goto cleanup;
+                        }
+                    }
+                }
+                index = end_index;
+                continue;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_repeated_indexed_addr_triples(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char shift_rd[32];
+        char shift_rs[32];
+        char load_rd[32];
+        char add_rd[32];
+        char add_rs1[32];
+        char add_rs2[32];
+        int load_offset = 0;
+        size_t scan_index;
+
+        if (index + 2u < line_count &&
+            compiler_riscv_preview_line_is_slli_by_two(lines[index], shift_rd, sizeof(shift_rd), shift_rs, sizeof(shift_rs)) &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 1u], load_rd, sizeof(load_rd), &load_offset) &&
+            compiler_riscv_preview_line_is_add_regs(
+                lines[index + 2u], add_rd, sizeof(add_rd), add_rs1, sizeof(add_rs1), add_rs2, sizeof(add_rs2)) &&
+            strcmp(add_rd, shift_rd) == 0 &&
+            strcmp(add_rs1, load_rd) == 0 &&
+            strcmp(add_rs2, shift_rd) == 0) {
+            for (scan_index = index + 3u; scan_index + 2u < line_count; ++scan_index) {
+                char next_shift_rd[32];
+                char next_shift_rs[32];
+                char next_load_rd[32];
+                char next_add_rd[32];
+                char next_add_rs1[32];
+                char next_add_rs2[32];
+                int next_load_offset = 0;
+                size_t check_index;
+                int invalidated = 0;
+
+                if (!compiler_riscv_preview_line_is_slli_by_two(
+                        lines[scan_index], next_shift_rd, sizeof(next_shift_rd), next_shift_rs, sizeof(next_shift_rs)) ||
+                    !compiler_riscv_preview_line_is_lw_sp_reg(
+                        lines[scan_index + 1u], next_load_rd, sizeof(next_load_rd), &next_load_offset) ||
+                    !compiler_riscv_preview_line_is_add_regs(
+                        lines[scan_index + 2u],
+                        next_add_rd,
+                        sizeof(next_add_rd),
+                        next_add_rs1,
+                        sizeof(next_add_rs1),
+                        next_add_rs2,
+                        sizeof(next_add_rs2))) {
+                    if (compiler_riscv_preview_line_is_label(lines[scan_index])) {
+                        break;
+                    }
+                    continue;
+                }
+
+                if (strcmp(next_shift_rd, shift_rd) != 0 ||
+                    strcmp(next_shift_rs, shift_rs) != 0 ||
+                    strcmp(next_load_rd, load_rd) != 0 ||
+                    next_load_offset != load_offset ||
+                    strcmp(next_add_rd, add_rd) != 0 ||
+                    strcmp(next_add_rs1, add_rs1) != 0 ||
+                    strcmp(next_add_rs2, add_rs2) != 0) {
+                    continue;
+                }
+
+                for (check_index = index + 3u; check_index < scan_index; ++check_index) {
+                    if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rd) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rs) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], load_rd)) {
+                        invalidated = 1;
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    break;
+                }
+
+                if (!compiler_builder_appendf(&builder, "%s\n", lines[index]) ||
+                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 1u]) ||
+                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 2u])) {
+                    goto cleanup;
+                }
+                index += 3u;
+                while (index < scan_index) {
+                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                        goto cleanup;
+                    }
+                    ++index;
+                }
+                index = scan_index + 3u;
+                goto next_line;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+next_line:
+        continue;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char first_shift_rd[32];
+        char first_shift_rs[32];
+        char first_load_rd[32];
+        char first_load_base[32];
+        char first_add_rd[32];
+        char first_add_rs1[32];
+        char first_add_rs2[32];
+        unsigned first_shift_imm = 0u;
+        int first_load_offset = 0;
+
+        if (index + 2u < line_count &&
+            compiler_riscv_preview_line_is_slli_imm(
+                lines[index], first_shift_rd, sizeof(first_shift_rd), first_shift_rs, sizeof(first_shift_rs), &first_shift_imm) &&
+            first_shift_imm == 2u &&
+            compiler_riscv_preview_line_is_lw_reg_offset(
+                lines[index + 1u],
+                first_load_rd,
+                sizeof(first_load_rd),
+                &first_load_offset,
+                first_load_base,
+                sizeof(first_load_base)) &&
+            compiler_riscv_preview_line_is_add_regs(
+                lines[index + 2u],
+                first_add_rd,
+                sizeof(first_add_rd),
+                first_add_rs1,
+                sizeof(first_add_rs1),
+                first_add_rs2,
+                sizeof(first_add_rs2)) &&
+            strcmp(first_add_rd, first_shift_rd) == 0 &&
+            strcmp(first_add_rs1, first_load_rd) == 0 &&
+            strcmp(first_add_rs2, first_shift_rd) == 0) {
+            size_t scan_index;
+            int replaced = 0;
+
+            for (scan_index = index + 3u; scan_index + 2u < line_count; ++scan_index) {
+                char second_shift_rd[32];
+                char second_shift_rs[32];
+                char second_load_rd[32];
+                char second_load_base[32];
+                char second_add_rd[32];
+                char second_add_rs1[32];
+                char second_add_rs2[32];
+                unsigned second_shift_imm = 0u;
+                int second_load_offset = 0;
+                size_t check_index;
+                int invalidated = 0;
+
+                if (!compiler_riscv_preview_line_is_slli_imm(lines[scan_index],
+                        second_shift_rd,
+                        sizeof(second_shift_rd),
+                        second_shift_rs,
+                        sizeof(second_shift_rs),
+                        &second_shift_imm) ||
+                    second_shift_imm != first_shift_imm ||
+                    strcmp(second_shift_rd, first_shift_rd) != 0 ||
+                    strcmp(second_shift_rs, first_shift_rs) != 0 ||
+                    !compiler_riscv_preview_line_is_lw_reg_offset(
+                        lines[scan_index + 1u],
+                        second_load_rd,
+                        sizeof(second_load_rd),
+                        &second_load_offset,
+                        second_load_base,
+                        sizeof(second_load_base)) ||
+                    second_load_offset != first_load_offset ||
+                    strcmp(second_load_rd, first_load_rd) != 0 ||
+                    strcmp(second_load_base, first_load_base) != 0 ||
+                    !compiler_riscv_preview_line_is_add_regs(
+                        lines[scan_index + 2u],
+                        second_add_rd,
+                        sizeof(second_add_rd),
+                        second_add_rs1,
+                        sizeof(second_add_rs1),
+                        second_add_rs2,
+                        sizeof(second_add_rs2)) ||
+                    strcmp(second_add_rd, first_add_rd) != 0 ||
+                    strcmp(second_add_rs1, first_add_rs1) != 0 ||
+                    strcmp(second_add_rs2, first_add_rs2) != 0) {
+                    continue;
+                }
+
+                for (check_index = index + 3u; check_index < scan_index; ++check_index) {
+                    if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rd) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rs)) {
+                        invalidated = 1;
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    break;
+                }
+
+                if (!compiler_builder_appendf(&builder, "%s\n", lines[index]) ||
+                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 1u]) ||
+                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 2u])) {
+                    goto cleanup;
+                }
+                index += 3u;
+                while (index < scan_index) {
+                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                        goto cleanup;
+                    }
+                    ++index;
+                }
+                index = scan_index + 3u;
+                replaced = 1;
+                break;
+            }
+
+            if (replaced) {
+                continue;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    if (!strstr(text, "  mv t5, a0\n  mv a0, a1\n  mv a1, t5\n  call ")) {
+        return 1;
+    }
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char first_reg[32];
+        char first_base[32];
+        char second_reg[32];
+        char second_base[32];
+        int first_offset = 0;
+        int second_offset = 0;
+
+        if (index + 5u < line_count &&
+            compiler_riscv_preview_line_is_lw_reg_offset(
+                lines[index], first_reg, sizeof(first_reg), &first_offset, first_base, sizeof(first_base)) &&
+            compiler_riscv_preview_line_is_lw_reg_offset(
+                lines[index + 1u], second_reg, sizeof(second_reg), &second_offset, second_base, sizeof(second_base)) &&
+            strcmp(first_reg, "a1") == 0 &&
+            strcmp(second_reg, "a0") == 0 &&
+            strcmp(second_base, "a0") != 0 &&
+            strcmp(lines[index + 2u], "  mv t5, a0") == 0 &&
+            strcmp(lines[index + 3u], "  mv a0, a1") == 0 &&
+            strcmp(lines[index + 4u], "  mv a1, t5") == 0 &&
+            strncmp(lines[index + 5u], "  call ", 7u) == 0) {
+            if (!compiler_builder_appendf(&builder, "  lw a0, %d(%s)\n", first_offset, first_base) ||
+                !compiler_builder_appendf(&builder, "  lw a1, %d(%s)\n", second_offset, second_base) ||
+                !compiler_builder_appendf(&builder, "%s\n", lines[index + 5u])) {
+                goto cleanup;
+            }
+            index += 6u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_stack_staged_call_args(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    if (!strstr(text, "  call ")) {
+        return 1;
+    }
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char stage0_reg[32];
+        char stage1_reg[32];
+        char store0_reg[32];
+        char store1_reg[32];
+        char load0_reg[32];
+        char load1_reg[32];
+        int src0_offset = 0;
+        int src1_offset = 0;
+        int dst0_offset = 0;
+        int dst1_offset = 0;
+        int load0_offset = 0;
+        int load1_offset = 0;
+
+        if (index + 6u < line_count &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index], stage0_reg, sizeof(stage0_reg), &src0_offset) &&
+            compiler_riscv_preview_line_is_sw_sp_reg(lines[index + 1u], store0_reg, sizeof(store0_reg), &dst0_offset) &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 2u], stage1_reg, sizeof(stage1_reg), &src1_offset) &&
+            compiler_riscv_preview_line_is_sw_sp_reg(lines[index + 3u], store1_reg, sizeof(store1_reg), &dst1_offset) &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 4u], load0_reg, sizeof(load0_reg), &load0_offset) &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 5u], load1_reg, sizeof(load1_reg), &load1_offset) &&
+            strcmp(stage0_reg, store0_reg) == 0 &&
+            strcmp(stage1_reg, store1_reg) == 0 &&
+            strcmp(load0_reg, "a0") == 0 &&
+            strcmp(load1_reg, "a1") == 0 &&
+            load0_offset == dst0_offset &&
+            load1_offset == dst1_offset &&
+            strncmp(lines[index + 6u], "  call ", 7u) == 0) {
+            if (!compiler_builder_appendf(&builder, "  lw a0, %d(sp)\n", src0_offset) ||
+                !compiler_builder_appendf(&builder, "  sw a0, %d(sp)\n", dst0_offset) ||
+                !compiler_builder_appendf(&builder, "  lw a1, %d(sp)\n", src1_offset) ||
+                !compiler_builder_appendf(&builder, "  sw a1, %d(sp)\n", dst1_offset) ||
+                !compiler_builder_appendf(&builder, "%s\n", lines[index + 6u])) {
+                goto cleanup;
+            }
+            index += 7u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char base_reg[32];
+        int base_imm = 0;
+        size_t scan_index = 0u;
+        size_t end_index = 0u;
+        int replaced_any = 0;
+        int blocked = 0;
+
+        if (index + 2u < line_count &&
+            (compiler_riscv_preview_line_is_addi_sp_imm(lines[index], base_reg, sizeof(base_reg), &base_imm) ||
+                (compiler_riscv_preview_line_is_mv_sp(lines[index], base_reg, sizeof(base_reg)) && (base_imm = 0, 1))) &&
+            base_reg[0] == 't') {
+            end_index = line_count;
+            for (scan_index = index + 1u; scan_index < line_count;) {
+                char addr_reg[32];
+                char add_rs1[32];
+                char add_rs2[32];
+                char mem_reg[32];
+                char mem_base[32];
+                const char *index_reg = NULL;
+                int mem_offset = 0;
+
+                if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
+                    compiler_riscv_preview_line_defines_reg(lines[scan_index], "sp") ||
+                    compiler_riscv_preview_line_defines_reg(lines[scan_index], base_reg)) {
+                    end_index = scan_index;
+                    break;
+                }
+                if (scan_index + 1u < line_count &&
+                    compiler_riscv_preview_line_is_add_regs(
+                        lines[scan_index], addr_reg, sizeof(addr_reg), add_rs1, sizeof(add_rs1), add_rs2, sizeof(add_rs2))) {
+                    if (strcmp(add_rs1, base_reg) == 0) {
+                        index_reg = add_rs2;
+                    } else if (strcmp(add_rs2, base_reg) == 0) {
+                        index_reg = add_rs1;
+                    }
+                    if (index_reg &&
+                        compiler_riscv_preview_line_is_lw_reg_offset(
+                            lines[scan_index + 1u],
+                            mem_reg,
+                            sizeof(mem_reg),
+                            &mem_offset,
+                            mem_base,
+                            sizeof(mem_base)) &&
+                        mem_offset == 0 &&
+                        strcmp(mem_base, addr_reg) == 0 &&
+                        !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                            lines, end_index, scan_index + 2u, addr_reg)) {
+                        replaced_any = 1;
+                        scan_index += 2u;
+                        continue;
+                    }
+                    if (index_reg &&
+                        compiler_riscv_preview_line_is_sw_reg_offset(
+                            lines[scan_index + 1u],
+                            mem_reg,
+                            sizeof(mem_reg),
+                            &mem_offset,
+                            mem_base,
+                            sizeof(mem_base)) &&
+                        mem_offset == 0 &&
+                        strcmp(mem_base, addr_reg) == 0 &&
+                        !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                            lines, end_index, scan_index + 2u, addr_reg)) {
+                        replaced_any = 1;
+                        scan_index += 2u;
+                        continue;
+                    }
+                }
+                if (compiler_riscv_preview_line_uses_reg(lines[scan_index], base_reg)) {
+                    blocked = 1;
+                    break;
+                }
+                ++scan_index;
+            }
+
+            if (!blocked && replaced_any) {
+                for (scan_index = index + 1u; scan_index < end_index;) {
+                    char addr_reg[32];
+                    char add_rs1[32];
+                    char add_rs2[32];
+                    char mem_reg[32];
+                    char mem_base[32];
+                    const char *index_reg = NULL;
+                    int mem_offset = 0;
+
+                    if (scan_index + 1u < end_index &&
+                        compiler_riscv_preview_line_is_add_regs(
+                            lines[scan_index], addr_reg, sizeof(addr_reg), add_rs1, sizeof(add_rs1), add_rs2, sizeof(add_rs2))) {
+                        if (strcmp(add_rs1, base_reg) == 0) {
+                            index_reg = add_rs2;
+                        } else if (strcmp(add_rs2, base_reg) == 0) {
+                            index_reg = add_rs1;
+                        }
+                    }
+
+                    if (index_reg &&
+                        compiler_riscv_preview_line_is_lw_reg_offset(
+                            lines[scan_index + 1u],
+                            mem_reg,
+                            sizeof(mem_reg),
+                            &mem_offset,
+                            mem_base,
+                            sizeof(mem_base)) &&
+                        mem_offset == 0 &&
+                        strcmp(mem_base, addr_reg) == 0 &&
+                        !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                            lines, end_index, scan_index + 2u, addr_reg)) {
+                        if (!compiler_builder_appendf(&builder, "  add %s, sp, %s\n", addr_reg, index_reg) ||
+                            !compiler_builder_appendf(&builder, "  lw %s, %d(%s)\n", mem_reg, base_imm, addr_reg)) {
+                            goto cleanup;
+                        }
+                        scan_index += 2u;
+                        continue;
+                    }
+                    if (index_reg &&
+                        compiler_riscv_preview_line_is_sw_reg_offset(
+                            lines[scan_index + 1u],
+                            mem_reg,
+                            sizeof(mem_reg),
+                            &mem_offset,
+                            mem_base,
+                            sizeof(mem_base)) &&
+                        mem_offset == 0 &&
+                        strcmp(mem_base, addr_reg) == 0 &&
+                        !compiler_riscv_preview_reg_is_used_again_before_redefinition(
+                            lines, end_index, scan_index + 2u, addr_reg)) {
+                        if (!compiler_builder_appendf(&builder, "  add %s, sp, %s\n", addr_reg, index_reg) ||
+                            !compiler_builder_appendf(&builder, "  sw %s, %d(%s)\n", mem_reg, base_imm, addr_reg)) {
+                            goto cleanup;
+                        }
+                        scan_index += 2u;
+                        continue;
+                    }
+                    if (!compiler_builder_appendf(&builder, "%s\n", lines[scan_index])) {
+                        goto cleanup;
+                    }
+                    ++scan_index;
+                }
+                index = end_index;
+                continue;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
 }
 
 static int compiler_append_caller_save_sequence(
@@ -637,6 +2839,7 @@ static int compiler_append_caller_save_sequence(
 static int compiler_append_riscv_preview_instruction(
     CompilerStringBuilder *builder,
     const MachineBytesReport *report,
+    const CompilerRiscvPreviewCache *cache,
     size_t program_byte_offset,
     uint32_t word,
     size_t epilogue_stack_size,
@@ -650,7 +2853,7 @@ static int compiler_append_riscv_preview_instruction(
     uint32_t rs1 = (word >> 15u) & 0x1Fu;
     uint32_t rs2 = (word >> 20u) & 0x1Fu;
     uint32_t funct7 = (word >> 25u) & 0x7Fu;
-    const MachineBytesFixupSummary *fixup = compiler_find_fixup_at_patch_offset(report, program_byte_offset);
+    const MachineBytesFixupSummary *fixup = compiler_find_fixup_at_patch_offset_cached(cache, program_byte_offset);
     const char *target_name = NULL;
 
     (void)call_save_area_offset;
@@ -659,25 +2862,33 @@ static int compiler_append_riscv_preview_instruction(
     switch (opcode) {
         case 0x03u:
             if (funct3 == 0x2u) {
-                if (fixup &&
-                    fixup->kind == MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET &&
-                    fixup->target_name && fixup->target_name[0] != '\0') {
+                const MachineBytesFixupSummary *load_fixup =
+                    compiler_find_fixup_at_patch_offset_and_kind_cached(
+                        cache, program_byte_offset, MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET);
+
+                if (load_fixup &&
+                    load_fixup->target_name && load_fixup->target_name[0] != '\0') {
                     return compiler_builder_appendf(
                         builder,
                         "  lw %s, %%lo(%s)(%s)\n",
                         compiler_riscv_register_name(rd),
-                        fixup->target_name,
+                        load_fixup->target_name,
                         compiler_riscv_register_name(rs1));
                 }
-                const char *global_name = report ? compiler_find_global_name_for_gp_offset(&report->program, compiler_riscv_decode_i_imm(word)) : NULL;
+                {
+                    const char *global_name = report
+                        ? compiler_find_global_name_for_gp_offset(
+                              &report->program, compiler_riscv_decode_i_imm(word))
+                        : NULL;
 
-                if (rs1 == 3u && global_name) {
-                    return compiler_builder_appendf(
-                        builder,
-                        "  lw %s, %d(gp) # %s\n",
-                        compiler_riscv_register_name(rd),
-                        compiler_riscv_decode_i_imm(word),
-                        global_name);
+                    if (rs1 == 3u && global_name) {
+                        return compiler_builder_appendf(
+                            builder,
+                            "  lw %s, %d(gp) # %s\n",
+                            compiler_riscv_register_name(rd),
+                            compiler_riscv_decode_i_imm(word),
+                            global_name);
+                    }
                 }
                 return compiler_builder_appendf(
                     builder,
@@ -689,17 +2900,19 @@ static int compiler_append_riscv_preview_instruction(
             break;
         case 0x13u: {
             int32_t imm = compiler_riscv_decode_i_imm(word);
+            const MachineBytesFixupSummary *load_fixup =
+                compiler_find_fixup_at_patch_offset_and_kind_cached(
+                    cache, program_byte_offset, MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET);
 
-            if (fixup &&
-                fixup->kind == MACHINE_BYTES_FIXUP_DATA_LOAD_TARGET &&
-                fixup->target_name && fixup->target_name[0] != '\0' &&
+            if (load_fixup &&
+                load_fixup->target_name && load_fixup->target_name[0] != '\0' &&
                 funct3 == 0x0u) {
                 return compiler_builder_appendf(
                     builder,
                     "  addi %s, %s, %%lo(%s)\n",
                     compiler_riscv_register_name(rd),
                     compiler_riscv_register_name(rs1),
-                    fixup->target_name);
+                    load_fixup->target_name);
             }
 
             switch (funct3) {
@@ -788,14 +3001,17 @@ static int compiler_append_riscv_preview_instruction(
         }
         case 0x23u:
             if (funct3 == 0x2u) {
-                if (fixup &&
-                    fixup->kind == MACHINE_BYTES_FIXUP_DATA_STORE_TARGET &&
-                    fixup->target_name && fixup->target_name[0] != '\0') {
+                const MachineBytesFixupSummary *store_fixup =
+                    compiler_find_fixup_at_patch_offset_and_kind_cached(
+                        cache, program_byte_offset, MACHINE_BYTES_FIXUP_DATA_STORE_TARGET);
+
+                if (store_fixup &&
+                    store_fixup->target_name && store_fixup->target_name[0] != '\0') {
                     return compiler_builder_appendf(
                         builder,
                         "  sw %s, %%lo(%s)(%s)\n",
                         compiler_riscv_register_name(rs2),
-                        fixup->target_name,
+                        store_fixup->target_name,
                         compiler_riscv_register_name(rs1));
                 }
                 const char *global_name = report ? compiler_find_global_name_for_gp_offset(&report->program, compiler_riscv_decode_s_imm(word)) : NULL;
@@ -858,28 +3074,54 @@ static int compiler_append_riscv_preview_instruction(
             break;
         }
         case 0x37u:
-            if (fixup &&
-                fixup->kind == MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET &&
-                fixup->target_name && fixup->target_name[0] != '\0') {
-                return compiler_builder_appendf(
-                    builder,
-                    "  lui %s, %%hi(%s)\n",
-                    compiler_riscv_register_name(rd),
-                    fixup->target_name);
+            {
+                const MachineBytesFixupSummary *addr_fixup =
+                    compiler_find_fixup_at_patch_offset_and_kind_cached(
+                        cache, program_byte_offset, MACHINE_BYTES_FIXUP_DATA_ADDR_TARGET);
+
+                if (addr_fixup &&
+                    addr_fixup->target_name && addr_fixup->target_name[0] != '\0') {
+                    return compiler_builder_appendf(
+                        builder,
+                        "  lui %s, %%hi(%s)\n",
+                        compiler_riscv_register_name(rd),
+                        addr_fixup->target_name);
+                }
             }
             return compiler_builder_appendf(
                 builder,
                 "  lui %s, 0x%x\n",
                 compiler_riscv_register_name(rd),
                 (unsigned)(word >> 12u));
+        case 0x17u:
+            if (fixup &&
+                fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
+                fixup->target_name && fixup->target_name[0] != '\0') {
+                if (!compiler_builder_appendf(builder, "  call ") ||
+                    !compiler_append_pretty_symbol_name(builder, report, fixup->target_name) ||
+                    !compiler_builder_appendf(builder, "\n")) {
+                    return 0;
+                }
+                return 1;
+            }
+            return compiler_builder_appendf(
+                builder,
+                "  auipc %s, 0x%x\n",
+                compiler_riscv_register_name(rd),
+                (unsigned)(word >> 12u));
         case 0x63u: {
+            const CompilerBlockLabelCacheEntry *cached_label = NULL;
             const char *mnemonic = NULL;
             int32_t imm = compiler_riscv_decode_b_imm(word);
 
             if (fixup && fixup->target_name && fixup->target_name[0] != '\0') {
                 target_name = fixup->target_name;
             } else {
-                target_name = compiler_find_label_at_program_byte_offset(report, program_byte_offset + (size_t)imm);
+                cached_label = compiler_find_block_label_at_program_byte_offset_cached(
+                    cache, program_byte_offset + (size_t)imm);
+                if (!cached_label) {
+                    target_name = compiler_find_label_at_program_byte_offset(report, program_byte_offset + (size_t)imm);
+                }
             }
             switch (funct3) {
                 case 0x0u:
@@ -903,14 +3145,16 @@ static int compiler_append_riscv_preview_instruction(
                 default:
                     break;
             }
-            if (mnemonic && target_name) {
+            if (mnemonic && (target_name || cached_label)) {
                 if (!compiler_builder_appendf(
                         builder,
                         "  %s %s, %s, ",
                         mnemonic,
                         compiler_riscv_register_name(rs1),
                         compiler_riscv_register_name(rs2)) ||
-                    !compiler_append_pretty_symbol_name(builder, report, target_name) ||
+                    !((cached_label &&
+                        compiler_builder_appendf(builder, ".L%s_%zu", cached_label->function_name, cached_label->block_index)) ||
+                        compiler_append_pretty_symbol_name(builder, report, target_name)) ||
                     !compiler_builder_appendf(builder, "\n")) {
                     return 0;
                 }
@@ -951,17 +3195,25 @@ static int compiler_append_riscv_preview_instruction(
                 compiler_riscv_register_name(rs1));
         }
         case 0x6Fu: {
+            const CompilerBlockLabelCacheEntry *cached_label = NULL;
             int32_t imm = compiler_riscv_decode_j_imm(word);
 
             if (fixup && fixup->target_name && fixup->target_name[0] != '\0') {
                 target_name = fixup->target_name;
             } else {
-                target_name = compiler_find_label_at_program_byte_offset(report, program_byte_offset + (size_t)imm);
+                cached_label = compiler_find_block_label_at_program_byte_offset_cached(
+                    cache, program_byte_offset + (size_t)imm);
+                if (!cached_label) {
+                    target_name = compiler_find_label_at_program_byte_offset(report, program_byte_offset + (size_t)imm);
+                }
             }
             if (rd == 0u) {
-                if (target_name) {
+                if (target_name || cached_label) {
                     if (!compiler_builder_appendf(builder, "  j ") ||
-                        !compiler_append_pretty_symbol_name(builder, report, target_name) ||
+                        !((cached_label &&
+                            compiler_builder_appendf(
+                                builder, ".L%s_%zu", cached_label->function_name, cached_label->block_index)) ||
+                            compiler_append_pretty_symbol_name(builder, report, target_name)) ||
                         !compiler_builder_appendf(builder, "\n")) {
                         return 0;
                     }
@@ -969,9 +3221,11 @@ static int compiler_append_riscv_preview_instruction(
                 }
                 return compiler_builder_appendf(builder, "  jal zero, %d\n", imm);
             }
-            if (target_name) {
+            if (target_name || cached_label) {
                 if (!compiler_builder_appendf(builder, "  jal %s, ", compiler_riscv_register_name(rd)) ||
-                    !compiler_append_pretty_symbol_name(builder, report, target_name) ||
+                    !((cached_label &&
+                        compiler_builder_appendf(builder, ".L%s_%zu", cached_label->function_name, cached_label->block_index)) ||
+                        compiler_append_pretty_symbol_name(builder, report, target_name)) ||
                     !compiler_builder_appendf(builder, "\n")) {
                     return 0;
                 }
@@ -1051,6 +3305,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
     MachineLayoutProgram layout_program;
     MachineEmitProgram emit_program;
     MachineBytesReport bytes_report;
+    CompilerRiscvPreviewCache preview_cache;
     MachineSelectError select_error;
     MachineLayoutError layout_error;
     MachineEmitError emit_error;
@@ -1079,6 +3334,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
     machine_layout_program_init(&layout_program);
     machine_emit_program_init(&emit_program);
     machine_bytes_report_init(&bytes_report);
+    compiler_riscv_preview_cache_init(&preview_cache);
     compiler_builder_init(&builder);
 
     ok = machine_select_build_program_from_machine_ir_report(report, &select_program, &select_error);
@@ -1103,6 +3359,11 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         &bytes_error);
     if (!ok) {
         compiler_copy_stage_error(error, bytes_error.line, bytes_error.column, bytes_error.message);
+        goto cleanup;
+    }
+    if (!compiler_riscv_preview_cache_build(&bytes_report, &preview_cache)) {
+        compiler_set_error(error, 0, 0, "COMPILER-110: failed to build riscv preview lookup cache");
+        ok = 0;
         goto cleanup;
     }
     if (!machine_bytes_report_get_program(&bytes_report, &program) || !program) {
@@ -1238,9 +3499,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         if (function_summary->call_count > 0u) {
             frame_bytes += 4u;   /* ra */
             frame_bytes += 4u;   /* s11 */
-            frame_bytes += 15u * 4u; /* t5,a0-a7,t0-t6 save area */
             frame_restores_ra = 1;
-            save_caller_regs_around_call = 1;
         }
         if (frame_bytes > 0u && (frame_bytes % 16u) != 0u) {
             frame_bytes = ((frame_bytes + 15u) / 16u) * 16u;
@@ -1306,6 +3565,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
             size_t block_byte_count = 0u;
             size_t function_start = 0u;
             size_t byte_offset;
+            size_t skip_until_program_byte_offset = (size_t)-1;
 
             memset(&block_summary, 0, sizeof(block_summary));
             if (!machine_bytes_function_get_block(function, block_index, &block) || !block ||
@@ -1322,7 +3582,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                 goto cleanup;
             }
             if (block_summary.label_name && block_summary.label_name[0] != '\0') {
-                if (!compiler_append_pretty_symbol_name(&builder, &bytes_report, block_summary.label_name) ||
+                if (!compiler_builder_appendf(&builder, ".L%s_%zu", function_name, block_index) ||
                     !compiler_builder_appendf(&builder, ":\n")) {
                     compiler_set_error(error, 0, 0, "COMPILER-120: out of memory writing block label");
                     ok = 0;
@@ -1333,11 +3593,77 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                 uint32_t word = compiler_read_u32_le(block_bytes + byte_offset);
                 size_t program_byte_offset = function_start + block_summary.start_byte_offset + byte_offset;
                 const MachineBytesFixupSummary *call_fixup = NULL;
+                const MachineBytesFixupSummary *current_fixup = NULL;
+                const CompilerBlockLabelCacheEntry *tail_call_cached_label = NULL;
+                const char *tail_call_target_name = NULL;
                 int include_a0 = 0;
+                size_t tail_call_skip_byte_count = 0u;
+
+                if (skip_until_program_byte_offset != (size_t)-1 &&
+                    program_byte_offset < skip_until_program_byte_offset) {
+                    continue;
+                }
 
                 if (save_caller_regs_around_call) {
-                    call_fixup = compiler_find_call_fixup_covering_offset(&bytes_report, program_byte_offset);
+                    call_fixup = compiler_find_call_fixup_covering_offset_cached(&preview_cache, program_byte_offset);
+                    if (call_fixup && program_byte_offset == call_fixup->owner_byte_offset) {
+                        include_a0 = compiler_call_requires_a0_preservation(
+                            &bytes_report,
+                            function_index,
+                            program_byte_offset);
+                    }
                     (void)block;
+                }
+                current_fixup = compiler_find_fixup_at_patch_offset_cached(&preview_cache, program_byte_offset);
+                if (compiler_riscv_preview_detect_tail_call_epilogue(
+                        block_bytes,
+                        block_byte_count,
+                        byte_offset,
+                        word,
+                        frame_bytes,
+                        ra_save_offset,
+                        frame_restores_ra,
+                        &tail_call_skip_byte_count)) {
+                    if (current_fixup &&
+                        current_fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
+                        current_fixup->target_name && current_fixup->target_name[0] != '\0') {
+                        tail_call_target_name = current_fixup->target_name;
+                    } else if ((word & 0x7Fu) == 0x6Fu && ((word >> 7u) & 0x1Fu) == 1u) {
+                        int32_t imm = compiler_riscv_decode_j_imm(word);
+                        size_t target_program_byte_offset = program_byte_offset + (size_t)imm;
+
+                        tail_call_cached_label = compiler_find_block_label_at_program_byte_offset_cached(
+                            &preview_cache, target_program_byte_offset);
+                        if (!tail_call_cached_label) {
+                            tail_call_target_name = compiler_find_label_at_program_byte_offset(
+                                &bytes_report, target_program_byte_offset);
+                        }
+                    }
+                }
+                if ((tail_call_target_name || tail_call_cached_label) &&
+                    ((word & 0x7Fu) == 0x6Fu) && (((word >> 7u) & 0x1Fu) == 1u) &&
+                    compiler_riscv_preview_detect_tail_call_epilogue(
+                        block_bytes,
+                        block_byte_count,
+                        byte_offset,
+                        word,
+                        frame_bytes,
+                        ra_save_offset,
+                        frame_restores_ra,
+                        &tail_call_skip_byte_count)) {
+                    if (!compiler_append_riscv_preview_tail_call(
+                            &builder,
+                            &bytes_report,
+                            tail_call_target_name,
+                            tail_call_cached_label,
+                            frame_bytes,
+                            ra_save_offset)) {
+                        compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing tail call");
+                        ok = 0;
+                        goto cleanup;
+                    }
+                    skip_until_program_byte_offset = program_byte_offset + tail_call_skip_byte_count;
+                    continue;
                 }
                 if (call_fixup && program_byte_offset == call_fixup->owner_byte_offset &&
                     !compiler_append_caller_save_sequence(&builder, call_save_area_offset, 1, include_a0)) {
@@ -1349,6 +3675,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                 if (!compiler_append_riscv_preview_instruction(
                         &builder,
                         &bytes_report,
+                        &preview_cache,
                         program_byte_offset,
                         word,
                         frame_bytes,
@@ -1359,6 +3686,13 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                     compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing riscv instruction");
                     ok = 0;
                     goto cleanup;
+                }
+                if (current_fixup &&
+                    current_fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
+                    (word & 0x7Fu) == 0x17u) {
+                    skip_until_program_byte_offset = program_byte_offset + 8u;
+                } else {
+                    skip_until_program_byte_offset = (size_t)-1;
                 }
                 if (call_fixup &&
                     program_byte_offset == call_fixup->patch_byte_offset &&
@@ -1379,6 +3713,19 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
 
     *out_text = builder.data;
     builder.data = NULL;
+    if (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
+        !compiler_optimize_riscv_preview_zero_adds(out_text) ||
+        !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
+        !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
+        !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
+        !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
+        !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
+        !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text) ||
+        !compiler_optimize_riscv_preview_stack_staged_call_args(out_text)) {
+        compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
+        ok = 0;
+        goto cleanup;
+    }
     ok = 1;
 
 cleanup:
@@ -1386,6 +3733,7 @@ cleanup:
     machine_layout_program_free(&layout_program);
     machine_select_program_free(&select_program);
     compiler_builder_free(&builder);
+    compiler_riscv_preview_cache_free(&preview_cache);
     machine_bytes_report_free(&bytes_report);
     return ok;
 }
@@ -1487,7 +3835,11 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_phi_eliminated_flat_report(
+    if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
+        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+        goto cleanup;
+    }
+    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
         &value_program,
         COMPILER_DEFAULT_COLOR_BUDGET,
         COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,

@@ -344,24 +344,13 @@ static int memory_ssa_create_entry_seed_versions(const ValueSsaFunction *input_f
     size_t slot_index;
 
     for (slot_index = 0; slot_index < output_function->tracked_slot_count; ++slot_index) {
-        const ValueSsaSlotRef slot = output_function->tracked_slots[slot_index].slot;
-        int needs_entry_seed = 0;
+        size_t version_id;
 
-        if (slot.kind == VALUE_SSA_SLOT_GLOBAL) {
-            needs_entry_seed = 1;
-        } else if (slot.kind == VALUE_SSA_SLOT_LOCAL &&
-            slot.id < input_function->local_count &&
-            input_function->locals[slot.id].is_parameter) {
-            needs_entry_seed = 1;
-        }
-
-        if (needs_entry_seed) {
-            size_t version_id = memory_ssa_function_allocate_version(output_function);
-
-            if (version_id == (size_t)-1 ||
-                !memory_ssa_function_set_entry_version(output_function, slot_index, version_id, error)) {
-                return 0;
-            }
+        (void)input_function;
+        version_id = memory_ssa_function_allocate_version(output_function);
+        if (version_id == (size_t)-1 ||
+            !memory_ssa_function_set_entry_version(output_function, slot_index, version_id, error)) {
+            return 0;
         }
     }
 

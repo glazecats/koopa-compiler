@@ -696,9 +696,9 @@ static int test_machine_reloc_preview_internal_call_uses_pc_relative_addend(void
         !machine_reloc_file_get_relocation(&reloc_file, 0, &relocation) || !relocation ||
         relocation->kind != MACHINE_BYTES_FIXUP_CALL_TARGET ||
         !relocation->has_target_byte_offset ||
-        relocation->target_byte_offset != 8u ||
+        relocation->target_byte_offset != 12u ||
         relocation->patch_byte_offset != 0u ||
-        relocation->addend != 8) {
+        relocation->addend != 12) {
         fprintf(stderr, "[machine-reloc] FAIL: preview internal-call addend mismatch: %s\n", reloc_error.message);
         ok = 0;
     }

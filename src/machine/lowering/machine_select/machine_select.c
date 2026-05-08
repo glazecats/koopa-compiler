@@ -2,6 +2,7 @@
 
 #include "machine/layout.h"
 
+#include <sys/time.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,38 @@ typedef struct {
     size_t length;
     size_t capacity;
 } MachineSelectStringBuilder;
+
+static double machine_select_now_s(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+}
+
+static int machine_select_trace_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_TRACE_TIMING");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_pure_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_CLEANUP_PURE");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_reuse_addr_roots_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static void machine_select_trace_timing(const char *stage, double elapsed_s) {
+    if (!stage || !machine_select_trace_enabled()) {
+        return;
+    }
+    fprintf(stderr, "[machine-select-timing] %s %.3f\n", stage, elapsed_s);
+}
 
 static void machine_select_set_error(MachineSelectError *error, int line, int column, const char *fmt, ...);
 static char *machine_select_strdup(const char *text);

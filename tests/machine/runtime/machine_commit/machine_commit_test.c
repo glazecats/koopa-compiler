@@ -295,7 +295,7 @@ static int test_machine_commit_mainline(void) {
         0,
         0u,
         "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
+        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     if (!machine_commit_clone_file(&commit_file, &cloned_commit_file, &commit_error) ||
         cloned_commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -314,7 +314,7 @@ static int test_machine_commit_mainline(void) {
         MACHINE_COMMIT_RESOLUTION_DEFERRED_REGISTER_COMMIT,
         MACHINE_COMMIT_KIND_REGISTER,
         "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
+        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: writeback=deferred-register-writeback status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -436,7 +436,7 @@ static int test_machine_commit_custom_step_cases(void) {
     machine_commit_report_free(&commit_report);
     machine_commit_file_free(&commit_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x1eu, store_local_imm_payload, 1u, 1, 0xaau) ||
+    if (!overwrite_step_bytes(&step_file, 0x20u, store_local_imm_payload, 1u, 1, 0xaau) ||
         !machine_commit_build_from_machine_step_file(&step_file, &commit_file, &commit_error)) {
         fprintf(stderr, "[machine-commit] FAIL: store-local-imm setup failed: %s\n", commit_error.message);
         ok = 0;
@@ -454,11 +454,11 @@ static int test_machine_commit_custom_step_cases(void) {
         0,
         0u,
         "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-local-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-local-commit kind=local-slot writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
+        "commit: resolution=deferred-local-commit kind=local-slot writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x20 value=0x10 known=yes name=store-local-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_commit_file_free(&commit_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x21u, store_global_imm_payload, 1u, 1, 0xabu) ||
+    if (!overwrite_step_bytes(&step_file, 0x23u, store_global_imm_payload, 1u, 1, 0xabu) ||
         !machine_commit_build_from_machine_step_file(&step_file, &commit_file, &commit_error)) {
         fprintf(stderr, "[machine-commit] FAIL: store-global-imm setup failed: %s\n", commit_error.message);
         ok = 0;
@@ -476,7 +476,7 @@ static int test_machine_commit_custom_step_cases(void) {
         0,
         0u,
         "machine_commit profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans writeback=deferred-global-writeback origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-global-commit kind=global-slot writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
+        "commit: resolution=deferred-global-commit kind=global-slot writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x23 value=0x13 known=yes name=store-global-imm bytes=2 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
 
     machine_commit_file_free(&commit_file);
 
@@ -542,10 +542,10 @@ static int test_machine_commit_i386_bridge(void) {
 
     ok &= expect_text("commit i386 dump wrapper", dump_text,
         "machine_commit profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
+        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n");
     ok &= expect_text("commit i386 report dump wrapper", report_dump_text,
         "machine_commit profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans writeback=deferred-register-writeback origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
+        "commit: resolution=deferred-register-commit kind=register writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 has-committed-state=no status=- pc=- current-segment=- current-byte=- targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: writeback=deferred-register-writeback status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

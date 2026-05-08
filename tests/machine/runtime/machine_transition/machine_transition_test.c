@@ -298,7 +298,7 @@ static int test_machine_transition_mainline(void) {
         0u,
         0x8au,
         "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
+        "transition: resolution=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_transition_clone_file(&transition_file, &cloned_transition_file, &transition_error) ||
         cloned_transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -318,7 +318,7 @@ static int test_machine_transition_mainline(void) {
         1,
         0x1001u,
         "machine_transition profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
+        "transition: resolution=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 next-status=ready next-pc=0x1001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -496,10 +496,10 @@ static int test_machine_transition_i386_bridge(void) {
 
     ok &= expect_text("transition i386 dump wrapper", dump_text,
         "machine_transition profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
+        "transition: resolution=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("transition i386 report dump wrapper", report_dump_text,
         "machine_transition profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "transition: resolution=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
+        "transition: resolution=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 next-status=ready next-pc=0x8048001 next-segment=0 next-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

@@ -160,9 +160,11 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
                     }
                     break;
                 case LOWER_IR_INSTR_CALL:
-                    if (!lower_ir_append_value_name(&builder, instruction->result) ||
+                    if ((instruction->has_result &&
+                            (!lower_ir_append_value_name(&builder, instruction->result) ||
+                                !lower_ir_append_string(&builder, " = "))) ||
                         !lower_ir_append_format(&builder,
-                            " = call %s(",
+                            "call %s(",
                             instruction->as.call.callee_name ? instruction->as.call.callee_name : "<anon>")) {
                         free(builder.data);
                         return 0;

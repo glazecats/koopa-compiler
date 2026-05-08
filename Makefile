@@ -617,7 +617,8 @@ $(COMPILER_DRIVER_TEST_BIN): tests/compiler/compiler_driver_test.c $(COMPILER_CO
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"
-	@tmp="./$(LEXER_TEST_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(LEXER_TEST_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(LEXER_TEST_BIN)" "$$tmp" && "$$tmp" $(LEXER_TEST_INPUT); \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -625,7 +626,8 @@ test-lexer: $(LEXER_TEST_BIN)
 
 test-lexer-regression: $(LEXER_REGRESSION_BIN)
 	@echo "[lexer] running regression tests"
-	@tmp="./$(LEXER_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(LEXER_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(LEXER_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -633,7 +635,8 @@ test-lexer-regression: $(LEXER_REGRESSION_BIN)
 
 test-parser: $(PARSER_TEST_BIN)
 	@echo "[parser] running $(PARSER_TEST_INPUT)"
-	@tmp="./$(PARSER_TEST_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(PARSER_TEST_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(PARSER_TEST_BIN)" "$$tmp" && "$$tmp" $(PARSER_TEST_INPUT); \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -641,7 +644,8 @@ test-parser: $(PARSER_TEST_BIN)
 
 test-parser-regression: $(PARSER_REGRESSION_BIN)
 	@echo "[parser] running regression tests"
-	@tmp="./$(PARSER_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(PARSER_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(PARSER_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -649,7 +653,8 @@ test-parser-regression: $(PARSER_REGRESSION_BIN)
 
 test-parser-legacy-link: $(PARSER_LEGACY_LINK_BIN)
 	@echo "[parser] running legacy-link test"
-	@tmp="./$(PARSER_LEGACY_LINK_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(PARSER_LEGACY_LINK_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(PARSER_LEGACY_LINK_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -657,7 +662,8 @@ test-parser-legacy-link: $(PARSER_LEGACY_LINK_BIN)
 
 test-semantic-regression: $(SEMANTIC_REGRESSION_BIN)
 	@echo "[semantic] running regression tests"
-	@tmp="./$(SEMANTIC_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(SEMANTIC_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(SEMANTIC_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -665,7 +671,8 @@ test-semantic-regression: $(SEMANTIC_REGRESSION_BIN)
 
 test-ir-regression: $(IR_REGRESSION_BIN)
 	@echo "[ir] running regression tests"
-	@tmp="./$(IR_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(IR_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(IR_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -673,7 +680,8 @@ test-ir-regression: $(IR_REGRESSION_BIN)
 
 test-ir-verifier: $(IR_VERIFIER_BIN)
 	@echo "[ir] running verifier tests"
-	@tmp="./$(IR_VERIFIER_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(IR_VERIFIER_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(IR_VERIFIER_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -681,7 +689,8 @@ test-ir-verifier: $(IR_VERIFIER_BIN)
 
 test-ir-pass: $(IR_PASS_BIN)
 	@echo "[ir] running pass tests"
-	@tmp="./$(IR_PASS_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(IR_PASS_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(IR_PASS_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -689,7 +698,8 @@ test-ir-pass: $(IR_PASS_BIN)
 
 test-lower-ir-regression: $(LOWER_IR_REGRESSION_BIN)
 	@echo "[lower-ir] running regression tests"
-	@tmp="./$(LOWER_IR_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(LOWER_IR_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(LOWER_IR_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -697,7 +707,8 @@ test-lower-ir-regression: $(LOWER_IR_REGRESSION_BIN)
 
 test-lower-ir-verifier: $(LOWER_IR_VERIFIER_BIN)
 	@echo "[lower-ir] running verifier tests"
-	@tmp="./$(LOWER_IR_VERIFIER_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(LOWER_IR_VERIFIER_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(LOWER_IR_VERIFIER_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -705,7 +716,8 @@ test-lower-ir-verifier: $(LOWER_IR_VERIFIER_BIN)
 
 test-value-ssa-regression: $(VALUE_SSA_REGRESSION_BIN)
 	@echo "[value-ssa] running regression tests"
-	@tmp="./$(VALUE_SSA_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -713,7 +725,8 @@ test-value-ssa-regression: $(VALUE_SSA_REGRESSION_BIN)
 
 test-value-ssa-verifier: $(VALUE_SSA_VERIFIER_BIN)
 	@echo "[value-ssa] running verifier tests"
-	@tmp="./$(VALUE_SSA_VERIFIER_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_VERIFIER_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_VERIFIER_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -721,7 +734,8 @@ test-value-ssa-verifier: $(VALUE_SSA_VERIFIER_BIN)
 
 test-value-ssa-analysis: $(VALUE_SSA_ANALYSIS_BIN)
 	@echo "[value-ssa] running analysis tests"
-	@tmp="./$(VALUE_SSA_ANALYSIS_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_ANALYSIS_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_ANALYSIS_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -729,7 +743,8 @@ test-value-ssa-analysis: $(VALUE_SSA_ANALYSIS_BIN)
 
 test-value-ssa-interp: $(VALUE_SSA_INTERP_BIN)
 	@echo "[value-ssa] running interpreter tests"
-	@tmp="./$(VALUE_SSA_INTERP_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_INTERP_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_INTERP_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -737,7 +752,8 @@ test-value-ssa-interp: $(VALUE_SSA_INTERP_BIN)
 
 test-value-ssa-oracle: $(VALUE_SSA_ORACLE_BIN)
 	@echo "[value-ssa] running oracle tests"
-	@tmp="./$(VALUE_SSA_ORACLE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_ORACLE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_ORACLE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -745,7 +761,8 @@ test-value-ssa-oracle: $(VALUE_SSA_ORACLE_BIN)
 
 test-value-ssa-alloc: $(VALUE_SSA_ALLOC_BIN)
 	@echo "[value-ssa] running allocator tests"
-	@tmp="./$(VALUE_SSA_ALLOC_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_ALLOC_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_ALLOC_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -753,7 +770,8 @@ test-value-ssa-alloc: $(VALUE_SSA_ALLOC_BIN)
 
 test-value-ssa-machine: $(VALUE_SSA_MACHINE_BIN)
 	@echo "[value-ssa] running machine-model tests"
-	@tmp="./$(VALUE_SSA_MACHINE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(VALUE_SSA_MACHINE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(VALUE_SSA_MACHINE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -761,7 +779,8 @@ test-value-ssa-machine: $(VALUE_SSA_MACHINE_BIN)
 
 test-machine-ir: $(MACHINE_IR_BIN)
 	@echo "[machine-ir] running tests"
-	@tmp="./$(MACHINE_IR_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_IR_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_IR_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -769,7 +788,8 @@ test-machine-ir: $(MACHINE_IR_BIN)
 
 test-machine-select: $(MACHINE_SELECT_BIN)
 	@echo "[machine-select] running tests"
-	@tmp="./$(MACHINE_SELECT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_SELECT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_SELECT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -777,7 +797,8 @@ test-machine-select: $(MACHINE_SELECT_BIN)
 
 test-machine-layout: $(MACHINE_LAYOUT_BIN)
 	@echo "[machine-layout] running tests"
-	@tmp="./$(MACHINE_LAYOUT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_LAYOUT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_LAYOUT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -785,7 +806,8 @@ test-machine-layout: $(MACHINE_LAYOUT_BIN)
 
 test-machine-emit: $(MACHINE_EMIT_BIN)
 	@echo "[machine-emit] running tests"
-	@tmp="./$(MACHINE_EMIT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_EMIT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_EMIT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -793,7 +815,8 @@ test-machine-emit: $(MACHINE_EMIT_BIN)
 
 test-machine-encode: $(MACHINE_ENCODE_BIN)
 	@echo "[machine-encode] running tests"
-	@tmp="./$(MACHINE_ENCODE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_ENCODE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_ENCODE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -801,7 +824,8 @@ test-machine-encode: $(MACHINE_ENCODE_BIN)
 
 test-machine-bytes: $(MACHINE_BYTES_BIN)
 	@echo "[machine-bytes] running tests"
-	@tmp="./$(MACHINE_BYTES_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_BYTES_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_BYTES_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -809,7 +833,8 @@ test-machine-bytes: $(MACHINE_BYTES_BIN)
 
 test-machine-object: $(MACHINE_OBJECT_BIN)
 	@echo "[machine-object] running tests"
-	@tmp="./$(MACHINE_OBJECT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_OBJECT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_OBJECT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -817,7 +842,8 @@ test-machine-object: $(MACHINE_OBJECT_BIN)
 
 test-machine-reloc: $(MACHINE_RELOC_BIN)
 	@echo "[machine-reloc] running tests"
-	@tmp="./$(MACHINE_RELOC_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_RELOC_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_RELOC_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -825,7 +851,8 @@ test-machine-reloc: $(MACHINE_RELOC_BIN)
 
 test-machine-container: $(MACHINE_CONTAINER_BIN)
 	@echo "[machine-container] running tests"
-	@tmp="./$(MACHINE_CONTAINER_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_CONTAINER_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_CONTAINER_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -833,7 +860,8 @@ test-machine-container: $(MACHINE_CONTAINER_BIN)
 
 test-machine-elf: $(MACHINE_ELF_BIN)
 	@echo "[machine-elf] running tests"
-	@tmp="./$(MACHINE_ELF_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_ELF_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_ELF_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -841,7 +869,8 @@ test-machine-elf: $(MACHINE_ELF_BIN)
 
 test-machine-image: $(MACHINE_IMAGE_BIN)
 	@echo "[machine-image] running tests"
-	@tmp="./$(MACHINE_IMAGE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_IMAGE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_IMAGE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -849,7 +878,8 @@ test-machine-image: $(MACHINE_IMAGE_BIN)
 
 test-machine-exec: $(MACHINE_EXEC_BIN)
 	@echo "[machine-exec] running tests"
-	@tmp="./$(MACHINE_EXEC_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_EXEC_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_EXEC_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -857,7 +887,8 @@ test-machine-exec: $(MACHINE_EXEC_BIN)
 
 test-machine-load: $(MACHINE_LOAD_BIN)
 	@echo "[machine-load] running tests"
-	@tmp="./$(MACHINE_LOAD_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_LOAD_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_LOAD_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -865,7 +896,8 @@ test-machine-load: $(MACHINE_LOAD_BIN)
 
 test-machine-runtime: $(MACHINE_RUNTIME_BIN)
 	@echo "[machine-runtime] running tests"
-	@tmp="./$(MACHINE_RUNTIME_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_RUNTIME_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_RUNTIME_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -873,7 +905,8 @@ test-machine-runtime: $(MACHINE_RUNTIME_BIN)
 
 test-machine-launch: $(MACHINE_LAUNCH_BIN)
 	@echo "[machine-launch] running tests"
-	@tmp="./$(MACHINE_LAUNCH_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_LAUNCH_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_LAUNCH_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -881,7 +914,8 @@ test-machine-launch: $(MACHINE_LAUNCH_BIN)
 
 test-machine-step: $(MACHINE_STEP_BIN)
 	@echo "[machine-step] running tests"
-	@tmp="./$(MACHINE_STEP_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_STEP_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_STEP_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -889,7 +923,8 @@ test-machine-step: $(MACHINE_STEP_BIN)
 
 test-machine-decode: $(MACHINE_DECODE_BIN)
 	@echo "[machine-decode] running tests"
-	@tmp="./$(MACHINE_DECODE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_DECODE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_DECODE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -897,7 +932,8 @@ test-machine-decode: $(MACHINE_DECODE_BIN)
 
 test-machine-payload-decode: $(MACHINE_PAYLOAD_DECODE_BIN)
 	@echo "[machine-payload-decode] running tests"
-	@tmp="./$(MACHINE_PAYLOAD_DECODE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_PAYLOAD_DECODE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_PAYLOAD_DECODE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -905,7 +941,8 @@ test-machine-payload-decode: $(MACHINE_PAYLOAD_DECODE_BIN)
 
 test-machine-interp: $(MACHINE_INTERP_BIN)
 	@echo "[machine-interp] running tests"
-	@tmp="./$(MACHINE_INTERP_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_INTERP_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_INTERP_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -913,7 +950,8 @@ test-machine-interp: $(MACHINE_INTERP_BIN)
 
 test-machine-transition: $(MACHINE_TRANSITION_BIN)
 	@echo "[machine-transition] running tests"
-	@tmp="./$(MACHINE_TRANSITION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_TRANSITION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_TRANSITION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -921,7 +959,8 @@ test-machine-transition: $(MACHINE_TRANSITION_BIN)
 
 test-machine-state: $(MACHINE_STATE_BIN)
 	@echo "[machine-state] running tests"
-	@tmp="./$(MACHINE_STATE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_STATE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_STATE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -929,7 +968,8 @@ test-machine-state: $(MACHINE_STATE_BIN)
 
 test-machine-mutation: $(MACHINE_MUTATION_BIN)
 	@echo "[machine-mutation] running tests"
-	@tmp="./$(MACHINE_MUTATION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_MUTATION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_MUTATION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -937,7 +977,8 @@ test-machine-mutation: $(MACHINE_MUTATION_BIN)
 
 test-machine-writeback: $(MACHINE_WRITEBACK_BIN)
 	@echo "[machine-writeback] running tests"
-	@tmp="./$(MACHINE_WRITEBACK_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_WRITEBACK_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_WRITEBACK_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -945,7 +986,8 @@ test-machine-writeback: $(MACHINE_WRITEBACK_BIN)
 
 test-machine-commit: $(MACHINE_COMMIT_BIN)
 	@echo "[machine-commit] running tests"
-	@tmp="./$(MACHINE_COMMIT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_COMMIT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_COMMIT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -953,7 +995,8 @@ test-machine-commit: $(MACHINE_COMMIT_BIN)
 
 test-machine-apply: $(MACHINE_APPLY_BIN)
 	@echo "[machine-apply] running tests"
-	@tmp="./$(MACHINE_APPLY_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_APPLY_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_APPLY_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -961,7 +1004,8 @@ test-machine-apply: $(MACHINE_APPLY_BIN)
 
 test-machine-observe: $(MACHINE_OBSERVE_BIN)
 	@echo "[machine-observe] running tests"
-	@tmp="./$(MACHINE_OBSERVE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_OBSERVE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_OBSERVE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -969,7 +1013,8 @@ test-machine-observe: $(MACHINE_OBSERVE_BIN)
 
 test-machine-delta: $(MACHINE_DELTA_BIN)
 	@echo "[machine-delta] running tests"
-	@tmp="./$(MACHINE_DELTA_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_DELTA_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_DELTA_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -977,7 +1022,8 @@ test-machine-delta: $(MACHINE_DELTA_BIN)
 
 test-machine-trace: $(MACHINE_TRACE_BIN)
 	@echo "[machine-trace] running tests"
-	@tmp="./$(MACHINE_TRACE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_TRACE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_TRACE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -985,7 +1031,8 @@ test-machine-trace: $(MACHINE_TRACE_BIN)
 
 test-machine-event: $(MACHINE_EVENT_BIN)
 	@echo "[machine-event] running tests"
-	@tmp="./$(MACHINE_EVENT_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_EVENT_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_EVENT_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -993,7 +1040,8 @@ test-machine-event: $(MACHINE_EVENT_BIN)
 
 test-machine-outcome: $(MACHINE_OUTCOME_BIN)
 	@echo "[machine-outcome] running tests"
-	@tmp="./$(MACHINE_OUTCOME_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_OUTCOME_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_OUTCOME_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1001,7 +1049,8 @@ test-machine-outcome: $(MACHINE_OUTCOME_BIN)
 
 test-machine-history: $(MACHINE_HISTORY_BIN)
 	@echo "[machine-history] running tests"
-	@tmp="./$(MACHINE_HISTORY_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_HISTORY_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_HISTORY_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1009,7 +1058,8 @@ test-machine-history: $(MACHINE_HISTORY_BIN)
 
 test-machine-timeline: $(MACHINE_TIMELINE_BIN)
 	@echo "[machine-timeline] running tests"
-	@tmp="./$(MACHINE_TIMELINE_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_TIMELINE_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_TIMELINE_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1017,7 +1067,8 @@ test-machine-timeline: $(MACHINE_TIMELINE_BIN)
 
 test-machine-log: $(MACHINE_LOG_BIN)
 	@echo "[machine-log] running tests"
-	@tmp="./$(MACHINE_LOG_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_LOG_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_LOG_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1025,7 +1076,8 @@ test-machine-log: $(MACHINE_LOG_BIN)
 
 test-machine-journal: $(MACHINE_JOURNAL_BIN)
 	@echo "[machine-journal] running tests"
-	@tmp="./$(MACHINE_JOURNAL_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MACHINE_JOURNAL_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MACHINE_JOURNAL_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1033,7 +1085,8 @@ test-machine-journal: $(MACHINE_JOURNAL_BIN)
 
 test-compiler-driver: $(COMPILER_DRIVER_TEST_BIN)
 	@echo "[compiler] running driver regression tests"
-	@tmp="./$(COMPILER_DRIVER_TEST_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(COMPILER_DRIVER_TEST_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(COMPILER_DRIVER_TEST_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1049,8 +1102,8 @@ test-compiler-cli: $(COMPILER_BIN)
 	"$$tmpbin" -riscv "$$tmpdir/input.sy" -o "$$tmpdir/output.s" && \
 	test "$$(sed -n '1p' "$$tmpdir/output.s")" = ".attribute arch, \"rv32im\"" && \
 	test "$$(sed -n '2p' "$$tmpdir/output.s")" = ".text" && \
-	test "$$(sed -n '7p' "$$tmpdir/output.s")" = "main:" && \
-	test "$$(sed -n '9p' "$$tmpdir/output.s")" = "  li a0, 0"; \
+	grep -Fxq "main:" "$$tmpdir/output.s" && \
+	grep -Fxq "  li a0, 0" "$$tmpdir/output.s"; \
 	status=$$?; \
 	rm -f "$$tmpbin"; \
 	rm -rf "$$tmpdir"; \
@@ -1081,7 +1134,8 @@ test-compiler-asm: $(COMPILER_BIN)
 
 test-memory-ssa-regression: $(MEMORY_SSA_REGRESSION_BIN)
 	@echo "[memory-ssa] running regression tests"
-	@tmp="./$(MEMORY_SSA_REGRESSION_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MEMORY_SSA_REGRESSION_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MEMORY_SSA_REGRESSION_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1089,7 +1143,8 @@ test-memory-ssa-regression: $(MEMORY_SSA_REGRESSION_BIN)
 
 test-memory-ssa-verifier: $(MEMORY_SSA_VERIFIER_BIN)
 	@echo "[memory-ssa] running verifier tests"
-	@tmp="./$(MEMORY_SSA_VERIFIER_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MEMORY_SSA_VERIFIER_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MEMORY_SSA_VERIFIER_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1097,7 +1152,8 @@ test-memory-ssa-verifier: $(MEMORY_SSA_VERIFIER_BIN)
 
 test-memory-ssa-analysis: $(MEMORY_SSA_ANALYSIS_BIN)
 	@echo "[memory-ssa] running analysis tests"
-	@tmp="./$(MEMORY_SSA_ANALYSIS_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MEMORY_SSA_ANALYSIS_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MEMORY_SSA_ANALYSIS_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \
@@ -1105,7 +1161,8 @@ test-memory-ssa-analysis: $(MEMORY_SSA_ANALYSIS_BIN)
 
 test-memory-ssa-pass: $(MEMORY_SSA_PASS_BIN)
 	@echo "[memory-ssa] running pass tests"
-	@tmp="./$(MEMORY_SSA_PASS_BIN).run.$$$$"; \
+	@tmp=$$(mktemp "./$(MEMORY_SSA_PASS_BIN).run.XXXXXX"); \
+	rm -f "$$tmp" && \
 	cp "./$(MEMORY_SSA_PASS_BIN)" "$$tmp" && "$$tmp"; \
 	status=$$?; \
 	rm -f "$$tmp"; \

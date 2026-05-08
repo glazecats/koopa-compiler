@@ -22,6 +22,7 @@ int value_ssa_eliminate_redundant_binaries(ValueSsaProgram *program, ValueSsaErr
 int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_eliminate_dead_value_defs(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_build_from_lower_ir_with_canonicalization(const LowerIrProgram *program,
     ValueSsaLowerIrCanonicalizeMode mode,
     ValueSsaProgram *out_program,

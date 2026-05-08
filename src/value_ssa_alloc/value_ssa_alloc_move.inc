@@ -13,6 +13,7 @@ void value_ssa_allocator_move_family_analysis_init(ValueSsaAllocatorMoveFamilyAn
     analysis->family_count = 0;
     analysis->items = NULL;
     analysis->value_family_indices = NULL;
+    analysis->root_family_indices = NULL;
 }
 
 void value_ssa_allocator_move_family_analysis_free(ValueSsaAllocatorMoveFamilyAnalysis *analysis) {
@@ -22,6 +23,7 @@ void value_ssa_allocator_move_family_analysis_free(ValueSsaAllocatorMoveFamilyAn
 
     free(analysis->items);
     free(analysis->value_family_indices);
+    free(analysis->root_family_indices);
     value_ssa_allocator_move_family_analysis_init(analysis);
 }
 
@@ -98,8 +100,10 @@ int value_ssa_compute_allocator_move_family_analysis(const ValueSsaFunction *fun
 
     analysis->value_family_indices =
         (size_t *)malloc((analysis->value_count ? analysis->value_count : 1) * sizeof(size_t));
+    analysis->root_family_indices =
+        (size_t *)malloc((analysis->value_count ? analysis->value_count : 1) * sizeof(size_t));
     root_to_family_index = (size_t *)malloc((analysis->value_count ? analysis->value_count : 1) * sizeof(size_t));
-    if (!analysis->value_family_indices || !root_to_family_index) {
+    if (!analysis->value_family_indices || !analysis->root_family_indices || !root_to_family_index) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-103: out of memory preparing move-family analysis");
         goto cleanup;
     }
@@ -107,6 +111,7 @@ int value_ssa_compute_allocator_move_family_analysis(const ValueSsaFunction *fun
     analysis->family_count = 0;
     for (value_id = 0; value_id < analysis->value_count; ++value_id) {
         analysis->value_family_indices[value_id] = (size_t)-1;
+        analysis->root_family_indices[value_id] = (size_t)-1;
         root_to_family_index[value_id] = (size_t)-1;
         if (!active_coalesce->class_sizes || active_coalesce->class_sizes[value_id] == 0) {
             continue;
@@ -153,6 +158,14 @@ int value_ssa_compute_allocator_move_family_analysis(const ValueSsaFunction *fun
         }
         family_index = root_to_family_index[root_value_id];
         analysis->value_family_indices[value_id] = family_index;
+    }
+
+    for (value_id = 0; value_id < analysis->value_count; ++value_id) {
+        size_t root_value_id = active_coalesce->value_roots ? active_coalesce->value_roots[value_id] : value_id;
+
+        if (root_value_id < analysis->value_count) {
+            analysis->root_family_indices[root_value_id] = analysis->value_family_indices[value_id];
+        }
     }
 
     if (active_affinity && active_affinity->weights) {
@@ -304,24 +317,22 @@ int value_ssa_allocator_move_family_analysis_find_root(const ValueSsaAllocatorMo
     const ValueSsaAllocatorMoveFamilyItem **out_item) {
     size_t family_index;
 
-    if (!analysis) {
+    if (!analysis || !analysis->root_family_indices || root_value_id >= analysis->value_count) {
         return 0;
     }
 
-    for (family_index = 0; family_index < analysis->family_count; ++family_index) {
-        if (analysis->items[family_index].root_value_id != root_value_id) {
-            continue;
-        }
-        if (out_index) {
-            *out_index = family_index;
-        }
-        if (out_item) {
-            *out_item = &analysis->items[family_index];
-        }
-        return 1;
+    family_index = analysis->root_family_indices[root_value_id];
+    if (family_index >= analysis->family_count || analysis->items[family_index].root_value_id != root_value_id) {
+        return 0;
     }
+    if (out_index) {
+        *out_index = family_index;
+    }
+    if (out_item) {
+        *out_item = &analysis->items[family_index];
+    }
+    return 1;
 
-    return 0;
 }
 
 int value_ssa_allocator_move_family_analysis_get_value_family(const ValueSsaAllocatorMoveFamilyAnalysis *analysis,

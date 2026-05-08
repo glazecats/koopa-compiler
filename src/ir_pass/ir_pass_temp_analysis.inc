@@ -169,7 +169,7 @@ static int ir_pass_try_resolve_constant_value(IrValueRef value,
 
     *out_has_value = 0u;
     if (value.kind == IR_VALUE_IMMEDIATE) {
-        *out_value = value.immediate;
+        *out_value = ir_pass_normalize_sysy_int_value(value.immediate);
         *out_has_value = 1u;
         return 1;
     }

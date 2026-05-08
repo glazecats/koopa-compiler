@@ -1,5 +1,6 @@
 #include "ir_pass.h"
 
+#include <stdint.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -56,6 +57,11 @@ typedef struct {
 	unsigned char *reachable;
 	size_t *predecessor_counts;
 } IrPassCfgAnalysis;
+
+static long long ir_pass_normalize_sysy_int_value(long long value) {
+	uint32_t bits = (uint32_t)value;
+	return (long long)(int32_t)bits;
+}
 
 static void ir_pass_set_error(IrError *error, int line, int column, const char *fmt, ...);
 static IrValueRef ir_pass_value_immediate(long long value);

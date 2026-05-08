@@ -297,7 +297,7 @@ static int test_machine_apply_mainline(void) {
         0,
         0u,
         "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
+        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
 
     if (!machine_apply_clone_file(&apply_file, &cloned_apply_file, &apply_error) ||
         cloned_apply_file.commit_file.writeback_file.mutation_file.state_file.transition_file.interp_file.payload_decode_file.decode_file.step_file.launch_file.registers ==
@@ -316,7 +316,7 @@ static int test_machine_apply_mainline(void) {
         MACHINE_APPLY_RESOLUTION_PENDING_REGISTER_APPLICATION,
         MACHINE_APPLY_KIND_REGISTER,
         "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
+        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: commit=deferred-register-commit status=ready segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
@@ -444,7 +444,7 @@ static int test_machine_apply_custom_step_cases(void) {
     machine_apply_report_free(&apply_report);
     machine_apply_file_free(&apply_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x1eu, store_local_imm_payload, 1u, 1, 0xaau) ||
+    if (!overwrite_step_bytes(&step_file, 0x20u, store_local_imm_payload, 1u, 1, 0xaau) ||
         !machine_apply_build_from_machine_step_file(&step_file, &apply_file, &apply_error)) {
         fprintf(stderr, "[machine-apply] FAIL: store-local-imm setup failed: %s\n", apply_error.message);
         ok = 0;
@@ -464,11 +464,11 @@ static int test_machine_apply_custom_step_cases(void) {
         1,
         7u,
         "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-local-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-local-application kind=local-slot commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xaa targets=[] return-imm=-\n");
+        "apply: resolution=pending-local-application kind=local-slot commit=deferred-local-commit writeback=deferred-local-writeback mutation=deferred-local-slot effect=local-slot transition=next-fetch action=advance raw=0x20 value=0x10 known=yes name=store-local-imm bytes=2 payload=[0x07] imm=7 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xaa targets=[] return-imm=-\n");
 
     machine_apply_file_free(&apply_file);
 
-    if (!overwrite_step_bytes(&step_file, 0x21u, store_global_imm_payload, 1u, 1, 0xabu) ||
+    if (!overwrite_step_bytes(&step_file, 0x23u, store_global_imm_payload, 1u, 1, 0xabu) ||
         !machine_apply_build_from_machine_step_file(&step_file, &apply_file, &apply_error)) {
         fprintf(stderr, "[machine-apply] FAIL: store-global-imm setup failed: %s\n", apply_error.message);
         ok = 0;
@@ -488,7 +488,7 @@ static int test_machine_apply_custom_step_cases(void) {
         1,
         5u,
         "machine_apply profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans commit=deferred-global-commit origin-status=ready origin-pc=0x1000 origin-sp=0x4000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-global-application kind=global-slot commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x21 value=0x11 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xab targets=[] return-imm=-\n");
+        "apply: resolution=pending-global-application kind=global-slot commit=deferred-global-commit writeback=deferred-global-writeback mutation=deferred-global-slot effect=global-slot transition=next-fetch action=advance raw=0x23 value=0x13 known=yes name=store-global-imm bytes=2 payload=[0x05] imm=5 has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x1002 preview-segment=0 preview-byte=0xab targets=[] return-imm=-\n");
 
     machine_apply_file_free(&apply_file);
 
@@ -556,10 +556,10 @@ static int test_machine_apply_i386_bridge(void) {
 
     ok &= expect_text("apply i386 dump wrapper", dump_text,
         "machine_apply profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
+        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n");
     ok &= expect_text("apply i386 report dump wrapper", report_dump_text,
         "machine_apply profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans commit=deferred-register-commit origin-status=ready origin-pc=0x8048000 origin-sp=0x804b000 origin-segment=0 mapped_bytes=8192\n"
-        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1c value=0x0c known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
+        "apply: resolution=pending-register-application kind=register commit=deferred-register-commit writeback=deferred-register-writeback mutation=deferred-register-result effect=value-result transition=next-fetch action=advance raw=0x1e value=0x0e known=yes name=load-local bytes=1 payload=[] imm=- has-applied-state=no applied-status=- applied-pc=- applied-segment=- applied-byte=- has-preview-state=yes preview-status=ready preview-pc=0x8048001 preview-segment=0 preview-byte=0x8a targets=[] return-imm=-\n"
         "report_overview:\n"
         "  origin: commit=deferred-register-commit status=ready segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"

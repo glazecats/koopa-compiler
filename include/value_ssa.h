@@ -69,6 +69,7 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    size_t array_rank;
 } ValueSsaLocal;
 
 typedef struct {

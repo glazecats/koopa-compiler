@@ -226,6 +226,22 @@ static int memory_ssa_pass_dump_program_copy(const ValueSsaProgram *program,
     return 1;
 }
 
+static unsigned long long memory_ssa_pass_text_hash(const char *text) {
+    unsigned long long hash = 1469598103934665603ull;
+
+    if (!text) {
+        return 0ull;
+    }
+
+    while (*text) {
+        hash ^= (unsigned char)*text;
+        hash *= 1099511628211ull;
+        ++text;
+    }
+
+    return hash;
+}
+
 static int memory_ssa_pass_run_one_step(const char *step_name,
     int (*pass_fn)(ValueSsaProgram *, ValueSsaError *),
     ValueSsaProgram *program,

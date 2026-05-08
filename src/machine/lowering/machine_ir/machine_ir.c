@@ -1,5 +1,6 @@
 #include "machine/ir.h"
 
+#include <sys/time.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,26 @@ typedef struct {
     size_t length;
     size_t capacity;
 } MachineIrStringBuilder;
+
+static double machine_ir_now_s(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+}
+
+static int machine_ir_trace_enabled(void) {
+    const char *flag = getenv("MACHINE_IR_TRACE_TIMING");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static void machine_ir_trace_timing(const char *stage, double elapsed_s) {
+    if (!stage || !machine_ir_trace_enabled()) {
+        return;
+    }
+    fprintf(stderr, "[machine-ir-timing] %s %.3f\n", stage, elapsed_s);
+}
 
 static void machine_ir_set_error(MachineIrError *error, int line, int column, const char *fmt, ...);
 static void machine_ir_set_error_from_value_ssa(MachineIrError *error, const ValueSsaError *value_error);

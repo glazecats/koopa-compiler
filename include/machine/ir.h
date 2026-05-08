@@ -481,6 +481,12 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_repor
     size_t machine_register_count,
     MachineIrAllocateRewriteReport *out_report,
     MachineIrError *error);
+int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+    const ValueSsaProgram *program,
+    size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
 int machine_ir_build_allocate_and_rewrite_program_single_block_spills_report_dump(
     const ValueSsaProgram *program,
     size_t color_budget,

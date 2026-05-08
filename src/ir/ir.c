@@ -1,5 +1,7 @@
 #include "ir.h"
 
+#include <stdint.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +75,11 @@ typedef struct {
     size_t capacity;
 } IrStringBuilder;
 
+static long long ir_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
+
 static void ir_lower_scope_stack_free(IrLowerScopeStack *stack);
 static int ir_lower_scope_stack_push(IrLowerScopeStack *stack);
 static void ir_lower_scope_stack_pop(IrLowerScopeStack *stack);
@@ -91,6 +98,10 @@ static int ir_lower_scope_lookup(const IrLowerScopeStack *stack,
 static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
     const char *name,
     IrLowerBindingInfo *out_info);
+static int ir_lower_scope_update_binding_const_value_by_local_id(IrLowerScopeStack *stack,
+    size_t local_id,
+    int has_const_value,
+    long long const_value);
 
 static void ir_basic_block_free(IrBasicBlock *block);
 static void ir_function_free(IrFunction *function);

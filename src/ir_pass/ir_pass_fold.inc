@@ -14,78 +14,76 @@ static int ir_pass_try_fold_binary_immediate(IrBinaryOp op,
     long long lhs,
     long long rhs,
     long long *out_value) {
-    const int shift_width = (int)(sizeof(long long) * 8u);
+    int32_t lhs32;
+    int32_t rhs32;
 
     if (!out_value) {
         return 0;
     }
 
+    lhs32 = (int32_t)ir_pass_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)ir_pass_normalize_sysy_int_value(rhs);
+
     switch (op) {
     case IR_BINARY_ADD:
-        return !__builtin_add_overflow(lhs, rhs, out_value);
+        *out_value = ir_pass_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
+        return 1;
     case IR_BINARY_SUB:
-        return !__builtin_sub_overflow(lhs, rhs, out_value);
+        *out_value = ir_pass_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
+        return 1;
     case IR_BINARY_MUL:
-        return !__builtin_mul_overflow(lhs, rhs, out_value);
+        *out_value = ir_pass_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
+        return 1;
     case IR_BINARY_DIV:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            return 0;
-        }
-        *out_value = lhs / rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)lhs32 / (long long)rhs32);
         return 1;
     case IR_BINARY_MOD:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            return 0;
-        }
-        *out_value = lhs % rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)lhs32 % (long long)rhs32);
         return 1;
     case IR_BINARY_BIT_AND:
-        *out_value = lhs & rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)(lhs32 & rhs32));
         return 1;
     case IR_BINARY_BIT_XOR:
-        *out_value = lhs ^ rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
         return 1;
     case IR_BINARY_BIT_OR:
-        *out_value = lhs | rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)(lhs32 | rhs32));
         return 1;
     case IR_BINARY_SHIFT_LEFT:
-        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        if ((unsigned long long)lhs > ((unsigned long long)LLONG_MAX >> (unsigned long long)rhs)) {
-            return 0;
-        }
-        *out_value = lhs << rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
         return 1;
     case IR_BINARY_SHIFT_RIGHT:
-        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        *out_value = lhs >> rhs;
+        *out_value = ir_pass_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
         return 1;
     case IR_BINARY_EQ:
-        *out_value = (lhs == rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 == rhs32) ? 1LL : 0LL;
         return 1;
     case IR_BINARY_NE:
-        *out_value = (lhs != rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 != rhs32) ? 1LL : 0LL;
         return 1;
     case IR_BINARY_LT:
-        *out_value = (lhs < rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 < rhs32) ? 1LL : 0LL;
         return 1;
     case IR_BINARY_LE:
-        *out_value = (lhs <= rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 <= rhs32) ? 1LL : 0LL;
         return 1;
     case IR_BINARY_GT:
-        *out_value = (lhs > rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 > rhs32) ? 1LL : 0LL;
         return 1;
     case IR_BINARY_GE:
-        *out_value = (lhs >= rhs) ? 1LL : 0LL;
+        *out_value = (lhs32 >= rhs32) ? 1LL : 0LL;
         return 1;
     default:
         return 0;

@@ -131,7 +131,7 @@ static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFil
 
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
-            "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
+            "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
             machine_elf_target_profile_name(profile),
             machine_elf_target_profile_name(origin_profile),
             machine_elf_relocation_semantics_name(semantics),
@@ -166,17 +166,17 @@ static int verify_payload_decode_file_with_profile(const MachinePayloadDecodeFil
         !current_segment_summary.name || strcmp(current_segment_summary.name, ".text") != 0 ||
         !machine_payload_decode_file_get_fetch_summary(decode_file, &fetch_summary) ||
         fetch_summary.byte_virtual_address != base_virtual_address ||
-        fetch_summary.byte_value != 0x1cu ||
+        fetch_summary.byte_value != 0x1eu ||
         !machine_payload_decode_file_get_decode_tag_summary(decode_file, &decode_tag_summary) ||
         decode_tag_summary.tag_class != MACHINE_DECODE_TAG_OP ||
-        decode_tag_summary.raw_byte != 0x1cu ||
-        decode_tag_summary.tag_value != 0x0cu ||
+        decode_tag_summary.raw_byte != 0x1eu ||
+        decode_tag_summary.tag_value != 0x0eu ||
         !decode_tag_summary.is_known ||
         !decode_tag_summary.tag_name || strcmp(decode_tag_summary.tag_name, "load-local") != 0 ||
         !machine_payload_decode_file_get_payload_summary(decode_file, &payload_summary) ||
         payload_summary.kind != MACHINE_PAYLOAD_DECODE_KIND_OP ||
-        payload_summary.raw_byte != 0x1cu ||
-        payload_summary.tag_value != 0x0cu ||
+        payload_summary.raw_byte != 0x1eu ||
+        payload_summary.tag_value != 0x0eu ||
         !payload_summary.is_known ||
         !payload_summary.tag_name || strcmp(payload_summary.tag_name, "load-local") != 0 ||
         payload_summary.total_byte_count != 1u ||
@@ -228,12 +228,12 @@ static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeR
 
     if (snprintf(expected_dump, sizeof(expected_dump),
             "machine_payload_decode profile=%s elf_origin=%s elf_semantics=%s status=ready pc=0x%zx sp=0x%zx current_segment=%zu mapped_bytes=%zu\n"
-            "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
+            "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
             "report_overview:\n"
             "  status=ready current-segment=0 mapped-bytes=8192 pc=0x%zx sp=0x%zx\n"
             "  elf_source: target=%s origin=%s semantics=%s\n"
             "  policy: profile=%s max-payload=3\n"
-            "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
+            "  payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n",
             machine_elf_target_profile_name(profile),
             machine_elf_target_profile_name(origin_profile),
             machine_elf_relocation_semantics_name(semantics),
@@ -272,7 +272,7 @@ static int verify_payload_decode_report_with_profile(const MachinePayloadDecodeR
         !machine_payload_decode_report_get_current_segment_summary_artifact(report, &current_segment_summary) ||
         !current_segment_summary || strcmp(current_segment_summary->name, ".text") != 0 ||
         !machine_payload_decode_report_get_fetch_summary_artifact(report, &fetch_summary) ||
-        !fetch_summary || fetch_summary->byte_value != 0x1cu ||
+        !fetch_summary || fetch_summary->byte_value != 0x1eu ||
         !machine_payload_decode_report_get_decode_tag_summary_artifact(report, &decode_tag_summary) ||
         !decode_tag_summary || strcmp(decode_tag_summary->tag_name, "load-local") != 0 ||
         !machine_payload_decode_report_get_payload_summary_artifact(report, &payload_summary) ||
@@ -532,15 +532,15 @@ static int test_machine_payload_decode_ir_bridge_and_profile(void) {
         0x1000u);
     ok &= expect_text("payload decode ir dump wrapper", dump_text,
         "machine_payload_decode profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
+        "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
     ok &= expect_text("payload decode ir report-dump wrapper", report_dump_text,
         "machine_payload_decode profile=generic-elf32 elf_origin=generic-elf32 elf_semantics=direct-patch-spans status=ready pc=0x1000 sp=0x4000 current_segment=0 mapped_bytes=8192\n"
-        "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
+        "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x1000 sp=0x4000\n"
         "  elf_source: target=generic-elf32 origin=generic-elf32 semantics=direct-patch-spans\n"
         "  policy: profile=generic-elf32 max-payload=3\n"
-        "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
+        "  payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
 
     free(dump_text);
     dump_text = NULL;
@@ -593,15 +593,15 @@ static int test_machine_payload_decode_ir_bridge_and_profile(void) {
         0x08048000u);
     ok &= expect_text("payload decode i386 dump wrapper", dump_text,
         "machine_payload_decode profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
+        "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
     ok &= expect_text("payload decode i386 report-dump wrapper", report_dump_text,
         "machine_payload_decode profile=i386-preview elf_origin=i386-preview elf_semantics=direct-patch-spans status=ready pc=0x8048000 sp=0x804b000 current_segment=0 mapped_bytes=8192\n"
-        "payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
+        "payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n"
         "report_overview:\n"
         "  status=ready current-segment=0 mapped-bytes=8192 pc=0x8048000 sp=0x804b000\n"
         "  elf_source: target=i386-preview origin=i386-preview semantics=direct-patch-spans\n"
         "  policy: profile=i386-preview max-payload=3\n"
-        "  payload: kind=op raw=0x1c value=0x0c known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
+        "  payload: kind=op raw=0x1e value=0x0e known=yes name=load-local total-bytes=1 payload-bytes=0 imm=0 bytes=[]\n");
 
 cleanup:
     free(report_dump_text);

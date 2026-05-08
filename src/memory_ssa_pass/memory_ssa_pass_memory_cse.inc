@@ -595,6 +595,9 @@ cleanup:
 
 static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *program, ValueSsaError *error) {
     size_t iteration;
+    char **seen_states = NULL;
+    size_t seen_count = 0;
+    int ok = 0;
 
     if (!program) {
         memory_ssa_pass_set_error(error, 0, 0, "MEMORY-SSA-PASS-074: invalid join-binary-gvn contract");
@@ -603,10 +606,30 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
     if (!value_ssa_verify_program(program, error)) {
         return 0;
     }
+    seen_states =
+        (char **)calloc((size_t)MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS, sizeof(char *));
+    if (!seen_states) {
+        memory_ssa_pass_set_error(
+            error, 0, 0, "MEMORY-SSA-PASS-075: out of memory while tracking join-binary states");
+        return 0;
+    }
 
     for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
+        char *current_text = NULL;
         size_t function_index;
         int changed = 0;
+
+        if (!memory_ssa_pass_dump_program_copy(program, &current_text, error)) {
+            goto cleanup;
+        }
+        for (function_index = 0; function_index < seen_count; ++function_index) {
+            if (strcmp(seen_states[function_index], current_text) == 0) {
+                free(current_text);
+                ok = value_ssa_verify_program(program, error);
+                goto cleanup;
+            }
+        }
+        seen_states[seen_count++] = current_text;
 
         for (function_index = 0; function_index < program->function_count; ++function_index) {
             ValueSsaFunction *function = &program->functions[function_index];
@@ -814,16 +837,20 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
         }
 
         if (!changed) {
-            return value_ssa_verify_program(program, error);
+            ok = value_ssa_verify_program(program, error);
+            goto cleanup;
         }
     }
 
-    memory_ssa_pass_set_error(error,
-        0,
-        0,
-        "MEMORY-SSA-PASS-076: join-binary GVN did not converge within %d iterations",
-        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
-    return 0;
+    ok = value_ssa_verify_program(program, error);
+cleanup:
+    if (seen_states) {
+        for (iteration = 0; iteration < seen_count; ++iteration) {
+            free(seen_states[iteration]);
+        }
+    }
+    free(seen_states);
+    return ok;
 }
 
 static int memory_ssa_pass_run_value_cleanup_closure(ValueSsaProgram *program,
@@ -831,6 +858,10 @@ static int memory_ssa_pass_run_value_cleanup_closure(ValueSsaProgram *program,
     ValueSsaError *error) {
     char *before_text = NULL;
     char *after_text = NULL;
+    char *step_before = NULL;
+    char *step_after = NULL;
+    char **seen_states = NULL;
+    size_t seen_count = 0;
     size_t iteration;
     int changed_any = 0;
     int ok = 0;
@@ -843,55 +874,118 @@ static int memory_ssa_pass_run_value_cleanup_closure(ValueSsaProgram *program,
         return 0;
     }
 
+    seen_states =
+        (char **)calloc((size_t)MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS, sizeof(char *));
+    if (!seen_states) {
+        memory_ssa_pass_set_error(
+            error, 0, 0, "MEMORY-SSA-PASS-085: out of memory while tracking value-cleanup states");
+        return 0;
+    }
+
     *out_changed = 0;
     for (iteration = 0; iteration < MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS; ++iteration) {
+        size_t seen_index;
+
         free(before_text);
         free(after_text);
+        free(step_before);
+        free(step_after);
         before_text = NULL;
         after_text = NULL;
+        step_before = NULL;
+        step_after = NULL;
 
-        if (!memory_ssa_pass_dump_program_copy(program, &before_text, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-pre-fold", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "normalize-binary-operands", value_ssa_normalize_binary_operands, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-mid-fold", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step("fold-constants", value_ssa_fold_constants, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-algebraic-identities", value_ssa_simplify_algebraic_identities, program, error) ||
-            !memory_ssa_pass_run_one_step("simplify-trivial-values", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "eliminate-redundant-binaries", value_ssa_eliminate_redundant_binaries, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "simplify-trivial-values-post-cse", value_ssa_simplify_trivial_values, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "eliminate-dead-value-defs", value_ssa_eliminate_dead_value_defs, program, error) ||
-            !memory_ssa_pass_run_one_step("simplify-cfg", value_ssa_simplify_cfg, program, error) ||
-            !memory_ssa_pass_run_one_step(
-                "eliminate-dead-value-defs-post-cfg", value_ssa_eliminate_dead_value_defs, program, error) ||
-            !memory_ssa_pass_dump_program_copy(program, &after_text, error)) {
+        if (!memory_ssa_pass_dump_program_copy(program, &before_text, error)) {
             goto cleanup;
         }
+        memory_ssa_pass_trace("value-cleanup iter=%zu begin hash=%llu",
+            iteration,
+            memory_ssa_pass_text_hash(before_text));
+        for (seen_index = 0; seen_index < seen_count; ++seen_index) {
+            if (strcmp(seen_states[seen_index], before_text) == 0) {
+                memory_ssa_pass_trace("value-cleanup iter=%zu repeated-prior-state prior_iter=%zu hash=%llu",
+                    iteration,
+                    seen_index,
+                    memory_ssa_pass_text_hash(before_text));
+                *out_changed = changed_any;
+                ok = 1;
+                goto cleanup;
+            }
+        }
+        seen_states[seen_count++] = before_text;
+        before_text = NULL;
 
-        if (strcmp(before_text, after_text) == 0) {
+        {
+            static const struct {
+                const char *name;
+                int (*fn)(ValueSsaProgram *, ValueSsaError *);
+            } steps[] = {
+                {"simplify-trivial-values-pre-fold", value_ssa_simplify_trivial_values},
+                {"normalize-binary-operands", value_ssa_normalize_binary_operands},
+                {"simplify-trivial-values-mid-fold", value_ssa_simplify_trivial_values},
+                {"fold-constants", value_ssa_fold_constants},
+                {"simplify-algebraic-identities", value_ssa_simplify_algebraic_identities},
+                {"simplify-trivial-values", value_ssa_simplify_trivial_values},
+                {"eliminate-redundant-binaries", value_ssa_eliminate_redundant_binaries},
+                {"simplify-trivial-values-post-cse", value_ssa_simplify_trivial_values},
+                {"eliminate-dead-value-defs", value_ssa_eliminate_dead_value_defs},
+                {"simplify-cfg", value_ssa_simplify_cfg},
+                {"eliminate-dead-value-defs-post-cfg", value_ssa_eliminate_dead_value_defs},
+            };
+            size_t step_index;
+
+            for (step_index = 0; step_index < sizeof(steps) / sizeof(steps[0]); ++step_index) {
+                free(step_before);
+                free(step_after);
+                step_before = NULL;
+                step_after = NULL;
+                if (!memory_ssa_pass_dump_program_copy(program, &step_before, error) ||
+                    !memory_ssa_pass_run_one_step(steps[step_index].name, steps[step_index].fn, program, error) ||
+                    !memory_ssa_pass_dump_program_copy(program, &step_after, error)) {
+                    goto cleanup;
+                }
+                if (strcmp(step_before, step_after) != 0) {
+                    memory_ssa_pass_trace("value-cleanup iter=%zu step=%s changed before=%llu after=%llu",
+                        iteration,
+                        steps[step_index].name,
+                        memory_ssa_pass_text_hash(step_before),
+                        memory_ssa_pass_text_hash(step_after));
+                }
+            }
+            if (!memory_ssa_pass_dump_program_copy(program, &after_text, error)) {
+                goto cleanup;
+            }
+        }
+
+        if (strcmp(seen_states[seen_count - 1u], after_text) == 0) {
+            memory_ssa_pass_trace("value-cleanup iter=%zu stabilized-in-one-iteration hash=%llu",
+                iteration,
+                memory_ssa_pass_text_hash(after_text));
             *out_changed = changed_any;
             ok = 1;
             goto cleanup;
         }
 
+        memory_ssa_pass_trace("value-cleanup iter=%zu end hash=%llu",
+            iteration,
+            memory_ssa_pass_text_hash(after_text));
         changed_any = 1;
     }
 
-    memory_ssa_pass_set_error(error,
-        0,
-        0,
-        "MEMORY-SSA-PASS-086: value-cleanup closure did not converge within %d iterations",
-        MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
+    *out_changed = changed_any;
+    ok = value_ssa_verify_program(program, error);
 
 cleanup:
+    if (seen_states) {
+        for (iteration = 0; iteration < seen_count; ++iteration) {
+            free(seen_states[iteration]);
+        }
+    }
+    free(seen_states);
     free(before_text);
     free(after_text);
+    free(step_before);
+    free(step_after);
     return ok;
 }
 

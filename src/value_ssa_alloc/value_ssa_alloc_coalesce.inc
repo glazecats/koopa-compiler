@@ -14,6 +14,10 @@ void value_ssa_allocator_coalesce_analysis_init(ValueSsaAllocatorCoalesceAnalysi
     analysis->items = NULL;
     analysis->value_roots = NULL;
     analysis->class_sizes = NULL;
+    analysis->pair_index_capacity = 0;
+    analysis->pair_index_lhs = NULL;
+    analysis->pair_index_rhs = NULL;
+    analysis->pair_index_item_indices = NULL;
 }
 
 void value_ssa_allocator_coalesce_analysis_free(ValueSsaAllocatorCoalesceAnalysis *analysis) {
@@ -24,7 +28,95 @@ void value_ssa_allocator_coalesce_analysis_free(ValueSsaAllocatorCoalesceAnalysi
     free(analysis->items);
     free(analysis->value_roots);
     free(analysis->class_sizes);
+    free(analysis->pair_index_lhs);
+    free(analysis->pair_index_rhs);
+    free(analysis->pair_index_item_indices);
     value_ssa_allocator_coalesce_analysis_init(analysis);
+}
+
+static size_t value_ssa_alloc_coalesce_pair_hash(size_t lhs_value_id,
+    size_t rhs_value_id,
+    size_t capacity) {
+    size_t lhs = lhs_value_id < rhs_value_id ? lhs_value_id : rhs_value_id;
+    size_t rhs = lhs_value_id < rhs_value_id ? rhs_value_id : lhs_value_id;
+    size_t hash = lhs * 1315423911u + rhs * 2654435761u + 1469598103934665603ull;
+
+    return capacity == 0 ? 0 : hash % capacity;
+}
+
+static int value_ssa_alloc_coalesce_build_pair_index(ValueSsaAllocatorCoalesceAnalysis *analysis,
+    ValueSsaError *error) {
+    size_t capacity = 0;
+    size_t item_index;
+
+    if (!analysis) {
+        return 0;
+    }
+
+    free(analysis->pair_index_lhs);
+    free(analysis->pair_index_rhs);
+    free(analysis->pair_index_item_indices);
+    analysis->pair_index_capacity = 0;
+    analysis->pair_index_lhs = NULL;
+    analysis->pair_index_rhs = NULL;
+    analysis->pair_index_item_indices = NULL;
+
+    if (analysis->item_count == 0) {
+        return 1;
+    }
+
+    capacity = 1;
+    while (capacity < analysis->item_count * 2) {
+        if (capacity > ((size_t)-1) / 2) {
+            break;
+        }
+        capacity *= 2;
+    }
+    if (capacity < analysis->item_count) {
+        capacity = analysis->item_count;
+    }
+
+    analysis->pair_index_lhs = (size_t *)malloc(capacity * sizeof(size_t));
+    analysis->pair_index_rhs = (size_t *)malloc(capacity * sizeof(size_t));
+    analysis->pair_index_item_indices = (size_t *)malloc(capacity * sizeof(size_t));
+    if (!analysis->pair_index_lhs || !analysis->pair_index_rhs || !analysis->pair_index_item_indices) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-231: out of memory preparing coalesce pair index");
+        free(analysis->pair_index_lhs);
+        free(analysis->pair_index_rhs);
+        free(analysis->pair_index_item_indices);
+        analysis->pair_index_lhs = NULL;
+        analysis->pair_index_rhs = NULL;
+        analysis->pair_index_item_indices = NULL;
+        return 0;
+    }
+
+    for (item_index = 0; item_index < capacity; ++item_index) {
+        analysis->pair_index_lhs[item_index] = (size_t)-1;
+        analysis->pair_index_rhs[item_index] = (size_t)-1;
+        analysis->pair_index_item_indices[item_index] = (size_t)-1;
+    }
+
+    for (item_index = 0; item_index < analysis->item_count; ++item_index) {
+        size_t lhs = analysis->items[item_index].lhs_value_id;
+        size_t rhs = analysis->items[item_index].rhs_value_id;
+        size_t slot = value_ssa_alloc_coalesce_pair_hash(lhs, rhs, capacity);
+
+        if (lhs > rhs) {
+            size_t temp = lhs;
+            lhs = rhs;
+            rhs = temp;
+        }
+
+        while (analysis->pair_index_item_indices[slot] != (size_t)-1) {
+            slot = (slot + 1) % capacity;
+        }
+        analysis->pair_index_lhs[slot] = lhs;
+        analysis->pair_index_rhs[slot] = rhs;
+        analysis->pair_index_item_indices[slot] = item_index;
+    }
+
+    analysis->pair_index_capacity = capacity;
+    return 1;
 }
 
 static size_t value_ssa_alloc_coalesce_find_root(size_t *parents, size_t value_id) {
@@ -359,6 +451,10 @@ int value_ssa_compute_allocator_coalesce_analysis(const ValueSsaFunction *functi
         ++analysis->class_sizes[root];
     }
 
+    if (!value_ssa_alloc_coalesce_build_pair_index(analysis, error)) {
+        goto cleanup;
+    }
+
     ok = 1;
 
 cleanup:
@@ -377,26 +473,66 @@ int value_ssa_allocator_coalesce_analysis_find_pair(const ValueSsaAllocatorCoale
     size_t rhs_value_id,
     size_t *out_index,
     const ValueSsaAllocatorCoalesceItem **out_item) {
+    size_t lhs = lhs_value_id;
+    size_t rhs = rhs_value_id;
+    size_t slot;
+    size_t start_slot;
     size_t item_index;
 
     if (!analysis) {
         return 0;
     }
 
-    for (item_index = 0; item_index < analysis->item_count; ++item_index) {
-        const ValueSsaAllocatorCoalesceItem *item = &analysis->items[item_index];
+    if (lhs > rhs) {
+        size_t temp = lhs;
+        lhs = rhs;
+        rhs = temp;
+    }
+    if (!analysis->pair_index_capacity || !analysis->pair_index_item_indices ||
+        !analysis->pair_index_lhs || !analysis->pair_index_rhs) {
+        if (!analysis->items) {
+            return 0;
+        }
+        for (item_index = 0; item_index < analysis->item_count; ++item_index) {
+            size_t item_lhs = analysis->items[item_index].lhs_value_id;
+            size_t item_rhs = analysis->items[item_index].rhs_value_id;
 
-        if (!((item->lhs_value_id == lhs_value_id && item->rhs_value_id == rhs_value_id) ||
-                (item->lhs_value_id == rhs_value_id && item->rhs_value_id == lhs_value_id))) {
-            continue;
+            if (item_lhs > item_rhs) {
+                size_t temp = item_lhs;
+                item_lhs = item_rhs;
+                item_rhs = temp;
+            }
+            if (item_lhs != lhs || item_rhs != rhs) {
+                continue;
+            }
+            if (out_index) {
+                *out_index = item_index;
+            }
+            if (out_item) {
+                *out_item = &analysis->items[item_index];
+            }
+            return 1;
         }
-        if (out_index) {
-            *out_index = item_index;
+        return 0;
+    }
+
+    slot = value_ssa_alloc_coalesce_pair_hash(lhs, rhs, analysis->pair_index_capacity);
+    start_slot = slot;
+    while (analysis->pair_index_item_indices[slot] != (size_t)-1) {
+        if (analysis->pair_index_lhs[slot] == lhs && analysis->pair_index_rhs[slot] == rhs) {
+            size_t item_index = analysis->pair_index_item_indices[slot];
+            if (out_index) {
+                *out_index = item_index;
+            }
+            if (out_item) {
+                *out_item = &analysis->items[item_index];
+            }
+            return 1;
         }
-        if (out_item) {
-            *out_item = item;
+        slot = (slot + 1) % analysis->pair_index_capacity;
+        if (slot == start_slot) {
+            break;
         }
-        return 1;
     }
 
     return 0;

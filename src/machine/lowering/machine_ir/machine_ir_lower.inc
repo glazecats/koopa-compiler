@@ -43,6 +43,26 @@ static MachineIrOperand machine_ir_lower_value_ref(const ValueSsaFunctionMachine
     return machine_ir_operand_none();
 }
 
+static int machine_ir_function_has_call_instruction(const ValueSsaFunction *function) {
+    size_t block_index;
+
+    if (!function || !function->has_body) {
+        return 0;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        for (instruction_index = 0u; instruction_index < block->instruction_count; ++instruction_index) {
+            if (block->instructions[instruction_index].kind == VALUE_SSA_INSTR_CALL) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int machine_ir_build_protected_call_crossing_spill_slots(
     const ValueSsaFunction *function,
     const ValueSsaFunctionMachineAllocationView *machine_view,
@@ -67,6 +87,9 @@ static int machine_ir_build_protected_call_crossing_spill_slots(
         return 0;
     }
     if (!function->has_body || machine_view->value_count == 0) {
+        return 1;
+    }
+    if (!machine_ir_function_has_call_instruction(function)) {
         return 1;
     }
 
@@ -211,6 +234,27 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
         return 1;
     }
 
+    if (function->local_count > 0u) {
+        out_function->locals = (MachineIrLocal *)calloc(function->local_count, sizeof(MachineIrLocal));
+        if (!out_function->locals) {
+            free(protected_spill_slots);
+            machine_ir_function_free(out_function);
+            machine_ir_set_error(error, 0, 0, "MACHINE-IR-317: out of memory preallocating locals");
+            return 0;
+        }
+        out_function->local_capacity = function->local_count;
+    }
+    if (function->block_count > 0u) {
+        out_function->blocks = (MachineIrBasicBlock *)calloc(function->block_count, sizeof(MachineIrBasicBlock));
+        if (!out_function->blocks) {
+            free(protected_spill_slots);
+            machine_ir_function_free(out_function);
+            machine_ir_set_error(error, 0, 0, "MACHINE-IR-318: out of memory preallocating blocks");
+            return 0;
+        }
+        out_function->block_capacity = function->block_count;
+    }
+
     for (local_index = 0; local_index < function->local_count; ++local_index) {
         if (!machine_ir_function_append_local(
                 out_function,
@@ -232,6 +276,28 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
         if (!machine_ir_function_append_block(out_function, NULL, &dest_block, error) || !dest_block) {
             machine_ir_function_free(out_function);
             return 0;
+        }
+
+        if (source_block->phi_count > 0u) {
+            dest_block->phis = (MachineIrPhi *)calloc(source_block->phi_count, sizeof(MachineIrPhi));
+            if (!dest_block->phis) {
+                free(protected_spill_slots);
+                machine_ir_function_free(out_function);
+                machine_ir_set_error(error, 0, 0, "MACHINE-IR-319: out of memory preallocating phis");
+                return 0;
+            }
+            dest_block->phi_capacity = source_block->phi_count;
+        }
+        if (source_block->instruction_count > 0u) {
+            dest_block->instructions =
+                (MachineIrInstruction *)calloc(source_block->instruction_count, sizeof(MachineIrInstruction));
+            if (!dest_block->instructions) {
+                free(protected_spill_slots);
+                machine_ir_function_free(out_function);
+                machine_ir_set_error(error, 0, 0, "MACHINE-IR-320: out of memory preallocating instructions");
+                return 0;
+            }
+            dest_block->instruction_capacity = source_block->instruction_count;
         }
 
         for (phi_index = 0; phi_index < source_block->phi_count; ++phi_index) {

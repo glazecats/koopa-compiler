@@ -122,7 +122,7 @@ static int test_machine_bytes_lowers_from_machine_encode(void) {
     size_t program_byte_count = 0;
     size_t function_index = 0;
     size_t emit_index = 0;
-    static const unsigned char expected_program_bytes[] = {0x21u, 0x81u, 0x83u, 0x01u, 0x81u, 0x17u};
+    static const unsigned char expected_program_bytes[] = {0x23u, 0x81u, 0x83u, 0x01u, 0x81u, 0x17u};
     int ok = 1;
 
     memset(&encode_error, 0, sizeof(encode_error));
@@ -190,7 +190,7 @@ static int test_machine_bytes_lowers_from_machine_encode(void) {
         &bytes_program,
         "machine_bytes\n"
         "function main params=0 locals=0 spills=0 bytes=6\n"
-        "  F0.L0 @0..4 term@2 bytes=21 81 83 01 ; emit.0 -> layout.0 -> bb.0\n"
+        "  F0.L0 @0..4 term@2 bytes=23 81 83 01 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @4\n"
         "  F0.L1 @4..6 term@4 bytes=81 17 ; emit.1 -> layout.1 -> bb.1\n"
         "    reti 7\n");
@@ -344,7 +344,7 @@ static int test_machine_bytes_report_and_bridges(void) {
     size_t report_block_byte_count = 0;
     size_t report_byte_count = 0;
     char *actual_text = NULL;
-    static const unsigned char expected_report_bytes[] = {0x1Cu, 0x8Au, 0xEAu, 0x00u, 0x21u, 0x81u, 0x11u, 0x81u, 0x12u};
+    static const unsigned char expected_report_bytes[] = {0x1Eu, 0x8Au, 0xEAu, 0x00u, 0x21u, 0x81u, 0x11u, 0x81u, 0x12u};
     static const unsigned char expected_report_block_bytes[] = {0x81u, 0x11u};
     int ok = 1;
 
@@ -746,8 +746,9 @@ static int test_machine_bytes_riscv32_preview_patches_internal_call_targets(void
             &bytes_error) ||
         !machine_bytes_build_report_from_program(&bytes_program, &bytes_report, &bytes_error) ||
         !machine_bytes_report_copy_bytes(&bytes_report, &preview_bytes, &preview_byte_count, &bytes_error) ||
-        preview_byte_count != 12u ||
-        decode_riscv_j_imm(read_u32_le(preview_bytes)) != 8 ||
+        preview_byte_count != 16u ||
+        (read_u32_le(preview_bytes + 0u) & 0x7Fu) != 0x17u ||
+        (read_u32_le(preview_bytes + 4u) & 0x7Fu) != 0x67u ||
         !machine_bytes_report_get_fixup_summary_count(&bytes_report, &fixup_count) ||
         fixup_count != 1u ||
         !machine_bytes_report_get_fixup_summary(&bytes_report, 0u, &fixup) || !fixup ||
@@ -755,7 +756,7 @@ static int test_machine_bytes_riscv32_preview_patches_internal_call_targets(void
         !fixup->has_target_function_index ||
         fixup->target_function_index != 1u ||
         !fixup->has_target_byte_offset ||
-        fixup->target_byte_offset != 8u ||
+        fixup->target_byte_offset != 12u ||
         fixup->patch_byte_offset != 0u ||
         fixup->patch_byte_count != 4u) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview internal call mismatch: %s\n", bytes_error.message);
@@ -1242,22 +1243,23 @@ static int test_machine_bytes_riscv32_preview_materializes_call_args_and_spill_r
             &bytes_error) ||
         !machine_bytes_build_report_from_program(&bytes_program, &bytes_report, &bytes_error) ||
         !machine_bytes_report_copy_bytes(&bytes_report, &preview_bytes, &preview_byte_count, &bytes_error) ||
-        preview_byte_count != 32u ||
+        preview_byte_count != 36u ||
         (read_u32_le(preview_bytes + 0u) & 0x7Fu) != 0x37u ||
         (read_u32_le(preview_bytes + 4u) & 0x7Fu) != 0x13u ||
-        (read_u32_le(preview_bytes + 8u) & 0x7Fu) != 0x6Fu ||
-        (read_u32_le(preview_bytes + 12u) & 0x7Fu) != 0x23u ||
-        (read_u32_le(preview_bytes + 16u) & 0x7Fu) != 0x03u ||
-        read_u32_le(preview_bytes + 20u) != 0x00008067u ||
+        (read_u32_le(preview_bytes + 8u) & 0x7Fu) != 0x17u ||
+        (read_u32_le(preview_bytes + 12u) & 0x7Fu) != 0x67u ||
+        (read_u32_le(preview_bytes + 16u) & 0x7Fu) != 0x23u ||
+        (read_u32_le(preview_bytes + 20u) & 0x7Fu) != 0x03u ||
+        read_u32_le(preview_bytes + 24u) != 0x00008067u ||
         !machine_bytes_report_get_fixup_summary_count(&bytes_report, &fixup_count) ||
         fixup_count != 1u ||
         !machine_bytes_report_get_fixup_summary(&bytes_report, 0u, &fixup) || !fixup ||
         fixup->kind != MACHINE_BYTES_FIXUP_CALL_TARGET ||
         !fixup->has_target_byte_offset ||
-        fixup->target_byte_offset != 24u ||
+        fixup->target_byte_offset != 28u ||
         fixup->patch_byte_offset != 8u ||
         fixup->patch_byte_count != 4u ||
-        fixup->owner_byte_count != 16u) {
+        fixup->owner_byte_count != 20u) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview call arg/result materialization mismatch: %s\n", bytes_error.message);
         ok = 0;
     }
@@ -1360,23 +1362,26 @@ static int test_machine_bytes_riscv32_preview_materializes_spill_and_stack_call_
             &bytes_error) ||
         !machine_bytes_build_report_from_program(&bytes_program, &bytes_report, &bytes_error) ||
         !machine_bytes_report_copy_bytes(&bytes_report, &preview_bytes, &preview_byte_count, &bytes_error) ||
-        preview_byte_count != 68u ||
+        preview_byte_count != 72u ||
         read_u32_le(preview_bytes + 0u) != 0xff010113u ||
-        (read_u32_le(preview_bytes + 4u) & 0x7Fu) != 0x03u ||
-        ((read_u32_le(preview_bytes + 4u) >> 7u) & 0x1Fu) != 10u ||
-        ((read_u32_le(preview_bytes + 4u) >> 20u) & 0xFFFu) != 16u ||
-        (read_u32_le(preview_bytes + 40u) & 0x7Fu) != 0x23u ||
-        (read_u32_le(preview_bytes + 44u) & 0x7Fu) != 0x6Fu ||
-        read_u32_le(preview_bytes + 48u) != 0x01010113u ||
+        (read_u32_le(preview_bytes + 4u) & 0x7Fu) != 0x13u ||
+        (read_u32_le(preview_bytes + 8u) & 0x7Fu) != 0x23u ||
+        (read_u32_le(preview_bytes + 12u) & 0x7Fu) != 0x03u ||
+        ((read_u32_le(preview_bytes + 12u) >> 7u) & 0x1Fu) != 10u ||
+        ((read_u32_le(preview_bytes + 12u) >> 20u) & 0xFFFu) != 16u ||
+        (read_u32_le(preview_bytes + 40u) & 0x7Fu) != 0x13u ||
+        (read_u32_le(preview_bytes + 44u) & 0x7Fu) != 0x17u ||
+        (read_u32_le(preview_bytes + 48u) & 0x7Fu) != 0x67u ||
+        read_u32_le(preview_bytes + 52u) != 0x01010113u ||
         !machine_bytes_report_get_fixup_summary_count(&bytes_report, &fixup_count) ||
         fixup_count != 1u ||
         !machine_bytes_report_get_fixup_summary(&bytes_report, 0u, &fixup) || !fixup ||
         fixup->kind != MACHINE_BYTES_FIXUP_CALL_TARGET ||
         !fixup->has_target_byte_offset ||
-        fixup->target_byte_offset != 60u ||
+        fixup->target_byte_offset != 64u ||
         fixup->patch_byte_offset != 44u ||
         fixup->patch_byte_count != 4u ||
-        fixup->owner_byte_count != 52u) {
+        fixup->owner_byte_count != 56u) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview spill/stack call arg materialization mismatch: %s\n", bytes_error.message);
         ok = 0;
     }
@@ -1481,6 +1486,109 @@ static int test_machine_bytes_riscv32_preview_materializes_spill_backed_value_op
         read_u32_le(preview_bytes + 48u) != 0x00008067u) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview spill-backed value ops mismatch: %s\n", bytes_error.message);
         ok = 0;
+    }
+
+    free(preview_bytes);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    return ok;
+}
+
+static int test_machine_bytes_riscv32_preview_keeps_large_spill_binary_operands_disjoint(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineBytesError bytes_error;
+    unsigned char *preview_bytes = NULL;
+    size_t preview_byte_count = 0u;
+    int ok = 1;
+    uint32_t rhs_base_add = 0u;
+    uint32_t rhs_load = 0u;
+    uint32_t add_word = 0u;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.functions) {
+        return 0;
+    }
+
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].local_count = 1025u;
+    emit_program.functions[0].spill_slot_count = 3u;
+    emit_program.functions[0].block_count = 1u;
+    emit_program.functions[0].block_capacity = 1u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 3u;
+    emit_program.functions[0].blocks[0].op_capacity = 3u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(3u, sizeof(MachineEmitOp));
+    if (!emit_program.functions[0].blocks[0].label_name || !emit_program.functions[0].blocks[0].ops) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    emit_program.functions[0].blocks[0].ops[0].has_result = 1u;
+    emit_program.functions[0].blocks[0].ops[0].result = machine_select_operand_spill_slot(0u);
+    emit_program.functions[0].blocks[0].ops[0].as.copy_value = machine_select_operand_immediate(1);
+
+    emit_program.functions[0].blocks[0].ops[1].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    emit_program.functions[0].blocks[0].ops[1].has_result = 1u;
+    emit_program.functions[0].blocks[0].ops[1].result = machine_select_operand_spill_slot(1u);
+    emit_program.functions[0].blocks[0].ops[1].as.copy_value = machine_select_operand_immediate(1);
+
+    emit_program.functions[0].blocks[0].ops[2].kind = MACHINE_SELECT_OP_ALU;
+    emit_program.functions[0].blocks[0].ops[2].has_result = 1u;
+    emit_program.functions[0].blocks[0].ops[2].result = machine_select_operand_spill_slot(2u);
+    emit_program.functions[0].blocks[0].ops[2].as.binary.op = MACHINE_IR_BINARY_ADD;
+    emit_program.functions[0].blocks[0].ops[2].as.binary.lhs = machine_select_operand_spill_slot(0u);
+    emit_program.functions[0].blocks[0].ops[2].as.binary.rhs = machine_select_operand_spill_slot(1u);
+
+    emit_program.functions[0].blocks[0].has_terminator = 1u;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_SPILL;
+    emit_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_spill_slot(2u);
+
+    if (!machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_bytes_program_copy_bytes(&bytes_program, &preview_bytes, &preview_byte_count, &bytes_error) ||
+        preview_byte_count != 112u) {
+        fprintf(stderr, "[machine-bytes] FAIL: riscv preview large-spill binary setup failed: %s\n", bytes_error.message);
+        ok = 0;
+    } else {
+        rhs_base_add = read_u32_le(preview_bytes + 64u);
+        rhs_load = read_u32_le(preview_bytes + 68u);
+        add_word = read_u32_le(preview_bytes + 72u);
+
+        if ((rhs_base_add & 0x7Fu) != 0x33u ||
+            ((rhs_base_add >> 7u) & 0x1Fu) != 29u ||
+            ((rhs_base_add >> 15u) & 0x1Fu) != 2u ||
+            ((rhs_base_add >> 20u) & 0x1Fu) != 29u ||
+            (rhs_load & 0x7Fu) != 0x03u ||
+            ((rhs_load >> 7u) & 0x1Fu) != 30u ||
+            ((rhs_load >> 15u) & 0x1Fu) != 29u ||
+            add_word != 0x01ef8eb3u) {
+            fprintf(stderr,
+                "[machine-bytes] FAIL: riscv preview large-spill binary prep reused the lhs scratch unexpectedly\n");
+            ok = 0;
+        }
     }
 
     free(preview_bytes);
@@ -1676,24 +1784,30 @@ static int test_machine_bytes_riscv32_preview_materializes_large_slot_offsets(vo
             &bytes_program,
             &bytes_error) ||
         !machine_bytes_program_copy_bytes(&bytes_program, &preview_bytes, &preview_byte_count, &bytes_error) ||
-        preview_byte_count != 68u ||
+        preview_byte_count != 92u ||
         (read_u32_le(preview_bytes + 0u) & 0x7Fu) != 0x37u ||
         (read_u32_le(preview_bytes + 4u) & 0x7Fu) != 0x13u ||
         (read_u32_le(preview_bytes + 8u) & 0x7Fu) != 0x33u ||
         (read_u32_le(preview_bytes + 12u) & 0x7Fu) != 0x03u ||
-        (read_u32_le(preview_bytes + 16u) & 0x7Fu) != 0x23u ||
-        (read_u32_le(preview_bytes + 20u) & 0x7Fu) != 0x37u ||
-        (read_u32_le(preview_bytes + 24u) & 0x7Fu) != 0x03u ||
-        (read_u32_le(preview_bytes + 28u) & 0x7Fu) != 0x03u ||
+        (read_u32_le(preview_bytes + 16u) & 0x7Fu) != 0x37u ||
+        (read_u32_le(preview_bytes + 20u) & 0x7Fu) != 0x13u ||
+        (read_u32_le(preview_bytes + 24u) & 0x7Fu) != 0x33u ||
+        (read_u32_le(preview_bytes + 28u) & 0x7Fu) != 0x23u ||
         (read_u32_le(preview_bytes + 32u) & 0x7Fu) != 0x37u ||
-        (read_u32_le(preview_bytes + 36u) & 0x7Fu) != 0x13u ||
-        (read_u32_le(preview_bytes + 40u) & 0x7Fu) != 0x33u ||
-        (read_u32_le(preview_bytes + 44u) & 0x7Fu) != 0x23u ||
-        (read_u32_le(preview_bytes + 48u) & 0x7Fu) != 0x13u ||
-        (read_u32_le(preview_bytes + 52u) & 0x7Fu) != 0x37u ||
-        (read_u32_le(preview_bytes + 56u) & 0x7Fu) != 0x23u ||
+        (read_u32_le(preview_bytes + 36u) & 0x7Fu) != 0x03u ||
+        (read_u32_le(preview_bytes + 40u) & 0x7Fu) != 0x37u ||
+        (read_u32_le(preview_bytes + 44u) & 0x7Fu) != 0x13u ||
+        (read_u32_le(preview_bytes + 48u) & 0x7Fu) != 0x33u ||
+        (read_u32_le(preview_bytes + 52u) & 0x7Fu) != 0x03u ||
+        (read_u32_le(preview_bytes + 56u) & 0x7Fu) != 0x37u ||
         (read_u32_le(preview_bytes + 60u) & 0x7Fu) != 0x13u ||
-        read_u32_le(preview_bytes + 64u) != 0x00008067u) {
+        (read_u32_le(preview_bytes + 64u) & 0x7Fu) != 0x33u ||
+        (read_u32_le(preview_bytes + 68u) & 0x7Fu) != 0x23u ||
+        (read_u32_le(preview_bytes + 72u) & 0x7Fu) != 0x13u ||
+        (read_u32_le(preview_bytes + 76u) & 0x7Fu) != 0x37u ||
+        (read_u32_le(preview_bytes + 80u) & 0x7Fu) != 0x23u ||
+        (read_u32_le(preview_bytes + 84u) & 0x7Fu) != 0x13u ||
+        read_u32_le(preview_bytes + 88u) != 0x00008067u) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview large-slot offset mismatch: %s\n", bytes_error.message);
         ok = 0;
     }
@@ -1962,9 +2076,9 @@ static int test_machine_bytes_program_level_offsets_and_byte_image(void) {
     size_t function_index = 0;
     size_t emit_index = 0;
     static const unsigned char expected_program_bytes[] = {
-        0x21u, 0x82u, 0x83u, 0x01u, 0x81u, 0x11u,
-        0x21u, 0x85u, 0x81u, 0x13u};
-    static const unsigned char expected_helper_bytes[] = {0x21u, 0x85u, 0x81u, 0x13u};
+        0x23u, 0x82u, 0x83u, 0x01u, 0x81u, 0x11u,
+        0x23u, 0x85u, 0x81u, 0x13u};
+    static const unsigned char expected_helper_bytes[] = {0x23u, 0x85u, 0x81u, 0x13u};
     int ok = 1;
 
     memset(&encode_error, 0, sizeof(encode_error));
@@ -2201,7 +2315,7 @@ static int test_machine_bytes_from_machine_emit_artifacts(void) {
         &bytes_program,
         "machine_bytes\n"
         "function main params=0 locals=0 spills=0 bytes=6\n"
-        "  F0.L0 @0..4 term@2 bytes=21 84 83 01 ; emit.0 -> layout.0 -> bb.0\n"
+        "  F0.L0 @0..4 term@2 bytes=23 84 83 01 ; emit.0 -> layout.0 -> bb.0\n"
         "    fallthrough F0.L1 @4\n"
         "  F0.L1 @4..6 term@4 bytes=81 13 ; emit.1 -> layout.1 -> bb.1\n"
         "    reti 3\n");
@@ -2226,6 +2340,106 @@ static int test_machine_bytes_from_machine_emit_artifacts(void) {
     machine_emit_lower_report_free(&emit_report);
     machine_bytes_program_free(&bytes_program);
     machine_bytes_report_free(&bytes_report);
+    return ok;
+}
+
+static int test_machine_bytes_store_imm_zero_uses_zero_register(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineBytesError bytes_error;
+    const MachineBytesFunction *function_view = NULL;
+    const MachineBytesBlock *block_view = NULL;
+    unsigned char *block_bytes = NULL;
+    size_t block_byte_count = 0;
+    size_t function_index = 0;
+    size_t emit_index = 0;
+    uint32_t first_word = 0u;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
+    if (!emit_program.register_bank.registers[0].name) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 1u;
+    emit_program.functions[0].block_capacity = 1u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 1u;
+    emit_program.functions[0].blocks[0].op_capacity = 1u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    if (!emit_program.functions[0].blocks[0].label_name || !emit_program.functions[0].blocks[0].ops) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_STORE_LOCAL_IMM;
+    emit_program.functions[0].blocks[0].ops[0].as.store.slot = machine_select_slot_local(0u);
+    emit_program.functions[0].blocks[0].ops[0].as.store.value = machine_select_operand_immediate(0);
+    emit_program.functions[0].blocks[0].has_terminator = 1;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    emit_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_none();
+
+    if (!machine_bytes_lower_program_from_machine_emit_with_profile(
+            &emit_program,
+            MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
+            &bytes_program,
+            &bytes_error) ||
+        !machine_bytes_program_copy_block_bytes(&bytes_program, 0u, 0u, &block_bytes, &block_byte_count, &bytes_error) ||
+        !block_bytes ||
+        block_byte_count != 8u ||
+        !machine_bytes_program_find_block_by_program_byte_offset(
+            &bytes_program, 0u, &function_index, &emit_index, &function_view, &block_view) ||
+        function_index != 0u ||
+        emit_index != 0u ||
+        !function_view ||
+        strcmp(function_view->name, "main") != 0 ||
+        !block_view ||
+        strcmp(block_view->label_name, "F0.L0") != 0) {
+        fprintf(stderr, "[machine-bytes] FAIL: store-imm-zero optimization mismatch\n");
+        ok = 0;
+    } else {
+        first_word = read_u32_le(block_bytes);
+        if (first_word != 0x00012023u) {
+            fprintf(stderr, "[machine-bytes] FAIL: store-imm-zero did not use zero register\n");
+            ok = 0;
+        }
+    }
+
+    free(block_bytes);
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
     return ok;
 }
 
@@ -2635,12 +2849,14 @@ int main(void) {
     ok &= test_machine_bytes_riscv32_preview_materializes_call_args_and_spill_results();
     ok &= test_machine_bytes_riscv32_preview_materializes_spill_and_stack_call_args();
     ok &= test_machine_bytes_riscv32_preview_materializes_spill_backed_value_ops();
+    ok &= test_machine_bytes_riscv32_preview_keeps_large_spill_binary_operands_disjoint();
     ok &= test_machine_bytes_riscv32_preview_materializes_spill_backed_cmp_results();
     ok &= test_machine_bytes_riscv32_preview_materializes_large_slot_offsets();
     ok &= test_machine_bytes_riscv32_preview_emits_rv32m_alu_words();
     ok &= test_machine_bytes_riscv32_preview_rejects_more_than_eight_logical_registers();
     ok &= test_machine_bytes_report_handles_zero_reference_function();
     ok &= test_machine_bytes_from_machine_emit_artifacts();
+    ok &= test_machine_bytes_store_imm_zero_uses_zero_register();
     ok &= test_machine_bytes_encodes_call_payloads();
     ok &= test_machine_bytes_report_surfaces_global_object_sections();
     ok &= test_machine_bytes_report_surfaces_global_data_references();

@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
     size_t *active_degrees;
     size_t *active_effective_degrees;
+    ValueSsaAllocatorPlanItem *work_item_preview_bases;
     ValueSsaAllocationFamilyRuntimeFacts *family_runtime_facts;
     size_t *active_family_spill_removed_counts;
     size_t *active_family_member_counts;
@@ -42,9 +43,15 @@ typedef struct {
     size_t *active_family_external_affinity_sums;
     size_t *active_family_queue_priorities;
     size_t *scratch_roots;
+    unsigned char *scratch_root_flags;
     ValueSsaAllocatorMoveWorkClass *active_family_move_work_classes;
     unsigned char *active_move_related;
     unsigned char *active_effective_move_related;
+    size_t *interference_neighbor_offsets;
+    size_t *interference_neighbor_value_ids;
+    size_t *affinity_neighbor_offsets;
+    size_t *affinity_neighbor_value_ids;
+    size_t *affinity_neighbor_weights;
     unsigned char *family_neighbor_matrix;
     unsigned char *family_coalesce_ready_neighbor_matrix;
     size_t *family_coalesce_ready_affinity_matrix;
@@ -452,6 +459,164 @@ static void value_ssa_alloc_move_engine_seed_runtime_coalesce_families(
         runtime_coalesce_roots[value_id] = value_id;
         runtime_coalesce_class_sizes[value_id] = 1;
     }
+}
+
+static int value_ssa_alloc_move_engine_build_affinity_neighbors(const ValueSsaAllocationPrep *prep,
+    size_t value_count,
+    size_t **out_offsets,
+    size_t **out_neighbor_value_ids,
+    size_t **out_neighbor_weights) {
+    size_t *offsets = NULL;
+    size_t *neighbor_value_ids = NULL;
+    size_t *neighbor_weights = NULL;
+    size_t *write_offsets = NULL;
+    size_t candidate_index;
+
+    if (out_offsets) {
+        *out_offsets = NULL;
+    }
+    if (out_neighbor_value_ids) {
+        *out_neighbor_value_ids = NULL;
+    }
+    if (out_neighbor_weights) {
+        *out_neighbor_weights = NULL;
+    }
+    if (!prep || !out_offsets || !out_neighbor_value_ids || !out_neighbor_weights) {
+        return 0;
+    }
+
+    offsets = (size_t *)calloc((value_count ? value_count : 1) + 1, sizeof(size_t));
+    write_offsets = (size_t *)calloc((value_count ? value_count : 1), sizeof(size_t));
+    if (!offsets || !write_offsets) {
+        free(offsets);
+        free(write_offsets);
+        return 0;
+    }
+
+    for (candidate_index = 0; candidate_index < prep->candidate_count; ++candidate_index) {
+        const ValueSsaCopyAffinityCandidate *candidate = &prep->candidates[candidate_index];
+
+        if (candidate->lhs >= value_count || candidate->rhs >= value_count || candidate->weight == 0) {
+            continue;
+        }
+        ++offsets[candidate->lhs + 1];
+        ++offsets[candidate->rhs + 1];
+    }
+    for (candidate_index = 1; candidate_index <= value_count; ++candidate_index) {
+        offsets[candidate_index] += offsets[candidate_index - 1];
+    }
+
+    if (offsets[value_count] > 0) {
+        neighbor_value_ids = (size_t *)malloc(offsets[value_count] * sizeof(size_t));
+        neighbor_weights = (size_t *)malloc(offsets[value_count] * sizeof(size_t));
+        if (!neighbor_value_ids || !neighbor_weights) {
+            free(offsets);
+            free(write_offsets);
+            free(neighbor_value_ids);
+            free(neighbor_weights);
+            return 0;
+        }
+    }
+
+    memcpy(write_offsets, offsets, (value_count ? value_count : 1) * sizeof(size_t));
+    for (candidate_index = 0; candidate_index < prep->candidate_count; ++candidate_index) {
+        const ValueSsaCopyAffinityCandidate *candidate = &prep->candidates[candidate_index];
+        size_t lhs_index;
+        size_t rhs_index;
+
+        if (candidate->lhs >= value_count || candidate->rhs >= value_count || candidate->weight == 0) {
+            continue;
+        }
+
+        lhs_index = write_offsets[candidate->lhs]++;
+        neighbor_value_ids[lhs_index] = candidate->rhs;
+        neighbor_weights[lhs_index] = candidate->weight;
+
+        rhs_index = write_offsets[candidate->rhs]++;
+        neighbor_value_ids[rhs_index] = candidate->lhs;
+        neighbor_weights[rhs_index] = candidate->weight;
+    }
+
+    free(write_offsets);
+    *out_offsets = offsets;
+    *out_neighbor_value_ids = neighbor_value_ids;
+    *out_neighbor_weights = neighbor_weights;
+    return 1;
+}
+
+static int value_ssa_alloc_move_engine_build_interference_neighbors(const ValueSsaInterferenceGraph *interference_graph,
+    size_t value_count,
+    size_t **out_offsets,
+    size_t **out_neighbor_value_ids) {
+    size_t *offsets = NULL;
+    size_t *neighbor_value_ids = NULL;
+    size_t *write_offsets = NULL;
+    size_t lhs_value_id;
+    size_t rhs_value_id;
+
+    if (out_offsets) {
+        *out_offsets = NULL;
+    }
+    if (out_neighbor_value_ids) {
+        *out_neighbor_value_ids = NULL;
+    }
+    if (!interference_graph || !out_offsets || !out_neighbor_value_ids ||
+        !interference_graph->interferes || interference_graph->value_count != value_count) {
+        return 0;
+    }
+
+    offsets = (size_t *)calloc((value_count ? value_count : 1) + 1, sizeof(size_t));
+    write_offsets = (size_t *)calloc((value_count ? value_count : 1), sizeof(size_t));
+    if (!offsets || !write_offsets) {
+        free(offsets);
+        free(write_offsets);
+        return 0;
+    }
+
+    for (lhs_value_id = 0; lhs_value_id < value_count; ++lhs_value_id) {
+        for (rhs_value_id = lhs_value_id + 1; rhs_value_id < value_count; ++rhs_value_id) {
+            if (!interference_graph->interferes[lhs_value_id * value_count + rhs_value_id]) {
+                continue;
+            }
+            ++offsets[lhs_value_id + 1];
+            ++offsets[rhs_value_id + 1];
+        }
+    }
+    for (lhs_value_id = 1; lhs_value_id <= value_count; ++lhs_value_id) {
+        offsets[lhs_value_id] += offsets[lhs_value_id - 1];
+    }
+
+    if (offsets[value_count] > 0) {
+        neighbor_value_ids = (size_t *)malloc(offsets[value_count] * sizeof(size_t));
+        if (!neighbor_value_ids) {
+            free(offsets);
+            free(write_offsets);
+            return 0;
+        }
+    }
+
+    memcpy(write_offsets, offsets, (value_count ? value_count : 1) * sizeof(size_t));
+    for (lhs_value_id = 0; lhs_value_id < value_count; ++lhs_value_id) {
+        for (rhs_value_id = lhs_value_id + 1; rhs_value_id < value_count; ++rhs_value_id) {
+            size_t lhs_index;
+            size_t rhs_index;
+
+            if (!interference_graph->interferes[lhs_value_id * value_count + rhs_value_id]) {
+                continue;
+            }
+
+            lhs_index = write_offsets[lhs_value_id]++;
+            neighbor_value_ids[lhs_index] = rhs_value_id;
+
+            rhs_index = write_offsets[rhs_value_id]++;
+            neighbor_value_ids[rhs_index] = lhs_value_id;
+        }
+    }
+
+    free(write_offsets);
+    *out_offsets = offsets;
+    *out_neighbor_value_ids = neighbor_value_ids;
+    return 1;
 }
 
 static size_t value_ssa_alloc_move_engine_effective_root(
@@ -990,22 +1155,40 @@ static size_t value_ssa_alloc_move_engine_collect_unique_runtime_roots(
     for (root_index = 0; root_index < root_count; ++root_index) {
         size_t root_value_id =
             value_ssa_alloc_move_engine_runtime_root_value_id(runtime_state, value_count, roots[root_index]);
-        size_t seen_index;
-        int already_seen = 0;
 
         if (root_value_id >= value_count) {
             continue;
         }
-        for (seen_index = 0; seen_index < unique_count; ++seen_index) {
-            if (out_roots[seen_index] == root_value_id) {
-                already_seen = 1;
-                break;
+        if (runtime_state && runtime_state->scratch_root_flags) {
+            if (runtime_state->scratch_root_flags[root_value_id]) {
+                continue;
             }
-        }
-        if (already_seen) {
+            runtime_state->scratch_root_flags[root_value_id] = 1u;
+            out_roots[unique_count++] = root_value_id;
             continue;
         }
-        out_roots[unique_count++] = root_value_id;
+
+        {
+            size_t seen_index;
+            int already_seen = 0;
+
+            for (seen_index = 0; seen_index < unique_count; ++seen_index) {
+                if (out_roots[seen_index] == root_value_id) {
+                    already_seen = 1;
+                    break;
+                }
+            }
+            if (already_seen) {
+                continue;
+            }
+            out_roots[unique_count++] = root_value_id;
+        }
+    }
+
+    if (runtime_state && runtime_state->scratch_root_flags) {
+        for (root_index = 0; root_index < unique_count; ++root_index) {
+            runtime_state->scratch_root_flags[out_roots[root_index]] = 0u;
+        }
     }
 
     return unique_count;
@@ -1218,12 +1401,28 @@ static void value_ssa_alloc_move_engine_update_active_degrees(
     }
 
     runtime_state->active_degrees[transition_value_id] = 0;
+    if (runtime_state->interference_neighbor_offsets && runtime_state->interference_neighbor_value_ids) {
+        for (neighbor_value_id = runtime_state->interference_neighbor_offsets[transition_value_id];
+             neighbor_value_id < runtime_state->interference_neighbor_offsets[transition_value_id + 1];
+             ++neighbor_value_id) {
+            size_t neighbor_id = runtime_state->interference_neighbor_value_ids[neighbor_value_id];
+
+            if (neighbor_id == transition_value_id || scheduled[neighbor_id]) {
+                continue;
+            }
+            if (runtime_state->active_degrees[neighbor_id] == 0) {
+                continue;
+            }
+            --runtime_state->active_degrees[neighbor_id];
+        }
+        return;
+    }
+
     for (neighbor_value_id = 0; neighbor_value_id < interference_graph->value_count; ++neighbor_value_id) {
         if (neighbor_value_id == transition_value_id || scheduled[neighbor_value_id]) {
             continue;
         }
-        if (!interference_graph
-                 ->interferes[transition_value_id * interference_graph->value_count + neighbor_value_id]) {
+        if (!interference_graph->interferes[transition_value_id * interference_graph->value_count + neighbor_value_id]) {
             continue;
         }
         if (runtime_state->active_degrees[neighbor_value_id] == 0) {
@@ -1236,7 +1435,6 @@ static void value_ssa_alloc_move_engine_update_active_degrees(
 static void value_ssa_alloc_move_engine_update_active_move_related_for_roots(
     const ValueSsaAllocationWorklist *worklist,
     const ValueSsaAllocatorMoveEngineFamilyMembers *family_members,
-    const ValueSsaCopyAffinityGraph *affinity_graph,
     const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
     const unsigned char *scheduled,
     const unsigned char *frozen,
@@ -1246,8 +1444,9 @@ static void value_ssa_alloc_move_engine_update_active_move_related_for_roots(
     ValueSsaAllocatorMoveEngineRuntimeState *runtime_state) {
     size_t root_index;
 
-    if (!worklist || !family_members || !affinity_graph || !scheduled || !frozen || !roots || !runtime_state ||
-        !runtime_state->active_move_related) {
+    if (!worklist || !family_members || !scheduled || !frozen || !roots || !runtime_state ||
+        !runtime_state->active_move_related || !runtime_state->affinity_neighbor_offsets ||
+        !runtime_state->affinity_neighbor_value_ids) {
         return;
     }
 
@@ -1268,7 +1467,7 @@ static void value_ssa_alloc_move_engine_update_active_move_related_for_roots(
             size_t value_id = work_item->value_id;
             size_t value_root_value_id =
                 value_ssa_alloc_move_engine_effective_root(runtime_state, coalesce_analysis, value_count, value_id);
-            size_t neighbor_value_id;
+            size_t neighbor_index;
             int has_active_affinity = 0;
 
             if (value_id >= value_count) {
@@ -1278,11 +1477,12 @@ static void value_ssa_alloc_move_engine_update_active_move_related_for_roots(
                 runtime_state->active_move_related[value_id] = 0;
                 continue;
             }
-            for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+            for (neighbor_index = runtime_state->affinity_neighbor_offsets[value_id];
+                 neighbor_index < runtime_state->affinity_neighbor_offsets[value_id + 1];
+                 ++neighbor_index) {
+                size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
+
                 if (neighbor_value_id == value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                    continue;
-                }
-                if (affinity_graph->weights[value_id * value_count + neighbor_value_id] == 0) {
                     continue;
                 }
                 if (value_ssa_alloc_move_engine_family_pair_is_consumed(runtime_state,
@@ -1315,8 +1515,9 @@ static void value_ssa_alloc_move_engine_update_active_move_related(
     (void)value_count;
     (void)coalesce_analysis;
     (void)interference_graph;
+    (void)affinity_graph;
 
-    if (!interference_graph || !affinity_graph || !scheduled || !frozen ||
+    if (!interference_graph || !scheduled || !frozen ||
         !runtime_state || !runtime_state->active_degrees || !runtime_state->active_effective_degrees ||
         !runtime_state->active_family_member_counts || !runtime_state->active_family_external_neighbor_counts ||
         !runtime_state->active_family_external_affinity_sums || !runtime_state->scratch_roots ||
@@ -1333,7 +1534,6 @@ static void value_ssa_alloc_move_engine_update_active_move_related(
 
     value_ssa_alloc_move_engine_update_active_move_related_for_roots(worklist,
         family_members,
-        affinity_graph,
         coalesce_analysis,
         scheduled,
         frozen,
@@ -1393,33 +1593,60 @@ static void value_ssa_alloc_move_engine_recompute_active_effective_degrees_for_r
                 size_t value_root_id =
                     value_ssa_alloc_move_engine_effective_root(runtime_state, coalesce_analysis, value_count, value_id);
 
-                for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+                size_t neighbor_begin = 0;
+                size_t neighbor_end = value_count;
+
+                if (runtime_state->interference_neighbor_offsets && runtime_state->interference_neighbor_value_ids) {
+                    neighbor_begin = runtime_state->interference_neighbor_offsets[value_id];
+                    neighbor_end = runtime_state->interference_neighbor_offsets[value_id + 1];
+                }
+
+                for (neighbor_value_id = neighbor_begin; neighbor_value_id < neighbor_end; ++neighbor_value_id) {
                     size_t neighbor_root_value_id;
                     size_t seen_index;
                     int already_seen = 0;
+                    size_t neighbor_id = runtime_state->interference_neighbor_offsets &&
+                            runtime_state->interference_neighbor_value_ids
+                        ? runtime_state->interference_neighbor_value_ids[neighbor_value_id]
+                        : neighbor_value_id;
 
-                    if (neighbor_value_id == value_id || scheduled[neighbor_value_id]) {
+                    if (neighbor_id == value_id || scheduled[neighbor_id]) {
                         continue;
                     }
-                    if (!interference_graph->interferes[value_id * value_count + neighbor_value_id]) {
+                    if (!(runtime_state->interference_neighbor_offsets && runtime_state->interference_neighbor_value_ids) &&
+                        !interference_graph->interferes[value_id * value_count + neighbor_id]) {
                         continue;
                     }
                     neighbor_root_value_id = value_ssa_alloc_move_engine_effective_root(
-                        runtime_state, coalesce_analysis, value_count, neighbor_value_id);
+                        runtime_state, coalesce_analysis, value_count, neighbor_id);
                     if (neighbor_root_value_id == value_root_id) {
                         continue;
                     }
-                    for (seen_index = 0; seen_index < seen_count; ++seen_index) {
-                        if (runtime_state->scratch_roots[seen_index] == neighbor_root_value_id) {
-                            already_seen = 1;
-                            break;
+                    if (runtime_state->scratch_root_flags) {
+                        if (runtime_state->scratch_root_flags[neighbor_root_value_id]) {
+                            continue;
                         }
-                    }
-                    if (already_seen) {
-                        continue;
+                        runtime_state->scratch_root_flags[neighbor_root_value_id] = 1u;
+                    } else {
+                        for (seen_index = 0; seen_index < seen_count; ++seen_index) {
+                            if (runtime_state->scratch_roots[seen_index] == neighbor_root_value_id) {
+                                already_seen = 1;
+                                break;
+                            }
+                        }
+                        if (already_seen) {
+                            continue;
+                        }
                     }
                     runtime_state->scratch_roots[seen_count++] = neighbor_root_value_id;
                     ++effective_degree;
+                }
+                if (runtime_state->scratch_root_flags) {
+                    size_t seen_index;
+
+                    for (seen_index = 0; seen_index < seen_count; ++seen_index) {
+                        runtime_state->scratch_root_flags[runtime_state->scratch_roots[seen_index]] = 0u;
+                    }
                 }
                 runtime_state->active_effective_degrees[value_id] = effective_degree;
             }
@@ -1430,7 +1657,6 @@ static void value_ssa_alloc_move_engine_recompute_active_effective_degrees_for_r
 static void value_ssa_alloc_move_engine_recompute_active_effective_move_related_for_roots(
     const ValueSsaAllocationWorklist *worklist,
     const ValueSsaAllocatorMoveEngineFamilyMembers *family_members,
-    const ValueSsaCopyAffinityGraph *affinity_graph,
     const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
     const unsigned char *scheduled,
     const unsigned char *frozen,
@@ -1441,9 +1667,10 @@ static void value_ssa_alloc_move_engine_recompute_active_effective_move_related_
     size_t root_index;
     int use_coalesce;
 
-    if (!worklist || !family_members || !affinity_graph || !scheduled || !frozen || !roots || !runtime_state ||
+    if (!worklist || !family_members || !scheduled || !frozen || !roots || !runtime_state ||
         !runtime_state->active_move_related || !runtime_state->active_effective_move_related ||
-        !runtime_state->scratch_class_move_related) {
+        !runtime_state->scratch_class_move_related || !runtime_state->affinity_neighbor_offsets ||
+        !runtime_state->affinity_neighbor_value_ids) {
         return;
     }
 
@@ -1496,18 +1723,19 @@ static void value_ssa_alloc_move_engine_recompute_active_effective_move_related_
         for (member_index = 0; member_index < root_member_count; ++member_index) {
             size_t item_index = family_members->member_item_indices[root_offset + member_index];
             size_t value_id = worklist->items[item_index].value_id;
-            size_t neighbor_value_id;
+            size_t neighbor_index;
             size_t value_root_value_id =
                 value_ssa_alloc_move_engine_effective_root(runtime_state, coalesce_analysis, value_count, value_id);
 
             if (value_id >= value_count || scheduled[value_id] || frozen[value_id]) {
                 continue;
             }
-            for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+            for (neighbor_index = runtime_state->affinity_neighbor_offsets[value_id];
+                 neighbor_index < runtime_state->affinity_neighbor_offsets[value_id + 1];
+                 ++neighbor_index) {
+                size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
+
                 if (neighbor_value_id == value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                    continue;
-                }
-                if (affinity_graph->weights[value_id * value_count + neighbor_value_id] == 0) {
                     continue;
                 }
                 if (value_ssa_alloc_move_engine_effective_root(
@@ -1581,6 +1809,7 @@ static void value_ssa_alloc_move_engine_update_effective_value_runtime_state(
             scheduled,
             runtime_state->active_degrees,
             runtime_state->scratch_roots,
+            runtime_state->scratch_root_flags,
             runtime_state->active_effective_degrees);
         value_ssa_alloc_recompute_active_effective_move_related(affinity_graph,
             coalesce_analysis,
@@ -1603,7 +1832,6 @@ static void value_ssa_alloc_move_engine_update_effective_value_runtime_state(
         runtime_state);
     value_ssa_alloc_move_engine_recompute_active_effective_move_related_for_roots(worklist,
         family_members,
-        affinity_graph,
         coalesce_analysis,
         scheduled,
         frozen,
@@ -1614,19 +1842,14 @@ static void value_ssa_alloc_move_engine_update_effective_value_runtime_state(
 }
 
 static void value_ssa_alloc_move_engine_recompute_family_queue_priorities(
-    const ValueSsaAllocationWorklist *worklist,
-    const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
     size_t value_count,
-    const unsigned char *scheduled,
     ValueSsaAllocatorMoveEngineRuntimeState *runtime_state,
     const ValueSsaAllocatorMoveEngineCurrentQueues *queues,
     int full_reseed) {
     size_t root_index;
     size_t normalized_root_count;
-
-    (void)worklist;
-    (void)coalesce_analysis;
-    (void)scheduled;
+    size_t *roots = NULL;
+    size_t root_count = 0;
 
     if (!runtime_state || !runtime_state->scratch_roots || !queues ||
         (!runtime_state->active_family_queue_priorities && !runtime_state->family_runtime_facts)) {
@@ -1634,26 +1857,17 @@ static void value_ssa_alloc_move_engine_recompute_family_queue_priorities(
     }
 
     if (full_reseed) {
-        normalized_root_count = value_ssa_alloc_move_engine_collect_unique_runtime_roots(runtime_state,
-            value_count,
-            queues->active_family_roots,
-            queues->active_family_count,
-            runtime_state->scratch_roots);
-        for (root_index = 0; root_index < normalized_root_count; ++root_index) {
-            size_t root_value_id = runtime_state->scratch_roots[root_index];
-
-            if (root_value_id >= value_count) {
-                continue;
-            }
-            value_ssa_alloc_move_engine_set_family_queue_priority(runtime_state, value_count, root_value_id, 0);
-        }
-        return;
+        roots = queues->active_family_roots;
+        root_count = queues->active_family_count;
+    } else {
+        roots = queues->affected_family_roots;
+        root_count = queues->affected_family_count;
     }
 
     normalized_root_count = value_ssa_alloc_move_engine_collect_unique_runtime_roots(runtime_state,
         value_count,
-        queues->affected_family_roots,
-        queues->affected_family_count,
+        roots,
+        root_count,
         runtime_state->scratch_roots);
     for (root_index = 0; root_index < normalized_root_count; ++root_index) {
         size_t root_value_id = runtime_state->scratch_roots[root_index];
@@ -1913,21 +2127,24 @@ static void value_ssa_alloc_move_engine_recompute_active_family_move_pressure_fo
             size_t item_index = family_members->member_item_indices[root_offset + member_index];
             const ValueSsaAllocationWorkItem *work_item = &worklist->items[item_index];
             size_t family_value_id = work_item->value_id;
-            size_t neighbor_value_id;
+            size_t neighbor_index;
 
             if (family_value_id >= value_count || scheduled[family_value_id] || frozen[family_value_id]) {
                 continue;
             }
-            for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+            for (neighbor_index = runtime_state->affinity_neighbor_offsets
+                     ? runtime_state->affinity_neighbor_offsets[family_value_id]
+                     : 0;
+                 runtime_state->affinity_neighbor_offsets &&
+                 neighbor_index < runtime_state->affinity_neighbor_offsets[family_value_id + 1];
+                 ++neighbor_index) {
+                size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
                 size_t neighbor_root_value_id;
-                size_t weight;
+                size_t weight =
+                    runtime_state->affinity_neighbor_weights ? runtime_state->affinity_neighbor_weights[neighbor_index] : 0;
                 const ValueSsaAllocatorCoalesceItem *coalesce_item = NULL;
 
                 if (neighbor_value_id == family_value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                    continue;
-                }
-                weight = affinity_graph->weights[family_value_id * value_count + neighbor_value_id];
-                if (weight == 0) {
                     continue;
                 }
                 neighbor_root_value_id =
@@ -1951,20 +2168,19 @@ static void value_ssa_alloc_move_engine_recompute_active_family_move_pressure_fo
                 }
                 if (value_ssa_allocator_coalesce_analysis_find_pair(
                         coalesce_analysis, family_value_id, neighbor_value_id, NULL, &coalesce_item) &&
-                    coalesce_item && coalesce_item->can_coalesce &&
-                    runtime_state->family_coalesce_ready_neighbor_matrix &&
-                    !runtime_state
-                         ->family_coalesce_ready_neighbor_matrix[root_value_id * value_count + neighbor_root_value_id]) {
-                    runtime_state->family_coalesce_ready_neighbor_matrix[root_value_id * value_count +
-                        neighbor_root_value_id] = 1u;
-                    runtime_state->family_coalesce_ready_neighbor_matrix[neighbor_root_value_id * value_count +
-                        root_value_id] = 1u;
-                    value_ssa_alloc_move_engine_increment_family_coalesce_ready_neighbor_count(
-                        runtime_state, value_count, root_value_id);
-                }
-                if (coalesce_item && coalesce_item->can_coalesce) {
+                    coalesce_item && coalesce_item->can_coalesce) {
                     size_t ready_affinity_index = root_value_id * value_count + neighbor_root_value_id;
 
+                    if (runtime_state->family_coalesce_ready_neighbor_matrix &&
+                        !runtime_state
+                             ->family_coalesce_ready_neighbor_matrix[root_value_id * value_count + neighbor_root_value_id]) {
+                        runtime_state->family_coalesce_ready_neighbor_matrix[root_value_id * value_count +
+                            neighbor_root_value_id] = 1u;
+                        runtime_state->family_coalesce_ready_neighbor_matrix[neighbor_root_value_id * value_count +
+                            root_value_id] = 1u;
+                        value_ssa_alloc_move_engine_increment_family_coalesce_ready_neighbor_count(
+                            runtime_state, value_count, root_value_id);
+                    }
                     if (runtime_state->family_coalesce_ready_affinity_matrix) {
                         runtime_state->family_coalesce_ready_affinity_matrix[ready_affinity_index] += weight;
                     }
@@ -2384,6 +2600,7 @@ static void value_ssa_alloc_move_engine_refresh_active_family_roots(ValueSsaAllo
 
     if (full_reseed) {
         queues->active_family_count = 0;
+        memset(queues->affected_family_root_flags, 0, (queues->value_count ? queues->value_count : 1));
         for (root_value_id = 0; root_value_id < queues->value_count; ++root_value_id) {
             size_t representative_root_value_id =
                 value_ssa_alloc_move_engine_runtime_root_value_id(runtime_state, queues->value_count, root_value_id);
@@ -2397,16 +2614,17 @@ static void value_ssa_alloc_move_engine_refresh_active_family_roots(ValueSsaAllo
                 }
                 continue;
             }
-            if (value_ssa_alloc_move_engine_root_list_contains(
-                    queues->active_family_roots, queues->active_family_count, representative_root_value_id)) {
+            if (queues->affected_family_root_flags[representative_root_value_id]) {
                 if (representative_root_value_id != root_value_id) {
                     value_ssa_alloc_move_engine_clear_obsolete_root_identity(
                         queues, runtime_state, root_value_id);
                 }
                 continue;
             }
+            queues->affected_family_root_flags[representative_root_value_id] = 1u;
             queues->active_family_roots[queues->active_family_count++] = representative_root_value_id;
         }
+        memset(queues->affected_family_root_flags, 0, (queues->value_count ? queues->value_count : 1));
         return;
     }
 
@@ -2425,6 +2643,15 @@ static void value_ssa_alloc_move_engine_refresh_active_family_roots(ValueSsaAllo
                     queues, runtime_state, queues->active_family_roots[root_value_id]);
             }
             continue;
+        }
+        if (runtime_state->scratch_root_flags) {
+            if (runtime_state->scratch_root_flags[active_root_value_id]) {
+                if (queues->active_family_roots[root_value_id] != active_root_value_id) {
+                    value_ssa_alloc_move_engine_clear_obsolete_root_identity(
+                        queues, runtime_state, queues->active_family_roots[root_value_id]);
+                }
+                continue;
+            }
         }
         if (value_ssa_alloc_move_engine_root_list_contains(
                 queues->active_family_roots, write_index, active_root_value_id)) {
@@ -2491,14 +2718,7 @@ static void value_ssa_alloc_move_engine_consider_family_candidate(
     if (entry->root_value_id != representative_root_value_id) {
         entry->root_value_id = representative_root_value_id;
     }
-    queue_priority = value_ssa_alloc_move_engine_compute_family_queue_priority(candidate->priority,
-        entry->family_active_member_count,
-        entry->family_coalesce_ready_neighbor_count,
-        entry->family_coalesce_ready_affinity_weight_sum,
-        entry->family_best_coalesce_ready_partner_affinity_weight,
-        entry->family_best_coalesce_ready_partner_is_mutual,
-        entry->family_external_neighbor_count,
-        entry->family_external_affinity_weight_sum);
+    queue_priority = candidate->move_work_priority;
     if (queue_priority > entry->move_work_priority) {
         entry->move_work_priority = queue_priority;
     }
@@ -2531,57 +2751,6 @@ static void value_ssa_alloc_move_engine_consider_family_candidate(
     }
 }
 
-static void value_ssa_alloc_move_engine_prepare_family_queue_priority_for_root(
-    const ValueSsaAllocationWorklist *worklist,
-    const ValueSsaAllocatorMoveEngineFamilyMembers *family_members,
-    const unsigned char *scheduled,
-    ValueSsaAllocatorMoveEngineRuntimeState *runtime_state,
-    size_t root_value_id) {
-    ValueSsaAllocatorMoveEngineFamilyStateView family_state;
-    size_t member_index;
-    size_t root_offset;
-    size_t root_count;
-    size_t base_priority = 0;
-
-    if (!worklist || !family_members || !scheduled || !runtime_state || root_value_id >= family_members->value_count ||
-        !value_ssa_alloc_move_engine_read_family_state(
-            runtime_state, family_members->value_count, root_value_id, &family_state)) {
-        return;
-    }
-
-    root_offset = family_members->root_member_offsets[family_state.representative_root_value_id];
-    root_count = family_members->root_member_counts[family_state.representative_root_value_id];
-    for (member_index = 0; member_index < root_count; ++member_index) {
-        size_t item_index = family_members->member_item_indices[root_offset + member_index];
-        const ValueSsaAllocationWorkItem *work_item = &worklist->items[item_index];
-
-        if (work_item->value_id >= family_members->value_count || scheduled[work_item->value_id]) {
-            continue;
-        }
-        if (work_item->priority > base_priority) {
-            base_priority = work_item->priority;
-        }
-    }
-
-    if (base_priority == 0) {
-        value_ssa_alloc_move_engine_set_family_queue_priority(
-            runtime_state, family_members->value_count, family_state.representative_root_value_id, 0);
-        return;
-    }
-
-    value_ssa_alloc_move_engine_set_family_queue_priority(runtime_state,
-        family_members->value_count,
-        family_state.representative_root_value_id,
-        value_ssa_alloc_move_engine_compute_family_queue_priority(base_priority,
-            family_state.active_member_count,
-            family_state.coalesce_ready_neighbor_count,
-            family_state.coalesce_ready_affinity_weight_sum,
-            family_state.best_coalesce_ready_partner_affinity_weight,
-            family_state.best_coalesce_ready_partner_is_mutual,
-            family_state.external_neighbor_count,
-            family_state.external_affinity_weight_sum));
-}
-
 static void value_ssa_alloc_move_engine_rebuild_family_phase_entry_for_root(
     const ValueSsaAllocationPrep *prep,
     const ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
@@ -2599,7 +2768,9 @@ static void value_ssa_alloc_move_engine_rebuild_family_phase_entry_for_root(
     size_t member_index;
     size_t root_offset;
     size_t root_count;
+    size_t family_queue_priority = 0;
     ValueSsaAllocatorMoveEngineFamilyStateView family_state;
+    ValueSsaAllocatorPlanItem *base_item;
 
     if (!prep || !worklist || !family_members || !initial_effective_degrees || !initial_family_move_related ||
         !initial_effective_move_related || !was_frozen || !scheduled || !runtime_state || !queues ||
@@ -2617,36 +2788,59 @@ static void value_ssa_alloc_move_engine_rebuild_family_phase_entry_for_root(
     }
     root_offset = family_members->root_member_offsets[family_state.representative_root_value_id];
     root_count = family_members->root_member_counts[family_state.representative_root_value_id];
-    value_ssa_alloc_move_engine_prepare_family_queue_priority_for_root(
-        worklist, family_members, scheduled, runtime_state, root_value_id);
     for (member_index = 0; member_index < root_count; ++member_index) {
         size_t item_index = family_members->member_item_indices[root_offset + member_index];
         const ValueSsaAllocationWorkItem *work_item = &worklist->items[item_index];
         ValueSsaAllocatorPlanItem candidate;
+        size_t candidate_queue_priority;
 
         if (work_item->value_id >= queues->value_count || scheduled[work_item->value_id]) {
             continue;
         }
 
-        value_ssa_alloc_build_plan_item_preview(prep,
+        base_item = runtime_state->work_item_preview_bases ? &runtime_state->work_item_preview_bases[item_index] : NULL;
+        if (!base_item || base_item->value_id != work_item->value_id) {
+            value_ssa_alloc_build_plan_item_preview_base(prep,
+                work_item,
+                initial_effective_degrees,
+                initial_effective_move_related,
+                &candidate);
+            base_item = &candidate;
+        }
+
+        candidate = *base_item;
+        value_ssa_alloc_finish_plan_item_preview_dynamic(prep,
             coalesce_analysis,
             runtime_state->runtime_coalesce_roots,
             runtime_state->runtime_coalesce_class_sizes,
             runtime_state->family_runtime_facts,
-            work_item,
-            initial_effective_degrees,
             runtime_state->active_degrees,
             runtime_state->active_effective_degrees,
             initial_family_move_related,
-            initial_effective_move_related,
             runtime_state->active_move_related,
             runtime_state->active_effective_move_related,
             was_frozen,
             color_budget,
             &candidate);
+        candidate_queue_priority = value_ssa_alloc_move_engine_compute_family_queue_priority(candidate.priority,
+            family_state.active_member_count,
+            family_state.coalesce_ready_neighbor_count,
+            family_state.coalesce_ready_affinity_weight_sum,
+            family_state.best_coalesce_ready_partner_affinity_weight,
+            family_state.best_coalesce_ready_partner_is_mutual,
+            family_state.external_neighbor_count,
+            family_state.external_affinity_weight_sum);
+        candidate.move_work_priority = candidate_queue_priority;
+        if (candidate_queue_priority > family_queue_priority) {
+            family_queue_priority = candidate_queue_priority;
+        }
         value_ssa_alloc_move_engine_consider_family_candidate(
             queues->family_phase_entries, runtime_state, queues->value_count, &candidate);
     }
+    value_ssa_alloc_move_engine_set_family_queue_priority(runtime_state,
+        queues->value_count,
+        family_state.representative_root_value_id,
+        family_queue_priority);
 }
 
 static void value_ssa_alloc_move_engine_collect_phase_ready_family_roots(
@@ -2798,17 +2992,33 @@ static void value_ssa_alloc_move_engine_collect_affected_family_roots_for_value(
     if (include_interference_neighbors && interference_graph && interference_graph->interferes) {
         size_t neighbor_value_id;
 
-        for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
-            size_t neighbor_root_value_id;
+        size_t neighbor_begin = 0;
+        size_t neighbor_end = value_count;
 
-            if (neighbor_value_id == value_id || scheduled[neighbor_value_id]) {
+        if (runtime_state && runtime_state->interference_neighbor_offsets &&
+            runtime_state->interference_neighbor_value_ids) {
+            neighbor_begin = runtime_state->interference_neighbor_offsets[value_id];
+            neighbor_end = runtime_state->interference_neighbor_offsets[value_id + 1];
+        }
+
+        for (neighbor_value_id = neighbor_begin; neighbor_value_id < neighbor_end; ++neighbor_value_id) {
+            size_t neighbor_root_value_id;
+            size_t neighbor_id =
+                runtime_state && runtime_state->interference_neighbor_offsets &&
+                    runtime_state->interference_neighbor_value_ids
+                ? runtime_state->interference_neighbor_value_ids[neighbor_value_id]
+                : neighbor_value_id;
+
+            if (neighbor_id == value_id || scheduled[neighbor_id]) {
                 continue;
             }
-            if (!interference_graph->interferes[value_id * value_count + neighbor_value_id]) {
+            if (!(runtime_state && runtime_state->interference_neighbor_offsets &&
+                    runtime_state->interference_neighbor_value_ids) &&
+                !interference_graph->interferes[value_id * value_count + neighbor_id]) {
                 continue;
             }
             neighbor_root_value_id = value_ssa_alloc_move_engine_effective_root(
-                runtime_state, coalesce_analysis, value_count, neighbor_value_id);
+                runtime_state, coalesce_analysis, value_count, neighbor_id);
             value_ssa_alloc_move_engine_mark_affected_family_root(queues, runtime_state, neighbor_root_value_id);
         }
     }
@@ -2825,18 +3035,21 @@ static void value_ssa_alloc_move_engine_collect_affected_family_roots_for_value(
             size_t item_index = family_members->member_item_indices[root_offset + member_index];
             const ValueSsaAllocationWorkItem *work_item = &worklist->items[item_index];
             size_t family_value_id = work_item->value_id;
-            size_t neighbor_value_id;
+            size_t neighbor_index;
 
             if (family_value_id >= value_count || scheduled[family_value_id]) {
                 continue;
             }
-            for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+            for (neighbor_index = runtime_state->affinity_neighbor_offsets
+                     ? runtime_state->affinity_neighbor_offsets[family_value_id]
+                     : 0;
+                 runtime_state->affinity_neighbor_offsets &&
+                 neighbor_index < runtime_state->affinity_neighbor_offsets[family_value_id + 1];
+                 ++neighbor_index) {
+                size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
                 size_t neighbor_root_value_id;
 
                 if (neighbor_value_id == family_value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                    continue;
-                }
-                if (affinity_graph->weights[family_value_id * value_count + neighbor_value_id] == 0) {
                     continue;
                 }
                 neighbor_root_value_id = value_ssa_alloc_move_engine_effective_root(
@@ -2845,15 +3058,18 @@ static void value_ssa_alloc_move_engine_collect_affected_family_roots_for_value(
             }
         }
     } else {
-        size_t neighbor_value_id;
+        size_t neighbor_index;
 
-        for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+        for (neighbor_index = runtime_state->affinity_neighbor_offsets
+                 ? runtime_state->affinity_neighbor_offsets[value_id]
+                 : 0;
+             runtime_state->affinity_neighbor_offsets &&
+             neighbor_index < runtime_state->affinity_neighbor_offsets[value_id + 1];
+             ++neighbor_index) {
+            size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
             size_t neighbor_root_value_id;
 
             if (neighbor_value_id == value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                continue;
-            }
-            if (affinity_graph->weights[value_id * value_count + neighbor_value_id] == 0) {
                 continue;
             }
             neighbor_root_value_id = value_ssa_alloc_move_engine_effective_root(
@@ -2896,18 +3112,21 @@ static void value_ssa_alloc_move_engine_collect_affected_family_roots_for_root(
         size_t item_index = family_members->member_item_indices[root_offset + member_index];
         const ValueSsaAllocationWorkItem *work_item = &worklist->items[item_index];
         size_t value_id = work_item->value_id;
-        size_t neighbor_value_id;
+        size_t neighbor_index;
 
         if (value_id >= value_count || scheduled[value_id] || frozen[value_id]) {
             continue;
         }
-        for (neighbor_value_id = 0; neighbor_value_id < value_count; ++neighbor_value_id) {
+        for (neighbor_index = runtime_state->affinity_neighbor_offsets
+                 ? runtime_state->affinity_neighbor_offsets[value_id]
+                 : 0;
+             runtime_state->affinity_neighbor_offsets &&
+             neighbor_index < runtime_state->affinity_neighbor_offsets[value_id + 1];
+             ++neighbor_index) {
+            size_t neighbor_value_id = runtime_state->affinity_neighbor_value_ids[neighbor_index];
             size_t neighbor_root_value_id;
 
             if (neighbor_value_id == value_id || scheduled[neighbor_value_id] || frozen[neighbor_value_id]) {
-                continue;
-            }
-            if (affinity_graph->weights[value_id * value_count + neighbor_value_id] == 0) {
                 continue;
             }
             neighbor_root_value_id = value_ssa_alloc_move_engine_effective_root(
@@ -3018,14 +3237,19 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
     int transition_is_freeze,
     int transition_is_spill_remove,
     int full_reseed) {
+    int refresh_full_reseed;
+
     if (!prep || !worklist || !family_members || !interference_graph || !affinity_graph || !coalesce_analysis ||
         !initial_effective_degrees || !initial_family_move_related || !initial_effective_move_related ||
         !scheduled || !frozen || !was_frozen || !runtime_state || !queues) {
         return;
     }
 
+    refresh_full_reseed = full_reseed || transition_is_freeze ||
+        (!transition_is_freeze && transition_value_id < value_count && frozen[transition_value_id]);
+
     value_ssa_alloc_move_engine_reset_affected_family_roots(queues);
-    if (!full_reseed && transition_value_id < value_count) {
+    if (!refresh_full_reseed && transition_value_id < value_count) {
         value_ssa_alloc_move_engine_collect_affected_family_roots_for_value(queues,
             worklist,
             interference_graph,
@@ -3041,7 +3265,7 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
             family_members);
     }
     value_ssa_alloc_move_engine_update_active_degrees(
-        interference_graph, scheduled, transition_value_id, transition_is_freeze, full_reseed, runtime_state);
+        interference_graph, scheduled, transition_value_id, transition_is_freeze, refresh_full_reseed, runtime_state);
     value_ssa_alloc_move_engine_update_active_move_related(worklist,
         family_members,
         interference_graph,
@@ -3051,7 +3275,7 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
         queues,
         scheduled,
         frozen,
-        full_reseed,
+        refresh_full_reseed,
         runtime_state);
     value_ssa_alloc_move_engine_update_effective_value_runtime_state(worklist,
         family_members,
@@ -3062,22 +3286,22 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
         queues,
         scheduled,
         frozen,
-        full_reseed,
+        refresh_full_reseed,
         runtime_state);
     value_ssa_alloc_move_engine_update_active_family_member_counts(coalesce_analysis,
         value_count,
         scheduled,
         transition_value_id,
         transition_is_freeze,
-        full_reseed,
+        refresh_full_reseed,
         runtime_state);
     value_ssa_alloc_move_engine_update_active_family_spill_removed_counts(coalesce_analysis,
         value_count,
         transition_value_id,
         transition_is_spill_remove,
-        full_reseed,
+        refresh_full_reseed,
         runtime_state);
-    if (full_reseed) {
+    if (refresh_full_reseed) {
         value_ssa_alloc_recompute_active_family_move_pressure(affinity_graph,
             coalesce_analysis,
             scheduled,
@@ -3104,7 +3328,7 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
             value_count,
             runtime_state);
     }
-    if (full_reseed) {
+    if (refresh_full_reseed) {
         value_ssa_alloc_recompute_active_family_move_work_classes(coalesce_analysis,
             value_count,
             initial_family_move_related,
@@ -3122,8 +3346,8 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
             runtime_state);
     }
     value_ssa_alloc_move_engine_recompute_family_queue_priorities(
-        worklist, coalesce_analysis, value_count, scheduled, runtime_state, queues, full_reseed);
-    if (full_reseed) {
+        value_count, runtime_state, queues, refresh_full_reseed);
+    if (refresh_full_reseed) {
         value_ssa_alloc_move_engine_sync_all_family_runtime_facts(runtime_state, value_count);
     } else {
         value_ssa_alloc_move_engine_sync_family_runtime_facts_for_roots(
@@ -3141,7 +3365,7 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues(
         color_budget,
         runtime_state,
         queues,
-        full_reseed);
+        refresh_full_reseed);
 }
 
 static void value_ssa_alloc_move_engine_refresh_current_family_queues_for_coalesce_pair(
@@ -3232,7 +3456,7 @@ static void value_ssa_alloc_move_engine_refresh_current_family_queues_for_coales
         queues->affected_family_count,
         runtime_state);
     value_ssa_alloc_move_engine_recompute_family_queue_priorities(
-        worklist, coalesce_analysis, value_count, scheduled, runtime_state, queues, 0);
+        value_count, runtime_state, queues, 0);
     value_ssa_alloc_move_engine_sync_family_runtime_facts_for_roots(
         runtime_state, queues->affected_family_roots, queues->affected_family_count, value_count);
     value_ssa_alloc_move_engine_prepare_current_family_phase_queues(prep,
@@ -3625,6 +3849,38 @@ static void value_ssa_alloc_move_engine_pick_best_family_phase_coalesce_action(
     }
 }
 
+static void value_ssa_alloc_move_engine_note_phase_scan_count(ValueSsaAllocatorMoveEngineRunResult *result,
+    ValueSsaAllocatorPhase phase,
+    size_t candidate_count,
+    int pair_scan) {
+    if (!result) {
+        return;
+    }
+
+    switch (phase) {
+    case VALUE_SSA_ALLOCATOR_PHASE_SIMPLIFY:
+        if (pair_scan) {
+            result->simplify_pair_scan_total += candidate_count;
+        } else {
+            result->simplify_candidate_scan_total += candidate_count;
+        }
+        break;
+    case VALUE_SSA_ALLOCATOR_PHASE_FREEZE:
+        if (pair_scan) {
+            result->freeze_pair_scan_total += candidate_count;
+        } else {
+            result->freeze_candidate_scan_total += candidate_count;
+        }
+        break;
+    case VALUE_SSA_ALLOCATOR_PHASE_SPILL:
+    default:
+        if (!pair_scan) {
+            result->spill_candidate_scan_total += candidate_count;
+        }
+        break;
+    }
+}
+
 static void value_ssa_alloc_move_engine_choose_best_coalesce_action(
     const ValueSsaAllocatorMoveEngineCoalesceAction *simplify_action,
     const ValueSsaAllocatorMoveEngineCoalesceAction *freeze_action,
@@ -3839,6 +4095,32 @@ static void value_ssa_alloc_move_engine_note_step_for_run_result(
     }
 }
 
+static void value_ssa_alloc_move_engine_note_refresh_for_run_result(ValueSsaAllocatorMoveEngineRunResult *result,
+    ValueSsaAllocatorMoveEngineRefreshKind refresh_kind,
+    size_t affected_family_root_count) {
+    if (!result) {
+        return;
+    }
+
+    switch (refresh_kind) {
+    case VALUE_SSA_ALLOC_MOVE_ENGINE_REFRESH_GENERAL:
+        ++result->general_refresh_count;
+        break;
+    case VALUE_SSA_ALLOC_MOVE_ENGINE_REFRESH_COALESCE_PAIR:
+        ++result->coalesce_refresh_count;
+        break;
+    case VALUE_SSA_ALLOC_MOVE_ENGINE_REFRESH_NONE:
+    default:
+        break;
+    }
+
+    result->refresh_affected_family_root_total += affected_family_root_count;
+    if (affected_family_root_count > result->refresh_affected_family_root_max) {
+        result->refresh_affected_family_root_max = affected_family_root_count;
+    }
+    result->phase_entry_rebuild_count += affected_family_root_count;
+}
+
 static void value_ssa_alloc_move_engine_prepare_general_refresh_result(
     ValueSsaAllocatorMoveEngineStepResult *result,
     size_t transition_value_id,
@@ -3857,6 +4139,7 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
     const ValueSsaAllocatorMoveEngineRuntimeState *runtime_state,
     size_t value_count,
     const ValueSsaAllocatorMoveEngineCurrentQueues *queues,
+    ValueSsaAllocatorMoveEngineRunResult *out_run_result,
     ValueSsaAllocatorMoveEngineDecision *out_decision) {
     int found_simplify = 0;
     int found_freeze = 0;
@@ -3887,6 +4170,8 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
     best_freeze_view.representative_root_value_id = (size_t)-1;
     best_spill_view.representative_root_value_id = (size_t)-1;
 
+    value_ssa_alloc_move_engine_note_phase_scan_count(
+        out_run_result, VALUE_SSA_ALLOCATOR_PHASE_SIMPLIFY, queues->simplify_family_count, 0);
     value_ssa_alloc_move_engine_pick_best_family_phase_candidate(entries,
         runtime_state,
         value_count,
@@ -3896,6 +4181,8 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
         &found_simplify,
         &best_simplify,
         &best_simplify_view);
+    value_ssa_alloc_move_engine_note_phase_scan_count(
+        out_run_result, VALUE_SSA_ALLOCATOR_PHASE_FREEZE, queues->freeze_family_count, 0);
     value_ssa_alloc_move_engine_pick_best_family_phase_candidate(entries,
         runtime_state,
         value_count,
@@ -3905,6 +4192,8 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
         &found_freeze,
         &best_freeze,
         &best_freeze_view);
+    value_ssa_alloc_move_engine_note_phase_scan_count(
+        out_run_result, VALUE_SSA_ALLOCATOR_PHASE_SPILL, queues->spill_family_count, 0);
     value_ssa_alloc_move_engine_pick_best_family_phase_candidate(entries,
         runtime_state,
         value_count,
@@ -3915,6 +4204,8 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
         &best_spill,
         &best_spill_view);
 
+    value_ssa_alloc_move_engine_note_phase_scan_count(
+        out_run_result, VALUE_SSA_ALLOCATOR_PHASE_SIMPLIFY, queues->simplify_family_count, 1);
     value_ssa_alloc_move_engine_pick_best_family_phase_coalesce_action(entries,
         runtime_state,
         value_count,
@@ -3922,6 +4213,8 @@ static void value_ssa_alloc_move_engine_choose_current_phase_decision(
         queues->simplify_family_count,
         VALUE_SSA_ALLOCATOR_PHASE_SIMPLIFY,
         &simplify_coalesce_action);
+    value_ssa_alloc_move_engine_note_phase_scan_count(
+        out_run_result, VALUE_SSA_ALLOCATOR_PHASE_FREEZE, queues->freeze_family_count, 1);
     value_ssa_alloc_move_engine_pick_best_family_phase_coalesce_action(entries,
         runtime_state,
         value_count,
@@ -4057,6 +4350,9 @@ static int value_ssa_alloc_move_engine_execute_coalesce_decision(
         value_ssa_alloc_set_error(ctx->error, 0, 0, "VALUE-SSA-ALLOC-123: out of memory rebuilding runtime family member slices");
         return 0;
     }
+    if (ctx->out_run_result) {
+        ++ctx->out_run_result->family_member_rebuild_count;
+    }
     value_ssa_alloc_move_engine_prepare_coalesce_pair_refresh_result(out_result, lhs_root_value_id, rhs_root_value_id);
     return 1;
 }
@@ -4065,6 +4361,11 @@ static int value_ssa_alloc_move_engine_execute_freeze_decision(
     ValueSsaAllocatorMoveEngineExecutionContext *ctx,
     const ValueSsaAllocatorMoveEngineDecision *decision,
     ValueSsaAllocatorMoveEngineStepResult *out_result) {
+    size_t root_value_id;
+    size_t root_offset;
+    size_t root_count;
+    size_t member_index;
+
     if (!ctx || !ctx->function || !ctx->runtime_state || !ctx->queues || !decision ||
         decision->kind != VALUE_SSA_ALLOC_MOVE_ENGINE_DECISION_FREEZE) {
         return 0;
@@ -4082,6 +4383,24 @@ static int value_ssa_alloc_move_engine_execute_freeze_decision(
         ctx->scheduled,
         ctx->frozen,
         ctx->was_frozen);
+    root_value_id = value_ssa_alloc_move_engine_effective_root(
+        ctx->runtime_state, ctx->coalesce_analysis, ctx->function->next_value_id, decision->candidate.value_id);
+    if (ctx->family_members && ctx->runtime_state->active_move_related &&
+        ctx->runtime_state->active_effective_move_related &&
+        root_value_id < ctx->family_members->value_count) {
+        root_offset = ctx->family_members->root_member_offsets[root_value_id];
+        root_count = ctx->family_members->root_member_counts[root_value_id];
+        for (member_index = 0; member_index < root_count; ++member_index) {
+            size_t item_index = ctx->family_members->member_item_indices[root_offset + member_index];
+            size_t value_id = ctx->worklist->items[item_index].value_id;
+
+            if (value_id >= ctx->function->next_value_id || !ctx->frozen[value_id]) {
+                continue;
+            }
+            ctx->runtime_state->active_move_related[value_id] = 0u;
+            ctx->runtime_state->active_effective_move_related[value_id] = 0u;
+        }
+    }
     value_ssa_alloc_move_engine_prepare_general_refresh_result(out_result, decision->candidate.value_id, 1, 0);
     return 1;
 }
@@ -4205,6 +4524,10 @@ static int value_ssa_alloc_move_engine_refresh_after_step_result(
                 result->transition_is_freeze,
                 result->transition_is_spill_remove,
                 0);
+            if (ctx->out_run_result) {
+                value_ssa_alloc_move_engine_note_refresh_for_run_result(
+                    ctx->out_run_result, result->refresh_kind, ctx->queues->affected_family_count);
+            }
             return 1;
         case VALUE_SSA_ALLOC_MOVE_ENGINE_REFRESH_COALESCE_PAIR:
             value_ssa_alloc_move_engine_refresh_current_family_queues_for_coalesce_pair(ctx->prep,
@@ -4225,6 +4548,10 @@ static int value_ssa_alloc_move_engine_refresh_after_step_result(
                 ctx->queues,
                 result->root_value_id,
                 result->partner_root_value_id);
+            if (ctx->out_run_result) {
+                value_ssa_alloc_move_engine_note_refresh_for_run_result(
+                    ctx->out_run_result, result->refresh_kind, ctx->queues->affected_family_count);
+            }
             return 1;
         case VALUE_SSA_ALLOC_MOVE_ENGINE_REFRESH_NONE:
         default:
@@ -4398,12 +4725,12 @@ static int value_ssa_alloc_move_engine_run_current_phase_step(
         ctx->runtime_state,
         ctx->function->next_value_id,
         ctx->queues,
+        ctx->out_run_result,
         &decision);
     if (!value_ssa_alloc_move_engine_decision_has_action(&decision)) {
         value_ssa_alloc_set_error(ctx->error, 0, 0, "VALUE-SSA-ALLOC-073: allocator move-engine scheduling underflow");
         return 0;
     }
-
     if (!value_ssa_alloc_move_engine_execute_decision(ctx, &decision, out_result)) {
         return 0;
     }
@@ -4530,12 +4857,19 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
     unsigned char *spill_family_root_flags = NULL;
     size_t *spill_family_roots = NULL;
     size_t *scratch_roots = NULL;
+    unsigned char *scratch_root_flags = NULL;
     ValueSsaAllocatorMoveEngineFamilyPhaseEntry *family_phase_entries = NULL;
     ValueSsaAllocatorMoveWorkClass *active_family_move_work_classes = NULL;
     unsigned char *active_move_related = NULL;
     unsigned char *initial_family_move_related = NULL;
     unsigned char *initial_effective_move_related = NULL;
     unsigned char *active_effective_move_related = NULL;
+    size_t *affinity_neighbor_offsets = NULL;
+    size_t *affinity_neighbor_value_ids = NULL;
+    size_t *affinity_neighbor_weights = NULL;
+    size_t *interference_neighbor_offsets = NULL;
+    size_t *interference_neighbor_value_ids = NULL;
+    ValueSsaAllocatorPlanItem *work_item_preview_bases = NULL;
     unsigned char *family_neighbor_matrix = NULL;
     unsigned char *family_coalesce_ready_neighbor_matrix = NULL;
     size_t *family_coalesce_ready_affinity_matrix = NULL;
@@ -4550,7 +4884,11 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
     ValueSsaAllocatorMoveEngineCurrentQueues current_queues;
     ValueSsaAllocatorMoveEngineFamilyMembers family_members;
     size_t trace_index = 0;
+    size_t move_related_value_count = 0;
     int ok = 0;
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (!function || (!out_plan && !out_trace)) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-122: invalid move-engine contract");
@@ -4619,6 +4957,19 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         }
         active_coalesce = &owned_coalesce;
     }
+    if (active_prep && active_prep->move_related) {
+        size_t value_id;
+
+        for (value_id = 0; value_id < function->next_value_id; ++value_id) {
+            if (active_prep->move_related[value_id]) {
+                ++move_related_value_count;
+            }
+        }
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine prerequisites", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (out_plan) {
         out_plan->item_count = active_worklist->item_count;
@@ -4628,9 +4979,18 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
             (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
         out_plan->final_runtime_coalesce_class_sizes =
             (size_t *)calloc((function->next_value_id ? function->next_value_id : 1), sizeof(size_t));
-        if (!out_plan->items || !out_plan->final_runtime_coalesce_roots || !out_plan->final_runtime_coalesce_class_sizes) {
+        out_plan->value_item_indices =
+            (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+        if (!out_plan->items || !out_plan->final_runtime_coalesce_roots || !out_plan->final_runtime_coalesce_class_sizes ||
+            !out_plan->value_item_indices) {
             value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-068: out of memory preparing allocator plan");
             goto cleanup;
+        }
+        {
+            size_t value_index;
+            for (value_index = 0; value_index < function->next_value_id; ++value_index) {
+                out_plan->value_item_indices[value_index] = (size_t)-1;
+            }
         }
     }
     if (out_trace) {
@@ -4685,6 +5045,8 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
     spill_family_roots = (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
     scratch_roots = (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+    scratch_root_flags =
+        (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
     family_phase_entries = (ValueSsaAllocatorMoveEngineFamilyPhaseEntry *)calloc(
         function->next_value_id ? function->next_value_id : 1, sizeof(ValueSsaAllocatorMoveEngineFamilyPhaseEntry));
     active_family_move_work_classes = (ValueSsaAllocatorMoveWorkClass *)malloc(
@@ -4697,6 +5059,22 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
     active_effective_move_related =
         (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
+    if (!value_ssa_alloc_move_engine_build_affinity_neighbors(active_prep,
+            function->next_value_id,
+            &affinity_neighbor_offsets,
+            &affinity_neighbor_value_ids,
+            &affinity_neighbor_weights)) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-072: out of memory preparing move-engine state");
+        goto cleanup;
+    }
+    if (!value_ssa_alloc_move_engine_build_interference_neighbors(
+            active_interference,
+            function->next_value_id,
+            &interference_neighbor_offsets,
+            &interference_neighbor_value_ids)) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-072: out of memory preparing move-engine state");
+        goto cleanup;
+    }
     family_neighbor_matrix = (unsigned char *)calloc(
         (function->next_value_id ? (function->next_value_id * function->next_value_id) : 1), sizeof(unsigned char));
     family_coalesce_ready_neighbor_matrix = (unsigned char *)calloc(
@@ -4707,6 +5085,8 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         (function->next_value_id ? (function->next_value_id * function->next_value_id) : 1), sizeof(unsigned char));
     scratch_class_move_related =
         (unsigned char *)calloc(function->next_value_id ? function->next_value_id : 1, sizeof(unsigned char));
+    work_item_preview_bases = (ValueSsaAllocatorPlanItem *)calloc(
+        active_worklist->item_count ? active_worklist->item_count : 1, sizeof(ValueSsaAllocatorPlanItem));
     runtime_coalesce_roots =
         (size_t *)malloc((function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
     runtime_coalesce_class_sizes =
@@ -4722,15 +5102,21 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         !active_family_best_coalesce_ready_partner_mutual_flags || !active_family_external_affinity_sums ||
         !active_family_queue_priorities || !active_family_roots || !affected_family_root_flags ||
         !affected_family_roots || !simplify_family_root_flags || !simplify_family_roots || !freeze_family_root_flags ||
-        !freeze_family_roots || !spill_family_root_flags || !spill_family_roots || !scratch_roots || !family_phase_entries ||
+        !freeze_family_roots || !spill_family_root_flags || !spill_family_roots || !scratch_roots ||
+        !scratch_root_flags || !family_phase_entries ||
         !active_family_move_work_classes ||
         !active_move_related || !initial_family_move_related || !initial_effective_move_related ||
-        !active_effective_move_related || !family_neighbor_matrix || !family_coalesce_ready_neighbor_matrix ||
+        !active_effective_move_related || !work_item_preview_bases || !family_neighbor_matrix ||
+        !family_coalesce_ready_neighbor_matrix ||
         !family_coalesce_ready_affinity_matrix || !consumed_family_coalesce_pair_matrix ||
-        !scratch_class_move_related || !runtime_coalesce_roots || !runtime_coalesce_class_sizes || !frozen || !was_frozen ||
-        !scheduled) {
+        !scratch_class_move_related || !runtime_coalesce_roots || !runtime_coalesce_class_sizes || !frozen ||
+        !was_frozen || !scheduled || !interference_neighbor_offsets) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-072: out of memory preparing move-engine state");
         goto cleanup;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine allocate-state", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
     }
 
     runtime_state.active_degrees = active_degrees;
@@ -4749,9 +5135,16 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
     runtime_state.active_family_external_affinity_sums = active_family_external_affinity_sums;
     runtime_state.active_family_queue_priorities = active_family_queue_priorities;
     runtime_state.scratch_roots = scratch_roots;
+    runtime_state.scratch_root_flags = scratch_root_flags;
     runtime_state.active_family_move_work_classes = active_family_move_work_classes;
     runtime_state.active_move_related = active_move_related;
     runtime_state.active_effective_move_related = active_effective_move_related;
+    runtime_state.interference_neighbor_offsets = interference_neighbor_offsets;
+    runtime_state.interference_neighbor_value_ids = interference_neighbor_value_ids;
+    runtime_state.affinity_neighbor_offsets = affinity_neighbor_offsets;
+    runtime_state.affinity_neighbor_value_ids = affinity_neighbor_value_ids;
+    runtime_state.affinity_neighbor_weights = affinity_neighbor_weights;
+    runtime_state.work_item_preview_bases = work_item_preview_bases;
     runtime_state.family_neighbor_matrix = family_neighbor_matrix;
     runtime_state.family_coalesce_ready_neighbor_matrix = family_coalesce_ready_neighbor_matrix;
     runtime_state.family_coalesce_ready_affinity_matrix = family_coalesce_ready_affinity_matrix;
@@ -4828,6 +5221,13 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
     memcpy(initial_effective_move_related,
         runtime_state.active_effective_move_related,
         (function->next_value_id ? function->next_value_id : 1) * sizeof(unsigned char));
+    for (size_t preview_index = 0; preview_index < active_worklist->item_count; ++preview_index) {
+        value_ssa_alloc_build_plan_item_preview_base(active_prep,
+            &active_worklist->items[preview_index],
+            initial_effective_degrees,
+            initial_effective_move_related,
+            &work_item_preview_bases[preview_index]);
+    }
     value_ssa_alloc_move_engine_seed_initial_family_move_related(
         active_coalesce, function->next_value_id, initial_effective_move_related, initial_family_move_related);
     value_ssa_alloc_move_engine_refresh_current_family_queues(active_prep,
@@ -4850,6 +5250,10 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         0,
         0,
         1);
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine initialize-queues", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     {
         ValueSsaAllocatorMoveEngineExecutionContext execution_context;
@@ -4892,6 +5296,10 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
             out_run_result->plan_driver = plan_driver_result;
         }
     }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine plan-driver", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (out_trace) {
         out_trace->step_count = trace_index;
@@ -4901,18 +5309,55 @@ static int value_ssa_alloc_run_move_engine(const ValueSsaFunction *function,
         }
     }
     if (out_plan && out_plan->final_runtime_coalesce_roots && out_plan->final_runtime_coalesce_class_sizes) {
+        size_t item_index;
+
         memcpy(out_plan->final_runtime_coalesce_roots,
             runtime_state.runtime_coalesce_roots,
             (function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
         memcpy(out_plan->final_runtime_coalesce_class_sizes,
             runtime_state.runtime_coalesce_class_sizes,
             (function->next_value_id ? function->next_value_id : 1) * sizeof(size_t));
+        if (out_plan->value_item_indices) {
+            for (item_index = 0; item_index < out_plan->item_count; ++item_index) {
+                size_t value_id = out_plan->items[item_index].value_id;
+
+                if (value_id < function->next_value_id) {
+                    out_plan->value_item_indices[value_id] = item_index;
+                }
+            }
+        }
         if (out_run_result) {
             out_run_result->published_plan_artifacts = 1u;
         }
     }
     if (out_run_result) {
         out_run_result->status = VALUE_SSA_ALLOC_MOVE_ENGINE_RUN_COMPLETED;
+    }
+    if (trace_timing) {
+        fprintf(stderr,
+            "[value-ssa-alloc-timing] fn=%s move-engine summary items=%zu values=%zu move-related-values=%zu steps=%zu coalesce=%zu freeze=%zu simplify=%zu spill=%zu family-member-rebuild=%zu refresh=(general=%zu,coalesce=%zu,affected_total=%zu,affected_max=%zu,phase-entry-rebuild=%zu) scans=(simplify=%zu,freeze=%zu,spill=%zu,simplify-pair=%zu,freeze-pair=%zu)\n",
+            function->name ? function->name : "<anon>",
+            active_worklist ? active_worklist->item_count : 0u,
+            function->next_value_id,
+            move_related_value_count,
+            out_run_result ? out_run_result->plan_driver.completed_step_count : 0u,
+            out_run_result ? out_run_result->coalesce_step_count : 0u,
+            out_run_result ? out_run_result->freeze_step_count : 0u,
+            out_run_result ? out_run_result->simplify_remove_step_count : 0u,
+            out_run_result ? out_run_result->spill_remove_step_count : 0u,
+            out_run_result ? out_run_result->family_member_rebuild_count : 0u,
+            out_run_result ? out_run_result->general_refresh_count : 0u,
+            out_run_result ? out_run_result->coalesce_refresh_count : 0u,
+            out_run_result ? out_run_result->refresh_affected_family_root_total : 0u,
+            out_run_result ? out_run_result->refresh_affected_family_root_max : 0u,
+            out_run_result ? out_run_result->phase_entry_rebuild_count : 0u,
+            out_run_result ? out_run_result->simplify_candidate_scan_total : 0u,
+            out_run_result ? out_run_result->freeze_candidate_scan_total : 0u,
+            out_run_result ? out_run_result->spill_candidate_scan_total : 0u,
+            out_run_result ? out_run_result->simplify_pair_scan_total : 0u,
+            out_run_result ? out_run_result->freeze_pair_scan_total : 0u);
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine finalize", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_function_timing(function->name, "move-engine total", value_ssa_alloc_now_s() - total_start);
     }
     ok = 1;
 
@@ -4941,12 +5386,19 @@ cleanup:
     free(spill_family_root_flags);
     free(spill_family_roots);
     free(scratch_roots);
+    free(scratch_root_flags);
     free(family_phase_entries);
     free(active_family_move_work_classes);
     free(active_move_related);
     free(initial_family_move_related);
     free(initial_effective_move_related);
     free(active_effective_move_related);
+    free(interference_neighbor_offsets);
+    free(interference_neighbor_value_ids);
+    free(affinity_neighbor_offsets);
+    free(affinity_neighbor_value_ids);
+    free(affinity_neighbor_weights);
+    free(work_item_preview_bases);
     free(family_neighbor_matrix);
     free(family_coalesce_ready_neighbor_matrix);
     free(family_coalesce_ready_affinity_matrix);

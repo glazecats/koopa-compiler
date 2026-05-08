@@ -576,6 +576,7 @@ int value_ssa_function_append_local(ValueSsaFunction *function,
         return 0;
     }
     local->is_parameter = is_parameter;
+    local->array_rank = 0u;
 
     if (is_parameter) {
         ++function->parameter_count;

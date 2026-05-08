@@ -92,6 +92,20 @@
 
 ## Progress Reporting
 
+- At the end of every conversation, explicitly tell the user which active
+  implementation blocks/workstreams are currently being advanced or planned
+  next, and include an approximate percentage for each one.
+- Treat progress-memory upkeep as part of the implementation task itself, not
+  as optional narration. When a substantial work chunk changes the real
+  roadmap position, update `docs/NEXT_STEPS.md` before finishing the chunk.
+- In particular, keep `docs/NEXT_STEPS.md`'s `Current Active Slice` section
+  current as the default top-level progress snapshot, rather than letting it
+  lag behind conversational status updates.
+- Also keep the currently relevant referenced progress document in sync when
+  it is the canonical deeper status source for the active line (for example a
+  stage plan under `docs/backend/` or `docs/ssa/`). Do not update only one of
+  `Current Active Slice` or the referenced plan if both are being used as the
+  active progress memory for the same workstream.
 - When reporting implementation progress at the end of a work chunk, prefer locating the work inside the current roadmap/staging document rather than giving only a generic status line.
 - For staged workstreams such as Value-SSA allocator mainline, report progress in layered form when possible, for example:
   - which named stage/substage is complete
@@ -127,6 +141,66 @@
 - When the backend progress reference has already advanced past the timeline side, prefer the `MLOG1`-`MLOG3` snapshot in `docs/backend/MACHINE_LOG_PLAN.md` over older `MTIM*`, `MHIS*`, `MOUT*`, `MEV*`, `MTR*`, `MDEL*`, `MOB*`, `MAP*`, `MCOM*`, `MWB*`, `MMUT*`, `MSTA*`, `MTN*`, `MRT*`, `MLD*`, `MEX*`, `MI*`, `MELF*`, `MS*`, or `ML*` names unless the work actually reopened one of those earlier layers.
 - When the backend progress reference has already advanced past the log side, prefer the `MJR1`-`MJR3` snapshot in `docs/backend/MACHINE_JOURNAL_PLAN.md` over older `MLOG*`, `MTIM*`, `MHIS*`, `MOUT*`, `MEV*`, `MTR*`, `MDEL*`, `MOB*`, `MAP*`, `MCOM*`, `MWB*`, `MMUT*`, `MSTA*`, `MTN*`, `MRT*`, `MLD*`, `MEX*`, `MI*`, `MELF*`, `MS*`, or `ML*` names unless the work actually reopened one of those earlier layers.
 - Prefer concrete wording such as "X is complete; Y is in progress at roughly N%; Z is the next mainline" over vague wording such as "still working on it".
+
+## Correctness Rechecks
+
+- Treat periodic correctness rechecks as a required part of the implementation
+  workflow, not as optional cleanup after coding.
+- The current agent should proactively choose a recurring recheck cadence,
+  instead of waiting for the user to ask every time. A good default is:
+  - using a simple countdown-style trigger is encouraged, for example
+    "recheck after N user turns" or "recheck after N code-edit chunks",
+    as long as the cadence stays proactive and regular
+  - after every `1-3` substantial code-edit chunks on an active optimization /
+    correctness line
+  - or after every `3-5` user turns of continuous implementation on the same
+    line
+  - and always again before treating a new optimization or bug fix as a kept
+    checkpoint
+- Recheck coverage should rotate rather than repeating one tiny comfort suite
+  forever. Prefer varying the mix across rounds so the evidence surface keeps
+  widening instead of clustering on the same few cases.
+- The recurring recheck menu should be drawn from both course-facing and
+  external surfaces when they are available locally. Typical examples include:
+  - course baselines such as `lv8`, `lv9`, and relevant `-perf` / public perf
+    witnesses
+  - external testcase trees already present in the environment, such as
+    `minic-test-cases-2021s`, `minic-test-cases-2021f`, `indigo`,
+    `TrivialCompiler`, `lava-test`, and
+    `jokerwyt/sysy-testsuit-collection`
+- Prefer not to run exactly the same correctness batch every round unless the
+  active risk is very narrow and explicitly calls for that exact repro.
+- When choosing a recheck batch, prefer explaining it implicitly through the
+  work itself: cover the current risk first, then rotate one or more adjacent
+  suites so the overall confidence keeps increasing.
+- When a recheck does uncover a regression, treat restoring that previously
+  green surface as part of the active implementation task before pressing
+  further on the optimization line.
+
+## Long-Running Commands
+
+- Treat long-running commands and sweeps as stateful work, not as disposable
+  probes that may be casually restarted every turn.
+- Prefer letting an already-started long command finish and reporting its
+  result, instead of ending the conversation early and rerunning the same
+  command from scratch in the next turn.
+- If a long command must be interrupted because it is clearly hung, timed out,
+  or has already yielded enough information, say so explicitly and record the
+  reason rather than silently restarting it later.
+- When ending a conversation while a long command or sweep is still relevant,
+  explicitly record:
+  - which command is still in flight or still needs completion
+  - whether the next turn should continue waiting for that result or rerun it
+    for a concrete reason
+- Prefer splitting work into:
+  - long sweeps / full regressions that should usually be allowed to finish
+  - short diagnostics / focused repros that may be rerun cheaply
+  instead of repeatedly restarting the same expensive full sweep.
+- When a long-running command is likely to outlive the current turn or may
+  produce enough output that direct polling becomes awkward, prefer sending
+  its stdout/stderr to a concrete log file and then reading or tailing that
+  file for progress/result collection, rather than relying only on an active
+  terminal session buffer.
 
 ## Current Default Assignment
 

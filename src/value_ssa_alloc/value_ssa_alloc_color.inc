@@ -224,6 +224,10 @@ static int value_ssa_alloc_run_build_step(const ValueSsaFunction *function,
     ValueSsaAllocatorCoalesceAnalysis *coalesce_analysis,
     ValueSsaAllocationBuildStepResult *out_result,
     ValueSsaError *error) {
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
+
     if (out_result) {
         value_ssa_alloc_build_step_result_init(out_result);
     }
@@ -237,42 +241,75 @@ static int value_ssa_alloc_run_build_step(const ValueSsaFunction *function,
         return 0;
     }
     out_result->built_def_use = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step def-use", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_cfg_analysis(function, cfg, error)) {
         return 0;
     }
     out_result->built_cfg = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step cfg", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_liveness_analysis(function, cfg, liveness, error)) {
         return 0;
     }
     out_result->built_liveness = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step liveness", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_interference_graph(function, cfg, liveness, interference, error)) {
         return 0;
     }
     out_result->built_interference = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step interference", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_copy_affinity_graph(function, interference, affinity, error)) {
         return 0;
     }
     out_result->built_affinity = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step affinity", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_allocation_prep(function, def_use, liveness, interference, affinity, prep, error)) {
         return 0;
     }
     out_result->built_prep = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step prep", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_allocation_worklist(function, prep, worklist, error)) {
         return 0;
     }
     out_result->built_worklist = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "build-step worklist", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_compute_allocator_coalesce_analysis(
             function, prep, interference, affinity, color_budget, coalesce_analysis, error)) {
         return 0;
     }
     out_result->built_coalesce_analysis = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(
+            function->name, "build-step coalesce-analysis", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_function_timing(function->name, "build-step total", value_ssa_alloc_now_s() - total_start);
+    }
 
     out_result->status = VALUE_SSA_ALLOC_BUILD_STEP_COMPLETED;
     return 1;
@@ -284,6 +321,10 @@ static int value_ssa_alloc_run_full_step(const ValueSsaFunction *function,
     ValueSsaAllocationResult *result,
     ValueSsaAllocationFullStepResult *out_result,
     ValueSsaError *error) {
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
+
     if (out_result) {
         value_ssa_alloc_full_step_result_init(out_result);
     }
@@ -310,6 +351,10 @@ static int value_ssa_alloc_run_full_step(const ValueSsaFunction *function,
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-199: build-step ended in unknown state");
         return 0;
     }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "full-step build", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_alloc_run_entry_step(function,
             &artifacts->prep,
@@ -327,6 +372,10 @@ static int value_ssa_alloc_run_full_step(const ValueSsaFunction *function,
     }
     if (!value_ssa_alloc_entry_step_completed_or_cleanup(NULL, &out_result->entry_step, error)) {
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "full-step entry", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_function_timing(function->name, "full-step total", value_ssa_alloc_now_s() - total_start);
     }
 
     out_result->status = VALUE_SSA_ALLOC_FULL_STEP_COMPLETED;
@@ -378,6 +427,10 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     int spill_rewrote_any = 0;
     int rewrote_any = 0;
     int canonicalized_after_rewrite = 0;
+    unsigned char *rewritten_functions = NULL;
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (out_result) {
         value_ssa_alloc_rewrite_loop_step_result_init(out_result);
@@ -394,6 +447,12 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     }
 
     out_result->completed_iteration_count = iteration_count + 1;
+    rewritten_functions =
+        (unsigned char *)calloc(program->function_count ? program->function_count : 1u, sizeof(unsigned char));
+    if (!rewritten_functions) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-236: out of memory preparing rewrite-loop function map");
+        return 0;
+    }
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         spill_local_floors[function_index] = program->functions[function_index].local_count;
     }
@@ -401,12 +460,18 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     if (!value_ssa_alloc_run_program_rewrite_stage(program,
             current_result,
             spill_local_floors,
+            rewritten_functions,
             &split_rewrote_any,
             &spill_rewrote_any,
             &rewrote_any,
             &canonicalized_after_rewrite,
             error)) {
+        free(rewritten_functions);
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("rewrite-loop rewrite-stage", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
     }
 
     out_result->split_rewrote_any = split_rewrote_any ? 1u : 0u;
@@ -414,6 +479,10 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     out_result->rewrote_any = rewrote_any ? 1u : 0u;
     out_result->canonicalized_after_rewrite = canonicalized_after_rewrite ? 1u : 0u;
     if (!rewrote_any) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-loop total", value_ssa_alloc_now_s() - total_start);
+        }
+        free(rewritten_functions);
         out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_CONVERGED;
         return 1;
     }
@@ -421,41 +490,76 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     if (out_stats) {
         ++out_stats->rewrite_rounds;
     }
-    if (!value_ssa_allocate_program(program, color_budget, next_result, error)) {
-        return 0;
+    value_ssa_program_allocation_result_free(next_result);
+    next_result->function_count = program->function_count;
+    if (program->function_count > 0u) {
+        next_result->function_results =
+            (ValueSsaAllocationResult *)calloc(program->function_count, sizeof(ValueSsaAllocationResult));
+        if (!next_result->function_results) {
+            free(rewritten_functions);
+            value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-237: out of memory preparing incremental reallocate");
+            return 0;
+        }
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            value_ssa_allocation_result_init(&next_result->function_results[function_index]);
+            if (!program->functions[function_index].has_body) {
+                continue;
+            }
+            if (rewritten_functions[function_index]) {
+                if (!value_ssa_allocate_function(&program->functions[function_index],
+                        color_budget,
+                        &next_result->function_results[function_index],
+                        error)) {
+                    free(rewritten_functions);
+                    value_ssa_program_allocation_result_free(next_result);
+                    return 0;
+                }
+            } else if (!value_ssa_clone_allocation_result(&current_result->function_results[function_index],
+                           &next_result->function_results[function_index],
+                           error)) {
+                free(rewritten_functions);
+                value_ssa_program_allocation_result_free(next_result);
+                return 0;
+            }
+        }
+    }
+    if (trace_timing) {
+        size_t reallocated_function_count = 0;
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            if (rewritten_functions[function_index]) {
+                ++reallocated_function_count;
+            }
+        }
+        fprintf(stderr,
+            "[value-ssa-alloc-timing] rewrite-loop reallocated-functions=%zu/%zu\n",
+            reallocated_function_count,
+            program->function_count);
+        value_ssa_alloc_trace_timing("rewrite-loop reallocate", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
     }
     if (out_stats) {
         ++out_stats->allocation_rounds;
     }
 
-    {
-        ValueSsaProgramAllocationLayout current_layout;
-        ValueSsaProgramAllocationLayout next_layout;
-        int equivalent = 0;
-
-        value_ssa_program_allocation_layout_init(&current_layout);
-        value_ssa_program_allocation_layout_init(&next_layout);
-        if (!value_ssa_build_program_allocation_layout(current_result, &current_layout, error) ||
-            !value_ssa_build_program_allocation_layout(next_result, &next_layout, error)) {
-            value_ssa_program_allocation_layout_free(&current_layout);
-            value_ssa_program_allocation_layout_free(&next_layout);
-            return 0;
+    if (value_ssa_program_allocation_result_equivalent_ignoring_names(current_result, next_result)) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-loop equivalence-check", value_ssa_alloc_now_s() - stage_start);
+            value_ssa_alloc_trace_timing("rewrite-loop total", value_ssa_alloc_now_s() - total_start);
         }
-
-        equivalent = value_ssa_program_allocation_layout_equivalent_ignoring_names(&current_layout, &next_layout);
-        value_ssa_program_allocation_layout_free(&current_layout);
-        value_ssa_program_allocation_layout_free(&next_layout);
-
-        if (equivalent) {
-            value_ssa_program_allocation_result_free(current_result);
-            *current_result = *next_result;
-            value_ssa_program_allocation_result_init(next_result);
-            out_result->reallocated_after_rewrite = 1u;
-            out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_CONVERGED;
-            return 1;
-        }
+        free(rewritten_functions);
+        value_ssa_program_allocation_result_free(current_result);
+        *current_result = *next_result;
+        value_ssa_program_allocation_result_init(next_result);
+        out_result->reallocated_after_rewrite = 1u;
+        out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_CONVERGED;
+        return 1;
     }
 
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("rewrite-loop equivalence-check", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_timing("rewrite-loop total", value_ssa_alloc_now_s() - total_start);
+    }
+    free(rewritten_functions);
     out_result->reallocated_after_rewrite = 1u;
     out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_COMPLETED;
     return 1;
@@ -472,6 +576,10 @@ static int value_ssa_alloc_run_pipeline_step(const ValueSsaFunction *function,
     ValueSsaAllocationResult *result,
     ValueSsaAllocationPipelineStepResult *out_result,
     ValueSsaError *error) {
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
+
     if (out_result) {
         value_ssa_alloc_pipeline_step_result_init(out_result);
     }
@@ -485,6 +593,10 @@ static int value_ssa_alloc_run_pipeline_step(const ValueSsaFunction *function,
         return 0;
     }
     out_result->built_plan = 1u;
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "pipeline-step plan", value_ssa_alloc_now_s() - stage_start);
+        stage_start = value_ssa_alloc_now_s();
+    }
 
     if (!value_ssa_alloc_run_execute_step(
             function, prep, coalesce_analysis, interference, plan, color_budget, result, &out_result->execute_step, error)) {
@@ -493,6 +605,10 @@ static int value_ssa_alloc_run_pipeline_step(const ValueSsaFunction *function,
     if (out_result->execute_step.status != VALUE_SSA_ALLOC_EXECUTE_STEP_COMPLETED) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-191: execute-step ended in unknown state");
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "pipeline-step execute", value_ssa_alloc_now_s() - stage_start);
+        value_ssa_alloc_trace_function_timing(function->name, "pipeline-step total", value_ssa_alloc_now_s() - total_start);
     }
 
     out_result->status = VALUE_SSA_ALLOC_PIPELINE_STEP_COMPLETED;
@@ -508,6 +624,9 @@ static int value_ssa_alloc_run_pipeline_step_from_plan(const ValueSsaFunction *f
     ValueSsaAllocationResult *result,
     ValueSsaAllocationPipelineStepResult *out_result,
     ValueSsaError *error) {
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+
     if (out_result) {
         value_ssa_alloc_pipeline_step_result_init(out_result);
     }
@@ -524,6 +643,9 @@ static int value_ssa_alloc_run_pipeline_step_from_plan(const ValueSsaFunction *f
     if (out_result->execute_step.status != VALUE_SSA_ALLOC_EXECUTE_STEP_COMPLETED) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-191: execute-step ended in unknown state");
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_function_timing(function->name, "pipeline-step-from-plan total", value_ssa_alloc_now_s() - total_start);
     }
 
     out_result->status = VALUE_SSA_ALLOC_PIPELINE_STEP_COMPLETED;
@@ -732,6 +854,9 @@ int value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(ValueS
     ValueSsaAllocationRewriteLoopStepResult loop_step;
     size_t *spill_local_floors = NULL;
     size_t iteration_count = 0;
+    int trace_timing = value_ssa_alloc_trace_enabled();
+    double total_start = trace_timing ? value_ssa_alloc_now_s() : 0.0;
+    double stage_start = total_start;
 
     if (!program || !result) {
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-043: invalid allocate+rewrite contract");
@@ -744,6 +869,9 @@ int value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(ValueS
     value_ssa_alloc_rewrite_loop_step_result_init(&loop_step);
     if (!value_ssa_allocate_program(program, color_budget, &current_result, error)) {
         return 0;
+    }
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("initial-allocate", value_ssa_alloc_now_s() - stage_start);
     }
     if (out_stats) {
         out_stats->allocation_rounds = 1;
@@ -790,6 +918,9 @@ int value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(ValueS
     free(spill_local_floors);
     value_ssa_program_allocation_result_free(result);
     *result = current_result;
+    if (trace_timing) {
+        value_ssa_alloc_trace_timing("total", value_ssa_alloc_now_s() - total_start);
+    }
     return 1;
 }
 

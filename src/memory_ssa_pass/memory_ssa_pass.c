@@ -8,6 +8,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int memory_ssa_pass_trace_enabled(void) {
+    const char *flag = getenv("MEMORY_SSA_PASS_TRACE");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static void memory_ssa_pass_trace(const char *fmt, ...) {
+    va_list args;
+
+    if (!fmt || !memory_ssa_pass_trace_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "[memory-ssa-pass-trace] ");
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fputc('\n', stderr);
+}
+
 static void memory_ssa_pass_set_error(ValueSsaError *error, int line, int column, const char *fmt, ...);
 static void memory_ssa_pass_copy_memory_error(ValueSsaError *error, const MemorySsaError *memory_error);
 static int memory_ssa_pass_compact_removed_instructions(ValueSsaBasicBlock *block,

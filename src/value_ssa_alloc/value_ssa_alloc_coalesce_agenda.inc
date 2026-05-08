@@ -85,6 +85,21 @@ static int value_ssa_alloc_coalesce_opportunity_is_before(const ValueSsaAllocato
     return lhs->rhs_root_value_id < rhs->rhs_root_value_id;
 }
 
+static int value_ssa_alloc_coalesce_opportunity_compare_qsort(const void *lhs_ptr, const void *rhs_ptr) {
+    const ValueSsaAllocatorCoalesceOpportunityItem *lhs =
+        (const ValueSsaAllocatorCoalesceOpportunityItem *)lhs_ptr;
+    const ValueSsaAllocatorCoalesceOpportunityItem *rhs =
+        (const ValueSsaAllocatorCoalesceOpportunityItem *)rhs_ptr;
+
+    if (value_ssa_alloc_coalesce_opportunity_is_before(lhs, rhs)) {
+        return -1;
+    }
+    if (value_ssa_alloc_coalesce_opportunity_is_before(rhs, lhs)) {
+        return 1;
+    }
+    return 0;
+}
+
 int value_ssa_compute_allocator_coalesce_opportunity_agenda(const ValueSsaFunction *function,
     const ValueSsaAllocatorMoveFamilyAnalysis *family_analysis,
     const ValueSsaAllocatorMoveWorklist *worklist,
@@ -198,19 +213,11 @@ int value_ssa_compute_allocator_coalesce_opportunity_agenda(const ValueSsaFuncti
         }
     }
 
-    for (family_index = 0; family_index < agenda->item_count; ++family_index) {
-        size_t scan_index;
-
-        for (scan_index = family_index + 1; scan_index < agenda->item_count; ++scan_index) {
-            ValueSsaAllocatorCoalesceOpportunityItem temp;
-
-            if (!value_ssa_alloc_coalesce_opportunity_is_before(&agenda->items[scan_index], &agenda->items[family_index])) {
-                continue;
-            }
-            temp = agenda->items[family_index];
-            agenda->items[family_index] = agenda->items[scan_index];
-            agenda->items[scan_index] = temp;
-        }
+    if (agenda->item_count > 1) {
+        qsort(agenda->items,
+            agenda->item_count,
+            sizeof(ValueSsaAllocatorCoalesceOpportunityItem),
+            value_ssa_alloc_coalesce_opportunity_compare_qsort);
     }
 
     ok = 1;

@@ -324,138 +324,103 @@ static int ir_eval_global_binary(TokenType op,
     int column,
     IrError *error,
     int *out_invalid_constant) {
-    const long long bit_width = (long long)(sizeof(long long) * 8);
+    int32_t lhs32;
+    int32_t rhs32;
 
     if (!out_value) {
         return 0;
     }
 
+    lhs32 = (int32_t)ir_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)ir_normalize_sysy_int_value(rhs);
+
     switch (op) {
     case TOKEN_PLUS:
-        if (__builtin_add_overflow(lhs, rhs, out_value)) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
         return 1;
     case TOKEN_MINUS:
-        if (__builtin_sub_overflow(lhs, rhs, out_value)) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
         return 1;
     case TOKEN_STAR:
-        if (__builtin_mul_overflow(lhs, rhs, out_value)) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
         return 1;
     case TOKEN_SLASH:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             ir_set_error(error,
                 line,
                 column,
                 "IR-LOWER-018: top-level initializer division by zero is not allowed");
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
-        *out_value = lhs / rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 / (long long)rhs32);
         return 1;
     case TOKEN_PERCENT:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             ir_set_error(error,
                 line,
                 column,
                 "IR-LOWER-018: top-level initializer modulo by zero is not allowed");
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
-        *out_value = lhs % rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 % (long long)rhs32);
         return 1;
     case TOKEN_SHIFT_LEFT:
-        if (rhs < 0 || rhs >= bit_width) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             ir_set_error(error,
                 line,
                 column,
-                "IR-LOWER-019: top-level initializer shift count %lld is out of range",
-                rhs);
+                "IR-LOWER-019: top-level initializer shift count %d is out of range",
+                rhs32);
             return 0;
         }
-        if (lhs < 0) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
-        if (rhs > 0 && lhs > (LLONG_MAX >> rhs)) {
-            if (out_invalid_constant) {
-                *out_invalid_constant = 1;
-            }
-            return 0;
-        }
-        *out_value = lhs << rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
         return 1;
     case TOKEN_SHIFT_RIGHT:
-        if (rhs < 0 || rhs >= bit_width) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             if (out_invalid_constant) {
                 *out_invalid_constant = 1;
             }
             ir_set_error(error,
                 line,
                 column,
-                "IR-LOWER-019: top-level initializer shift count %lld is out of range",
-                rhs);
+                "IR-LOWER-019: top-level initializer shift count %d is out of range",
+                rhs32);
             return 0;
         }
-        *out_value = lhs >> rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
         return 1;
     case TOKEN_AMP:
-        *out_value = lhs & rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 & rhs32));
         return 1;
     case TOKEN_CARET:
-        *out_value = lhs ^ rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
         return 1;
     case TOKEN_PIPE:
-        *out_value = lhs | rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 | rhs32));
         return 1;
     case TOKEN_EQ:
-        *out_value = (lhs == rhs) ? 1 : 0;
+        *out_value = (lhs32 == rhs32) ? 1 : 0;
         return 1;
     case TOKEN_NE:
-        *out_value = (lhs != rhs) ? 1 : 0;
+        *out_value = (lhs32 != rhs32) ? 1 : 0;
         return 1;
     case TOKEN_LT:
-        *out_value = (lhs < rhs) ? 1 : 0;
+        *out_value = (lhs32 < rhs32) ? 1 : 0;
         return 1;
     case TOKEN_LE:
-        *out_value = (lhs <= rhs) ? 1 : 0;
+        *out_value = (lhs32 <= rhs32) ? 1 : 0;
         return 1;
     case TOKEN_GT:
-        *out_value = (lhs > rhs) ? 1 : 0;
+        *out_value = (lhs32 > rhs32) ? 1 : 0;
         return 1;
     case TOKEN_GE:
-        *out_value = (lhs >= rhs) ? 1 : 0;
+        *out_value = (lhs32 >= rhs32) ? 1 : 0;
         return 1;
     case TOKEN_AND_AND:
-        *out_value = (lhs != 0 && rhs != 0) ? 1 : 0;
+        *out_value = (lhs32 != 0 && rhs32 != 0) ? 1 : 0;
         return 1;
     case TOKEN_OR_OR:
-        *out_value = (lhs != 0 || rhs != 0) ? 1 : 0;
+        *out_value = (lhs32 != 0 || rhs32 != 0) ? 1 : 0;
         return 1;
     default:
         ir_set_error(error,
@@ -465,6 +430,10 @@ static int ir_eval_global_binary(TokenType op,
             lexer_token_type_name(op));
         return 0;
     }
+}
+
+static int ir_global_initializer_number_fits_fold_range(long long value) {
+    return value >= INT32_MIN && value <= (long long)UINT32_MAX;
 }
 
 static int ir_eval_global_initializer_expr(const IrProgram *program,
@@ -484,7 +453,13 @@ static int ir_eval_global_initializer_expr(const IrProgram *program,
 
     switch (expr->kind) {
     case AST_EXPR_NUMBER:
-        *out_value = expr->as.number_value;
+        if (!ir_global_initializer_number_fits_fold_range(expr->as.number_value)) {
+            if (out_invalid_constant) {
+                *out_invalid_constant = 1;
+            }
+            return 0;
+        }
+        *out_value = ir_normalize_sysy_int_value(expr->as.number_value);
         return 1;
     case AST_EXPR_INIT_LIST:
         if (out_invalid_constant) {
@@ -529,22 +504,16 @@ static int ir_eval_global_initializer_expr(const IrProgram *program,
         }
         switch (expr->as.unary.op) {
         case TOKEN_PLUS:
-            *out_value = rhs;
+            *out_value = ir_normalize_sysy_int_value(rhs);
             return 1;
         case TOKEN_MINUS:
-            if (rhs == LLONG_MIN) {
-                if (out_invalid_constant) {
-                    *out_invalid_constant = 1;
-                }
-                return 0;
-            }
-            *out_value = -rhs;
+            *out_value = ir_normalize_sysy_int_value(-rhs);
             return 1;
         case TOKEN_BANG:
             *out_value = rhs == 0 ? 1 : 0;
             return 1;
         case TOKEN_TILDE:
-            *out_value = ~rhs;
+            *out_value = ir_normalize_sysy_int_value(~rhs);
             return 1;
         default:
             if (out_invalid_constant) {

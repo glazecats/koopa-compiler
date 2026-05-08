@@ -36,6 +36,7 @@ void machine_bytes_report_init(MachineBytesReport *report) {
     report->reference_summaries = NULL;
     report->fixup_summaries = NULL;
     report->symbol_summaries = NULL;
+    report->symbol_summaries_by_name = NULL;
     report->section_summaries = NULL;
     report->total_block_summary_count = 0;
     report->total_program_byte_count = 0;
@@ -89,6 +90,7 @@ void machine_bytes_report_free(MachineBytesReport *report) {
     free(report->reference_summaries);
     free(report->fixup_summaries);
     free(report->symbol_summaries);
+    free(report->symbol_summaries_by_name);
     free(report->section_summaries);
     free(report->function_indices_with_calls);
     free(report->function_indices_with_fallthrough);

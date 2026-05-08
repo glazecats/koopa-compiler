@@ -806,11 +806,11 @@ static int lower_ir_verify_instruction(const LowerIrProgram *program,
         {
             const LowerIrFunction *callee;
 
-        if (!instruction->has_result || instruction->result.kind != LOWER_IR_VALUE_TEMP) {
+        if (instruction->has_result && instruction->result.kind != LOWER_IR_VALUE_TEMP) {
             lower_ir_set_error(error,
                 0,
                 0,
-                "LOWER-IR-VERIFY-010: bb.%zu instruction %zu call must produce a temp result",
+                "LOWER-IR-VERIFY-010: bb.%zu instruction %zu call result must be a temp when present",
                 block->id,
                 instruction_index);
             return 0;

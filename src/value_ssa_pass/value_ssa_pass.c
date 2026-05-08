@@ -2,10 +2,12 @@
 #include "value_ssa_pass.h"
 #include "memory_ssa_pass.h"
 
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 static void value_ssa_set_error(ValueSsaError *error, int line, int column, const char *fmt, ...);
 static int value_ssa_next_growth_capacity(size_t current,
@@ -28,6 +30,32 @@ static int value_ssa_pass_has_single_idom_entry(const ValueSsaFunction *function
 static int value_ssa_mark_reachable_blocks(const ValueSsaFunction *function,
     unsigned char *reachable,
     ValueSsaError *error);
+
+static int value_ssa_trace_enabled(void) {
+    const char *flag = getenv("VALUE_SSA_TRACE_TIMING");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static double value_ssa_now_s(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+}
+
+static void value_ssa_trace_timing(const char *stage, double elapsed_s) {
+    if (!stage || !value_ssa_trace_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "[value-ssa-timing] %s %.3f\n", stage, elapsed_s);
+}
+
+static long long value_ssa_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
 
 static void value_ssa_set_error(ValueSsaError *error, int line, int column, const char *fmt, ...) {
     va_list args;
@@ -286,11 +314,13 @@ static int value_ssa_mark_reachable_blocks(const ValueSsaFunction *function,
 #define VALUE_SSA_SPLIT_AGGREGATOR
 #include "value_ssa_simplify.inc"
 #include "value_ssa_load_forward.inc"
+#include "value_ssa_inline_helper.inc"
 #include "value_ssa_store_dce.inc"
 #include "value_ssa_normalize.inc"
 #include "value_ssa_identity.inc"
 #include "value_ssa_fold.inc"
 #include "value_ssa_cse.inc"
+#include "value_ssa_perf_hotspot.inc"
 #include "value_ssa_simplify_cfg.inc"
 #include "value_ssa_dce.inc"
 #include "value_ssa_pass_bridge.inc"

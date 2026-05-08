@@ -167,6 +167,10 @@ typedef struct {
     ValueSsaAllocatorCoalesceItem *items;
     size_t *value_roots;
     size_t *class_sizes;
+    size_t pair_index_capacity;
+    size_t *pair_index_lhs;
+    size_t *pair_index_rhs;
+    size_t *pair_index_item_indices;
 } ValueSsaAllocatorCoalesceAnalysis;
 
 typedef enum {
@@ -197,6 +201,7 @@ typedef struct {
     size_t family_count;
     ValueSsaAllocatorMoveFamilyItem *items;
     size_t *value_family_indices;
+    size_t *root_family_indices;
 } ValueSsaAllocatorMoveFamilyAnalysis;
 
 typedef enum {
@@ -227,6 +232,7 @@ typedef struct {
     size_t item_count;
     ValueSsaAllocatorMoveWorkItem *items;
     size_t *value_work_indices;
+    size_t *root_work_indices;
 } ValueSsaAllocatorMoveWorklist;
 
 typedef struct {
@@ -432,6 +438,7 @@ typedef struct {
     ValueSsaAllocatorPlanItem *items;
     size_t *final_runtime_coalesce_roots;
     size_t *final_runtime_coalesce_class_sizes;
+    size_t *value_item_indices;
 } ValueSsaAllocatorPlan;
 
 void value_ssa_allocation_result_init(ValueSsaAllocationResult *result);

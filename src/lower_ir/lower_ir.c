@@ -556,6 +556,7 @@ int lower_ir_function_append_local(LowerIrFunction *function,
         return 0;
     }
     local->is_parameter = is_parameter;
+    local->array_rank = 0u;
 
     if (is_parameter) {
         ++function->parameter_count;

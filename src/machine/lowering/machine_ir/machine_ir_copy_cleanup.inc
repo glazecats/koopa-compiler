@@ -969,6 +969,16 @@ static int machine_ir_cleanup_local_copies_in_function(MachineIrProgram *program
                             program, function, needed, instruction->as.call.args[resource_index]);
                     }
                     break;
+                case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                    machine_ir_mark_operand_resource(
+                        program, function, needed, instruction->as.load_indirect_addr);
+                    break;
+                case MACHINE_IR_INSTR_STORE_INDIRECT:
+                    machine_ir_mark_operand_resource(
+                        program, function, needed, instruction->as.store_indirect.addr);
+                    machine_ir_mark_operand_resource(
+                        program, function, needed, instruction->as.store_indirect.value);
+                    break;
                 case MACHINE_IR_INSTR_STORE_LOCAL:
                 case MACHINE_IR_INSTR_STORE_GLOBAL:
                     machine_ir_mark_operand_resource(program, function, needed, instruction->as.store.value);

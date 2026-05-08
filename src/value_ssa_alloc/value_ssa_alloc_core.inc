@@ -89,6 +89,413 @@ void value_ssa_program_allocation_result_init(ValueSsaProgramAllocationResult *r
     result->function_results = NULL;
 }
 
+static int value_ssa_clone_allocation_result(const ValueSsaAllocationResult *src,
+    ValueSsaAllocationResult *dst,
+    ValueSsaError *error) {
+    size_t alloc_count;
+
+    if (!src || !dst) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-234: invalid allocation-result clone contract");
+        return 0;
+    }
+
+    value_ssa_allocation_result_free(dst);
+    *dst = *src;
+    dst->function_name = NULL;
+    dst->colors = NULL;
+    dst->has_color = NULL;
+    dst->spill_flags = NULL;
+    dst->spill_intended_flags = NULL;
+    dst->spill_confirmed_flags = NULL;
+    dst->spill_recovered_flags = NULL;
+    dst->spill_recovery_orders = NULL;
+    dst->spill_recovery_phase_ids = NULL;
+    dst->spill_recovery_phase_member_orders = NULL;
+    dst->spill_recovery_phase_member_counts = NULL;
+    dst->spill_recovery_phase_entries = NULL;
+    dst->spill_priorities = NULL;
+    dst->spill_slots = NULL;
+    dst->used_preferred_color_flags = NULL;
+    dst->preferred_color_sources = NULL;
+    dst->preferred_color_partner_value_ids = NULL;
+    dst->used_generic_eviction_flags = NULL;
+    dst->generic_eviction_blocker_value_ids = NULL;
+    dst->generic_eviction_blocker_recolored_flags = NULL;
+    dst->generic_eviction_blocker_new_colors = NULL;
+    dst->used_targeted_eviction_flags = NULL;
+    dst->targeted_eviction_blocker_value_ids = NULL;
+    dst->targeted_eviction_blocker_recolored_flags = NULL;
+    dst->targeted_eviction_blocker_new_colors = NULL;
+    dst->used_retry_eviction_flags = NULL;
+    dst->retry_eviction_blocker_value_ids = NULL;
+    dst->retry_eviction_blocker_recolored_flags = NULL;
+    dst->retry_eviction_blocker_new_colors = NULL;
+
+    alloc_count = src->value_count ? src->value_count : 1u;
+    if (src->colors) {
+        dst->colors = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->has_color) {
+        dst->has_color = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_flags) {
+        dst->spill_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_intended_flags) {
+        dst->spill_intended_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_confirmed_flags) {
+        dst->spill_confirmed_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_recovered_flags) {
+        dst->spill_recovered_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_recovery_orders) {
+        dst->spill_recovery_orders = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_ids) {
+        dst->spill_recovery_phase_ids = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_member_orders) {
+        dst->spill_recovery_phase_member_orders = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_member_counts) {
+        dst->spill_recovery_phase_member_counts = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_entries) {
+        dst->spill_recovery_phase_entries =
+            (ValueSsaAllocatorRetryFamilyAgendaItem *)malloc(alloc_count * sizeof(ValueSsaAllocatorRetryFamilyAgendaItem));
+    }
+    if (src->spill_priorities) {
+        dst->spill_priorities = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->spill_slots) {
+        dst->spill_slots = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->used_preferred_color_flags) {
+        dst->used_preferred_color_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->preferred_color_sources) {
+        dst->preferred_color_sources =
+            (ValueSsaAllocationPreferredColorSource *)malloc(alloc_count * sizeof(ValueSsaAllocationPreferredColorSource));
+    }
+    if (src->preferred_color_partner_value_ids) {
+        dst->preferred_color_partner_value_ids = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->used_generic_eviction_flags) {
+        dst->used_generic_eviction_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->generic_eviction_blocker_value_ids) {
+        dst->generic_eviction_blocker_value_ids = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->generic_eviction_blocker_recolored_flags) {
+        dst->generic_eviction_blocker_recolored_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->generic_eviction_blocker_new_colors) {
+        dst->generic_eviction_blocker_new_colors = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->used_targeted_eviction_flags) {
+        dst->used_targeted_eviction_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->targeted_eviction_blocker_value_ids) {
+        dst->targeted_eviction_blocker_value_ids = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->targeted_eviction_blocker_recolored_flags) {
+        dst->targeted_eviction_blocker_recolored_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->targeted_eviction_blocker_new_colors) {
+        dst->targeted_eviction_blocker_new_colors = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->used_retry_eviction_flags) {
+        dst->used_retry_eviction_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->retry_eviction_blocker_value_ids) {
+        dst->retry_eviction_blocker_value_ids = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+    if (src->retry_eviction_blocker_recolored_flags) {
+        dst->retry_eviction_blocker_recolored_flags = (unsigned char *)malloc(alloc_count * sizeof(unsigned char));
+    }
+    if (src->retry_eviction_blocker_new_colors) {
+        dst->retry_eviction_blocker_new_colors = (size_t *)malloc(alloc_count * sizeof(size_t));
+    }
+
+    if ((src->colors && !dst->colors) ||
+        (src->has_color && !dst->has_color) ||
+        (src->spill_flags && !dst->spill_flags) ||
+        (src->spill_intended_flags && !dst->spill_intended_flags) ||
+        (src->spill_confirmed_flags && !dst->spill_confirmed_flags) ||
+        (src->spill_recovered_flags && !dst->spill_recovered_flags) ||
+        (src->spill_recovery_orders && !dst->spill_recovery_orders) ||
+        (src->spill_recovery_phase_ids && !dst->spill_recovery_phase_ids) ||
+        (src->spill_recovery_phase_member_orders && !dst->spill_recovery_phase_member_orders) ||
+        (src->spill_recovery_phase_member_counts && !dst->spill_recovery_phase_member_counts) ||
+        (src->spill_recovery_phase_entries && !dst->spill_recovery_phase_entries) ||
+        (src->spill_priorities && !dst->spill_priorities) ||
+        (src->spill_slots && !dst->spill_slots) ||
+        (src->used_preferred_color_flags && !dst->used_preferred_color_flags) ||
+        (src->preferred_color_sources && !dst->preferred_color_sources) ||
+        (src->preferred_color_partner_value_ids && !dst->preferred_color_partner_value_ids) ||
+        (src->used_generic_eviction_flags && !dst->used_generic_eviction_flags) ||
+        (src->generic_eviction_blocker_value_ids && !dst->generic_eviction_blocker_value_ids) ||
+        (src->generic_eviction_blocker_recolored_flags && !dst->generic_eviction_blocker_recolored_flags) ||
+        (src->generic_eviction_blocker_new_colors && !dst->generic_eviction_blocker_new_colors) ||
+        (src->used_targeted_eviction_flags && !dst->used_targeted_eviction_flags) ||
+        (src->targeted_eviction_blocker_value_ids && !dst->targeted_eviction_blocker_value_ids) ||
+        (src->targeted_eviction_blocker_recolored_flags && !dst->targeted_eviction_blocker_recolored_flags) ||
+        (src->targeted_eviction_blocker_new_colors && !dst->targeted_eviction_blocker_new_colors) ||
+        (src->used_retry_eviction_flags && !dst->used_retry_eviction_flags) ||
+        (src->retry_eviction_blocker_value_ids && !dst->retry_eviction_blocker_value_ids) ||
+        (src->retry_eviction_blocker_recolored_flags && !dst->retry_eviction_blocker_recolored_flags) ||
+        (src->retry_eviction_blocker_new_colors && !dst->retry_eviction_blocker_new_colors)) {
+        value_ssa_allocation_result_free(dst);
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-235: out of memory cloning allocation result");
+        return 0;
+    }
+
+    if (src->colors) {
+        memcpy(dst->colors, src->colors, alloc_count * sizeof(size_t));
+    }
+    if (src->has_color) {
+        memcpy(dst->has_color, src->has_color, alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_flags) {
+        memcpy(dst->spill_flags, src->spill_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_intended_flags) {
+        memcpy(dst->spill_intended_flags, src->spill_intended_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_confirmed_flags) {
+        memcpy(dst->spill_confirmed_flags, src->spill_confirmed_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_recovered_flags) {
+        memcpy(dst->spill_recovered_flags, src->spill_recovered_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->spill_recovery_orders) {
+        memcpy(dst->spill_recovery_orders, src->spill_recovery_orders, alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_ids) {
+        memcpy(dst->spill_recovery_phase_ids, src->spill_recovery_phase_ids, alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_member_orders) {
+        memcpy(dst->spill_recovery_phase_member_orders, src->spill_recovery_phase_member_orders, alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_member_counts) {
+        memcpy(dst->spill_recovery_phase_member_counts, src->spill_recovery_phase_member_counts, alloc_count * sizeof(size_t));
+    }
+    if (src->spill_recovery_phase_entries) {
+        memcpy(dst->spill_recovery_phase_entries,
+            src->spill_recovery_phase_entries,
+            alloc_count * sizeof(ValueSsaAllocatorRetryFamilyAgendaItem));
+    }
+    if (src->spill_priorities) {
+        memcpy(dst->spill_priorities, src->spill_priorities, alloc_count * sizeof(size_t));
+    }
+    if (src->spill_slots) {
+        memcpy(dst->spill_slots, src->spill_slots, alloc_count * sizeof(size_t));
+    }
+    if (src->used_preferred_color_flags) {
+        memcpy(dst->used_preferred_color_flags, src->used_preferred_color_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->preferred_color_sources) {
+        memcpy(dst->preferred_color_sources,
+            src->preferred_color_sources,
+            alloc_count * sizeof(ValueSsaAllocationPreferredColorSource));
+    }
+    if (src->preferred_color_partner_value_ids) {
+        memcpy(dst->preferred_color_partner_value_ids, src->preferred_color_partner_value_ids, alloc_count * sizeof(size_t));
+    }
+    if (src->used_generic_eviction_flags) {
+        memcpy(dst->used_generic_eviction_flags, src->used_generic_eviction_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->generic_eviction_blocker_value_ids) {
+        memcpy(dst->generic_eviction_blocker_value_ids, src->generic_eviction_blocker_value_ids, alloc_count * sizeof(size_t));
+    }
+    if (src->generic_eviction_blocker_recolored_flags) {
+        memcpy(dst->generic_eviction_blocker_recolored_flags,
+            src->generic_eviction_blocker_recolored_flags,
+            alloc_count * sizeof(unsigned char));
+    }
+    if (src->generic_eviction_blocker_new_colors) {
+        memcpy(dst->generic_eviction_blocker_new_colors, src->generic_eviction_blocker_new_colors, alloc_count * sizeof(size_t));
+    }
+    if (src->used_targeted_eviction_flags) {
+        memcpy(dst->used_targeted_eviction_flags, src->used_targeted_eviction_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->targeted_eviction_blocker_value_ids) {
+        memcpy(dst->targeted_eviction_blocker_value_ids, src->targeted_eviction_blocker_value_ids, alloc_count * sizeof(size_t));
+    }
+    if (src->targeted_eviction_blocker_recolored_flags) {
+        memcpy(dst->targeted_eviction_blocker_recolored_flags,
+            src->targeted_eviction_blocker_recolored_flags,
+            alloc_count * sizeof(unsigned char));
+    }
+    if (src->targeted_eviction_blocker_new_colors) {
+        memcpy(dst->targeted_eviction_blocker_new_colors, src->targeted_eviction_blocker_new_colors, alloc_count * sizeof(size_t));
+    }
+    if (src->used_retry_eviction_flags) {
+        memcpy(dst->used_retry_eviction_flags, src->used_retry_eviction_flags, alloc_count * sizeof(unsigned char));
+    }
+    if (src->retry_eviction_blocker_value_ids) {
+        memcpy(dst->retry_eviction_blocker_value_ids, src->retry_eviction_blocker_value_ids, alloc_count * sizeof(size_t));
+    }
+    if (src->retry_eviction_blocker_recolored_flags) {
+        memcpy(dst->retry_eviction_blocker_recolored_flags,
+            src->retry_eviction_blocker_recolored_flags,
+            alloc_count * sizeof(unsigned char));
+    }
+    if (src->retry_eviction_blocker_new_colors) {
+        memcpy(dst->retry_eviction_blocker_new_colors, src->retry_eviction_blocker_new_colors, alloc_count * sizeof(size_t));
+    }
+
+    return 1;
+}
+
+static int value_ssa_allocation_result_equivalent_ignoring_names(
+    const ValueSsaAllocationResult *lhs,
+    const ValueSsaAllocationResult *rhs) {
+    size_t value_index;
+
+    if (!lhs || !rhs) {
+        return 0;
+    }
+    if (lhs->value_count != rhs->value_count ||
+        lhs->color_budget != rhs->color_budget ||
+        lhs->spill_slot_count != rhs->spill_slot_count ||
+        lhs->next_spill_recovery_order != rhs->next_spill_recovery_order ||
+        lhs->next_spill_recovery_phase_id != rhs->next_spill_recovery_phase_id) {
+        return 0;
+    }
+
+    for (value_index = 0; value_index < lhs->value_count; ++value_index) {
+        if ((lhs->colors && rhs->colors && lhs->colors[value_index] != rhs->colors[value_index]) ||
+            ((lhs->colors == NULL) != (rhs->colors == NULL)) ||
+            (lhs->has_color && rhs->has_color && lhs->has_color[value_index] != rhs->has_color[value_index]) ||
+            ((lhs->has_color == NULL) != (rhs->has_color == NULL)) ||
+            (lhs->spill_flags && rhs->spill_flags &&
+                lhs->spill_flags[value_index] != rhs->spill_flags[value_index]) ||
+            ((lhs->spill_flags == NULL) != (rhs->spill_flags == NULL)) ||
+            (lhs->spill_intended_flags && rhs->spill_intended_flags &&
+                lhs->spill_intended_flags[value_index] != rhs->spill_intended_flags[value_index]) ||
+            ((lhs->spill_intended_flags == NULL) != (rhs->spill_intended_flags == NULL)) ||
+            (lhs->spill_confirmed_flags && rhs->spill_confirmed_flags &&
+                lhs->spill_confirmed_flags[value_index] != rhs->spill_confirmed_flags[value_index]) ||
+            ((lhs->spill_confirmed_flags == NULL) != (rhs->spill_confirmed_flags == NULL)) ||
+            (lhs->spill_recovered_flags && rhs->spill_recovered_flags &&
+                lhs->spill_recovered_flags[value_index] != rhs->spill_recovered_flags[value_index]) ||
+            ((lhs->spill_recovered_flags == NULL) != (rhs->spill_recovered_flags == NULL)) ||
+            (lhs->spill_recovery_orders && rhs->spill_recovery_orders &&
+                lhs->spill_recovery_orders[value_index] != rhs->spill_recovery_orders[value_index]) ||
+            ((lhs->spill_recovery_orders == NULL) != (rhs->spill_recovery_orders == NULL)) ||
+            (lhs->spill_recovery_phase_ids && rhs->spill_recovery_phase_ids &&
+                lhs->spill_recovery_phase_ids[value_index] != rhs->spill_recovery_phase_ids[value_index]) ||
+            ((lhs->spill_recovery_phase_ids == NULL) != (rhs->spill_recovery_phase_ids == NULL)) ||
+            (lhs->spill_recovery_phase_member_orders && rhs->spill_recovery_phase_member_orders &&
+                lhs->spill_recovery_phase_member_orders[value_index] !=
+                    rhs->spill_recovery_phase_member_orders[value_index]) ||
+            ((lhs->spill_recovery_phase_member_orders == NULL) !=
+                (rhs->spill_recovery_phase_member_orders == NULL)) ||
+            (lhs->spill_recovery_phase_member_counts && rhs->spill_recovery_phase_member_counts &&
+                lhs->spill_recovery_phase_member_counts[value_index] !=
+                    rhs->spill_recovery_phase_member_counts[value_index]) ||
+            ((lhs->spill_recovery_phase_member_counts == NULL) !=
+                (rhs->spill_recovery_phase_member_counts == NULL)) ||
+            (lhs->spill_priorities && rhs->spill_priorities &&
+                lhs->spill_priorities[value_index] != rhs->spill_priorities[value_index]) ||
+            ((lhs->spill_priorities == NULL) != (rhs->spill_priorities == NULL)) ||
+            (lhs->spill_slots && rhs->spill_slots &&
+                lhs->spill_slots[value_index] != rhs->spill_slots[value_index]) ||
+            ((lhs->spill_slots == NULL) != (rhs->spill_slots == NULL)) ||
+            (lhs->used_preferred_color_flags && rhs->used_preferred_color_flags &&
+                lhs->used_preferred_color_flags[value_index] != rhs->used_preferred_color_flags[value_index]) ||
+            ((lhs->used_preferred_color_flags == NULL) != (rhs->used_preferred_color_flags == NULL)) ||
+            (lhs->preferred_color_sources && rhs->preferred_color_sources &&
+                lhs->preferred_color_sources[value_index] != rhs->preferred_color_sources[value_index]) ||
+            ((lhs->preferred_color_sources == NULL) != (rhs->preferred_color_sources == NULL)) ||
+            (lhs->preferred_color_partner_value_ids && rhs->preferred_color_partner_value_ids &&
+                lhs->preferred_color_partner_value_ids[value_index] !=
+                    rhs->preferred_color_partner_value_ids[value_index]) ||
+            ((lhs->preferred_color_partner_value_ids == NULL) !=
+                (rhs->preferred_color_partner_value_ids == NULL)) ||
+            (lhs->used_generic_eviction_flags && rhs->used_generic_eviction_flags &&
+                lhs->used_generic_eviction_flags[value_index] != rhs->used_generic_eviction_flags[value_index]) ||
+            ((lhs->used_generic_eviction_flags == NULL) != (rhs->used_generic_eviction_flags == NULL)) ||
+            (lhs->generic_eviction_blocker_value_ids && rhs->generic_eviction_blocker_value_ids &&
+                lhs->generic_eviction_blocker_value_ids[value_index] !=
+                    rhs->generic_eviction_blocker_value_ids[value_index]) ||
+            ((lhs->generic_eviction_blocker_value_ids == NULL) !=
+                (rhs->generic_eviction_blocker_value_ids == NULL)) ||
+            (lhs->generic_eviction_blocker_recolored_flags && rhs->generic_eviction_blocker_recolored_flags &&
+                lhs->generic_eviction_blocker_recolored_flags[value_index] !=
+                    rhs->generic_eviction_blocker_recolored_flags[value_index]) ||
+            ((lhs->generic_eviction_blocker_recolored_flags == NULL) !=
+                (rhs->generic_eviction_blocker_recolored_flags == NULL)) ||
+            (lhs->generic_eviction_blocker_new_colors && rhs->generic_eviction_blocker_new_colors &&
+                lhs->generic_eviction_blocker_new_colors[value_index] !=
+                    rhs->generic_eviction_blocker_new_colors[value_index]) ||
+            ((lhs->generic_eviction_blocker_new_colors == NULL) !=
+                (rhs->generic_eviction_blocker_new_colors == NULL)) ||
+            (lhs->used_targeted_eviction_flags && rhs->used_targeted_eviction_flags &&
+                lhs->used_targeted_eviction_flags[value_index] != rhs->used_targeted_eviction_flags[value_index]) ||
+            ((lhs->used_targeted_eviction_flags == NULL) != (rhs->used_targeted_eviction_flags == NULL)) ||
+            (lhs->targeted_eviction_blocker_value_ids && rhs->targeted_eviction_blocker_value_ids &&
+                lhs->targeted_eviction_blocker_value_ids[value_index] !=
+                    rhs->targeted_eviction_blocker_value_ids[value_index]) ||
+            ((lhs->targeted_eviction_blocker_value_ids == NULL) !=
+                (rhs->targeted_eviction_blocker_value_ids == NULL)) ||
+            (lhs->targeted_eviction_blocker_recolored_flags && rhs->targeted_eviction_blocker_recolored_flags &&
+                lhs->targeted_eviction_blocker_recolored_flags[value_index] !=
+                    rhs->targeted_eviction_blocker_recolored_flags[value_index]) ||
+            ((lhs->targeted_eviction_blocker_recolored_flags == NULL) !=
+                (rhs->targeted_eviction_blocker_recolored_flags == NULL)) ||
+            (lhs->targeted_eviction_blocker_new_colors && rhs->targeted_eviction_blocker_new_colors &&
+                lhs->targeted_eviction_blocker_new_colors[value_index] !=
+                    rhs->targeted_eviction_blocker_new_colors[value_index]) ||
+            ((lhs->targeted_eviction_blocker_new_colors == NULL) !=
+                (rhs->targeted_eviction_blocker_new_colors == NULL)) ||
+            (lhs->used_retry_eviction_flags && rhs->used_retry_eviction_flags &&
+                lhs->used_retry_eviction_flags[value_index] != rhs->used_retry_eviction_flags[value_index]) ||
+            ((lhs->used_retry_eviction_flags == NULL) != (rhs->used_retry_eviction_flags == NULL)) ||
+            (lhs->retry_eviction_blocker_value_ids && rhs->retry_eviction_blocker_value_ids &&
+                lhs->retry_eviction_blocker_value_ids[value_index] !=
+                    rhs->retry_eviction_blocker_value_ids[value_index]) ||
+            ((lhs->retry_eviction_blocker_value_ids == NULL) !=
+                (rhs->retry_eviction_blocker_value_ids == NULL)) ||
+            (lhs->retry_eviction_blocker_recolored_flags && rhs->retry_eviction_blocker_recolored_flags &&
+                lhs->retry_eviction_blocker_recolored_flags[value_index] !=
+                    rhs->retry_eviction_blocker_recolored_flags[value_index]) ||
+            ((lhs->retry_eviction_blocker_recolored_flags == NULL) !=
+                (rhs->retry_eviction_blocker_recolored_flags == NULL)) ||
+            (lhs->retry_eviction_blocker_new_colors && rhs->retry_eviction_blocker_new_colors &&
+                lhs->retry_eviction_blocker_new_colors[value_index] !=
+                    rhs->retry_eviction_blocker_new_colors[value_index]) ||
+            ((lhs->retry_eviction_blocker_new_colors == NULL) !=
+                (rhs->retry_eviction_blocker_new_colors == NULL))) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int value_ssa_program_allocation_result_equivalent_ignoring_names(
+    const ValueSsaProgramAllocationResult *lhs,
+    const ValueSsaProgramAllocationResult *rhs) {
+    size_t function_index;
+
+    if (!lhs || !rhs || lhs->function_count != rhs->function_count) {
+        return 0;
+    }
+
+    for (function_index = 0; function_index < lhs->function_count; ++function_index) {
+        if (!value_ssa_allocation_result_equivalent_ignoring_names(
+                &lhs->function_results[function_index], &rhs->function_results[function_index])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 void value_ssa_function_allocation_layout_init(ValueSsaFunctionAllocationLayout *layout) {
     if (!layout) {
         return;

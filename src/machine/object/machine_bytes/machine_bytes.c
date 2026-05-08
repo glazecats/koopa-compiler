@@ -55,6 +55,7 @@ static int machine_bytes_riscv_is_signed_12_immediate(long long imm);
 static int machine_bytes_riscv_is_shift_immediate(long long imm);
 static int machine_bytes_riscv_is_branch_immediate(long long imm);
 static int machine_bytes_riscv_is_jump_immediate(long long imm);
+static int machine_bytes_riscv_immediate_uses_zero_register(long long imm);
 static size_t machine_bytes_riscv_materialize_size(long long imm);
 static uint32_t machine_bytes_riscv_encode_i_type(
     uint32_t opcode,
@@ -216,6 +217,7 @@ static uint32_t machine_bytes_riscv_encode_compare_branch_word_from_parts(
     uint32_t rs2,
     long long imm);
 static uint32_t machine_bytes_riscv_encode_call_word(long long imm);
+static int machine_bytes_riscv_call_prefers_pair(const MachineEmitOp *op);
 static uint32_t machine_bytes_riscv_encode_return_word(void);
 static uint32_t machine_bytes_riscv_encode_jump_word(long long imm);
 static long long machine_bytes_riscv_pc_relative_imm(
@@ -317,6 +319,7 @@ static size_t machine_bytes_report_find_symbol_index_by_name(
 static int machine_bytes_report_populate_symbols(MachineBytesReport *report);
 static int machine_bytes_report_populate_fixups(MachineBytesReport *report);
 static int machine_bytes_report_populate_sections(MachineBytesReport *report);
+static int machine_bytes_report_build_symbol_name_index(MachineBytesReport *report);
 static int machine_bytes_clone_block_payload(MachineBytesBlock *dest, const MachineEncodeBlock *src);
 static int machine_bytes_clone_block_bytes(MachineBytesBlock *dest, const MachineBytesBlock *src);
 static const MachineBytesBlock *machine_bytes_target_block(const MachineBytesFunction *function, size_t target_index);
@@ -568,9 +571,12 @@ static size_t machine_bytes_op_encoded_size_for_profile(
                         &op->result,
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_ADDR_LOCAL:
-                return machine_bytes_riscv_materialize_size(
-                        machine_bytes_riscv_slot_offset(&op->as.addr_slot)) +
-                    4u +
+                return (machine_bytes_riscv_is_signed_12_immediate(
+                            machine_bytes_riscv_slot_offset(&op->as.addr_slot))
+                        ? 4u
+                        : machine_bytes_riscv_materialize_size(
+                              machine_bytes_riscv_slot_offset(&op->as.addr_slot)) +
+                            4u) +
                     machine_bytes_riscv_writeback_result_size(
                         function,
                         &op->result,
@@ -600,11 +606,16 @@ static size_t machine_bytes_op_encoded_size_for_profile(
             case MACHINE_SELECT_OP_STORE_GLOBAL:
                 return machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value) + 8u;
             case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
-                return machine_bytes_riscv_materialize_size(op->as.store.value.immediate) +
+                return (machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)
+                        ? 0u
+                        : machine_bytes_riscv_materialize_size(op->as.store.value.immediate)) +
                     machine_bytes_riscv_store_to_base_size(
                         machine_bytes_riscv_slot_offset(&op->as.store.slot));
             case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
-                return machine_bytes_riscv_materialize_size(op->as.store.value.immediate) + 8u;
+                return (machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)
+                        ? 0u
+                        : machine_bytes_riscv_materialize_size(op->as.store.value.immediate)) +
+                    8u;
             case MACHINE_SELECT_OP_LOAD_INDIRECT:
                 return machine_bytes_riscv_prepare_operand_size(function, &op->as.load_indirect_addr) +
                     4u +
@@ -622,7 +633,8 @@ static size_t machine_bytes_op_encoded_size_for_profile(
             case MACHINE_SELECT_OP_CALL_IMM_SPILL:
             case MACHINE_SELECT_OP_CALL_VOID:
             case MACHINE_SELECT_OP_CALL_VOID_IMM:
-                return machine_bytes_riscv_call_setup_size(function, op) + 4u +
+                return machine_bytes_riscv_call_setup_size(function, op) +
+                    (machine_bytes_riscv_call_prefers_pair(op) ? 8u : 4u) +
                     machine_bytes_riscv_call_result_size(function, op);
             case MACHINE_SELECT_OP_ALU_IMM:
                 imm_operand = op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE
@@ -849,6 +861,10 @@ static int machine_bytes_riscv_is_branch_immediate(long long imm) {
 
 static int machine_bytes_riscv_is_jump_immediate(long long imm) {
     return (imm & 1ll) == 0ll && imm >= -1048576ll && imm <= 1048574ll;
+}
+
+static int machine_bytes_riscv_immediate_uses_zero_register(long long imm) {
+    return imm == 0ll;
 }
 
 static size_t machine_bytes_riscv_materialize_size(long long imm) {
@@ -1256,6 +1272,15 @@ static uint32_t machine_bytes_riscv_result_scratch_register(void) {
     return 29u;
 }
 
+static uint32_t machine_bytes_riscv_spill_address_scratch_register(void) {
+    /*
+     * Keep large spill-slot address materialization off the main operand
+     * scratch pair (`t6` / `t5`), otherwise preparing a second spill-backed
+     * operand can overwrite the first operand's live value before the ALU op.
+     */
+    return machine_bytes_riscv_result_scratch_register();
+}
+
 static uint32_t machine_bytes_riscv_effective_operand_register(
     const MachineEmitOperand *operand,
     uint32_t scratch_reg) {
@@ -1266,6 +1291,7 @@ static uint32_t machine_bytes_riscv_effective_operand_register(
         case MACHINE_SELECT_OPERAND_REGISTER:
             return machine_bytes_riscv_map_register_id(operand->machine_register_id);
         case MACHINE_SELECT_OPERAND_IMMEDIATE:
+            return operand->immediate == 0 ? 0u : scratch_reg;
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return scratch_reg;
         case MACHINE_SELECT_OPERAND_NONE:
@@ -1282,7 +1308,9 @@ static size_t machine_bytes_riscv_prepare_operand_size(
     }
     switch (operand->kind) {
         case MACHINE_SELECT_OPERAND_IMMEDIATE:
-            return machine_bytes_riscv_materialize_size(operand->immediate);
+            return machine_bytes_riscv_immediate_uses_zero_register(operand->immediate)
+                ? 0u
+                : machine_bytes_riscv_materialize_size(operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_load_from_stack_size(
                 machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot));
@@ -1304,6 +1332,9 @@ static size_t machine_bytes_riscv_emit_prepare_operand(
     }
     switch (operand->kind) {
         case MACHINE_SELECT_OPERAND_IMMEDIATE:
+            if (operand->immediate == 0) {
+                return 0u;
+            }
             return machine_bytes_riscv_emit_materialize_immediate(
                 bytes, offset, scratch_reg, operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
@@ -1312,7 +1343,7 @@ static size_t machine_bytes_riscv_emit_prepare_operand(
                 offset,
                 scratch_reg,
                 machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot),
-                machine_bytes_riscv_scratch_register());
+                machine_bytes_riscv_spill_address_scratch_register());
         case MACHINE_SELECT_OPERAND_REGISTER:
         case MACHINE_SELECT_OPERAND_NONE:
         default:
@@ -1351,6 +1382,11 @@ static size_t machine_bytes_riscv_emit_move_operand_to_register(
     }
     switch (operand->kind) {
         case MACHINE_SELECT_OPERAND_IMMEDIATE:
+            if (operand->immediate == 0) {
+                return target_reg == 0u
+                    ? 0u
+                    : machine_bytes_riscv_emit_copy_register(bytes, offset, target_reg, 0u);
+            }
             return machine_bytes_riscv_emit_materialize_immediate(
                 bytes, offset, target_reg, operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
@@ -1359,7 +1395,7 @@ static size_t machine_bytes_riscv_emit_move_operand_to_register(
                 offset,
                 target_reg,
                 machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot),
-                machine_bytes_riscv_scratch_register());
+                machine_bytes_riscv_spill_address_scratch_register());
         case MACHINE_SELECT_OPERAND_REGISTER:
             return machine_bytes_riscv_emit_copy_register(
                 bytes,
@@ -1961,6 +1997,11 @@ static uint32_t machine_bytes_riscv_encode_call_word(long long imm) {
     return machine_bytes_riscv_encode_j_type(0x6Fu, 1u, imm);
 }
 
+static int machine_bytes_riscv_call_prefers_pair(const MachineEmitOp *op) {
+    (void)op;
+    return 1;
+}
+
 static uint32_t machine_bytes_riscv_encode_return_word(void) {
     return machine_bytes_riscv_encode_i_type(0x67u, 0u, 0x0u, 1u, 0);
 }
@@ -2078,13 +2119,21 @@ static int machine_bytes_write_block_bytes_for_profile(
                     uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
                     long long slot_offset = machine_bytes_riscv_slot_offset(&op->as.addr_slot);
 
-                    byte_index += machine_bytes_riscv_emit_materialize_immediate(
-                        dest_block->bytes, byte_index, result_reg, slot_offset);
-                    machine_bytes_write_u32_le(
-                        dest_block->bytes,
-                        byte_index,
-                        machine_bytes_riscv_encode_r_type(0x33u, result_reg, 0x0u, 2u, result_reg, 0x00u));
-                    byte_index += 4u;
+                    if (machine_bytes_riscv_is_signed_12_immediate(slot_offset)) {
+                        machine_bytes_write_u32_le(
+                            dest_block->bytes,
+                            byte_index,
+                            machine_bytes_riscv_encode_i_type(0x13u, result_reg, 0x0u, 2u, slot_offset));
+                        byte_index += 4u;
+                    } else {
+                        byte_index += machine_bytes_riscv_emit_materialize_immediate(
+                            dest_block->bytes, byte_index, result_reg, slot_offset);
+                        machine_bytes_write_u32_le(
+                            dest_block->bytes,
+                            byte_index,
+                            machine_bytes_riscv_encode_r_type(0x33u, result_reg, 0x0u, 2u, result_reg, 0x00u));
+                        byte_index += 4u;
+                    }
                     byte_index += machine_bytes_riscv_emit_writeback_result(
                         function, dest_block->bytes, byte_index, &op->result, result_reg);
                     break;
@@ -2309,21 +2358,25 @@ static int machine_bytes_write_block_bytes_for_profile(
                     break;
                 }
                 case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
-                    byte_index += machine_bytes_riscv_emit_materialize_immediate(
-                        dest_block->bytes, byte_index, 31u, op->as.store.value.immediate);
+                    if (!machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)) {
+                        byte_index += machine_bytes_riscv_emit_materialize_immediate(
+                            dest_block->bytes, byte_index, 31u, op->as.store.value.immediate);
+                    }
                     byte_index += machine_bytes_riscv_emit_store_to_base(
                         dest_block->bytes,
                         byte_index,
                         machine_bytes_riscv_slot_base_register(&op->as.store.slot),
-                        31u,
+                        machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate) ? 0u : 31u,
                         machine_bytes_riscv_slot_offset(&op->as.store.slot),
                         machine_bytes_riscv_secondary_scratch_register());
                     break;
                 case MACHINE_SELECT_OP_STORE_GLOBAL_IMM: {
                     uint32_t base_reg = machine_bytes_riscv_secondary_scratch_register();
 
-                    byte_index += machine_bytes_riscv_emit_materialize_immediate(
-                        dest_block->bytes, byte_index, 31u, op->as.store.value.immediate);
+                    if (!machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)) {
+                        byte_index += machine_bytes_riscv_emit_materialize_immediate(
+                            dest_block->bytes, byte_index, 31u, op->as.store.value.immediate);
+                    }
                     machine_bytes_write_u32_le(
                         dest_block->bytes,
                         byte_index,
@@ -2332,7 +2385,12 @@ static int machine_bytes_write_block_bytes_for_profile(
                     machine_bytes_write_u32_le(
                         dest_block->bytes,
                         byte_index,
-                        machine_bytes_riscv_encode_s_type(0x23u, 0x2u, base_reg, 31u, 0));
+                        machine_bytes_riscv_encode_s_type(
+                            0x23u,
+                            0x2u,
+                            base_reg,
+                            machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate) ? 0u : 31u,
+                            0));
                     byte_index += 4u;
                     break;
                 }
@@ -2438,15 +2496,25 @@ static int machine_bytes_write_block_bytes_for_profile(
                         call_imm = machine_bytes_riscv_pc_relative_imm(
                             function_byte_offset + dest_block->start_byte_offset + byte_index,
                             target_byte_offset);
-                        if (!machine_bytes_riscv_is_jump_immediate(call_imm)) {
-                            machine_bytes_set_error(
-                                error, 0, 0, "MACHINE-BYTES-342: riscv preview call target out of range");
-                            return 0;
-                        }
                     }
-                    machine_bytes_write_u32_le(
-                        dest_block->bytes, byte_index, machine_bytes_riscv_encode_call_word(call_imm));
-                    byte_index += 4u;
+                    if (machine_bytes_riscv_call_prefers_pair(op)) {
+                        long long upper = (call_imm + 0x800ll) >> 12;
+                        long long lower = call_imm - (upper << 12);
+
+                        machine_bytes_write_u32_le(
+                            dest_block->bytes,
+                            byte_index,
+                            machine_bytes_riscv_encode_u_type(0x17u, 1u, upper << 12));
+                        machine_bytes_write_u32_le(
+                            dest_block->bytes,
+                            byte_index + 4u,
+                            machine_bytes_riscv_encode_i_type(0x67u, 1u, 0x0u, 1u, lower));
+                        byte_index += 8u;
+                    } else {
+                        machine_bytes_write_u32_le(
+                            dest_block->bytes, byte_index, machine_bytes_riscv_encode_call_word(call_imm));
+                        byte_index += 4u;
+                    }
                     if (stack_arg_bytes > 0u) {
                         byte_index += machine_bytes_riscv_emit_adjust_sp(
                             dest_block->bytes,
@@ -3331,7 +3399,9 @@ static int machine_bytes_report_append_global_data_reference(
         } else if (op->kind == MACHINE_SELECT_OP_STORE_GLOBAL) {
             prepare_size = machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value);
         } else if (op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) {
-            prepare_size = machine_bytes_riscv_materialize_size(op->as.store.value.immediate);
+            prepare_size = machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)
+                ? 0u
+                : machine_bytes_riscv_materialize_size(op->as.store.value.immediate);
         }
         if (op->kind != MACHINE_SELECT_OP_ADDR_GLOBAL && kind == MACHINE_BYTES_REFERENCE_DATA_ADDR) {
             summary->patch_byte_offset = owner_byte_offset + prepare_size;
@@ -3749,18 +3819,86 @@ static int machine_bytes_report_populate_function_references(
 static size_t machine_bytes_report_find_symbol_index_by_name(
     const MachineBytesReport *report,
     const char *symbol_name) {
-    size_t symbol_index;
+    size_t lo = 0u;
+    size_t hi;
 
-    if (!report || !symbol_name || !report->symbol_summaries) {
+    if (!report || !symbol_name || !report->symbol_summaries || !report->symbol_summaries_by_name) {
         return (size_t)-1;
     }
-    for (symbol_index = 0; symbol_index < report->total_symbol_summary_count; ++symbol_index) {
-        if (report->symbol_summaries[symbol_index].name &&
-            strcmp(report->symbol_summaries[symbol_index].name, symbol_name) == 0) {
-            return symbol_index;
+    hi = report->total_symbol_summary_count;
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        MachineBytesSymbolSummary *symbol = report->symbol_summaries_by_name[mid];
+        int cmp;
+
+        if (!symbol || !symbol->name) {
+            return (size_t)-1;
+        }
+        cmp = strcmp(symbol->name, symbol_name);
+        if (cmp < 0) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
         }
     }
+    if (lo < report->total_symbol_summary_count &&
+        report->symbol_summaries_by_name[lo] &&
+        report->symbol_summaries_by_name[lo]->name &&
+        strcmp(report->symbol_summaries_by_name[lo]->name, symbol_name) == 0) {
+        return (size_t)(report->symbol_summaries_by_name[lo] - report->symbol_summaries);
+    }
     return (size_t)-1;
+}
+
+static int machine_bytes_compare_symbol_name_ptrs(const void *lhs, const void *rhs) {
+    const MachineBytesSymbolSummary *const *left = (const MachineBytesSymbolSummary *const *)lhs;
+    const MachineBytesSymbolSummary *const *right = (const MachineBytesSymbolSummary *const *)rhs;
+    const char *left_name;
+    const char *right_name;
+    int cmp;
+
+    left_name = (*left && (*left)->name) ? (*left)->name : "";
+    right_name = (*right && (*right)->name) ? (*right)->name : "";
+    cmp = strcmp(left_name, right_name);
+    if (cmp != 0) {
+        return cmp;
+    }
+    if (*left < *right) {
+        return -1;
+    }
+    if (*left > *right) {
+        return 1;
+    }
+    return 0;
+}
+
+static int machine_bytes_report_build_symbol_name_index(MachineBytesReport *report) {
+    size_t symbol_index;
+
+    if (!report) {
+        return 0;
+    }
+    free(report->symbol_summaries_by_name);
+    report->symbol_summaries_by_name = NULL;
+    if (report->total_symbol_summary_count == 0u) {
+        return 1;
+    }
+    if (!report->symbol_summaries) {
+        return 0;
+    }
+    report->symbol_summaries_by_name = (MachineBytesSymbolSummary **)malloc(
+        report->total_symbol_summary_count * sizeof(MachineBytesSymbolSummary *));
+    if (!report->symbol_summaries_by_name) {
+        return 0;
+    }
+    for (symbol_index = 0u; symbol_index < report->total_symbol_summary_count; ++symbol_index) {
+        report->symbol_summaries_by_name[symbol_index] = &report->symbol_summaries[symbol_index];
+    }
+    qsort(report->symbol_summaries_by_name,
+        report->total_symbol_summary_count,
+        sizeof(MachineBytesSymbolSummary *),
+        machine_bytes_compare_symbol_name_ptrs);
+    return 1;
 }
 
 static int machine_bytes_report_populate_symbols(MachineBytesReport *report) {
@@ -4146,6 +4284,7 @@ static void machine_bytes_report_clear_shape(MachineBytesReport *report) {
     free(report->reference_summaries);
     free(report->fixup_summaries);
     free(report->symbol_summaries);
+    free(report->symbol_summaries_by_name);
     free(report->section_summaries);
     free(report->function_indices_with_calls);
     free(report->function_indices_with_fallthrough);
@@ -4160,6 +4299,7 @@ static void machine_bytes_report_clear_shape(MachineBytesReport *report) {
     report->reference_summaries = NULL;
     report->fixup_summaries = NULL;
     report->symbol_summaries = NULL;
+    report->symbol_summaries_by_name = NULL;
     report->section_summaries = NULL;
     report->total_block_summary_count = 0;
     report->total_program_byte_count = 0;

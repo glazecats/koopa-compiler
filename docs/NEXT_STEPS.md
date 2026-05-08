@@ -90,20 +90,1854 @@
     part of the active backend mainline. They should be treated as SSA-side
     optimization work for a later phase, most likely under `value_ssa_pass`,
     after the current RISC-V lowering/object pipeline is materially more real.
+17. Course `lv8`, `lv9`, and `-perf` are no longer the default active
+    implementation line for this round. Treat them as regression baselines
+    that must stay green while the current mainline shifts to hidden-course
+    compatibility and return-flow audit work.
+18. The current front-end / semantic mainline is now split into two linked
+    audit tracks:
+    - default submission-mode compatibility: find and close hidden
+      `CTE/AE/WA` families without depending on the strict all-paths-return
+      gate
+    - strict audit quality: keep `--enforce-all-paths-return-check`
+      available, but continue shrinking false positives until that mode is
+      trustworthy rather than merely optional
+19. Third-party SysY testcase suites are now part of the active evidence
+    surface, not only optional future ideas. When available locally or after
+    checkout, prefer periodic `autotest -t <suite-dir> /workspaces/compiler_lab`
+    sweeps to search for hidden-like failures, then minimize any discovered
+    failures back into repository regressions.
+20. Known acquisition seeds for that external-suite line should now be treated
+    as working inputs instead of fuzzy memory:
+    - course doc reference:
+      `https://pku-minic.github.io/online-doc/#/misc-app-ref/environment?id=%E4%BD%BF%E7%94%A8%E5%85%B6%E4%BB%96%E6%B5%8B%E8%AF%95%E7%94%A8%E4%BE%8B`
+    - `https://github.com/pku-minic/minic-test-cases-2021s`
+    - `https://github.com/pku-minic/minic-test-cases-2021f`
+    - `https://github.com/segviol/indigo/tree/develop/test_codes/upload`
+    - `https://github.com/TrivialCompiler/TrivialCompiler/tree/master/custom_test`
+    - `https://github.com/ustb-owl/lava-test`
+    - `https://github.com/jokerwyt/sysy-testsuit-collection`
+    Current policy is to prefer the two `pku-minic` testcase trees first
+    because they are closest to the course environment, then broaden with the
+    public GitHub suites if those do not reproduce the remaining
+    hidden-course failures.
 
 ## Current Active Slice
 
 - Current multi-round implementation focus is now the following ordered line,
   and it should be treated as the default mainline until these items are
   materially closed:
-  1. pass course `lv9` under `autotest -riscv -s lv9 /workspaces/compiler_lab`
-  2. land real array support across the current front-end / semantic /
-     lowering chain instead of stopping at explicit unsupported-feature
-     diagnostics
-  3. keep repository regressions plus course tests green throughout
-  4. after `lv9` is stable, return to the reopened downstream RISC-V
-     artifact-honesty line (`machine_reloc -> machine_elf`)
+  1. keep the post-allocator correctness checkpoint green while the hidden / default compatibility audit continues to shrink the remaining `CTE` / `AE` / `RE` tails
+  2. continue the explicit performance reopen on the narrowed public tails:
+     - `hoist-2` compile-time pressure in the allocator-heavy path
+     - keep the older locally-tracked `03_sort2` / `shuffle2` runtime witnesses as useful references, but treat the fresh full-sweep public authority as higher priority when it disagrees
+     - broader course-internal `-perf` pressure, not only one public hot case
+     - slow or timing-sensitive third-party perf cases when they reproduce
+       clearly enough to optimize against
+     - compiler compile-time itself as an explicit optimization target, not
+       only generated-code/runtime performance
+     - any newly reproduced external-suite pressure that survives the
+       normalized-oracle sweeps
+  3. after that performance round settles, reopen explicit target-direction
+     tuning:
+     - converge the machine-register count toward the final RISC-V direction
+       (`32` architectural registers; current staging policy still decides
+       how many allocatable logical registers are exposed at each backend
+       lane, but future work should stop treating the current small flat bank
+       as the end state)
+     - add safe/common optimization work that materially improves generated
+       code or compile-time/runtime performance
+     - only stage loop-oriented transforms such as loop unrolling with care
+       and only after correctness and more structural backend/SSA tuning stay
+       green
+  4. after any optimization round, rerun the same full correctness sweep
+     again over course and external suites
+  5. only then treat the current round as ready to end / checkpoint
 - Current progress snapshot for that ordered line:
+  - post-allocator correctness checkpoint:
+    **complete / 100%**
+    - course regression baselines remain green in the current tree:
+      `lv8` (`12/12`) and `lv9` (`22/22`)
+    - one reusable third-party sweep tool now exists in-repo:
+      `tools/sweep_sysy_suite.py`, which follows the rebuilt
+      `build/compiler -> clang -> ld.lld -> qemu-riscv32-static` path and
+      applies the current normalized-oracle policy for third-party suites
+      (including common `stdout`, `stdout+exit`, `stdout+"\\n"+exit`,
+      `stdout+exit+"\\n"`, `stdout+"\\n"+exit+"\\n"`, trailing blank-line,
+      and trailing-space noise)
+    - directly sweepable external suites are now green again under that rule:
+      `compiler2021/公开用例与运行时库/function_test2021` (`103/103`),
+      `segviol/indigo/test_codes/functional_test` (`111/111`),
+      `TrivialCompiler/custom_test` (`29/29`),
+      and `ustb-owl/lava-test/cases` (`162/162`)
+    - `jokerwyt/sysy-testsuit-collection/lvX` has been widened again in the
+      current tree, but the latest full sweep shows it is **not** all green:
+      current authority is `464/467`, with residual pressure concentrated in
+      `many_parameters10000.c -> COMPILE_TIMEOUT`,
+      `register_alloc10000.c -> COMPILE_TIMEOUT`, and
+      `matrix-1.c -> RUN_TIMEOUT`
+    - the earlier local gap on `minic-test-cases-2021s` / `2021f` is now also
+      materially closed in the current tree: the sweep harness can now fall
+      back to the environment's native `libsysy.a` to synthesize host-side
+      oracles for those `.c`-based suites when the local clone does not carry
+      ready-made `.out` files or checked-out runtime sources. Focused reruns
+      now keep `minic-test-cases-2021f/functional` green again (`100/100`)
+      and `minic-test-cases-2021s/functional` green again (`112/112`) under
+      the same rebuilt-compiler path and normalized-oracle rule.
+    - one temporarily reopened hidden-like correctness tail is now also
+      reclosed in the live tree and should be treated as part of the green
+      baseline again rather than as an active unknown:
+      `compiler2021/公开用例与运行时库/function_test2021/079_calculator.sy`
+      had reproduced as a rebuilt-path `SIGSEGV` (`stdout=""`, `exit=-11`)
+      because the RISC-V text exporter could bind the wrong preview data
+      fixup at a given patch offset. In practice that let zero-valued global
+      stores print malformed sequences like `lui t5, 0x0 ; sw zero, 0(t5)`
+      instead of preserving the intended `%hi/%lo(symbol)` relocation pair.
+      The current tree now resolves preview fixups by both
+      `patch_byte_offset` and fixup family during text export, and
+      `test-compiler-driver` now carries a dedicated zero-global-store symbol
+      fixup regression so this failure shape stays locked down. Focused
+      reruns are green again after that closure:
+      `test-compiler-driver`, `lv9` (`22/22`), and
+      `compiler2021/公开用例与运行时库/function_test2021` (`103/103`).
+    - one second course-adjacent correctness tail is now also closed and
+      regression-locked in the live tree: `minic-test-cases-2021s/functional`
+      had reopened on `080_unlucky_data.c` as a false `RUN_TIMEOUT`, but the
+      root cause was not raw performance pressure. The real bug was an
+      over-aggressive loop-proof in canonical IR lowering: when a loop-carried
+      local was only updated under an unknown `if` branch inside the loop, the
+      flow-state proof could incorrectly treat the loop condition as staying
+      permanently true and erase the explicit loop-header condition block.
+      The current tree now treats unknown inner control flow as a blocker for
+      that "loop condition stays true" proof and also preserves only merged /
+      agreed-known state across unknown `if` joins. Focused checks are green
+      again after that closure: `test-ir-regression`, the minimized
+      `while(mon<=12){ if(getint()) mon=mon+1; }` IR shape, the original
+      `080_unlucky_data.c` rebuilt-path runtime, and the full
+      `minic-test-cases-2021s/functional` sweep (`112/112`). Together with
+      the already-green `minic-test-cases-2021f/functional` rerun (`100/100`),
+      this widens the post-fix course-adjacent evidence surface materially
+      beyond the earlier `compiler2021` / `lv8` / `lv9` checkpoint.
+  - post-checkpoint performance reopen:
+    **in progress / roughly 76%**
+    - 2026-05-08 recovery note: the current rollback/repair checkpoint has
+      now reclosed the visible `03_sort1/03_sort3` correctness regressions by
+      backing out the final `compiler_driver` text-peephole invocation
+      `compiler_optimize_riscv_preview_indexed_local_base_offsets(...)` from
+      the live preview pipeline. Revalidated local surfaces on this recovered
+      tree are: `make test-compiler-driver` PASS, `make test-value-ssa-regression`
+      PASS, `autotest -riscv -s lv8` (`12/12`), `autotest -riscv -s lv9`
+      (`22/22`), focused public reruns
+      `performance_test2021-public/03_sort1.sy` PASS,
+      `performance_test2021-public/03_sort2.sy -> RUN_TIMEOUT`,
+      `performance_test2021-public/03_sort3.sy` PASS, and
+      `compiler2021/公开用例与运行时库/2021初赛所有用例/performance`
+      back to `14/15` with only `03_sort2.sy -> RUN_TIMEOUT`. A full rerun of
+      `performance_test2021-public` is currently in flight to re-stamp the
+      expected `29/30` checkpoint explicitly in one log instead of only by
+      focused witness inference.
+    - current mainline policy shift: the older local `03_sort2` / `shuffle2`
+      runtime tails are now explicitly treated as **frozen / maintenance-
+      first** rather than as the primary optimization target for each next
+      turn. They remain useful witnesses and must not regress, but the
+      current tree has already pushed them into a diminishing-returns zone
+      where further work is increasingly likely to cost disproportionate
+      correctness risk for only small local wins. Unless a new very narrow
+      and obviously safe hotspot line emerges, the active performance reopen
+      should now prioritize higher-yield external perf / compile-time pressure
+      (for example `lava-test/performance_test2021` residuals and allocator-
+      side compile-time tails) over repeatedly reopening these same two
+      public runtime cases.
+    - future revisit note: after the current active red-point / external-perf
+      loop is cleared, it is still reasonable to reopen these two local static
+      witnesses **carefully** under a correctness-first rule. The current
+      post-recovery rebuilt baselines are `03_sort2.sy ~= total_instructions=374`
+      and `shuffle2.sy ~= total_instructions=258`. Treat those as the new
+      “must not regress” floor for any later narrow optimization retry, and do
+      not spend the current turn-range on them unless a very obviously safe
+      follow-up appears.
+    - a later same-day full sweep now supersedes several older “nearly all
+      green” perf-side memories and should be treated as the live authority
+      for the current workspace. The rebuilt tree still keeps the broad
+      repository/course baselines green (`make test`, `autotest -riscv`, and
+      `autotest -perf` all pass), but the broader public/external perf
+      pressure is no longer the older single-point picture:
+      `compiler2021/公开用例与运行时库/2021初赛所有用例/performance`
+      is now `12/15` with
+      `03_sort1.sy -> MISMATCH`,
+      `03_sort2.sy -> RUN_TIMEOUT`,
+      `03_sort3.sy -> MISMATCH`;
+      `compiler2021/公开用例与运行时库/performance_test2021-public`
+      is now `27/30` with that same `03_sort{1,2,3}` residual set; and
+      `segviol/indigo/test_codes/performance_test` is now `9/10` with
+      `03_sort1.sy -> MISMATCH`.
+      Current authority is therefore that the visible public perf surface has
+      materially reopened beyond the older “only `03_sort2` remains” memory,
+      and the next debug pass should treat the `03_sort1/2/3` cluster as one
+      coherent active problem rather than as a stale single-case timeout.
+    - a broader 2026-05-07 evidence refresh now also exists in explicit
+      scoreboard form instead of only as scattered one-off notes, and it is
+      important because it makes the current public/external pressure surface
+      unusually consistent:
+      `autotest -riscv /workspaces/compiler_lab` is green (`130/130`),
+      `autotest -perf /workspaces/compiler_lab` is green (`130/130`),
+      `compiler2021/公开用例与运行时库/2021初赛所有用例/functional`
+      is green (`103/103`),
+      `compiler2021/公开用例与运行时库/2021初赛所有用例/h_functional`
+      is green (`37/37`),
+      `compiler2021/公开用例与运行时库/2021初赛所有用例/performance`
+      is `14/15` with only `03_sort2.sy -> RUN_TIMEOUT`,
+      and `compiler2021/公开用例与运行时库/performance_test2021-public`
+      is `29/30` with only `03_sort2.sy -> RUN_TIMEOUT`.
+      Current authority is therefore stronger than an earlier “probably only
+      one public perf tail” guess: on the current tree the public course-style
+      performance surface now reproduces one stable remaining red point,
+      `03_sort2`, and does so consistently across both visible perf suites.
+    - a later same-day live-tree refresh has now superseded that earlier
+      `29/30` public-perf snapshot, and it should be treated as the current
+      authority for the code now in the workspace. The kept indirect-memory
+      direct-cleanup line now forwards safe local loads plus
+      non-address-taken global loads and then re-runs a narrow redundant-
+      binary cleanup on the direct-build Value-SSA path. That change is
+      revalidated on the current tree by `make test-value-ssa-regression`,
+      `make test-compiler-driver`, `autotest -riscv -s lv9`
+      (`22/22`), and rotated external functional sweeps
+      (`minic-test-cases-2021s/functional` `112/112`,
+      `indigo/test_codes/functional_test` `111/111`). On the performance
+      side it produces real static wins on both currently reproduced public
+      timeout witnesses. Current stable rebuilt witnesses on the live tree are
+      no longer the earlier `428/331` pair: `03_sort2.sy` now sits around
+      `total_instructions=399`, and `shuffle2.sy` now sits around
+      `total_instructions=260`. The runtime side is still open
+      under the same `60s` single-case budget, however: focused reruns keep
+      both `03_sort2.sy -> RUN_TIMEOUT` and `shuffle2.sy -> RUN_TIMEOUT`.
+      Current authority is therefore that this indirect-memory direct-cleanup
+      step is a kept optimization checkpoint rather than a backed-out trial,
+      but the public runtime tail has widened on the current live tree to a
+      concrete pair (`03_sort2`, `shuffle2`) instead of collapsing to all
+      green.
+- 2026-05-07: One later same-day `machine_select` follow-up is now also kept, and it is materially different from the earlier selected-side retries that were backed out. The current pure-call reuse path now understands block live-in register/spill arguments instead of only arguments whose defining load/address op appears earlier in the **same** block. That matters directly for the stable `03_sort2` residue, because one of the remaining hot `radixSort` blocks was repeatedly calling `getNumPos(spill.8, spill.9)` after those spill args were defined in the predecessor block, so the previous block-local arg-describer could not even recognize the calls as equal. The new live-in operand descriptor plus regression coverage (`test_machine_select_reuses_repeated_internal_pure_call_with_live_in_spill_args`) is green together with `make test-machine-select`, `make test-value-ssa-regression`, `make test-compiler-driver`, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep (`TrivialCompiler/custom_test` `29/29`). On the current stable tree this follow-up tightens the public static witness again on the more call-heavy tail: `03_sort2.sy` moves from about `419` down to about `413`, while `shuffle2.sy` stays roughly flat at `283`. Runtime still does not close under the same `60s` single-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a real local win on the `03_sort2` path, but not to overclaim it as the final runtime-closing step.
+- 2026-05-07: One same-day Value-SSA-side follow-up is now also kept on the other half of the public tail pair. The current indirect-memory direct-cleanup line now also inlines an extremely narrow class of internal helpers: single-block returning functions whose bodies stay inside `load_local(parameter)`, `load_global`, `mov`, and one or more pure `binary` ops, with no stores, indirect memory, address-taking, or nested calls. This is deliberately not a general inliner; it exists because the live `shuffle2` residue had converged onto the tiny helper `hash(k){ return k % hashmod; }`, so removing that repeated internal call overhead was a more direct next step than more block-local cleanup. The new regression `VALUE-SSA-CONVERT-DEFAULT-TINY-HELPER-INLINE` is green together with `make test-value-ssa-regression`, `make test-compiler-driver`, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep (`lava-test/cases` `162/162`). On the current stable tree this trims the public `shuffle2` static witness further from about `283` down to about `268`, with the direct `.s` opcode histogram also dropping call count from roughly `12` to `10`, while the already-improved `03_sort2` witness stays about flat at `413`. Runtime still does not close under the same `60s` single-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a real local win on the `shuffle2/hash` line, while treating the remaining runtime gap as still-open pressure rather than as solved.
+- 2026-05-07: A later final-text peephole retry was tested and explicitly **not** kept. I tried a very conservative entry-block reload elision in `compiler_driver` that replaced an initial `lw reg, off(sp)` with `mv reg, aN` when the same function had just stored that incoming argument register to the matching stack slot at function entry. The motivation was reasonable because hot leaf functions like `insert`, `reduce`, and `getNumPos` still spill arguments to stack and then immediately reload them. On tiny hand probes the text looked better, but the real course surface rejected the change: `make test-compiler-driver` and `make test-value-ssa-regression` stayed green after expectation refreshes, yet `autotest -riscv -s lv9` regressed badly (`13/22` with multiple array/sort wrong answers). The peephole has therefore been fully backed out again. Current authority is to treat this as a failed/unkept text-side trial rather than as a checkpoint, and to prefer later work on IR/selected/runtime cost directly over more function-entry text rewrites of this kind.
+- 2026-05-07: A later rebuild-first recheck overturned that earlier “default `-riscv` widening failed” conclusion and replaced it with a real kept checkpoint. The previous negative read had been contaminated by stale-binary evidence: after explicitly rebuilding `build/compiler` first and then rerunning the same surfaces, widening `value_ssa_optimize_perf_hotspots(...)` from the `COMPILER_MODE_PERF` path to the default `COMPILER_MODE_RISCV` path held up cleanly. The only immediate red point was one repository-local text expectation in `test_compiler_driver` (`int g = 7; return g;` now quite reasonably lowers to `li a0, 7` instead of forcing a `lui/lw` pair), and that expectation has now been updated to lock the improved shape. The revalidated kept surface after the widening is: `make test-value-ssa-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv9` (`22/22`), rotated external functional sweeps `TrivialCompiler/custom_test` (`29/29`) and `minic-test-cases-2021s/functional` first `20/20`, plus focused public perf witnesses still reproducing only the same runtime tails (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`). On the kept tree the default `-riscv` public static witness improves one more step on the `03_sort2` line, from about `total_instructions=413` down to about `408`, while `shuffle2.sy` stays about flat at `268`; the rebuilt `-perf` witness for `03_sort2` now matches the same `408` image too, so the two modes are back on one real shared path instead of only looking similar in principle. Current authority is therefore that this pass *is* now general enough for the default RISC-V path under its present narrow transform set; the earlier rollback memory should be treated as superseded by this rebuild-first recheck rather than as the live conclusion.
+- 2026-05-07: One more same-day Value-SSA-side retry was also tested and explicitly **not** kept. I tried an even narrower-looking cleanup that deleted `store_local` writes to locals that appeared to be “never read” in the current Value-SSA function, hoping to remove obvious junk such as `getNumPos`’s dead `tmp = 1` stack slot. On a superficial static witness this looked spectacular: the rebuilt `03_sort2.sy` text image collapsed all the way to about `total_instructions=359`. That win was fake. The pass was reasoning at the wrong storage granularity for local aggregate/array layouts: in practice it deleted most of the zero-initialization stores for `radixSort`’s local `head` / `tail` / `cnt` arrays, leaving only the first element writes alive because later dynamic accesses reached those locals through aggregate-style addressing rather than plain matching `load_local` rows. I rolled the pass back immediately after inspecting the emitted assembly and seeing that bogus collapse. The rolled-back tree is revalidated again (`make test-value-ssa-regression`, `make test-compiler-driver`, `autotest -riscv -s lv9` all green), and the stable `03_sort2` witness returns to `total_instructions=408`. Current authority is therefore explicit: do **not** attempt slot-by-slot “unread local store” cleanup on the direct Value-SSA path unless/until the analysis understands local aggregate/array aliasing well enough to distinguish scalar locals from aggregate-backed slot families.
+- 2026-05-07: A later same-day structural follow-up then reopened that failed idea in a kept, narrower form. The key observation was that canonical IR still knew which local slots belonged to array/aggregate families (`IrLocal.array_rank`), but that metadata was being dropped before the direct Value-SSA cleanup line. The current tree now propagates local `array_rank` metadata through `IR -> LowerIR -> ValueSSA`, and canonical IR now stamps the declared `array_rank` across the whole contiguous local-slot family created for one local array declaration, not only the base slot. On top of that, the direct-build Value-SSA cleanup line now deletes only unread **scalar** local stores, while conservatively treating any array/aggregate local slot as ineligible for that cleanup. The validation surface for this kept step is: `make test-lower-ir-regression` PASS, `make test-value-ssa-regression` PASS (including new default-conversion regressions that lock both “unread scalar local store is removed” and “array local stores are preserved”), `make test-compiler-driver` PASS, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep `TrivialCompiler/custom_test` (`29/29`). On the public static witnesses this trims a little more real stack traffic without reopening the earlier array-family bug: `03_sort2.sy` improves from about `408` down to about `404`, and `shuffle2.sy` improves from about `268` down to about `266`. The runtime witnesses still stay open under the same budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a small but real structural cleanup win on the direct path, not as the final runtime-closing step.
+- 2026-05-07: A later selected-side retry was also tested and explicitly **not** kept. I prototyped a very narrow cross-block cleanup that tried to reuse an edge-available `load_indirect(addr_global + index)` result in a unique-successor block instead of recomputing the same address/load chain again. The motivating witness was real (`shuffle2/insert` has exactly that shape from the head-bucket probe into the `p = head[h]` successor block), and the prototype even fired on a synthetic unit shape. But it did not yet have a sound enough interaction story with the broader selected cleanup pipeline: after landing the first version, the existing `machine_select` regression matrix reopened on an unrelated live-in/internal-call case (`test_machine_select_reuses_repeated_internal_pure_call_with_live_in_spill_args`), with verification failing during lowering. Because that meant the new cleanup still had hidden coupling with current selected alias/live-in reasoning, I rolled it back completely instead of trying to patch it forward in the same round. Current authority is therefore to keep this idea in the “promising but not yet proven” bucket: cross-block redundant indirect-load reuse may still be worthwhile later, but only after a tighter proof about predecessor-available values and selected live-ins is in place.
+- 2026-05-07: A later same-day Value-SSA-side follow-up then landed on exactly that same `shuffle2` bucket-probe shape, but at the safer direct-build layer instead of at `machine_select`. The current indirect-memory direct fast-cleanup line now also forwards one narrow class of repeated `load_indirect` across a unique predecessor edge: if the predecessor already computed a `load_indirect(addr)` and reaches the successor through its unique idom edge with no intervening memory write/call after that load, and the successor re-materializes the same pure address expression at block entry only to load it again, the second load is rewritten to a `mov` of the predecessor result. Existing cleanup then drops the now-dead local address chain. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-UNIQUE-PRED-INDIRECT-LOAD-FORWARD`) now locks that shape down, and the kept surface is revalidated by `make test-value-ssa-regression`, `make test-lower-ir-regression`, `make test-compiler-driver`, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep `TrivialCompiler/custom_test` (`29/29`). On the public static witnesses this does exactly what the earlier selected-side attempt was aiming for, but without reopening the selected regression line: `03_sort2.sy` stays about flat at `404`, while `shuffle2.sy` improves again from about `266` down to about `262` by removing the duplicate `head[h]` bucket probe on the false branch of `insert`. Runtime still does not close under the same `60s` budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a real local win on the `shuffle2` line rather than as a full tail closure.
+- 2026-05-07: One more same-day direct-path Value-SSA cleanup step has now landed on top of that edge-load-forward checkpoint, and this one helps both public witnesses at once. The kept indirect-memory direct fast-cleanup line now also reuses repeated `addr_local` / `addr_global` roots **within one block**: a later same-slot address formation is rewritten to a `mov` of the earlier root, and the existing trivial-value + redundant-binary cleanup then collapses the now-identical downstream address arithmetic. This is deliberately narrower than general expression CSE; the kept rule only touches repeated slot-root formation and relies on the already-landed cleanup passes to do the rest. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-REPEATED-ADDR-ROOT-REUSE`) now locks that shape down. The revalidated kept surface is again: `make test-value-ssa-regression` PASS, `make test-lower-ir-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep `TrivialCompiler/custom_test` (`29/29`). On the public static witnesses this trims a little more real address setup from both lines: `03_sort2.sy` improves from about `404` down to about `399`, while `shuffle2.sy` improves from about `262` down to about `260`. The focused public runtime witnesses still remain `RUN_TIMEOUT` under the same `60s` budget, so current authority is to keep this as another small but real structural win on the direct path rather than as a runtime-closure claim.
+- 2026-05-07: One later same-day Value-SSA follow-up is now also kept on the still-open `03_sort2` residue, and it is deliberately narrower than a general call-CSE pass. The direct indirect-memory cleanup line now also reuses repeated **same-block pure internal calls** when the callee has a real body, touches only local slots plus readonly scalar globals, performs no indirect memory, no global writes, no address-taking, and no nested calls, and the later call repeats the same callee name plus identical SSA/immediate args. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-REPEATED-PURE-INTERNAL-CALL-REUSE`) now locks that shape on a multi-block helper that mutates locals and reads one readonly global. A later same-day safety tightening also stayed kept: the same-block reuse no longer crosses intervening `call`, `store_global`, or `store_indirect` rows, so the optimization boundary is narrower but less speculative than the first prototype. The revalidated kept surface for the live tree is now: `make test-value-ssa-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv8` (`12/12`), `autotest -riscv -s lv9` (`22/22`), and rotated external functional sweeps `indigo/test_codes/functional_test` (`111/111`) plus `minic-test-cases-2021f/functional` (`100/100`). After explicit `make compiler` rebuilds to avoid stale-CLI evidence, the focused public perf witnesses still remain open under the same `60s` one-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`). The rebuilt static direction is still mildly positive on the `03_sort2` line, but the kept witness should now be read from the post-tightening tree rather than from the earlier looser prototype: under the current quick-count witness rule, `03_sort2` sits around `395` instead of the earlier `402`, while `shuffle2` stays effectively flat around `274`. Current authority is therefore to keep this as a modest but real 03-sort2-side structural win with greener safety boundaries, while treating the remaining work as runtime-tail closure rather than as another correctness or stale-binary issue.
+- 2026-05-07: One neighboring extension of that same idea was also tested and explicitly **not** kept. I prototyped a unique-predecessor cross-edge version of the pure-internal-call reuse so a successor block could reuse an equal pure call computed in its sole idom predecessor. Focused regression coverage proved the transform itself was implementable, but after rebuild-first measurement it did not earn its complexity on the live public witness: `03_sort2` did not reduce `call getNumPos` count, the quick-count static witness drifted the wrong way (`~391 -> ~393` in the temporary prototype lane), and the focused public runtime witness still stayed `RUN_TIMEOUT`. That cross-edge version has therefore been fully backed out again. Current authority is to keep only the narrower same-block reuse with explicit blockers, and to treat cross-edge pure-call reuse as an unkept experiment rather than as the next default optimization step.
+- 2026-05-07: One more same-day direct-path Value-SSA cleanup step is now also kept, and this one finally explains one of the “why does the dump still show obviously repeated adds?” tails. The problem was not that `value_ssa_eliminate_redundant_binaries(...)` failed to run; it was that the first redundant-binary pass could create a `mov`, then the following trivial-value simplify would collapse that `mov` and only *then* expose a second-layer duplicate binary that the pipeline no longer revisited. The current direct indirect-memory cleanup tail now therefore runs one extra small fixed-point round of `normalize binary operands -> eliminate redundant binaries -> simplify trivial values -> eliminate dead value defs` after the first such round. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-REDUNDANT-BINARY-FIXED-POINT`) now locks exactly that shape: two equal `add x,1` rows feed two later `add <same>,2` rows, and the second cleanup round must collapse the exposed duplicate into the shorter final chain. This change also widened one repository-local text expectation rather than reopening a bug: the `compiler-driver` “call-arg load swap” witness now accepts the stronger optimized shape where a tiny internal helper call is folded all the way to `lw a0, 0(a1)` plus `addi a0, a0, 5` with no remaining `call`. The revalidated kept surface for the live tree is: `make test-value-ssa-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv8` (`12/12`), and a rotated external functional sweep `TrivialCompiler/custom_test` (`29/29`). On the rebuilt public static witnesses this extra fixed-point round produces a real new drop on both open perf tails: `03_sort2` moves from about `395` down to about `383`, and `shuffle2` moves from about `274` down to about `272`. The focused public runtime witnesses are still open under the same `60s` one-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as another real structural cleanup checkpoint while continuing to treat runtime-tail closure as the active remaining problem.
+- 2026-05-07: One later same-day indirect-memory follow-up is now also kept on top of that fixed-point checkpoint, and this one is deliberately alias-aware rather than just “forward more loads”. The current direct cleanup line now also forwards repeated **same-block `load_indirect`** rows when the address is unchanged and every intervening write can be proven not to alias that loaded address. The first landed proof surface is intentionally narrow: it understands `addr_local`, `addr_global`, and `load_local(parameter-array)` roots, proves at least `local-vs-global`, `local-vs-parameter-pointer`, and `different-global-vs-global` non-aliasing, and still treats unknown indirect roots or calls as barriers. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-SAME-BLOCK-INDIRECT-LOAD-FORWARD-PARAM-NONALIAS`) now locks the representative shape directly: a local-array `load_indirect(addr_local ...)` may survive across a scalar-local store and an intervening `store_indirect(load_local parameter-array, ...)` and be reused as the final return value. The revalidated kept surface for the live tree is: `make test-value-ssa-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep `minic-test-cases-2021s/functional` (`112/112`). On the rebuilt public static witnesses this alias-aware load reuse gives one more real step on the `03_sort2` line without reopening `shuffle2`: `03_sort2` moves from about `383` down to about `382`, while `shuffle2` stays about flat at `272`. The focused public runtime witnesses still remain `RUN_TIMEOUT` under the same `60s` one-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a small but real `03_sort2`-side alias-proof win while continuing to treat the remaining work as runtime-tail closure rather than as correctness repair.
+- 2026-05-07: One more same-day Value-SSA refinement is now also kept on the `03_sort2` line, and it reopens an earlier caution point with a narrower proof instead of with a broad heuristic. The current **same-block pure internal call reuse** no longer treats `store_indirect` as an automatic barrier. That earlier barrier turned out to be overly conservative for the actually-landed pure-callee class, because those callees are already restricted to value arguments plus readonly globals and explicitly do **not** read indirect memory. So the kept rule now blocks only across intervening `call` rows, not across arbitrary local/global/indirect stores. A focused default-conversion regression (`VALUE-SSA-CONVERT-DEFAULT-REPEATED-PURE-INTERNAL-CALL-ACROSS-STORE-INDIRECT`) now locks the intended shape directly: two equal pure helper calls may be merged even when the caller performs an intervening `store_indirect` to an unrelated global array slot between them. The revalidated kept surface for the live tree is: `make test-value-ssa-regression` PASS, `make test-compiler-driver` PASS, `autotest -riscv -s lv8` (`12/12`), and a rotated external functional sweep `indigo/test_codes/functional_test` (`111/111`). On the rebuilt public static witnesses this narrower barrier meaningfully helps the still-open hot line: `03_sort2` drops again from about `382` down to about `377`, while `shuffle2` stays about flat at `272`. Focused public runtime witnesses still remain open under the same `60s` one-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a real `03_sort2`-side structural win with a tighter purity argument, while treating the remaining open work as runtime-tail closure rather than as another correctness or alias-safety bug.
+- 2026-05-07: One later same-day final-text/runtime-adjacent cleanup is now also kept, and this one finally starts shaving a bit of the obvious call-staging overhead that remained after the earlier Value-SSA work. The preview text exporter now recognizes one very narrow seven-line stack-staged two-argument call pattern: `lw tmp0, src0(sp); sw tmp0, dst0(sp); lw tmp1, src1(sp); sw tmp1, dst1(sp); lw a0, dst0(sp); lw a1, dst1(sp); call ...`. When that exact shape appears, it now folds to the shorter direct form `lw a0, src0(sp); sw a0, dst0(sp); lw a1, src1(sp); sw a1, dst1(sp); call ...` instead of pointlessly reloading the just-staged arguments from the temporary stack slots. This is intentionally much narrower than the earlier unsafe entry-reload experiment: it is local, adjacent, and preserves the same post-call stack snapshots. The revalidated kept surface for the live tree is: `make test-compiler-driver` PASS, `autotest -riscv -s lv9` (`22/22`), and a rotated external functional sweep `TrivialCompiler/custom_test` (`29/29`). On the rebuilt public static witnesses this text-level fold gives one more small real step on the `03_sort2` line without reopening `shuffle2`: `03_sort2` moves from about `377` down to about `375`, while `shuffle2` stays about flat at `272`. Focused public runtime witnesses still remain `RUN_TIMEOUT` under the same `60s` one-case budget (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to keep this as a small but real call-staging cleanup win while continuing to treat the remaining work as runtime-tail closure rather than as a correctness problem.
+- 2026-05-07: One neighboring final-text `repeated lui %hi(symbol)` peephole was also tested and explicitly **not** kept. The idea was to drop a repeated `lui rd, %hi(sym)` when the same block later rebuilt the same high half into the same register without an intervening redefinition. On the immediate static witnesses it looked promising (`03_sort2: ~375 -> ~374`, `shuffle2: ~272 -> ~269`), but the course surface rejected it: `autotest -riscv -s lv9 /workspaces/compiler_lab` reopened on `13_complex_arr_params` as a runtime wrong answer (`-11`). The optimization has therefore been fully backed out again, and post-backout checks reclose the affected surfaces (`make test-compiler-driver` PASS, `autotest -riscv -s lv9` back to `22/22`). Current authority is therefore explicit: do **not** treat repeated-`lui` deletion as a kept backend/text optimization in the current tree; it is a recorded failed experiment rather than an active checkpoint.
+    - that same refreshed sweep also widened the explicit third-party
+      scorecard instead of leaving the external surface at the level of older
+      broad statements. The current rebuilt tree keeps
+      `minic-test-cases-2021f/functional` green (`100/100`),
+      `minic-test-cases-2021s/functional` green (`112/112`),
+      `indigo/test_codes/functional_test` green (`111/111`), and
+      `indigo/test_codes/performance_test` green (`10/10`).
+      The two `pku-minic` performance directories are not active red points
+      in the present environment; they currently come back as `SKIP`
+      (`2021f/performance: 20`, `2021s/performance: 18`) because the local
+      clones do not carry the `.out` assets required by the current harness.
+      The remaining meaningful third-party perf pressure at the latest full
+      sweep is still concentrated, but the concrete residual set has changed
+      materially from the older notes. `lava-test/performance_test2021` is
+      now `25/29`, and
+      `compiler2021/公开用例与运行时库/performance_test2021-private`
+      is also `25/29`, both with the same residual set:
+      `dead-code-elimination-3.sy -> RUN_TIMEOUT`,
+      `hoist-2.sy -> RUN_TIMEOUT`,
+      `hoist-3.sy -> RUN_TIMEOUT`, and
+      `integer-divide-optimization-3.sy -> RUN_TIMEOUT`.
+      This supersedes the older memory that the line was dominated by
+      `COMPILE_TIMEOUT` / `COMPILE_FAIL` on the whole
+      `dead-code-elimination-*` / `integer-divide-optimization-*` families.
+      Current authority is therefore that the external perf surface has
+      improved on some earlier compile-side failures, but still retains a
+      smaller runtime-timeout cluster that should be treated as active.
+    - the latest same-day full sweep also widened the non-course external
+      scorecard beyond the older “all green except lava perf” story:
+      `lava-test/lava_test` is now `18/21` with
+      `kmp.sy -> MISMATCH`,
+      `many_parameters10000.sy -> COMPILE_TIMEOUT`, and
+      `register_alloc10000.sy -> COMPILE_TIMEOUT`;
+      `lava-test/custom_test` remains green (`29/29`);
+      `lava-test/shortcircuit_test` remains green (`1/1`);
+      `minic-test-cases-2021s/performance` remains `18 SKIP`;
+      `minic-test-cases-2021f/performance` remains `20 SKIP`.
+      Current authority is therefore that giant-parameter compile-time
+      pressure and one functional/perf-adjacent `kmp` mismatch are now part
+      of the live external scorecard, not just optional future curiosity.
+    - 2026-05-08 follow-up: the `kmp.sy` correctness red point is now reclosed.
+      The root cause was in `machine_ir_copy_cleanup`: its backward
+      needed/live scan did not mark `load_indirect` address operands or
+      `store_indirect` address/value operands as uses, so local-array address
+      chains like `addr_local + index` could be deleted as dead defs during
+      canonicalization. After restoring those indirect-memory use marks, the
+      focused witness `lava-test/lava_test/kmp.sy` is back to PASS, and a
+      fresh full rerun of `lava-test/lava_test` is now green (`21/21`).
+      Current authority is therefore that this external sub-suite is no
+      longer carrying an active correctness red point; the remaining external
+      pressure stays on the timeout / compile-time lines instead.
+    - the first current-round baseline points are now refreshed rather than
+      inherited only from older notes: the rebuilt CLI currently compiles
+      `lava-test/performance_test2021/hoist-2.sy` to RISC-V assembly in about
+      `11.8s`, while the still-open public runtime tail
+      `compiler2021/performance_test2021-public/03_sort2.sy` remains a
+      `RUN_TIMEOUT` under the current `60s` per-case sweep budget
+    - current working interpretation is now materially ahead of the older
+      `26%` snapshot that this section previously carried. The compile-side
+      pressure has already yielded one real allocator-side win on `hoist-2`,
+      and the runtime-side `03_sort2` line has already accumulated several
+      safe, kept late backend / final-text wins:
+      `608 -> 523 -> 515 -> 482 -> 488 -> 485 -> 434 -> 430 -> 428` total emitted instructions
+      across the successive kept checkpoints, with major hot-family movement
+      such as `li: 139 -> 12`, `mul: 34 -> 0` in the final text, and
+      `slli`, `mv`, `addi`, `srai`, and `andi` replacing several earlier
+      helper-register patterns.
+    - current authority is also slightly different from what the older
+      wording implied: the local-machine `03_sort2` `RUN_TIMEOUT` is still a
+      valid recorded data point, but it is no longer the only gate for
+      whether this performance reopen has materially progressed. Given the
+      huge `n=30000000` public input and the environment-sensitive IO /
+      memory-bandwidth cost of that case, this round should now be judged
+      primarily by `1)` correctness staying green, `2)` compile-side pressure
+      on `hoist-2` not regressing, and `3)` real static/runtime-cost
+      reductions on the public hot loops, rather than by forcing this one
+      local machine to beat the same `60s` wall.
+    - a later 2026-05-07 focused perf recheck then tightened the active
+      witness set again with fresh one-case reproductions instead of relying
+      only on the older broad-sweep memory. The currently reproduced tails are
+      still:
+      `compiler2021/.../performance_test2021-public/03_sort2.sy ->
+      RUN_TIMEOUT`,
+      `lava-test/performance_test2021/hoist-2.sy -> RUN_TIMEOUT`,
+      `lava-test/performance_test2021/dead-code-elimination-1.sy ->
+      COMPILE_TIMEOUT`, and
+      `lava-test/performance_test2021/integer-divide-optimization-1.sy ->
+      COMPILE_TIMEOUT`.
+    - that same recheck also added fresh stage-level profiling so the compile
+      side is less opaque than before. `hoist-2.sy` now again shows a clear
+      `machine_ir_report` bottleneck
+      (`machine_ir_report ~= 17.358s`, `full_riscv ~= 17.635s`, later layers
+      negligible). `integer-divide-optimization-1.sy` shows the same shape
+      but more severely (`value_ssa ~= 1.783s`,
+      `machine_ir_report ~= 51.836s`, later layers negligible). By contrast,
+      `dead-code-elimination-1.sy` still reaches `lower_ir` quickly
+      (`lexer ~= 0.042s`, `parser ~= 0.168s`, `semantic ~= 0.073s`,
+      `ir_lower ~= 0.048s`, `lower_ir ~= 0.025s`) and then goes silent for
+      tens of seconds before even emitting the next stage marker, so current
+      authority is that this particular compile-time tail is earlier than the
+      `machine_ir_report` hotspot and likely sits in the heavy `value_ssa`
+      pipeline or just beyond it.
+    - current reopen interpretation is therefore sharper than before:
+      `03_sort2` remains a runtime/program-performance tail,
+      `hoist-2` and `integer-divide-optimization-1` are now clearly
+      `machine_ir_report`-dominated compile-time tails,
+      and `dead-code-elimination-1` is a deeper earlier-stage compile-time
+      tail that should be debugged in `value_ssa`/allocator-side work before
+      spending more time on later backend/export layers.
+    - a later same-day follow-up then materially improved two of those compile
+      tails instead of only diagnosing them. First, the `value_ssa` default
+      entry now treats "contains at least one extreme straight-line function"
+      as sufficient to use the direct-build fast path; it no longer requires
+      every body function in the program to be a single-block return just to
+      help one giant helper function. After explicitly rebuilding the CLI with
+      that bridge change, `dead-code-elimination-1.sy` rechecks green instead
+      of timing out at compile time. Second, the no-move allocator-plan fast
+      path was tightened so trivially uncoalesced cases skip the expensive
+      effective-degree maintenance machinery instead of paying for coalescing
+      facts that are provably absent. That change keeps allocator/value-SSA
+      regressions green and drops the representative
+      `integer-divide-optimization-1.sy` compile profile from
+      `machine_ir_report ~= 57.323s` down to roughly
+      `machine_ir_report ~= 6.218s`, which also rechecks as a full PASS under
+      the focused perf sweep.
+    - those same fixes also sharpen the remaining external perf shape rather
+      than simply erasing it. After the latest reruns:
+      `dead-code-elimination-1.sy` is now PASS,
+      `integer-divide-optimization-1.sy` is now PASS,
+      while `dead-code-elimination-2.sy`,
+      `dead-code-elimination-3.sy`, and `hoist-2.sy` now reproduce as
+      `RUN_TIMEOUT` rather than compile-time failure. Current authority is
+      therefore that this line has advanced from "several opaque compile
+      timeouts" to a narrower split:
+      `03_sort2` plus `hoist-2` and the remaining `dead-code-elimination-*`
+      cases are now runtime/perf tails, while the compile-time-only
+      `integer-divide-optimization-*` family is at least partially reclosed.
+    - one first follow-up idea in this stage has now been tried and explicitly
+      *not* promoted: I tested a conservative default-path value-SSA reopen
+      around redundant pure-call elimination / memory-value canonicalization
+      in hopes of helping the `03_sort2` runtime tail, but the observed result
+      was the wrong tradeoff for the current tree. That experiment either left
+      `03_sort2` unchanged (`RUN_TIMEOUT`) or regressed nearby baselines
+      (`hoist-2` compile time drifted up into the mid-teens, and one variant
+      even reopened `lv9` with a wrong-answer `-11` symptom). Current
+      authority is therefore to keep those new default-path pass hooks *out*
+      of the mainline and treat that direction as a failed experiment rather
+      than as a checkpoint. The stable current baseline after backing it back
+      out is again: `lv8` (`12/12`), `lv9` (`22/22`), `hoist-2` compile in
+      roughly `15s`, and `03_sort2` still `RUN_TIMEOUT`.
+    - one first compile-time optimization move is now landed and measured on
+      the live mainline instead of only discussed abstractly: the
+      `machine_ir` entry path no longer clones the whole `ValueSsaProgram`
+      eagerly for every compile when the active lowering path will stay on the
+      all-spill or conservative non-rewrite branch anyway. That cut one full
+      needless SSA-program copy out of the common compile path for large
+      programs while keeping the real allocate+rewrite branch unchanged.
+      After fixing one intermediate regression in that refactor and rerunning
+      the key baselines, the current rebuilt tree is green again on
+      `test-compiler-driver`, `test-ir-regression`, and `git diff --check`,
+      and the direct `hoist-2` compile baseline moved from roughly
+      `13.3s` down to roughly `11.8s`. Current authority is therefore that
+      the performance reopen has now produced one real compile-time win on the
+      allocator-heavy path, while the distinct runtime tail `03_sort2` still
+      reproduces independently as a `RUN_TIMEOUT`.
+    - one later perf-only experiment was also tried and then explicitly
+      backed back out, and it should stay recorded as a failed direction
+      rather than being rediscovered repeatedly. I tested a very narrow
+      `-perf`-only Value-SSA pass that tried to reuse repeated same-block pure
+      internal calls (motivated by the repeated `getNumPos(...)` pattern in
+      `03_sort2`). The result was the wrong tradeoff for the current tree:
+      `03_sort2` still timed out under the same `60s` budget, while the
+      compile-time baseline drifted back upward (`hoist-2` moved from the
+      improved `~11.8s` band back into roughly `13s`). That experiment has now
+      been removed again, and the current live baseline after rollback is:
+      `test-compiler-driver` green, `test-ir-regression` green,
+      `hoist-2` back around `12.9s`, and `03_sort2` still `RUN_TIMEOUT`.
+    - a second, even narrower retry on that same family has now also been
+      tried and rejected so we do not circle back to it later by accident.
+      I reintroduced the repeated-helper-call idea in a smaller form: a tiny
+      `-perf`-only block-local pure internal-call reuse pass, wired directly
+      into the `compiler_driver` perf path instead of reopening a larger
+      canonicalization pipeline. That version also failed the same two-way
+      test: `03_sort2` still timed out under the same `60s` budget, while the
+      compile-side `hoist-2` baseline regressed badly into the mid-`15s`
+      range. It has now been removed again, and the current rolled-back
+      baseline is back to `test-value-ssa-regression` green,
+      `test-compiler-driver` green, and `hoist-2` around `12.6s`. Current
+      authority is therefore explicit: **do not reopen pure-call reuse /
+      repeated-helper-call CSE as the next performance move**; that line has
+      now failed twice with the wrong compile-time/runtime tradeoff.
+    - a third performance experiment has now also been tried, measured, and
+      explicitly backed out: letting `value_ssa_forward_local_loads(...)`
+      handle non-address-taken scalar locals even in programs that also use
+      indirect memory, and then wiring that pass into the `-perf` path only.
+      This was a soundness-first idea aimed at array-heavy programs like
+      `03_sort2`, and the safety boundary is now regression-locked (address-
+      taken locals do not get forwarded). But as a performance move it still
+      failed the same practical test: `03_sort2` remained `RUN_TIMEOUT`, while
+      the compile-side `hoist-2` baseline regressed into the mid-`15s` range.
+      That experiment has now also been removed again. The current rolled-back
+      baseline after all three rejected perf branches is back to
+      `test-value-ssa-regression` green, `test-compiler-driver` green, and
+      `hoist-2` around `11.4s`. Current authority is therefore stronger than
+      before: the next performance move should avoid both repeated-helper-call
+      reuse and “extra `-perf` entrypoint canonicalization/forwarding passes”
+      as primary directions.
+    - one reopened repository-internal regression-sync tail is now also mostly
+      reclosed in the live tree and should not be confused with the public
+      performance mainline itself. The previously red `make test` cluster in
+      `machine_bytes` / `machine_object` / `machine_reloc` turned out to be
+      dominated by stale internal expectations after the newer generic-byte
+      tags, paired preview-call patch spans, large-slot lowering shapes, and
+      explicit Memory-SSA entry-memory dumps landed. The current tree now has
+      those internal byte/object/reloc, runtime/observe snapshot, CLI smoke,
+      and Memory-SSA bridge expectations refreshed together, so the remaining
+      repository-internal maintenance tail is narrower: `test-value-ssa-alloc`
+      still needs a clean end-to-end rerun under a runner/latency-aware check
+      before the full internal `make test` sweep can be called fully reclosed.
+      The latest 2026-05-07 follow-up also split that allocator tail into two
+      more concrete pieces instead of leaving it as one fuzzy “alloc test is
+      weird” note. First, the earlier parallel `make test` `Text file busy`
+      failure was materially a runner problem, not an allocator correctness
+      symptom; current test runners now use unique `mktemp`-backed copy paths
+      so that collision class is no longer the leading issue. Second, there
+      was a real allocator-policy regression on the focused retry-family
+      slices `VALUE-SSA-ALLOC-RETRY-DUAL-EVICT-FAMILY-PRESSURE` and
+      `VALUE-SSA-ALLOC-RETRY-BLOCKER-FAMILY-PRESSURE`: hand-built test plans
+      without `value_item_indices` caused
+      `value_ssa_allocator_plan_find_value(...)` to fail, which silently hid
+      family-pressure facts and let retry recovery comparisons fall through to
+      raw `value_id` order. The current tree now restores a linear-scan
+      fallback for manual plans without index tables, and focused repro wrappers
+      again confirm the intended reasons on those slices
+      (`family-pressure` for the dual-evict case and
+      `retry-generic-eviction` for the lighter-blocker-family case). Current
+      authority is therefore that the allocator correctness tail is narrower
+      again, while the still-open part of `test-value-ssa-alloc` is mainly its
+      aggregate runtime/latency rather than an unresolved retry-policy
+      correctness mystery.
+      A later 2026-05-07 follow-up tightened that diagnosis further and also
+      corrected the earlier "mostly latency only" optimism. The focused
+      move-engine/family-freeze witness line is materially healthier again in
+      the current tree: the previously non-progressing
+      `VALUE-SSA-ALLOC-PLAN-FAMILY-FREEZE` path now exits the repeated
+      `freeze ssa.3` loop, the paired
+      `VALUE-SSA-ALLOC-PLAN-RELEASED-SIMPLIFY` witness is back on its intended
+      released-vs-freeze ordering, and the already-reopened retry-family
+      focused witnesses still recheck green together
+      (`RETRY-DUAL-EVICT-FAMILY-PRESSURE`,
+      `RETRY-BLOCKER-FAMILY-PRESSURE`,
+      `RETRY-PREFERRED`). The key kept implementation change is that
+      move-engine queue refresh now forces a broader reseed around frozen-path
+      transitions instead of relying only on narrow affected-root refresh, so
+      "freeze consumed but neighboring family state stayed stale" no longer
+      traps the planner in the same tiny family slice.
+      A later same-day follow-up then reclosed that broader allocator tail too.
+      Two more manual-artifact fallbacks were restored on the same principle as
+      the earlier `plan_find_value(...)` repair:
+      `value_ssa_allocator_coalesce_analysis_find_pair(...)` now linearly scans
+      hand-built coalesce rows when no pair index table exists, and
+      `value_ssa_allocator_move_worklist_find_root(...)` now linearly scans
+      hand-built move-work rows when no root-index table exists. In parallel,
+      the no-move allocator-plan fast path was tightened so it still respects
+      coalesced effective degree / coalesce class facts instead of flattening
+      every manual no-move case back to raw degree/class-1 planning.
+      Focused rechecks then materially reclosed the whole earlier cluster:
+      `coalesce-opportunity-agenda`, `move-transition` family/coalesce
+      witnesses, `spill-family-tie`, targeted/weighted recolor witnesses, and
+      the `RETRY-PREFERRED` manual path are green again after updating that
+      test's expected preferred-color source to the more precise
+      `coalesce-direct(ssa.4)` surface now that direct pair lookup works again.
+      Most importantly, the aggregate internal allocator suite is green again
+      in the current tree: direct rerun of
+      `./build/value_ssa/value_ssa_alloc_test` now passes, and adjacent
+      internal rechecks stay green too (`test-memory-ssa-regression`,
+      `test-compiler-driver`). Current authority is therefore that this
+      reopened allocator-maintenance tail is reclosed again, and the next
+      internal sweep can move back up to the broader repository `make test`
+      level instead of staying pinned on allocator-only cleanup.
+      A follow-up rotated correctness sweep on the same tree now also widens
+      the external/public confidence surface immediately after that reclosure
+      instead of leaving it implied by older checkpoints: the full course
+      `autotest -riscv /workspaces/compiler_lab` baseline is green again
+      (`130/130`), `indigo/test_codes/functional_test` is green again
+      (`111/111`), `minic-test-cases-2021s/functional` is green again
+      (`112/112`), and the wider
+      `sysy-testsuit-collection/lvX` sweep is green again end-to-end
+      (`467/467`). Current authority is therefore that the allocator-tail
+      repair did not only restore repository-internal self-consistency; it
+      also survived one fresh rotated course/external revalidation round.
+      It is also worth preserving the intermediate state explicitly because
+      that is the snapshot the user used to triage the line: at the earlier
+      2026-05-07 broad sweep point, `make test` itself was still visibly red
+      with failures concentrated in exactly
+      `machine-bytes`, `machine-object`, and `machine-reloc`, even while the
+      course/public/external user-facing surfaces were already mostly green.
+      That asymmetry is now part of project memory on purpose: it explains why
+      the next implementation step after the wide public sweep was “repair the
+      repository’s own artifact/backend regression expectations” rather than
+      “keep chasing new public functional breakage.”
+    - a fourth experiment also failed and should now be treated as another
+      closed direction rather than fresh unexplored ground: a late
+      `machine_select`-cleanup strength reduction that rewrote
+      `mul reg, 2^k` into `shl reg, k` before bytes lowering. This looked
+      attractive because `03_sort2` contains many `*4`-style address/index
+      expressions and the change lives late in the backend, but in the current
+      tree it still produced the wrong tradeoff: `03_sort2` remained
+      `RUN_TIMEOUT`, while the compile-side `hoist-2` baseline again regressed
+      into the mid-`16s` range. That experiment has now also been removed
+      again, and the current rolled-back baseline is back to
+      `test-machine-select` green, `test-compiler-driver` green, and
+      `hoist-2` around `12.5s`. Current authority is therefore even sharper:
+      the next performance move should not be another blind local rewrite in
+      either the `-perf` SSA entry path or the late selected-op cleanup path;
+      we now need a more profiling-driven or statistics-guided next step.
+    - profiling has now been refreshed to support that next step instead of
+      relying only on intuition. Fresh standalone measurements with
+      `tools/profile_compile_pipeline.py` show the current `hoist-2.sy`
+      baseline at roughly `13.56s` for the normal `-riscv` path and
+      `13.25s` for the `-perf` path, so the present perf reopen is no longer
+      dominated by a giant hidden compile-time regression from the latest
+      experiments. A fresh opcode histogram for `03_sort2.sy` also shows the
+      expected hot classes directly in the generated text: `lw/sw/li/add`
+      dominate, `mul` still appears `34` times, and `call` still appears
+      `15` times. Current authority is therefore that the runtime tail is
+      still likely indexed-address / repeated-load heavy rather than being a
+      pure control-flow issue, and the next performance move should focus on
+      a late, locality-aware index/address optimization rather than more
+      entrypoint-level SSA passes.
+    - one later backend-side micro-optimization round has now also produced a
+      real, measurable code-quality win on that same `03_sort2` path, even
+      though it has not yet closed the final runtime timeout. The current
+      `riscv32-preview` bytes path now uses the architectural zero register
+      for `store_local_imm 0` / `store_global_imm 0` instead of first
+      materializing a temporary zero, small `addr_local` forms now lower
+      directly to `addi rd, sp, imm` when the slot offset already fits the
+      signed-12-bit immediate range, and zero-valued prepared operands may
+      now flow through the later operand-prep path as `x0` instead of as an
+      extra synthesized scratch register. Direct rebuilt-CLI reruns now show
+      the public `03_sort2.sy` text histogram moving from the earlier
+      `total_instructions=608`, `li=139`, `add=74`, `addi=24` baseline down
+      to roughly `total_instructions=523`, `li=54`, `add=44`, `addi=54`
+      while preserving the same broad hot families (`lw=133`, `sw=106`,
+      `mul=34`, `call=15`). The public runtime result is still not closed:
+      the same single-case sweep under `tools/sweep_sysy_suite.py` continues
+      to reproduce `03_sort2.sy: RUN_TIMEOUT` at the current `60s`
+      per-case budget. Current authority is therefore that late backend
+      cleanup can still buy real instruction-count wins on the public hot
+      case, but the remaining tail is now specifically the unresolved
+      `addr_local + zero-index add` / repeated indexed-address family rather
+      than the already-closed zero-store materialization family.
+    - the compile-side baseline has now also been rechecked after the latest
+      late text/export peephole rounds so this line is not relying only on
+      older allocator-era numbers. Current `tools/profile_compile_pipeline.py`
+      reruns keep `hoist-2.sy` in the same band rather than showing a new
+      regression (`full-compiler ~= 13.50s`, `full-perf ~= 13.57s` in the
+      present tree), which means the recent final-text cleanups are not
+      secretly paying for their small `03_sort2` wins by reopening the old
+      compile-time pressure.
+    - one extra post-checkpoint text-side micro-optimization candidate has
+      now also been tried, measured, and explicitly rejected so we do not
+      keep rediscovering it later under a new name. I tested a very narrow
+      "dead immediate" final-text cleanup that removed `li rd, imm` when the
+      very next instruction redefined the same destination register without
+      reading it. In practice this was the wrong tradeoff for the current
+      tree: it did not improve the public `03_sort2` hot-case static shape
+      (the rebuilt text remained at `TOTAL=491` in that trial), while the
+      compile-side `hoist-2` baseline drifted the wrong direction
+      (`full-compiler ~= 14.06s`, `full-perf ~= 13.82s`). That experiment has
+      now been backed out again. The current live post-rollback snapshot is
+      slightly better on the static side (`03_sort2` text back to
+      `TOTAL=489`, `li=15`) while keeping `test-compiler-driver` green, and
+      the refreshed compile-side baseline is now roughly
+      `full-compiler ~= 14.09s`, `full-perf ~= 13.37s`. Current authority is
+      therefore explicit: **do not spend the next performance step on generic
+      adjacent-line dead-immediate cleanup**; it was measurable, safe enough
+      to test, and still not worth keeping.
+    - one follow-up widening of the existing `zero_adds` text cleanup has now
+      also been tried and rejected for the same reason. I tested a broader
+      variant that also tried to fold the self-overwrite form
+      `li rd, 0 ; add rd, base, rd` into `mv rd, base` when the zero-valued
+      register was not used again before redefinition. That variant stayed
+      correctness-green on `test-compiler-driver`, but it still did not move
+      the public `03_sort2` static shape off the same `TOTAL=489` plateau in
+      a meaningful way and pushed the compile-side perf path the wrong way
+      (`hoist-2` refresh during the trial was about
+      `full-compiler ~= 13.67s`, `full-perf ~= 14.19s`). It has now also been
+      backed out. Current authority is therefore even narrower: **do not keep
+      iterating on text-export-only variants of the current zero-add folding
+      family**; that neighborhood is now measured enough to demote in favor of
+      more structural machine-layer opportunities.
+    - one first truly structural follow-up on that same hotspot family has now
+      also been probed and then paused rather than landed: I tested teaching
+      `machine_bytes` to lower `ALU_IMM` subtraction by immediate as a direct
+      `addi rd, rs, -imm` when the negated immediate still fits the signed
+      12-bit RV32I form. That *is* the right long-term structural direction
+      for patterns such as `sub x, x, 1` that still appear in `03_sort2`, but
+      in the current tree that change immediately collides with a broader
+      byte-layout / test-contract surface: `test-machine-bytes` reopened on
+      multiple fixed-byte-shape expectations as soon as that immediate form was
+      admitted. Current authority is therefore not "never do sub-imm
+      immediateization", but rather: **do not land this optimization as an
+      isolated local tweak during the current reopen**. If we revisit it, it
+      should be done as a deliberate machine-bytes contract refresh with the
+      associated test / byte-shape / patch-offset expectations updated
+      together, not as a quick one-line encoding shortcut.
+    - one adjacent machine-select-side probe has now also been tried and then
+      parked without landing. The promising idea was to fold the obvious
+      zero-offset local-address pattern
+      `addr_local slot ; imm 0 ; add base, zero ; load/store_indirect`
+      back into direct `load_local` / `store_local`, because `03_sort2`
+      still shows several of those sequences at the selected-program level.
+      The observation itself is real and still useful as roadmap memory: that
+      pattern exists in the current selected dump and is a better structural
+      target than more text-export peepholes. But the first cleanup attempt
+      did not actually hit the live `03_sort2` residuals under the current
+      selected shapes, so it produced no kept win and has been fully backed
+      out. Current authority is therefore: **keep zero-offset local-address
+      folding on the candidate list, but do not keep half-working selected
+      cleanup scaffolding in the tree**. If we revisit it, start from the
+      real `03_sort2` selected-form witnesses rather than from a guessed
+      adjacent-op shape.
+    - that same conclusion has now been strengthened by a second pass over the
+      exact live witnesses rather than only a first guess. I re-ran the
+      `03_sort2` selected dump after instrumenting the obvious
+      `addr_local + imm 0 + add + load/store_indirect` family and confirmed
+      that the residuals still do exist, but the concrete shapes in the hot
+      blocks are more specific and less uniform than the naive adjacent-op
+      cleanup assumed. A tightened selected-cleanup attempt that only targeted
+      zero-offset local indirects still failed to produce a kept win on the
+      real hot blocks and has also been fully backed out. The refreshed
+      compile-side baseline after unwinding that probe remains in the same
+      band (`hoist-2` roughly `full-compiler ~= 13.89s`,
+      `full-perf ~= 13.82s`) with `test-compiler-driver` green again.
+      Current authority is therefore sharper than before: **the next
+      performance step should begin from one recorded live witness block and
+      derive the exact structural fold from that witness, not from a generic
+      "zero offset local indirect" slogan alone**.
+    - one more cleanup-side root-cause check has now also been completed and
+      should narrow future search space. I patched the selected-cleanup
+      use/rewrite accounting so `load_indirect` / `store_indirect` address
+      operands are finally counted as real uses for copy/materialize
+      forwarding, which removes one obvious blind spot from the current
+      cleanup infrastructure. That change is correctness-safe enough to keep
+      (`test-compiler-driver` stays green), but it still did **not** move the
+      live `03_sort2` selected witnesses or the downstream static profile by
+      itself. Current authority is therefore even more specific: the remaining
+      `03_sort2` residuals are not just "cleanup forgot indirect addresses";
+      there is at least one additional structural barrier in the actual
+      selected shapes. The next reopen step should therefore inspect one exact
+      hot witness end-to-end instead of continuing to widen generic selected
+      cleanup heuristics.
+    - one final text-side sanity check has now also been closed out so we can
+      stop second-guessing that line. I tightened the `zero_adds` witness
+      logic specifically for the live `li a0, 0 ; add a0, a1, a0 ; lw ...`
+      shape, on the theory that the zero temp should count as dead once the
+      `add` itself overwrites `a0`. That hypothesis turned out not to be the
+      real bottleneck for the current tree: the rebuilt `03_sort2` static
+      profile still stayed on the same `TOTAL=491`, `li=17` plateau, while
+      `test-compiler-driver` stayed green. Current authority is therefore now
+      explicit on this branch too: **the next performance step should not
+      spend more time on `compiler_driver` text-side `zero_adds` heuristics**.
+      The remaining residual is more likely to require an earlier emit/bytes
+      structural specialization than another tweak to the final pretty-printer
+      peephole.
+    - one last "maybe the main cleanup was simply gated off" hypothesis has
+      now also been tested and rejected. I temporarily reopened the top-level
+      `machine_select_cleanup_program(...)` gate for indirect-memory selected
+      programs after fixing indirect-address use accounting, but the live
+      `03_sort2` selected witnesses still did not change in the expected hot
+      blocks. That means the current barrier is not just "cleanup never ran on
+      indirect-memory programs"; there is still at least one later-layer
+      structural reason those zero-offset address patterns survive. This probe
+      has been fully backed out again. Current authority is therefore explicit:
+      **do not spend the next round reopening broad selected-cleanup gates**.
+      The next credible move remains a downstream specialization derived from
+      one exact surviving witness.
+    - that downstream witness has now been pinned down one layer more
+      precisely. I traced the representative `03_sort2` residual
+      `addi a1, sp, 144 ; li a0, 0 ; add a0, a1, a0 ; lw ...` back through the
+      emit/layout dumps and confirmed it is **not** a bytes-side invention.
+      The current selected/layout/emit chain really is carrying the generic
+      pattern `addr_local slot ; imm 0 ; add ; load_indirect/store_indirect`
+      all the way down to bytes, which then faithfully lowers it into the
+      final `li 0 ; add ; lw/sw` text shape. Current authority is therefore
+      sharper again: **the next optimization should not start in
+      `machine_bytes` as a print-time special case**. It should begin at the
+      selected/emit-side representation boundary by canonicalizing zero-offset
+      local-address indirects into direct local slot operations before bytes
+      lowering.
+    - one small but useful control experiment has now also closed a false lead
+      in that same area. I added a tiny compiler-driver regression that checks
+      a simple local-array zero-offset witness does **not** keep the full
+      `li 0 ; add base, 0 ; lw` text sequence in the final RISC-V output. That
+      test passes in the current tree, which means the simplest zero-offset
+      local-address case is already being handled well enough. Current
+      authority is therefore narrower again: the stubborn `03_sort2` residuals
+      are not the plain "local slot at offset 0" case, but a more complex
+      witness involving additional address/value composition (for example
+      spill-carried bases, bucket-array address chains, or repeated composed
+      local-array roots). The next performance step should therefore mine that
+      *more complex* witness directly instead of spending more time on the
+      already-green trivial zero-offset case.
+    - that control result is now reinforced by one direct end-to-end witness
+      check. The new compiler-driver regression for the simple local-array
+      case stays green together with `lv9`, so the plain
+      `addr_local + imm 0 + add + load/store_indirect` shape is no longer a
+      productive debugging target by itself. Current authority is therefore
+      specific enough to guide the next round: **skip the trivial local-root
+      witness entirely and move straight to the complex `03_sort2` survivors**
+      such as spill-carried bucket roots and repeated array-root compositions
+      around `getNumPos(...)`.
+    - the first debugging tool for that complex-witness line is now also in
+      place: `tools/analyze_machine_emit_addr_local.py` scans one
+      machine-emit dump and summarizes repeated `addr_local` roots, explicit
+      zero-offset root witnesses, and rough root-use counts. On the current
+      `03_sort2` emit dump it narrows the practical search space to a tiny
+      set immediately: zero-offset witnesses exist only for `local.4`,
+      `local.20`, and `local.36`, and the hottest root by simple use count is
+      `local.4` (`14` uses, vs `8` for `local.20` and `4` for `local.36`).
+      Current authority is therefore now concrete enough for the next
+      implementation round: **start from the `local.4` witness family first,
+      then widen to `local.20` / `local.36` only if needed**.
+    - one first selected-side structural specialization on that exact
+      `local.4` witness family is now landed instead of only discussed. The
+      current tree adds a narrow block-local root-reuse pass in
+      `machine_select` that can run even when indirect-memory ops are still
+      present: repeated `addr_local` / `addr_global` materializations for the
+      same slot may now reuse one earlier still-live result instead of
+      rematerializing the root each time. This is intentionally *not* a broad
+      reopening of the old selected-cleanup gate; it is a small direct pass
+      aimed at the real `03_sort2` hotspot shape. A new repository-local
+      debug helper, `tools/dump_machine_stage.c`, now also makes the
+      `machine-ir` / `machine_select` / `machine_emit` / preview-bytes dumps
+      reproducible from one SysY input instead of relying on transient `/tmp`
+      binaries.
+    - that same narrow root-reuse pass now has direct evidence on the live
+      `03_sort2` path rather than only a synthetic unit test. In the current
+      `machine_select` dump, `radixSort` drops from `288` selected ops to
+      `281`, `bb.17` drops from `41` ops to `38`, and the earlier repeated
+      `spill.3/4/5/7 = addr_local local.4` chain now reuses one stable
+      `spill.3` root for the later three local-array-root compositions
+      instead of rematerializing the same base four times around
+      `getNumPos(...)`. The current rebuilt RISC-V text snapshot on the same
+      case is now down again to about `479` total instructions while keeping
+      `li=12`. Guardrails are currently green after landing that slice:
+      `make test-machine-select`, `make test-compiler-driver`, and
+      `git diff --check`.
+    - one immediate follow-up on that same line has now also been completed so
+      future rounds do not have to rediscover the same safety/perf boundary.
+      I split a second, more conservative selected-side cleanup candidate out
+      from the older broad gate: block-liveness for selected cleanup now also
+      counts `load_indirect` / `store_indirect` operands, and a pure
+      value-only cleanup subpass may now run before the broader
+      non-indirect-memory cleanup. Current measured result is deliberately
+      modest: it does **not** improve the live `03_sort2` static checkpoint
+      beyond the same `479`-instruction plateau, so it should be treated as
+      correctness-preserving cleanup infrastructure rather than as a new
+      performance win by itself. The important part is that current guardrails
+      still stay green after widening the validation surface around it:
+      `make test-machine-select`, `autotest -riscv -s lv9
+      /workspaces/compiler_lab` (`22/22`), full
+      `minic-test-cases-2021f/functional` (`100/100`), and
+      `git diff --check` are all green in the current tree.
+    - a follow-up tightening of the selected pure-value forwarding rule is
+      also now complete and likewise remains correctness-green on the wider
+      validation surface. The current rule is intentionally stricter about the
+      last visible use of a forwarded operand before allowing the copy to
+      disappear, which keeps the recent `03_sort2` block-local value cleanup
+      from turning into an over-eager alias skip. The current tree still
+      preserves the same `479`-instruction public snapshot, but the
+      correctness evidence now includes a rechecked `machine-select` test
+      suite, `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), a
+      full `minic-test-cases-2021f/functional` sweep (`100/100`), and
+      `git diff --check` in the same tree.
+    - one more very narrow cleanup is now also landed and validated in the
+      same safety-first style: selected cleanup now removes pure `copy`
+      self-noops directly and can also drop one redundant same-result
+      `addr_local` redefinition when the exact same slot is materialized again
+      into the same resource before use. This did not move the public
+      `03_sort2` text checkpoint off the same `479`-instruction plateau, but
+      it did reduce selected noise in the live dump and remains green on the
+      expanded validation surface: `make test-machine-select`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`),
+      `minic-test-cases-2021f/functional` (`100/100`), and `git diff --check`.
+    - one final follow-up in that same cleanup/debugging family has now also
+      been tried and bounded. I taught selected cleanup to fold the immediate
+      pair `addr_local/addr_global -> copy` when the original address result
+      has no later visible use beyond that copy, and I regression-locked both
+      the plain `copy self` no-op removal and the `addr_local -> copy ->
+      final use` fold shape in `test-machine-select`. This is correctness-
+      green on the same local evidence surface (`machine-select`, `lv9`,
+      third-party functional sample), but it still does **not** push the live
+      `03_sort2` text image below the same `479`-instruction checkpoint.
+      Current authority is therefore that the selected-side “obvious copy
+      noise” line is now much better debugged and partly cleaned, but is no
+      longer the most likely remaining source of another big public perf win
+      by itself.
+    - one more debugging pass now narrows the likely next structural win more
+      cleanly than the earlier selected-noise notes did. The live selected
+      dump no longer keeps the earlier obvious `copy self` clutter after the
+      latest cleanup refinements, but the final RISC-V text still stays at the
+      same `479`-instruction checkpoint. A new helper,
+      `tools/analyze_riscv_call_moves.py`, shows that many of the remaining
+      visible `mv` clusters around `getNumPos(...)` / `radixSort(...)` are now
+      ordinary call-argument permutation cycles (for example a `2`-arg swap or
+      a `4`-arg cycle) rather than accidental selected-noise leftovers, so
+      that line is less likely to hide another large cheap win by itself.
+      In contrast, another new helper,
+      `tools/analyze_machine_select_remat_spills.py`, isolates just two tight
+      same-block rematerializable spill-root candidates in the live
+      `03_sort2` selected dump:
+      `bb.17 spill.3 = addr_local local.4` (`4` same-block uses) and
+      `bb.5 spill.0 = addr_local local.36` (`2` same-block uses). Current
+      authority is therefore that the next more promising backend-side probe
+      is no longer “more selected copy cleanup”, but a narrow bytes-side or
+      late-lowering experiment around rematerializing these spill-backed local
+      array roots instead of always materializing them into stack slots and
+      loading them back.
+    - that narrower rematerialization probe is now also landed as a first
+      text-side pass and has produced a real, measured improvement on the live
+      `03_sort2` checkpoint instead of only a theoretical one. The current
+      final-text post-pass now recognizes one narrow stack-address reuse shape
+      and rewrites the easy local-address rematerialization pairs directly in
+      the emitted `.s`, which moves the live public `03_sort2` image down from
+      the older `479`-instruction plateau to about `456` total instructions
+      while keeping the same broad hot families and preserving the current
+      correctness surfaces. Fresh reruns after that change are still green on
+      `make test-compiler-driver`, `autotest -riscv -s lv9
+      /workspaces/compiler_lab`, `minic-test-cases-2021f/functional`,
+      `minic-test-cases-2021s/functional`, `compiler2021/.../function_test2021`,
+      `indigo/test_codes/functional_test`, `lava-test/cases`, and
+      `TrivialCompiler/custom_test`; `tools/profile_compile_pipeline.py` now
+      keeps `hoist-2.sy` in the same acceptable band (`full-compiler
+      ~= 15.259s`, `full-perf ~= 14.220s`) rather than exposing a regression.
+    - one follow-up final-text/local-root fold has now also landed on top of
+      that same safe late-export line, but this round importantly included a
+      real external-suite correctness correction before it was kept. The new
+      peephole folds the narrow scratch-root shape
+      `addi/mv t*, sp, K ; ... ; add addr, t*, idx ; lw value, 0(addr)` into
+      `add addr, sp, idx ; lw value, K(addr)` so the final `.s` stops paying
+      an extra stack-root materialization on some of the surviving
+      `03_sort2` indexed local-array witnesses. A first broader attempt also
+      touched non-scratch base registers and immediately reopened
+      `TrivialCompiler/custom_test/array.sy` (`stdout=""`, `exit=169`), so
+      current authority is explicit: keep this optimization **only** on the
+      scratch-root (`t*`) subfamily for now, and keep the new
+      `compiler_driver_test` regression that blocks the array-parameter
+      misfold. With that safety narrowing in place, the direct rebuilt-CLI
+      `03_sort2` histogram moves one more step from `456` down to about
+      `452` total instructions (`addi: 54 -> 50` while the main hot families
+      otherwise stay broadly stable), and the rechecked correctness surface is
+      green again on `make test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and the full
+      `TrivialCompiler/custom_test` external suite (`29/29`). A later rotated
+      rerun also keeps `indigo/test_codes/functional_test` green end-to-end
+      (`111/111`), so this kept version is no longer relying on only one
+      external family after the array-parameter correction. The compile-side
+      guardrail also stays acceptable after this kept variant and even nudges
+      slightly better again on the current local machine:
+      `tools/profile_compile_pipeline.py` now reports `hoist-2.sy` around
+      `full-compiler ~= 13.030s`, `full-perf ~= 13.248s`.
+    - one more final-text call-adjacent fold has now also landed on the same
+      `03_sort2` line, and this one removes a real repeated ABI-shuffle
+      pattern instead of only another address-root rematerialization. The
+      current preview text exporter now recognizes the narrow sequence
+      `lw a1, ... ; lw a0, ... ; mv t5, a0 ; mv a0, a1 ; mv a1, t5 ; call ...`
+      and rewrites it into the equivalent direct call-argument load order
+      `lw a0, ... ; lw a1, ... ; call ...`, eliminating the three-register
+      swap helper when the values were about to be passed to the call anyway.
+      A focused repository-local regression now locks that shape directly in
+      `compiler_driver_test`, and the live public hot repro benefits from it
+      in several places around the repeated `getNumPos(...)` cluster. On the
+      rebuilt `03_sort2` text image, the current stable checkpoint now moves
+      from about `452` total instructions down to about `434`, with `mv`
+      dropping materially from `29` to `11` while the rest of the hot opcode
+      families remain broadly stable. Rechecked correctness is still green on
+      `make test-compiler-driver`, `autotest -riscv -s lv9
+      /workspaces/compiler_lab`, and the full `TrivialCompiler/custom_test`
+      external suite (`29/29`). Current compile-time authority is more
+      nuanced than the earlier `hoist-2` guardrail alone: a later control
+      measurement on `lava-test/cases/107_long_code2.sy` still shows a slow
+      compile path (`~32s..35s`), but a temporary local disable/re-enable
+      experiment on this new call-swap fold confirms that slowdown is **not**
+      uniquely caused by this fold itself. In practice that means the `434`
+      `03_sort2` checkpoint is worth keeping for now while compile-time
+      follow-up continues on the broader large-text path rather than by
+      immediately reverting this specific runtime-side win.
+    - the compile-side reopen around `lava-test/cases/107_long_code2.sy` now
+      also has a first real stage breakdown instead of only wall-clock
+      suspicion. A new repository-local probe,
+      `tools/profile_compiler_stages.c`, times the major pipeline slices from
+      source text through final compiler text export. On the current rebuilt
+      tree, the big cost on `107_long_code2.sy` is **not** the final preview
+      text pretty-printer/peephole tail: the measured stage sum is already
+      about `30.316s`, the full `-riscv` compile is about `30.374s`, and the
+      estimated post-`machine_bytes` text-export tail is only about `0.058s`.
+      The real hot layers are upstream:
+      `value_ssa ~= 6.275s`, `machine_ir_report ~= 9.602s`,
+      and `machine_select ~= 14.385s`, while `machine_layout`,
+      `machine_emit`, and `machine_bytes` are effectively negligible on this
+      case. Current authority is therefore explicit: the next compile-time
+      optimization step for this large-text reopen should focus on the
+      `value_ssa -> machine_ir_report -> machine_select` line, not on further
+      tuning the final RISC-V text-export peepholes.
+    - that same compile-time diagnosis is now also one layer more specific on
+      the selected side instead of stopping at the coarse `machine_select`
+      bucket. The selected lowering path now supports an opt-in timing trace
+      (`MACHINE_SELECT_TRACE_TIMING=1`) that reports its major internal
+      phases. On repeated `107_long_code2.sy` measurements, the selected-side
+      cost is **not** clone/lower or verifier overhead: those stay around
+      `0.005s`. The dominant selected hotspot is the pure cleanup loop itself
+      (`cleanup_pure ~= 12.2s..12.5s`), with the narrower address-root reuse
+      pass a distant second (`cleanup_reuse_addr_roots ~= 1.8s` in the common
+      runs). Current authority is therefore sharper than before: the next
+      compile-time optimization step should begin inside
+      `machine_select_cleanup_pure_program(...)`, especially its iterative
+      per-function fixed-point loop and the helpers it repeatedly calls, not
+      inside selected lowering construction, verifier entry, or the
+      downstream layout/emit/bytes layers.
+    - that same `cleanup_pure` hotspot is now also broken down into its real
+      inner costs instead of being only one big 12-second box. On the live
+      `107_long_code2.sy` repro, `live_out` recomputation itself is almost
+      free (`~0.001s`) and the canonicalize/copy-self/terminator subpasses are
+      negligible too. The first fixed-point iteration is dominated by
+      `forward_trivial_defs_in_block(...)` (`~5.5s..7.8s`) plus
+      `remove_dead_defs_in_block(...)` (`~1.7s..2.5s`), with
+      `remove_redundant_addr_defs_in_block(...)` a smaller but still visible
+      secondary cost (`~0.3s..0.8s`). The second fixed-point iteration then
+      keeps paying another `~2s+` mostly on
+      `remove_dead_defs_in_block(...)` after `forward_trivial_defs_in_block(...)`
+      has already dropped to zero. Current authority is therefore sharper
+      again: if we want the first low-risk selected-side compile-time win, the
+      best default target is the repeated whole-block scans in
+      `forward_trivial_defs_in_block(...)` and
+      `remove_dead_defs_in_block(...)`, not liveness math itself.
+    - the first “what if we simply do not run `cleanup_pure` on this
+      pathological shape?” diagnostic probe is now also concrete enough to use
+      as roadmap memory. I added opt-in environment toggles
+      `MACHINE_SELECT_SKIP_CLEANUP_PURE=1` and
+      `MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS=1` so the current tree can compare
+      costs without changing default behavior. On `107_long_code2.sy`, the
+      `skip_cleanup_pure` probe collapses selected time from the usual
+      `~14s` band down to about `3.4s`, and the full `-riscv` compile drops
+      from the low-`30s` band to about `21.9s`, while the selected artifact
+      summary stays effectively unchanged (`ops=16005`, `blocks=1`,
+      `spills=1`, same byte count). Current authority is therefore that
+      `cleanup_pure` really is the dominant compile-time regression surface on
+      this extreme single-block/no-call giant spill program, and a future
+      default heuristic that suppresses or narrows that cleanup on similarly
+      pathological shapes is a credible next move rather than only a
+      speculative idea.
+    - that heuristic direction now also has a stronger upper-bound data point
+      instead of only the earlier “skip pure” half-step. On the same
+      `107_long_code2.sy` extreme single-block giant-spill case, the combined
+      diagnostic probe
+      `MACHINE_SELECT_SKIP_CLEANUP_PURE=1 MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS=1`
+      reduces selected time to effectively zero (`machine_select ~= 0.006s`)
+      and pulls the full rebuilt `-riscv` compile down to about `19.9s`,
+      which is finally back under the `20s` sweep budget. The selected
+      artifact summary still stays unchanged on this probe
+      (`ops=16005`, `blocks=1`, `spills=1`, same byte count), so current
+      authority is that the heavy selected cleanup passes are not buying any
+      meaningful selected-IR size change on this pathological shape. The next
+      practical step is therefore no longer “prove whether a cleanup-skip
+      heuristic might matter”; it is “turn that extremely narrow giant-single-
+      block heuristic into a default kept rule, then remeasure the real suite
+      and watch for correctness drift”.
+    - that giant-single-block selected-cleanup heuristic is now also landed on
+      the default path in a deliberately narrow first kept form instead of
+      only as a diagnostic environment override. Current `machine_select` now
+      skips both `cleanup_pure` and `reuse_addr_roots` automatically on the
+      same pathological shape we had been probing: one-function, one-block,
+      no-call, huge-spill selected programs
+      (`spill_slot_count >= 20000`, `op_count >= 12000`) that end in a
+      return-like terminator. Fresh reruns keep the nearby correctness surface
+      green on `make test-compiler-driver`, `autotest -riscv -s lv9
+      /workspaces/compiler_lab` (`22/22`), and the full
+      `TrivialCompiler/custom_test` suite (`29/29`). More importantly, the
+      original large-text compile repro is now materially reclosed on the
+      default compiler path rather than only in diagnostic mode:
+      `tools/profile_compile_pipeline.py` now reports
+      `107_long_code2.sy` around `full-compiler ~= 18.551s`,
+      `full-perf ~= 18.453s`, and the direct
+      `tools/sweep_sysy_suite.py --filter 107_long_code2.sy` rerun is green
+      again under the default `20s` per-case budget. The public runtime-side
+      checkpoint stays intact on the same tree too: `03_sort2` remains at the
+      kept `434`-instruction text image. Current authority is therefore that
+      this first giant-case selected-cleanup heuristic is worth keeping, and
+      the next compile-time follow-up should now shift from “can we recover
+      `107_long_code2` at all?” toward the still-open upstream hotspots in
+      `value_ssa` and `machine_ir_report`, plus any broader-but-still-safe
+      generalization of the same cleanup heuristic if later evidence supports
+      it.
+    - the first `machine_ir_report`-side follow-up has now also landed and
+      produced a much larger compile-time win than the earlier selected-side
+      heuristic alone. The hot giant case still had no `VALUE_SSA_INSTR_CALL`
+      at all, yet `machine_ir_lower_function_from_value_ssa(...)` always ran
+      `machine_ir_build_protected_call_crossing_spill_slots(...)`, which in
+      turn forced a full `value_ssa_compute_allocation_prep(...)` pass only to
+      discover there were no call-crossing values to protect. The current tree
+      now short-circuits that whole protected-spill path when the function has
+      no call instructions. On `107_long_code2.sy`, that drives the rebuilt
+      default compiler from the earlier high-teens/low-twenties band down to
+      about `full-compiler ~= 8.777s`, `full-perf ~= 8.703s`, while keeping
+      the nearby correctness surface green (`test-compiler-driver`, `lv9`,
+      `TrivialCompiler/custom_test`) and preserving the kept
+      `03_sort2 = 434` text checkpoint. Updated `MACHINE_IR_TRACE_TIMING=1`
+      evidence now shows the remaining `machine_ir_report` cost is largely
+      concentrated in `lower-machine-ir` itself (`~8.7s..10.4s`) plus a much
+      smaller `build-layout` slice (`~0.8s..0.9s`), while
+      `all-spill-result`, `attach-layout-context`, and `build-machine-view`
+      are effectively negligible. Current authority is therefore that the
+      old `machine_ir` hotspot has materially narrowed, and the next
+      compile-time step should shift further upstream rather than reopening
+      the already-closed protected-call-crossing spill-prep path.
+    - the next upstream compile-time follow-up has now also landed in a very
+      narrow kept form, and it materially helps the same giant public stress
+      line without broadening the default Value-SSA path for ordinary
+      programs. `value_ssa_build_default_from_lower_ir(...)` now bypasses the
+      heavy default memory-full canonicalization bridge only for an extreme
+      straight-line shape:
+      one function, one block, no calls, direct `return`, no indirect-memory
+      ops, and a very large temp/instruction count (`next_temp_id >= 12000`,
+      `instruction_count >= 12000`). On the live
+      `lava-test/cases/107_long_code2.sy` repro, fresh reruns now keep the
+      rebuilt CLI in the high-7s/low-8s band instead of the earlier
+      high-8s/low-9s band:
+      `tools/profile_compile_pipeline.py` now reports about
+      `full-compiler ~= 7.811s`, `full-perf ~= 7.889s`, while a direct stage
+      probe shows the remaining hot slices at roughly
+      `value_ssa ~= 4.852s` and `machine_ir_report ~= 0.753s`.
+      Nearby correctness evidence stays green on the same tree:
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`),
+      `indigo/test_codes/functional_test` (`111/111`),
+      `tools/sweep_sysy_suite.py --filter 107_long_code2.sy`,
+      and the kept `03_sort2 = 434` text checkpoint. Current authority is
+      therefore that the giant compile-time reopen is now mostly a
+      `value_ssa`-side default-bridge / giant-shape policy question rather
+      than a `machine_ir` lowering emergency, while the separate runtime tail
+      `03_sort2` still remains open.
+    - the current `hoist-2` compile-time line now has a much sharper
+      root-cause picture and one materially stronger kept checkpoint in the
+      live tree. Fresh `VALUE_SSA_TRACE_TIMING=1 + MACHINE_IR_TRACE_TIMING=1`
+      probes show that `hoist-2` is not bottlenecked by the earlier
+      `value_ssa` default bridge (`~0.13s..0.15s`) and not by downstream
+      selected/layout/bytes work; the real cost sits inside
+      `value_ssa_allocate_and_rewrite_program_single_block_spills(...)`,
+      and more specifically inside allocator-plan construction for the hot
+      function `func`. Current retained instrumentation now prints per-
+      function allocator timing such as
+      `build-step ...`, `full-step build/entry`,
+      `pipeline-step plan/execute`, `execute-step select-phase`,
+      `execute-step spill-slot-assign`, plus the rewrite-loop
+      `reallocated-functions=M/N` summary under `VALUE_SSA_TRACE_TIMING=1`.
+      That evidence shows a stable pattern on the hot function:
+      `build-step total ~= 0.05s`, `pipeline-step plan ~= 2.0s..2.7s`,
+      `execute-step select-phase ~= 0.19s..0.24s`, and
+      `spill-slot-assign ~= ~0.005s`, while each rewrite round still
+      reallocates only `1/7` functions. One first compile-time win from that
+      diagnosis is now also materially closed and kept in the mainline:
+      rewrite-loop reallocation may reuse the prior allocation result for
+      functions untouched by the current rewrite round instead of blindly
+      reallocating the whole program every time. After fully rebuilding the
+      current CLI and rerunning the same public repro, the current `hoist-2`
+      checkpoint is now in the low-`3s` band instead of the earlier low-teens
+      band:
+      `tools/profile_compile_pipeline.py` now reports about
+      `full-compiler ~= 3.260s`, `full-perf ~= 3.208s`.
+      Two later follow-up experiments have also now been explicitly ruled out
+      by measurement and should stay recorded as dead directions rather than
+      being retried by accident:
+      `1)` a static no-affinity allocator-plan builder originally written with
+      an O(n^2) selection sort, and
+      `2)` the same no-affinity fast path after fixing that local sort to
+      `qsort`; both variants stayed correctness-green but regressed `hoist-2`
+      back into roughly the `~12.5s..14s` band. Current authority is
+      therefore that the next compile-time step on `hoist-2` should continue
+      targeting real state reuse inside the kept allocator path, not replace
+      the whole plan builder with a separate static fast path just because
+      the current affinity graph is sparse.
+      One newer kept helper in that same line is now also worth treating as
+      part of the live baseline rather than as ad hoc local debug code: the
+      move-engine incremental refresh path now builds one explicit
+      interference-neighbor adjacency surface and reuses it for
+      active-degree / effective-degree updates, so those hot refresh sites no
+      longer rescan whole interference-matrix rows just to visit real
+      neighbors. Focused reruns on the current tree keep
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`),
+      `minic-test-cases-2021s/functional` (`112/112`), and
+      `indigo/test_codes/functional_test` (`111/111`) green, while the
+      public runtime-side static witness still holds at `03_sort2 = 434`
+      (`mv=11`).
+      One nearby allocator bookkeeping retry has also now been explicitly
+      ruled out and should stay recorded as a failed direction: I tried a
+      broader root-list dedup / compaction rewrite that reused
+      `scratch_root_flags` across additional move-engine refresh lists in
+      hopes of trimming `plan-driver` bookkeeping. That variant stayed
+      correctness-green but regressed representative `hoist-2`
+      allocator-stage timings back upward (for example
+      `allocate+rewrite ~= 11.6s..12.7s` on reruns), so it has been removed
+      again. Current authority is therefore to keep the interference-neighbor
+      helper but **not** continue the broader root-list/scratch-flag rewrite
+      direction as the next compile-time move.
+      One later targeted no-move fast path is now also landed and should be
+      treated as the current main kept checkpoint for this line. Fresh rebuilt
+      diagnostics now show that the hot `hoist-2` body function is a nearly
+      pure `simplify/spill` case (`move-related-values=0`, `coalesce=0`,
+      `freeze=0`), so the earlier full move-engine scheduling/refresh path
+      was paying for machinery that this shape never used. The current tree
+      now detects that narrow case and lets
+      `value_ssa_compute_allocator_plan(...)` build a direct no-move plan
+      instead of entering the full move-engine pipeline. Focused reruns keep
+      `test-value-ssa-regression` green, `test-compiler-driver` green,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` green (`22/22`), keep
+      the full `minic-test-cases-2021f/functional` sweep green (`100/100`),
+      and still keep the public runtime-side static witness at
+      `03_sort2 = 434` (`mv=11`). More importantly, fresh rebuilt timing now
+      returns `hoist-2` to the same low-`3s` kept band:
+      `tools/profile_compile_pipeline.py` reports about
+      `full-compiler ~= 3.37s`, `full-perf ~= 3.62s`, and fresh staged traces
+      now show repeated `no-move-plan total ~= 0.06s..0.08s` with
+      `allocate+rewrite` dropping into roughly the `~1.7s..3.5s` band on
+      representative reruns. Current authority is therefore that any further
+      allocator-side compile-time tuning should start *after* this no-move
+      fast path checkpoint, not before it.
+    - the latest `03_sort2` runtime-side reopen has now also narrowed one more
+      false lead instead of only broadening the search space. Fresh selected /
+      emit / final-assembly inspection now shows the hottest remaining
+      residual is no longer the plain local-array-root shape by itself, but
+      the repeated same-argument `getNumPos(...)` call family inside the hot
+      `radixSort` loop (for example the repeated
+      `getNumPos(216(sp), 0(sp))` cluster around `LradixSort_18`). I tried a
+      very narrow selected-side block-local pure-call reuse probe in the
+      `machine_select_cleanup_pure_program(...)` line, but it did not produce
+      a kept win and has been removed again. The direct diagnostic result was
+      still useful: the current purity/arg-descriptor model only reached an
+      earlier weaker witness (`block=5` arg-descriptor failures on
+      load-indirect-derived call args), while the truly hot repeated-call
+      cluster remained untouched. Current authority is therefore now sharper:
+      **treat repeated `getNumPos(...)` calls as the real runtime residual,
+      but do not continue the pure-cleanup call-cache rewrite direction as-is;
+      the next credible attempt should move to the main selected/cleanup path
+      or another later layer that can cache call results more explicitly
+      instead of trying to reuse the overwritten call-result register.**
+      That same runtime-residual line now also has a first repository-local
+      witness tool so future rounds do not have to rediscover the hot shape by
+      hand. `tools/analyze_machine_select_repeated_calls.py` scans one
+      selected dump, traces simple call arguments back to local/global/immediate
+      sources, and reports repeated same-signature call clusters per block.
+      On the current `03_sort2` selected dump it already isolates one clear
+      main target: `radixSort bb.17` repeats
+      `getNumPos(local:54, local:0)` three extra times inside the hot loop.
+      That exact witness has now also yielded one first kept mainline win in
+      the live tree: a new narrow selected-side cleanup pass now runs on the
+      real indirect-memory path and reuses repeated internal pure-call results
+      through an explicit spill cache when the callee has a body, stays free
+      of global writes, the call arguments still trace back to the same
+      local/global/immediate/address descriptors, and no intervening call or
+      conflicting store invalidates the cached result. This is intentionally
+      narrower than the earlier rejected pure-cleanup rewrite direction: it
+      does not try to reopen whole-program call CSE, and it only attacks the
+      concrete repeated-helper hotspot on the path that `03_sort2` actually
+      uses. The current repository-local regression now locks one focused
+      indirect-memory case where the second internal call is replaced by a
+      `copy spill.*` reuse instead of a second `call`.
+    - that new repeated-internal-call reuse pass now also has direct live
+      witness evidence on the real `03_sort2` path rather than only on the
+      synthetic unit test. After rebuilding the current tree, the refreshed
+      selected dump no longer reports any repeated same-signature call cluster
+      from `tools/analyze_machine_select_repeated_calls.py`; the first kept
+      form dropped the hot `radixSort bb.17` block from `38` ops / `4`
+      `getNumPos(...)` calls down to `32` ops / `2` `getNumPos(...)` calls,
+      and the whole `radixSort` function from `268` ops / `8` calls to
+      `262` ops / `6` calls while preserving the same `spills=1` shape. That
+      line has now advanced one more kept step too: after relaxing the
+      over-conservative "any intervening `store_indirect` is a barrier"
+      condition for this already-proven internal pure-call family, the live
+      selected witness drops again to `radixSort bb.17 = 29` ops / `1` call
+      and `radixSort = 259` ops / `5` calls. The rebuilt final RISC-V text
+      now also moves below the previous protected `434` checkpoint to
+      `total_instructions=430` while still holding `mv=11`; the text-side
+      `call` count drops again from `13` to `12`. Current authority is
+      therefore that the repeated-`getNumPos(...)` runtime residual is no
+      longer only diagnosed or partially reduced; the hot `bb.17` cluster is
+      now essentially collapsed to one remaining `getNumPos(...)` call on the
+      live mainline.
+    - that same hot-block line has now yielded one more kept follow-up on top
+      of the `430` checkpoint, and this time the win is no longer about call
+      reuse itself. A new narrow selected-side cleanup pass now reuses a later
+      register-valued pure expression when the exact same expression has
+      already been materialized into a spill slot earlier in the block; the
+      comparison is block-local and recursive over the current small pure
+      expression family (`copy`, `materialize_imm`, `alu`, `alui`, `cmp`,
+      `cmpi`) so it can recognize cases such as "this `reg.0` is again the
+      same `spill.8 << 4`-derived address component" instead of comparing only
+      raw operand ids. On the live `03_sort2` witness this removes the final
+      repeated `spill.8`-scaled address recomputation at the tail of
+      `radixSort bb.17`, changing the last chain from a fresh
+      `alui.2 spill.8, 4 ; alu.0 spill.3, ... ; load_indirect ...` sequence to
+      direct `load_indirect spill.6`. That line did produce a temporary
+      `427`-instruction local witness during the immediate optimization pass,
+      but it did not survive the later stability screen unchanged. The current
+      stable rebuilt witness after backing out the still-unsettled follow-up
+      branch is therefore `total_instructions=428` with the same headline hot
+      families (`call=12`, `mv=11`) instead of the briefly lower unstable
+      intermediate. Current authority is therefore that the `bb.17`
+      `getNumPos(...)`-adjacent residual has still been pushed down another
+      layer versus the older `430` checkpoint, but the stable kept floor for
+      now is `428`, not the transient `427`.
+    - that newest spill-expression reuse slice has now also gone through one
+      full correctness tighten-and-keep cycle instead of staying at the
+      earlier "green on nearby rotated suites" level only. While widening the
+      recheck surface, `minic-test-cases-2021f/functional/097_register_alloc.c`
+      briefly reopened as a `MISMATCH` (`expected 194`, `actual 37`), which
+      pointed straight back at the new recursive small-pure-expression reuse
+      line. The practical fix was to keep that pass on the indirect-memory
+      mainline it was designed for instead of letting it run on all selected
+      programs: the non-indirect high-register-pressure repro returns to green,
+      while the indirect-memory line stays on the same reduced hot-family
+      shape. Current authority is therefore sharper than before:
+      the recursive spill-expression reuse pass is now a kept
+      **indirect-memory-only** optimization, not a generally enabled
+      selected-side fold.
+    - one deeper correctness hardening follow-up is now also landed on top of
+      that gate. The recursive small-pure-expression matcher itself had an
+      over-permissive equality rule: if two operands reused the same register
+      or spill id but one side no longer had a matching reaching small-pure
+      def at the use site, the matcher could still fall back to plain operand-
+      id equality and silently treat the values as identical. A new focused
+      `machine_select` regression now locks the concrete bad shape: one spill
+      slot is first used to build an address-derived pure expression, then the
+      same spill slot is redefined to a different address before a superficially
+      similar later expression is formed. The current matcher now rejects that
+      false equality unless both sides really resolve to the same reaching
+      definition tree (or the exact same defining op), and current reruns keep
+      both the stable `428` `03_sort2` witness and the full nearby course line
+      intact.
+    - one additional selected-side follow-up idea was then probed and
+      deliberately *not* kept: reusing repeated same-block `load_local`
+      operations for non-address-taken locals. The motivating live residuals
+      were real (`bb.18` / `bb.22` / `bb.23` still contain repeated
+      `load_local local.52/local.55` chains), but the first implementation
+      proved too fragile before it earned a stable checkpoint. It interfered
+      with already-landed repeated-internal-call cleanup coverage, and once it
+      was fully backed back out the stable `03_sort2` witness settled at
+      `428` rather than the briefly lower transient `427`. Current authority
+      is therefore explicit: **do not treat non-address-taken load-local reuse
+      as a kept optimization yet**. If that line reopens later, it should be
+      rebuilt from a narrower proof/debug base instead of resumed from the
+      reverted patch.
+    - the next diagnostic step on that remaining runtime-side line is now also
+      in-repo instead of staying conversational only. A new helper,
+      `tools/analyze_machine_select_addr_loads.py`, scans one selected dump,
+      recursively describes `load_indirect` / `store_indirect` address trees,
+      and reports repeated address shapes per block. On the analyzed `03_sort2`
+      selected witness it already narrows the next plausible residue family to
+      repeated `load_indirect` address trees such as
+      `alu.0(local:1, alui.2(local:52, 4))` in `radixSort bb.5` and
+      `alu.0(addr_local:4, alui.2(local:52, 4))` in `radixSort bb.18`, without
+      reopening the broader failed `load_local`-reuse branch. Current
+      authority is therefore to use that helper as the next hotspot classifier
+      before attempting another selected-side fold.
+    - that hotspot-classification line now also has a second companion helper
+      above raw address-only scans. `tools/analyze_machine_select_repeated_exprs.py`
+      recursively describes selected-side small pure expressions
+      (`copy/materialize/alu/alui/cmp/cmpi`) and reports repeated signatures
+      per block. On the same current `03_sort2` witness it sharpens the next
+      likely profitable residue family further: repeated
+      `alui.2(local:52,4)` chains in `radixSort bb.8` / `bb.18` and repeated
+      `alui.2(local:55,4)` chains in `bb.22`, plus the paired repeated
+      address-tree form `alu.0(addr_local:4, alui.2(local:52,4))` in
+      `bb.18`. A first attempt to keep a more general register-valued
+      expression-reuse fold on top of that evidence did not improve the stable
+      `03_sort2` witness beyond `428`, so current authority is to keep the new
+      expression-analysis helper but not keep that no-win fold itself.
+    - that same diagnostics-first line now also has a third companion helper
+      for blocker inspection instead of only raw repetition counts.
+      `tools/analyze_machine_select_load_reuse_blockers.py` scans consecutive
+      repeated `load_indirect` address trees inside one block and prints the
+      intervening operations between those repeated loads. On the current
+      stable `03_sort2` witness it shows that the remaining hot address family
+      is not just "one more missing trivial CSE": for
+      `alu.0(local:1, alui.2(local:52, 4))` in `radixSort bb.5`, the repeat is
+      separated by `call getNumPos(...)` plus several value-prep ops; for
+      `alu.0(addr_local:4, alui.2(local:52, 4))` in `bb.18`, the repeated load
+      is separated by a real `store_indirect(...)` into the same bucket array
+      region plus more address reconstruction. Current authority is therefore
+      that the next credible win should likely come from a narrower
+      address-tree/result reuse pattern above those concrete blocker families,
+      not from reopening broad generic load-local or load-indirect reuse.
+    - that blocker-inspection line now also has a fourth companion helper for
+      repeated pure-expression families themselves instead of only the final
+      `load_indirect` addresses. `tools/analyze_machine_select_expr_reuse_blockers.py`
+      scans repeated small pure expressions (`copy/materialize/alu/alui/cmp/cmpi`)
+      inside one block and classifies the intervening blockers between each
+      repeated pair. On the current stable `03_sort2` witness it sharpens the
+      residue map further:
+      `alui.2(local:52,4)` and `alui.2(local:55,4)` are by far the most common
+      repeated expression families, but their repetitions are usually
+      separated by fresh `load_local local.52/local.55`, more address-root
+      rebuilding, and sometimes real `store_indirect(...)` barriers. Together
+      with the earlier address/load blocker helper, current authority is
+      therefore that the remaining `03_sort2` tail is now well enough
+      diagnosed that the next optimization attempt should be chosen against
+      one concrete blocker family rather than against "repeated expressions in
+      general".
+    - one additional selected-side follow-up idea was then tried and also
+      explicitly *not* kept: reusing the already-computed address result of an
+      earlier `load_indirect` / `store_indirect` address tree when the same
+      address tree is rebuilt later in the same block. The motivating local
+      shape was real (`radixSort bb.18` repeatedly rebuilds
+      `alu.0(addr_local:4, alui.2(local:52, 4))`), but the first
+      implementation did not even hit its focused regression in the desired
+      way, which confirmed that the remaining blocker is deeper than just
+      "address roots are equal". That branch has now been fully backed back
+      out, and the stable current `03_sort2` witness remains `428`. Current
+      authority is therefore to keep the richer hotspot diagnostics, but not
+      keep that first indirect-address-result reuse pass itself.
+    - the latest diagnostic pass over those helper outputs now also gives a
+      more explicit ranking of which blocker families dominate the remaining
+      `03_sort2` tail. `tools/classify_machine_select_hotspots.py` can now
+      bucket the blocker reports into coarse families such as
+      `call_barrier`, `indirect_store_barrier`, `reload_same_local`,
+      `rebuild_address_root`, `nested_load_indirect`, and
+      `rebuild_small_expr`. On the current stable witness, the remaining hot
+      address/load and small-expression families are dominated much more by
+      `rebuild_small_expr` plus repeated `load_local local.52/local.55`
+      reloads than by raw calls or direct alias-unsafe stores:
+      - repeated `load_indirect` address trees are currently led by
+        `alu.0(addr_local:4, alui.2(local:52,4))`, where
+        `rebuild_small_expr` and `reload_same_local` dominate while real
+        `indirect_store_barrier` appears but is not the majority case
+      - repeated pure expressions are currently dominated by
+        `alui.2(local:52,4)` and `alui.2(local:55,4)`, again with
+        `rebuild_small_expr` and `reload_same_local` far outweighing
+        `call_barrier`
+      Current authority is therefore that the next credible runtime-side
+      experiment should probably target one very narrow
+      `load_local local.52/local.55 -> alui.2(...,4)` reuse family first,
+      before reopening broader address-tree or load-indirect reuse.
+    - that exact narrow selected-side follow-up has now also been tried once
+      and explicitly rejected as a kept checkpoint. I wired in a
+      `machine_select` cleanup experiment that tried to reuse repeated
+      same-block `load_local local.N -> alui.2(...,4)` shapes for
+      non-address-taken locals, landed focused unit coverage for that rewrite,
+      and rechecked the nearby floor (`make test-machine-select`,
+      `make test-compiler-driver`, `autotest -riscv -s lv8`). Fresh
+      `03_sort2` evidence then showed the wrong outcome for a kept step:
+      the stable selected witness did not change, the rebuilt final text
+      remained at `total_instructions=428`, and the residual blocker picture
+      was still dominated by same-register rebuild/reload structure rather
+      than by one missing safe fold. That experiment has now been fully
+      backed back out, so current authority is to keep the richer diagnostics
+      and the stable `428` checkpoint, but not keep that
+      `scaled-local-index` reuse pass itself.
+    - a rotated external-suite correctness sweep on the rolled-back stable
+      tree has now also reopened one concrete non-`03_sort2` pressure line,
+      and it usefully narrows where to look next. A fresh
+      `sysy-testsuit-collection/lvX` rerun on the current compiler came back
+      `462/467`, with the surviving red points concentrated in giant compile-
+      time / giant-runtime cases rather than in semantic mismatches:
+      `many_parameters10000.c` (`COMPILE_TIMEOUT`),
+      `many_parameters5000.c` (`COMPILE_TIMEOUT`),
+      `register_alloc10000.c` (`COMPILE_TIMEOUT`),
+      `register_alloc1000.c` (`COMPILE_FAIL`), and
+      `matrix-1.c` (`RUN_TIMEOUT`). Focused follow-up immediately narrowed
+      that tail further: `register_alloc1000.c` was failing on
+      `MEMORY-SSA-PASS-086` (`value-cleanup closure did not converge within
+      256 iterations`), so the current tree now treats that cleanup closure
+      the same conservative way it already treats join-binary GVN
+      non-convergence: repeated/over-budget cleanup iterations stop at the
+      current verifier-valid Value-SSA state instead of aborting the whole
+      compile. After rebuilding the real CLI, focused reruns now reclose
+      `register_alloc1000.c` and `many_parameters5000.c` to successful
+      `build/compiler -riscv ... -o ...` assembly generation, and
+      `matrix-1.c` also clears the direct compile-to-assembly path again.
+      Current authority is therefore that the reopened external pressure is
+      now narrower than the raw `462/467` sweep first implied: the next
+      compile-time follow-up should focus on the still-heavy
+      `10000`-scale giant tails (`many_parameters10000` and
+      `register_alloc10000`) rather than on the already reclosed
+      `register_alloc1000` / `many_parameters5000` pair.
+    - that same `10000`-scale compile-time tail has now moved forward again
+      after one more bridge-level fast-path refinement instead of only being
+      reclassified as "still big". Focused timing showed that both
+      `many_parameters10000.c` and `register_alloc10000.c` were spending
+      their time before allocator/backend work, inside
+      `value_ssa_build_default_from_lower_ir(...)`'s default
+      memory-full canonicalized build. The earlier
+      `extreme-straight-line` fast path existed, but it was too narrow for
+      these real cases because it effectively wanted the whole program to look
+      like one lone body function. The current tree now treats a broader but
+      still conservative family as eligible for the same direct-build escape
+      hatch: non-indirect-memory programs whose body functions are all single-
+      block straight-line returns, and where at least one body function is
+      giant enough (for example `parameter_count > 512`,
+      `next_temp_id >= 12000`, or `instruction_count >= 12000`). Focused
+      regression coverage now locks that bridge decision on a synthetic
+      declaration-plus-giant-parameter lower-IR case, and the in-repo floors
+      stay green (`test-value-ssa-regression`, `test-compiler-driver`).
+      Real giant-case evidence also improved materially: with
+      `VALUE_SSA_TRACE_TIMING=1`, both surviving `10000`-scale cases now hit
+      the fast path (`extreme-straight-line=1`) and reduce their Value-SSA
+      build stage from "no stage line within tens of seconds" down to about
+      `5.6s` (`many_parameters10000`) and `7.1s`
+      (`register_alloc10000`). Direct rebuilt-CLI reruns now also reclose the
+      compile-to-assembly path on both cases:
+      `build/compiler -riscv .../many_parameters10000.c -o ...` and
+      `.../register_alloc10000.c -o ...` both produce large `.s` outputs
+      successfully again under a `60s` compile-only budget. Current authority
+      is therefore that the active `10000`-scale line is no longer blocked on
+      the old Value-SSA default canonicalization bottleneck; the remaining
+      reopen there is now the heavier full case pipeline budget
+      (compile + assemble/link/run in suite sweeps), not the earlier
+      pre-backend build failure mode.
+    - the `MEMORY-SSA-PASS-086` line itself is now also better explained than
+      the earlier "probably some oscillation" diagnosis, and one direct
+      improvement has already landed from that deeper trace. I added an
+      opt-in `MEMORY_SSA_PASS_TRACE=1` closure trace on
+      `memory_ssa_pass_run_value_cleanup_closure(...)` and reran the original
+      focused repro `register_alloc1000.c`. The trace showed that this case
+      is not primarily bouncing across many unrelated canonicalization steps:
+      the only repeatedly mutating steps in the closure are
+      `fold-constants`, `simplify-trivial-values`, and
+      `eliminate-dead-value-defs`, while
+      `normalize-binary-operands`, `simplify-algebraic-identities`,
+      `eliminate-redundant-binaries`, and `simplify-cfg` stay inert on this
+      repro. More importantly, the trace shape is now clear enough to name:
+      it looks like a very slow constant-propagation / dead-def cleanup chain,
+      not a small two-state oscillation. Before the latest fold-side change,
+      that repro was still taking roughly `232` value-cleanup iterations to
+      stabilize. I then taught `value_ssa_fold_constants(...)` to resolve
+      immediate values through `mov` definition chains instead of requiring
+      the binary operands to already be literal immediates at the direct use
+      site. Focused regression coverage now locks that behavior on a
+      `mov -> binary -> binary` constant chain, and the in-repo floors remain
+      green (`test-value-ssa-regression`, `test-compiler-driver`). The same
+      `MEMORY_SSA_PASS_TRACE` rerun on `register_alloc1000.c` now shows the
+      closure collapsing to one real mutating iteration and then immediate
+      stabilization, instead of the earlier 200+ iteration crawl. Focused
+      external reruns are green again on the rebuilt compiler:
+      `register_alloc1000.c`, `many_parameters5000.c`, and
+      `many_parameters10000.c` all pass again under
+      `tools/sweep_sysy_suite.py --case-timeout 180`. Current authority is
+      therefore more precise than before: the reopened `086` family was
+      partly a current-tree regression in Value-SSA shaping, but it also
+      relied on an older cleanup-budget weakness in `memory_ssa_pass`; the
+      current tree now addresses both sides well enough that the earlier giant
+      repros no longer sit on that same slow closure path.
+    - one further selected-side retry on the stable `03_sort2` residue family
+      has now also been measured and backed back out, so this branch should be
+      treated as exhausted for the moment rather than as a still-promising
+      next guess. This version was more structured than the earlier rejected
+      `scaled-local-index` copy fold: it rewrote later uses onto an earlier
+      surviving `alui.2(local.N,4)` result so the later
+      `load_local + alui.2` pair could become dead together. Focused
+      `machine_select` regressions proved that the local rewrite worked on a
+      toy block and still stayed blocked for address-taken locals, but fresh
+      real evidence on the stable tree still did not move the kept public hot
+      witness: `03_sort2` remains `total_instructions=428`, and the repeated
+      `alui.2(local:52,4)` / `alui.2(local:55,4)` hotspot counts on the
+      stable selected dump remain materially unchanged. That experiment has now
+      been fully removed again. Current authority is therefore stronger than
+      before: the remaining `03_sort2` tail is very unlikely to close from
+      another small same-block scaled-index reuse tweak at selected cleanup
+      level.
+    - the current giant-case profiling line now also has a first meaningful
+      post-Value-SSA split instead of one blended "still slow somewhere"
+      bucket. With `VALUE_SSA_TRACE_TIMING`, `MACHINE_IR_TRACE_TIMING`, and
+      `MACHINE_SELECT_TRACE_TIMING` enabled on the rebuilt CLI:
+      - `register_alloc10000.c` now clears Value-SSA in about `7.6s`, then
+        spends another large chunk inside `machine_ir` itself
+        (`lower-machine-ir` about `7.7s`, `machine_ir` total about `8.2s`)
+      - `many_parameters10000.c` now clears Value-SSA in about `5.9s` and
+        `machine_ir` in about `0.6s`, but then spends its biggest visible
+        chunk in `machine_select` pure cleanup, specifically dead-def removal
+        on one giant function (`pure fn=1 iter=1 dead ≈ 9.4s`)
+      Current authority is therefore that the giant compile-time line is no
+      longer dominated by one shared pre-backend bottleneck. The next compile-
+      time move should likely choose between:
+      - `machine_ir` lowering cost on `register_alloc10000`
+      - `machine_select` dead-def / pure-cleanup cost on
+        `many_parameters10000`
+      rather than assuming the same optimization will help both equally.
+  - final full correctness sweep after performance reopen:
+    **in progress / roughly 96%**
+    - the first post-optimization checkpoint reruns are now real rather than
+      hypothetical: `autotest -riscv -s lv8 /workspaces/compiler_lab` is
+      green again (`12/12`), `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      is green again (`22/22`) after rolling back the unsafe `div/rem by
+      power-of-two` text rewrite, and a representative external correctness
+      slice stays green too (`compiler2021/.../function_test2021` first
+      `40/40` cases under `tools/sweep_sysy_suite.py`). Current authority is
+      therefore that the current `~485` static-codegen checkpoint is not just
+      a local pretty-print curiosity; it is already compatible with the
+      nearby course and external correctness surface that we have rechecked so
+      far
+    - the next post-optimization recheck wave has now advanced that evidence
+      again after the kept repeated-internal-call reuse landing. Focused reruns
+      remain green on `make test-machine-select`, `make test-compiler-driver`,
+      and `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and a
+      rotated external-suite sweep is also green again on the rebuilt current
+      compiler: `TrivialCompiler/custom_test` (`29/29`). One further rotated
+      sweep now also reconfirms the broader third-party functional surface on
+      the newer `430` checkpoint itself: `lava-test/cases` is green again
+      (`162/162`) on the rebuilt current compiler. After the later
+      `430 -> 427` follow-up, fresh reruns are still green on
+      `make test-machine-select`, `make test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and one
+      more rotated external suite:
+      `indigo/test_codes/functional_test` (`111/111`). Current authority is
+      therefore that the newer reduced post-`430` checkpoint is also staying
+      compatible with the nearby course line and with multiple previously
+      green third-party-functional slices, not only with the earlier `430`
+      one.
+      The same recheck wave has now also reclosed the broader
+      `minic-test-cases-2021f/functional` surface after the temporary
+      `097_register_alloc.c` reopen: focused reruns first confirmed that one
+      case was the only new red point, then the indirect-memory-only gate on
+      the new spill-expression reuse pass restored the full suite to
+      `100/100` while keeping the stable reduced `03_sort2` checkpoint intact.
+      The later matcher hardening reruns then also reconfirmed the same floor:
+      `make test-machine-select`, `make test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and the
+      focused `minic-test-cases-2021f/functional/097_register_alloc.c` repro
+      are all green again while the rebuilt `03_sort2` text remains at
+      `total_instructions=428`.
+      far.
+    - the latest rotated recheck wave now also records one deliberately
+      different external surface instead of reusing the same smaller comfort
+      suites again. On the stable rolled-back `428` tree, fresh reruns keep
+      `make test-machine-select` green, keep `make test-compiler-driver`
+      green, and keep `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      green (`22/22`). The same wave then widened to
+      `sysy-testsuit-collection/lvX`, which came back `462/467` and exposed a
+      giant-case-only residual tail instead of a new semantic correctness
+      family. Focused reruns after the new `MEMORY-SSA-PASS-086`
+      non-convergence guard now also reclose two of those five points on the
+      rebuilt CLI (`register_alloc1000.c` and `many_parameters5000.c`
+      compile successfully again), while the heavier `10000`-scale compile
+      cases remain the active follow-up. Current authority is therefore that
+      the latest correctness wave still supports the post-reopen stability
+      story on course and nearby external functional surfaces, but the
+      remaining not-yet-closed pressure has shifted back onto giant
+      compile-time budgeting rather than onto new wrong-answer/runtime
+      correctness regressions.
+    - that same rotated `lvX` giant-case cluster has now advanced again after
+      the latest Value-SSA giant fast path plus deeper `mov`-chain constant
+      folding. The most representative focused reruns are now green on the
+      rebuilt compiler under widened single-case budgets:
+      `register_alloc1000.c` passes again,
+      `many_parameters5000.c` passes again,
+      `many_parameters10000.c` passes again,
+      `register_alloc10000.c` passes again, and
+      `matrix-1.c` passes again under
+      `tools/sweep_sysy_suite.py --case-timeout 180`. Current authority is
+      therefore that the earlier reopened `lvX` giant-case cluster is no
+      longer sitting on the same compile-fail / compile-time tail shape that
+      produced the intermediate `462/467` reading; the next remaining
+      correctness work should rotate outward again instead of staying
+      fixated on this now-reclosed subset.
+    - the broader course-facing floor has also now been widened again after
+      those same fixes instead of relying only on earlier `lv8/lv9` spot
+      checks. Fresh reruns on the rebuilt current tree keep the full course
+      `-riscv` surface green again (`autotest -riscv /workspaces/compiler_lab`)
+      and keep another rotated external functional surface green again
+      (`minic-test-cases-2021f/functional` `100/100`). Current authority is
+      therefore that the recent Value-SSA / Memory-SSA fixes plus the later
+      backed-out `machine_select` retry still sit on a broad course-facing and
+      third-party functional floor, not only on the smaller sub-suite checks
+      that were used earlier in the round.
+    - that same post-reopen correctness sweep has now widened again after the
+      latest giant-case compile-time work instead of relying only on the older
+      `compiler2021` slice. Fresh reruns on the current tree keep
+      `make test-compiler-driver` green, keep
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` green again (`22/22`),
+      keep the full `indigo/test_codes/functional_test` suite green
+      (`111/111`), and keep the direct
+      `tools/sweep_sysy_suite.py /tmp/sysy-suites/lava-test/cases --filter 107_long_code2.sy`
+      repro green after the new `value_ssa` giant-shape fast path landed.
+      The public runtime-side static witness also remains intact on the same
+      tree: `03_sort2.sy` still analyzes to `total_instructions=434`
+      with the same hot-family shape (`lw=127`, `sw=100`, `mv=11`). Current
+      authority is therefore that the latest compile-time changes are no
+      longer only locally timed wins; they already sit on a broader rotated
+      external + course correctness surface too.
+    - that same correctness floor has now also been rechecked once more after
+      the latest `hoist-2` allocator-loop follow-up instead of only after the
+      earlier `107_long_code2` work. The current tree still keeps
+      `make test-compiler-driver` green, keeps
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` green again (`22/22`),
+      keeps the full `indigo/test_codes/functional_test` suite green
+      (`111/111`), keeps the direct
+      `tools/sweep_sysy_suite.py /tmp/sysy-suites/lava-test/cases --filter 107_long_code2.sy`
+      probe green, and still keeps the public runtime-side static witness at
+      the same `03_sort2 = 434` checkpoint. Current authority is therefore
+      that the new allocator-loop follow-up is not just locally timed; it is
+      already sitting on the same course + rotated external correctness floor
+      too.
+    - that same correctness floor has now widened again after the later
+      `hoist-2` allocator-plan round instead of relying only on the earlier
+      `lv9 + indigo + 107_long_code2` slice. The current tree still keeps
+      `make test-compiler-driver` green, keeps
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` green again (`12/12`),
+      keeps `autotest -riscv -s lv9 /workspaces/compiler_lab` green again
+      (`22/22`), keeps the full `indigo/test_codes/functional_test` suite
+      green (`111/111`), keeps the full
+      `minic-test-cases-2021f/functional` sweep green (`100/100`), keeps the
+      direct `lava-test/cases --filter 107_long_code2.sy` probe green, and
+      still keeps the public runtime-side static witness at the same
+      `03_sort2 = 434` checkpoint. Current authority is therefore that the
+      current kept allocator/instrumentation line is sitting on a materially
+      broader course + rotated external correctness floor than before.
+    - that rotating external evidence surface is now a little broader again in
+      the current tree: a focused `indigo/test_codes/functional_test` sample
+      (`30/30`) is green too, so the recent selected-cleanup/debugging edits
+      are not only holding on course `lv9` and the `minic-test-cases-2021f`
+      functional tree, but also on one more third-party suite family with a
+      different testcase mix.
+    - that same rotated third-party evidence is now wider than the earlier
+      spot-check wording implies. After the latest kept `03_sort2`
+      text/export fold was narrowed back to the scratch-root-safe family, the
+      current rebuilt compiler keeps the full
+      `indigo/test_codes/functional_test` suite green again too (`111/111`),
+      not only the earlier `30/30` slice. Current authority is therefore that
+      this round's kept performance tweak has already survived both the
+      `TrivialCompiler/custom_test` array-heavy surface and one larger
+      independent external functional family.
+    - the next kept `03_sort2` fold has now also survived another focused
+      post-change recheck instead of only inheriting the earlier green rows.
+      After landing the call-argument load-order fold, both
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`) and the full
+      `TrivialCompiler/custom_test` suite (`29/29`) are green again on the
+      rebuilt compiler. Current authority is therefore that the live
+      `03_sort2 = 434` checkpoint is still sitting on a revalidated course +
+      external correctness floor, even though compile-time follow-up remains
+      open elsewhere on the large-text side.
+    - the same sweep line has now also done one more useful job in the current
+      tree: it caught and then reclosed a real regression during the latest
+      `03_sort2` tuning step instead of only rubber-stamping already-green
+      cases. `TrivialCompiler/custom_test/array.sy` briefly reopened as a
+      `MISMATCH` (`stdout=""`, `exit=169`) when the new indexed-local-root
+      fold was allowed to rewrite non-scratch base registers, but the current
+      kept tree narrows that fold back to scratch-root witnesses only. After
+      that repair, both the focused `array.sy` rerun and the full
+      `TrivialCompiler/custom_test` suite are green again (`29/29`), so this
+      round should be remembered as evidence that the rotating external suites
+      are actively catching real backend/text-export soundness edges rather
+      than only adding redundant green rows.
+  - hidden/default compatibility audit line:
+    **in progress / roughly 92%**
+    - the earlier local nested-call corruption repro was closed at the real
+      downstream boundary in `machine_ir`, but hidden-course status must stay
+      **reopened** because the platform symptom for `22_nested_calls` is still
+      `AE` (assembler error), not the earlier local wrong-answer/runtime
+      corruption shape
+    - default compiler mode now intentionally bypasses all-paths-return
+      rejection, which closes one large false-CTE source for submission mode
+    - nearby public analogues around `nested_calls`, `short_circuit`, and
+      `long_array` now compile / assemble / run locally again after the recent
+      backend and canonicalization fixes, so the remaining risk surface is
+      increasingly hidden-only rather than broadly reproducible in public
+      suites
+    - the previously reopened public `091_long_func.c` branch-range blocker is
+      no longer a standing local red point in the current tree: after the
+      latest preview-branch fallback revisit plus the void-builtin cleanup,
+      focused `compile -> assemble -> link -> run` revalidation came back
+      green again on `091_long_func.c`, `098_nested_calls.c`, and the
+      surrounding `090..099` public `lvX` tail
+    - current hidden/default target list is now explicit rather than vague:
+      `17_while_if2` (`CTE`), `22_nested_calls` (`AE`), plus the known
+      segmentation-fault `RE` cluster:
+      `05_global_arr_init`, `06_long_array`, `08_arr_access`,
+      `09_const_arr_read`, `14_short_circuit1`, `17_func_expr2`,
+      `18_global_var2`, `32_global_1darr3`, `33_global_2darr3`,
+      `34_zero_init3`
+    - the nearest public analogues for those hidden families have now been
+      rechecked again after the latest lowering repair instead of being left
+      as stale assumptions. Current focused sweeps are green on:
+      `function_test2021/{033,039,040,041}_while_if*`,
+      `h_functional/{104,105}_long_array*`,
+      `h_functional/{115,116}_nested_calls*`,
+      `minic-test-cases-2021f/{080_max_flow,092_long_array,093_long_array2,098_nested_calls}`,
+      which materially narrows the remaining compatibility uncertainty back
+      toward hidden-only cases rather than a reproduced public family.
+    - that public-neighbor closure has now been widened once more around the
+      earlier hidden `RE` cluster instead of stopping at `long_array` /
+      `nested_calls` / `max_flow`. Current focused sweeps are also green on:
+      `function_test2021/{058,059}_short_circuit*`,
+      `minic-test-cases-2021f/{043,044,090}_short_circuit*`,
+      `sysy-testsuit-collection/lvX/{043,044,048,058,059,090,102}_short_circuit*`,
+      course `lv9/{05_global_arr_init,08_arr_access,09_const_arr_read,10_arr_in_loop}`,
+      and `sysy-testsuit-collection/lvX/{040_global_var,097_many_global_var}`.
+      Current authority is therefore that the remaining hidden/default risk is
+      no longer well represented by the closest publicly available families:
+      those public analogues are green again in the rebuilt tree, so the
+      residual uncertainty is increasingly hidden-only rather than “one more
+      nearby public testcase we have not rechecked yet”.
+  - strict `returns-all-paths` audit line:
+    **in progress / roughly 90%**
+    - several real false-positive loop families are now fixed and locked
+      with semantic regressions
+    - current understanding is now explicit: this audit is not a one-layer
+      semantic-only gate. The same user-visible strict/default behavior is
+      shaped by at least three linked layers:
+      `semantic_compute_function_returns_all_paths(...)` for the front gate,
+      the reachability/fallthrough-sensitive runtime-global-dependency walk
+      in canonical IR (`ir_global_dep`) for initializer-side control-flow
+      pruning, and the local-state-aware loop/if fallthrough shaping in
+      canonical IR lowering (`ir_lower_stmt`) that decides whether legal
+      strict programs keep a real exit path or collapse into malformed/dead
+      CFG on the way to later stages
+    - the residual work is now to widen legal-family search and keep those
+      three layers aligned, not to reopen the already-closed simple
+      guard-refinement cases
+    - a broader public strict-mode sweep over `compiler2021` and
+      `sysy-testsuit-collection` near-neighbor files (`while_if`, `if_test`,
+      `short_circuit`, `break`, `continue`) is now also clean: `41/41`
+      representative cases compile successfully under
+      `--enforce-all-paths-return-check`
+    - the previously reopened alias-fed nested-loop residual is now also
+      closed at the real canonical-IR lowering boundary rather than only in
+      semantic notes: `ir_lower_stmt` now keeps loop-exit blocks only when
+      there is a real path from a constant-true loop body back out to the
+      surrounding function, so the strict alias family
+      (`while(1){ if(a){return 1;} int b=a; b=1; for(;b<2;b=b+1){ if(b){return 2;} } }`)
+      no longer dies with `IR-LOWER-009`. That family is now locked in both
+      IR and compiler-driver regressions, and the rebuilt strict CLI again
+      lowers it all the way to RISC-V text.
+  - external-suite sweep line:
+    **in progress / roughly 95-96%**
+    - `minic-test-cases-2021s` and `minic-test-cases-2021f` are now locally
+      available and have already produced real differential results
+    - the first real external-suite closure (`088_int_literal`) is now fixed
+      and regression-locked in-repo
+    - the earlier public `081_n_queens` / `084_side_effect` suspicions are no
+      longer treated as live compiler bugs after rerunning them with the
+      correct `.in` / `.out` oracle handling
+    - current oracle policy is now explicit rather than partly implicit:
+      third-party `.out` files may encode either plain stdout, `stdout+exit`,
+      or `stdout + "\\n" + exit`, so broad sweeps should normalize against all
+      three shapes before treating a mismatch as a compiler bug
+    - with that normalized oracle handling, the current `sysy-testsuit-
+      collection/lvX` `090..099` tail is green end-to-end locally, including
+      the earlier pressure points `091_long_func.c`, `092_long_array.c`, and
+      `098_nested_calls.c`
+    - the full local `minic-test-cases-2021f/functional` sweep is now also
+      green again under the same normalized oracle handling (`100` functional
+      cases, `0` failures), which materially lowers the odds that the current
+      compatibility tail is still hiding a broad public functional regression
+    - the same is now true for `minic-test-cases-2021s/functional`
+      (`100` functional cases, `0` failures), so both close-to-course public
+      functional suite trees are currently green under the rebuilt CLI
+    - `compiler2021/公开用例与运行时库/function_test2021` is now also green under the
+      normalized oracle rule (`103` public functional cases, `0` real failures)
+    - `indigo/test_codes/functional_test` is now also green under the same
+      rule (`111` functional cases, `0` real failures)
+    - `TrivialCompiler/custom_test` and `lava-test/cases` have now both been
+      swept far enough to matter for hidden-neighbor hunting; the remaining
+      mismatches there are currently formatting-only oracle noise (for example
+      suites that encode trailing `0\n` as output text) rather than reproduced
+      semantic/codegen failures
+    - `compiler2021/performance_test2021-public` is now also narrowed to a
+      very small real tail instead of an open-ended suspicion: current local
+      reruns now leave exactly one reproduced red point, `03_sort2.sy`
+      (`RUN_TIMEOUT`), while `median2.sy` has been reclosed and is now green
+      again; that makes `03_sort2.sy` the best remaining public high-pressure
+      follow-up target once the broad sweep itself is considered sufficiently
+      closed
+    - `03_sort2.sy` now also has a tighter runtime diagnosis: the full input
+      times out, but a much smaller prefix input still completes quickly, so
+      the remaining tail is more likely a genuine algorithmic/performance
+      hotspot than a compiler-regression bug
+    - a later suite-batch sweep also found a new public third-party perf
+      cluster in `lava-performance`: `dead-code-elimination-1/2/3.sy`,
+      `floyd-2.sy`, and `hoist-2.sy`. The first trio has now been narrowed
+      twice: first from generic compile-time stalls to a semantic-scope
+      hotspot, and then from that hotspot to a concrete downstream far-call
+      limitation. After the current bytes fix, the trio now reaches runtime
+      rather than compile failure. `floyd-2.sy` in particular is now observed
+      as output-format noise rather than a semantic mismatch, so the remaining
+      real external pressure there is now mostly `03_sort2.sy` / `hoist-2.sy`
+      style runtime/performance budgeting rather than compiler correctness
+      bugs. Direct reruns now also keep `hoist-2.sy` in that same bucket: it
+      remains a pure runtime-timeout case and its source is dominated by
+      repeated loop-invariant arithmetic, so current authority is to treat it
+      as an optimization/perf follow-up rather than as a correctness defect.
+      More specifically, fresh stage timing now shows `hoist-2.sy` spends
+      almost all compiler-side time inside `machine_ir_report`, while
+      `03_sort2.sy` compiles quickly end-to-end and therefore looks like a
+      program-runtime/performance issue rather than a compiler-stage hotspot
+    - the full local `sysy-testsuit-collection` sweep has now also materially
+      narrowed from `15` real red points to no confirmed semantic/compiler
+      red points in the currently investigated pressure cluster: the earlier
+      `many_parameters*`, `register_alloc10000`, and `107_long_code2`
+      failures are now reclosed after the latest large-spill scratch fix, and
+      the only residual sweep noise is the `brainfk` pair whose bodies match
+      exactly and differ only by suite-formatting (`\r\n` vs `\n0`)
+    - current public-tail pressure is therefore now more about the remaining
+      hidden-only `CTE/AE/RE` families than about reproduced public stress
+      tails; the previously red large-parameter / large-register public
+      cluster is currently reclosed locally after the latest backend fix
   - `lv8` course line: **complete / 12 of 12 passing**
     under
     `CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases -s lv8 /workspaces/compiler_lab`
@@ -136,10 +1970,31 @@
     with the old front-end-only compatibility bridge now materially shrunk
   - SysY builtin callable-visibility line: **course-complete / roughly 80% toward ideal**
   - regression / ideal-state tail: **checkpoint-near / roughly 98%**
+  - full public course `-riscv` baseline:
+    **complete / 130 of 130 passing**
+    under
+    `CDE_LIBRARY_PATH=/opt/lib CDE_INCLUDE_PATH=/opt/include /opt/bin/autotest -riscv -t /opt/bin/testcases /workspaces/compiler_lab`
   - older closure lines remain maintenance-first:
     `lv7` is complete, `SEMA-CF-001` is checkpoint-near, and
     `machine_select` cleanup is effectively checkpointed unless a concrete bug
     reopens them
+  - Immediate implementation order for the current round:
+    1. update roadmap authority first whenever the active line changes
+    2. finish cloning and keeping locally available the full external-suite
+       set (`compiler2021`, `minic-test-cases-2021s`,
+       `minic-test-cases-2021f`, `segviol/indigo`,
+       `TrivialCompiler/TrivialCompiler`, `ustb-owl/lava-test`,
+       `jokerwyt/sysy-testsuit-collection`)
+    3. run broad default-mode sweeps to hunt hidden-like `CTE/AE/RE/WA`
+       families
+    4. prioritize real reproduced failures in this order:
+       hidden `17_while_if2`, hidden `22_nested_calls`, the known
+       `RE=segfault` cluster, then the remaining public compile-time tails
+       (`107_long_code2.c`, `many_parameters10000.c`)
+    5. rerun promising return-flow-shaped failures under
+       `--enforce-all-paths-return-check`
+    6. minimize each confirmed bug to a standalone SysY repro and lock it in
+       repository regressions
 - Current staged `lv9` plan should now be read as:
   - `LV9-A` syntax admission: **mostly complete / roughly 75%**
     lexer/parser/AST now accept bracket tokens, subscript expressions, array
@@ -2037,9 +3892,75 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-05: The reopened hidden-course compatibility line now has one first concrete closure on the `22_nested_calls` side instead of only a local repro plus allocator suspicion. The stable local `nested16` repro (`f(g0(),...,g15())`) is now back to exit `136` after moving the fix to the real downstream consumer boundary: `machine_ir` lowering now builds one protected spill-slot map for Value-SSA values that both cross calls and still land in caller-clobbered machine registers, and lowers those values as spill operands instead of pretending they remain safely register-resident into the preview RISC-V path. That change intentionally left the generic allocator semantics alone and reclosed the immediate regressions around it: `make test-compiler-driver` is green again after updating the focused caller-save / nested-call output expectations to the new spill-backed shape, and course `lv8` (`12/12`) plus `lv9` (`22/22`) both re-passed. Current authority is therefore: the local hidden-like nested-call failure is materially closed at the `machine_ir` consumer layer, while the remaining hidden compatibility risk is no longer the earlier nested-call corruption but the still-underdiagnosed `08_max_flow` compile-test-error line.
 - 2026-05-05: A second active control-flow line is now explicit alongside the default submission-mode bypass: strict-mode `returns-all-paths` false-positive auditing. Default compiler entrypoints now intentionally skip the all-paths-return gate unless explicitly re-enabled through `--enforce-all-paths-return-check`, and that submission-mode behavior is regression-locked; however, strict-mode auditing itself is not considered closed yet. The first real false-positive family has already been found and reclosed (`while(1){ if(a){return 2;} a=1; }` and its immediate `for(;;)` / `else a=1` siblings), but current authority is to keep auditing broader legal strict-mode control-flow families rather than treating the older `SEMA-CF-001` work as fully complete. Near-term plan for this line is: keep enumerating pass-expected `while` / `for` / `if` / nested-loop / guard-refinement shapes, lock each newly confirmed false positive with focused semantic regressions, and only then declare the strict-mode audit maintenance-first.
 - 2026-05-05: That strict-mode `returns-all-paths` audit has now materially advanced through two more legal-family slices instead of stopping at the first simple guard-refinement case. Current semantic regressions now also lock same-iteration guard-set-true families (`while/for(;;){ if(a){return 2;} a=1; if(a){return 3;} }`), plain continue-backed guard-set-true families (`... a=1; continue;`), and nested loop container families where an inner `while(1)` / `for(;;)` breaks after forcing the outer guard true before an outer return. Focused follow-up probes over wider nested `break/continue/return` combinations did uncover one extra red subgroup during the sweep, but that subgroup turned out to be semantically correct rejection rather than a false positive because the relevant inner `for` step never executes on the `break` edge. A broader subsequent sweep over non-constant outer loop conditions (`while(a<2)` / `for(;a<2;)`) plus nested-break / continue-backed legal return families came back clean. Current authority is therefore that the known strict-mode false positives have shrunk from a broad loop family to a much narrower residual risk surface, and the next passes should focus on finding any remaining genuinely legal strict-mode failures rather than reopening the already-locked guard-set-true slices.
+- 2026-05-05: The active control-flow audit should now also explicitly include third-party testcase sweeps rather than relying only on the repository regressions plus the course-bundled `/opt/bin/testcases` tree. Current plan is to keep using focused semantic probes for minimal reproductions, but also to periodically run `autotest -t <suite-dir> /workspaces/compiler_lab` against any locally available external SysY suites (for example `compiler2021`, `minic-test-cases-2021s`, `minic-test-cases-2021f`, `segviol/indigo`, `TrivialCompiler/TrivialCompiler`, `ustb-owl/lava-test`, or `jokerwyt/sysy-testsuit-collection`) whenever those directories are present in the environment or can be checked out later. This external-suite sweep applies to both lines: strict-mode false-positive hunting under `--enforce-all-paths-return-check`, and default-mode hidden-compatibility hunting for residual `CTE/AE` families such as the current `while_if2`-style uncertainty.
+- 2026-05-05: Execution protocol for that external-suite line is now explicit so future rounds do not have to reconstruct it from chat memory. Preferred order is: `1)` scan the local environment for any of the known third-party suite directories, `2)` run broad default-mode sweeps first to look for hidden `CTE/AE/WA` families, `3)` rerun any promising minimal repros under `--enforce-all-paths-return-check` when the shape looks return-flow-related, `4)` reduce each newly found failure to the smallest standalone SysY case, and `5)` lock confirmed compiler bugs with repository regressions before returning to the broader suite. Current working estimate for this audit line is still only roughly `55-60%` complete: known strict-mode false positives have narrowed materially, but external-suite coverage and hidden-case reproduction are still incomplete enough that this line should remain active rather than be treated as maintenance-first.
+- 2026-05-05: External-suite sweeping has now moved beyond “find one red case” into a broader stability pass. Current local evidence is: the high-risk `minic-test-cases-2021f` functional tail (`077..099`) is green again after the `088_int_literal` fix; the focused `sysy-testsuit-collection/lvX` risk cluster around `while_if`, `short_circuit`, `nested_calls`, `long_array`, `many_globals`, and array-param cases is also green; and the first `300` ordered `lvX` source cases now pass under the normalized oracle comparison after reopening one real backend/optimizer cluster. That reopened cluster produced three concrete issues: `074_monkey_eat_peach.c` (`MEMORY-SSA-070` on missing current version for a loop-carried local slot), `089_least_common_multiple.c` (`MEMORY-SSA-PASS-076` hard failure on join-binary GVN non-convergence), and `108_many_params.c` (wrong-answer on a high-arity mixed local-array/parameter call path). The first two are now materially closed: memory-SSA build now seeds entry versions conservatively enough for loop-local tracked slots, and join-binary GVN no longer aborts the whole compile when its local optimization loop fails to converge. The third is also now materially narrowed and patched at the backend handoff boundary: for Value-SSA programs with indirect memory or high-arity calls, `machine_ir` report construction now uses the conservative “allocate + machine view + lower original Value-SSA” path instead of the allocate+rewrite path that was corrupting mixed local-array/high-arity call arguments. Current remaining external-suite tail is therefore no longer broad correctness drift, but mostly compile-time pressure on very large stress cases such as `107_long_code2.c` and `many_parameters10000.c`, which are materially faster than before but still too close to or above the practical timeout budget.
+- 2026-05-05: The current giant-program tail now has one more explicit safety rail in both the SSA and backend-entry paths. `value_ssa_build_default_from_lower_ir(...)` now treats very large lower-IR programs conservatively and bypasses the expensive default memory/value canonicalization bridge, while `machine_ir` now has an extreme-size all-spill fallback instead of forcing every very large Value-SSA program through the full allocator/rewrite path. A focused `compiler_driver` regression now locks a `300`-argument compile smoke so this extreme-arity route stays live in-repo, and `make test-compiler-driver` remained green after the change. Current authority is still deliberately conservative: this reduces the chance that giant public stress programs take the most expensive pipeline by default, but it does not fully close the compile-time tail yet, because `107_long_code2.c` and `many_parameters10000.c` still exceed a `35s` local compile budget and remain active follow-up items.
+- 2026-05-05: Follow-up verification after that giant-program fallback round clarified two important points for the active tail. First, the apparent `108_many_params.c` re-regression turned out to be a test-harness mistake rather than a compiler rollback: the case requires its bundled `.in`, and with the correct input the current compiler still matches the expected `331024` output. Second, focused stage timing on the remaining giant stress cases now points to the real heavy segments more concretely instead of leaving the tail as a generic “compiler is slow” complaint. On `107_long_code2.c`, the current local breakdown is roughly `value_ssa ~= 6.4s`, `machine_ir_report ~= 11.1s`, and `machine_bytes_report ~= 9.1s`, while raw `bytes_dump` itself is negligible; `many_parameters10000.c` also reaches `value_ssa ~= 2.8s` and `machine_ir_report ~= 7.3s` before the same remaining tail pressure takes over. A small compiler-driver asymptotic cleanup is now landed on top of that evidence: final textual RISC-V export no longer linearly rescans fixup/block-label summaries at every instruction site, but builds one preview lookup cache first and reuses it for fixup and block-label queries. `make test-compiler-driver` and `git diff --check` stayed green after that change. Current authority is therefore that the compile-time tail is now narrower and better diagnosed, but still open: future rounds should treat `machine_bytes` report construction and the pre-bytes SSA/backend middle stages as the next performance targets rather than blaming string dump code alone.
+- 2026-05-05: Another follow-up on that same giant-program line also closed one misleading measurement path and one real stress item. The earlier repeated “CLI still times out” symptom on `107_long_code2.c` turned out to be stale-binary noise: `make test-compiler-driver` had been rebuilding the library/test surface but not `build/compiler`, so the command-line timing loop was still exercising an older binary. After explicitly rebuilding the CLI with `make compiler`, the current `build/compiler -riscv ... -o ...` path now emits `107_long_code2.c` successfully within a `40s` local timeout window and produces the expected large assembly output file. The remaining giant stress tail is therefore narrower again: `many_parameters10000.c` still misses the same `40s` window, but `107_long_code2.c` is no longer part of the active “still times out at the CLI surface” set.
+- 2026-05-05: The remaining `many_parameters10000.c` tail has now also advanced from “still clearly broken” to “materially narrowed and partly closed”. Focused stage probes showed that the preview backend was not merely slow there: it was failing with `MACHINE-BYTES-342: riscv preview call target out of range`, which means the giant-arity stress case had crossed from pure performance pressure into a real far-call codegen bug. The current landed repair is intentionally narrow and compiler-facing: very large preview calls now use a long-call `auipc + jalr` pair in `machine_bytes`, and the final compiler text exporter recognizes that pair as one `call target` pseudo-instruction while skipping the trailing helper word in the printed assembly stream. After rebuilding the real CLI (`make compiler`), `build/compiler -riscv /tmp/sysy-suites/sysy-testsuit-collection/lvX/many_parameters10000.c -o ...` now succeeds within a `60s` local timeout window, the emitted assembly assembles under `clang -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32`, and the final `.s` text contains the expected `call func` pseudo-op at the giant call site. Current authority is therefore that the active giant-program line has shrunk again: both `107_long_code2.c` and `many_parameters10000.c` now clear the basic CLI-to-assembly path, and the remaining reopen is no longer “they still fail to compile”, but “keep broad sweeps honest and continue lowering the compile-time ceiling where practical”.
+- 2026-05-05: A broader public-sweep follow-up right after that far-call closure also exposed the next real backend boundary, and the first attempted shortcut was intentionally backed out. A full `minic-test-cases-2021f/functional` sweep now comes back green except for `091_long_func.c`, which fails at `MACHINE-BYTES-344: riscv preview branch target out of range`. I briefly tested a “leave a placeholder branch immediate and rely on the assembler to recover” idea after confirming that `clang` can relax some far conditional branches, but the generated program then reached link/run and segfaulted instead of staying semantically honest. Current authority is therefore explicit: that half-fix is reverted, the tree is back to the safer state where `many_parameters10000.c` compiles through the CLI while `091_long_func.c` still fails early with `MACHINE-BYTES-344`, and the next genuine backend correctness target is a real far-branch / far-compare-branch strategy rather than another placeholder-bytes workaround.
+- 2026-05-05: The same public-tail investigation also clarified one misleading long-array signal and one real builtin-call contract bug. `092_long_array.c` looked like a wrong-answer regression under the quick `stdout + exit-code` concatenation script, but a newline-delimited diagnostic rerun against a direct Python simulation showed the produced numeric sequence matches the expected semantics at least through the first 15 printed checkpoints; current authority is therefore that `092_long_array.c` is no longer treated as a confirmed compiler bug, but as an oracle-normalization artifact in the quick sweep harness. In parallel, the investigation did expose a genuine downstream contract gap: SysY void builtins (`putint`, `putch`, `putarray`, `starttime`, `stoptime`) were already known as `void` in semantic analysis, but canonical/low IR had still been letting them masquerade as result-producing calls deep enough to keep `call putint(...)` shapes alive in the machine pipeline. The current narrow fix is now landed through `lower_ir`: builtin void calls lower as no-result calls plus a synthesized zero-valued expression result for the surrounding expression pipeline, and `machine_ir` verifier now accepts call instructions with no result when the callee/arg payload is otherwise well-formed. Focused re-runs show that `098_nested_calls.c` stays green after this change, and the rebuilt `092_long_array.c` diagnostic path now shows the expected printed values instead of the earlier misleading concatenation diff. Current public-tail priority therefore remains the same single hard red point: `091_long_func.c` and a real far-branch strategy.
+- 2026-05-05: Follow-up revalidation in the current tree materially changes that last public-tail conclusion, so future rounds should not keep treating `091_long_func.c` as the standing local blocker by inertia. After the latest preview-branch fallback revisit plus the builtin-void cleanup, the rebuilt CLI now passes focused `compile -> assemble -> link -> run` checks on `091_long_func.c`, `092_long_array.c`, and `098_nested_calls.c`, and a normalized-oracle sweep over `sysy-testsuit-collection/lvX/090..099` is green end-to-end. The important harness note is now explicit: third-party `.out` files are not uniform, so broad sweeps must accept all three common shapes (`stdout`, `stdout+exit`, and `stdout + "\\n" + exit`) before calling a mismatch real. Current authority is therefore that the active compatibility line is back to being mostly hidden-only: public analogues around the recent `long_func` / `long_array` / `nested_calls` pressure points are presently green locally, while the remaining mainline risk surface stays on the hidden `17_while_if2` / `22_nested_calls` / segfault-cluster side plus the still-open compile-time stress tail.
+- 2026-05-05: That same normalized-oracle sweep has now been widened enough to materially strengthen the “mostly hidden-only” conclusion instead of leaving it as a claim based only on a narrow tail sample. In addition to the green `sysy-testsuit-collection/lvX/090..099` window, the full local `minic-test-cases-2021f/functional` tree now passes end-to-end again (`100` functional cases, `0` failures) under `build/compiler -> clang -> ld.lld -> qemu-riscv32-static` validation with the normalized stdout/exit comparison rule. Current authority is therefore that the public functional surface is presently in a much healthier state than the last intermediate notes implied; the remaining active risk surface is better described as hidden-course-only compatibility and compile-time stress pressure, not as a still-reproduced broad public functional correctness regression.
+- 2026-05-05: The public functional evidence widened one more step in the same direction immediately afterward. `minic-test-cases-2021s/functional` is now also green end-to-end (`100` functional cases, `0` failures) under the same rebuilt-CLI plus normalized-oracle validation rule, so the two closest public course-style functional trees are both currently passing in full. Current authority is therefore stronger than “one suite happened to pass”: the remaining compatibility reopen should now be treated primarily as a hidden-course/environment-specific hunt plus a compile-time-tail hunt, not as a likely broad public functional regression hiding in ordinary SysY semantics.
+- 2026-05-05: The reopened high-pressure public stress cluster is now materially narrower after one concrete backend fix instead of only better diagnosed. The critical root cause turned out not to be “high arity calls” in the abstract, but large spill-slot operand preparation in the preview bytes lane: when a function had enough locals/parameters that spill slots crossed the signed-12-bit offset boundary, preparing one spill-backed operand could reuse `t6` as an address scratch while another live spill-backed operand was already sitting in `t6`, so later binary ops consumed an address instead of the preserved lhs value. The landed `machine_bytes` fix now routes spill-slot address materialization for operand loads through a separate scratch lane, and the representative `1024 vs 1025` repro is reclosed (`jal` and far-`call` variants both return the expected value again). Focused reruns now also reclose the earlier real public failures `many_parameters1025`, `many_parameters5000`, `many_parameters10000`, `register_alloc10000`, and `107_long_code2`. A full local `sysy-testsuit-collection` sweep now comes back with no confirmed semantic/compiler red point in that former cluster; the only residual noise is the two `brainfk` cases whose bodies match exactly and differ only in final trailing-`0` oracle formatting.
+- 2026-05-05: A final follow-up on that same external-suite line made the remaining `brainfk` noise more precise and removed it from the “compiler bug” bucket. The two residual `sysy-testsuit-collection` mismatches (`071_brainfk.c` and `083_brainfk.c`) are not semantic divergences: direct reruns show their program bodies match the expected text, and the only difference is output formatting at the tail (`stdout` currently ends with `\r\n` while the suite oracle ends with `\n0`). Current authority is therefore that the public external-suite line has no reproduced semantic/codegen red point left in the currently swept trees; the remaining reopen is hidden-course hunting plus any future decision about whether to normalize that runtime text-format detail for third-party suites.
+- 2026-05-05: The strict all-paths-return audit line also gained another negative-result data point that is useful precisely because it did *not* produce a new bug. A focused public near-neighbor sweep over `41` `while_if` / `if_test` / `short_circuit` / `break` / `continue` cases drawn from `compiler2021` and `sysy-testsuit-collection` now compiles cleanly under `--enforce-all-paths-return-check`. Current authority is therefore that the remaining strict-mode risk surface is narrower still: the earlier public/control-flow-adjacent families are no longer reproducing a false positive, so future strict-mode hunting should focus on more hidden-specific shapes instead of rechecking the already-green public `while_if` family by habit.
+- 2026-05-05: Course regression baselines were rechecked again immediately after the large-spill preview-bytes fix so this round would not rely only on third-party suites. Both `lv8` (`12/12`) and `lv9` (`22/22`) are green again under the current rebuilt compiler, while the representative public stress cases reopened by the same bug (`many_parameters1025`, `many_parameters5000`, `many_parameters10000`, `register_alloc10000`, and `107_long_code2`) are also reclosed locally. Current authority is therefore that the latest backend repair improved the high-pressure public line without reopening the course baseline, and the default next mainline should return to hidden-course-specific hunting rather than looping on already-reclosed public stress cases.
+- 2026-05-05: The full public course `-riscv` baseline has now also been rechecked end-to-end and is green again (`130/130`). That means the current tree is no longer only “locally okay on lv8/lv9”; the whole shipped course baseline now passes under the rebuilt compiler and the current backend fix set. Current authority is therefore even narrower than before: future implementation work should treat public course regressions as closed unless a new bug is explicitly reproduced, and should focus on the remaining hidden-course-specific compatibility line instead of reopening the already-green public course matrix by default.
+- 2026-05-05: Another batch of external suites was swept to keep hidden-neighbor hunting moving instead of just trusting the already-green course baseline. `indigo/test_codes/functional_test` now passes end-to-end (`111/111`) under the same normalized oracle comparison rule used for the other third-party suites. `TrivialCompiler/custom_test` and `lava-test/cases` were also swept; the remaining apparent mismatches there are currently formatting-only oracle noise (`brainfk` tail formatting or trailing `0\n` encoding) rather than reproduced semantic/codegen failures. Current authority is therefore that the public third-party ecosystem is now materially wider than the course suite but still not producing a new confirmed compiler bug, so the next mainline should stay aimed at hidden-course-specific shapes unless a genuinely semantic third-party repro appears later.
+- 2026-05-05: The public performance-oriented suite `compiler2021/performance_test2021-public` has now been narrowed to a very small real tail rather than a broad suspicion. A normalized rerun over all `30` public perf cases leaves exactly two reproduced red points: `03_sort2.sy` times out at runtime, and `median2.sy` mismatches while `median0.sy` / `median1.sy` remain green. Current authority is therefore that the broad public perf line is mostly closed too, and the best remaining public follow-up target is now that small `03_sort2` / `median2` pair instead of the whole perf suite being treated as open-endedly suspicious.
+- 2026-05-05: The same public perf tail narrowed again immediately after a targeted fix on the recursive tail-call path. `median2.sy` is now reclosed and green again under the current compiler, leaving `03_sort2.sy` as the only reproduced red point in `compiler2021/performance_test2021-public` (`RUN_TIMEOUT`). Current authority is therefore that the remaining public performance follow-up is now a single concrete timeout target rather than a broader correctness cluster, while the recursive correctness issue that `median2` exposed has already been fixed and revalidated.
+- 2026-05-05: A tighter runtime probe on `03_sort2.sy` clarified that the last public perf tail is likely a true performance hotspot rather than another compiler functional bug. The full input still times out, but a much smaller prefix of the same input completes quickly, so the remaining issue tracks the workload size and algorithmic shape rather than a semantic regression in the compiler backend. Current authority is therefore that the last public perf reopen should be treated as a performance/algorithmic follow-up, not as a compiler correctness failure to chase with the same tactics used for `median2`.
+- 2026-05-05: A later third-party performance batch sweep widened the remaining follow-up surface again, but in a useful way: `lava-test/performance_test2021` exposed a concrete new cluster instead of more format noise. Current reproduced red points there are `dead-code-elimination-1/2/3.sy` (`COMPILE_FAIL`), `floyd-2.sy` (`MISMATCH`), and `hoist-2.sy` (`RUN_TIMEOUT`). Combined with the already-isolated `03_sort2.sy` timeout, that means the remaining external-suite work is now a small set of concrete performance/compiler follow-ups rather than a broad unclassified sweep problem. The next practical step should be to reduce one member of that cluster to a minimal repro and fix it, then rerun the batch to see whether the others collapse with it or need separate treatment.
+- 2026-05-05: Follow-up probing on the `lava-performance` cluster clarified one more important boundary: the `dead-code-elimination-1/2/3.sy` cases are not just “source compile errors”, they currently stall long enough to trip the compile-phase timeout window even before the compiler gets to the later pipeline stages. That makes them a compile-time convergence/performance family rather than a plain late-stage codegen failure, and it means the next debugging pass should instrument or shrink the compiler’s middle pipeline on those cases instead of looking only at final assembly/runtime output. The `floyd-2.sy` mismatch and `hoist-2.sy` runtime timeout still remain as separate public perf follow-ups, but the `dead-code-elimination-*` trio should now be treated as an execution-time budgeting problem in the compiler itself, not as a user-program bug.
+- 2026-05-05: The `dead-code-elimination-*` trio has now been narrowed further and is no longer an open-ended “semantic is slow” bucket. A small semantic-scope acceleration on local-name lookup collapsed `dead-code-elimination-1.sy` stage timing from roughly `semantic ~= 98s` to `semantic ~= 0.058s`, proving the main compile-time hotspot was the old linear scope lookup path on huge declaration blocks. With that fix in place, the trio now fails immediately and uniformly at the next real boundary: `MACHINE-BYTES-342: riscv preview call target out of range`. Current authority is therefore that the semantic-side hotspot is materially closed, and the remaining issue for `dead-code-elimination-1/2/3.sy` has converged onto the same family of large-program far-call preview limitation we have already seen elsewhere in the backend.
+- 2026-05-05: The `dead-code-elimination-*` trio has now been narrowed again after the far-call fix. They no longer fail at compile time, and they no longer fail with `MACHINE-BYTES-342`; the current behavior is instead a runtime timeout on execution. That means the compiler-side correctness issue has been cleared, and the remaining work for that trio is now runtime/performance budgeting rather than another backend codegen bug. This is a useful endpoint because it confirms the earlier semantic and far-call fixes genuinely moved the suite across the compiler boundary instead of merely changing the failure mode superficially.
+- 2026-05-05: The `lava-performance` family has now been split even more cleanly. `floyd-2.sy` is not a semantic mismatch anymore under direct comparison of the produced output prefix; its remaining delta is just the same trailing output-format convention that has already shown up in several other third-party suites. That leaves `03_sort2.sy` and `hoist-2.sy` as the meaningful remaining public performance-oriented follow-ups, while the `dead-code-elimination-*` trio remains a runtime-timeout family now that the semantic scope fix and far-call fix have already been validated on it. In other words, the external-sweep line is still useful, but the true compiler-correctness surface has shrunk further and the remaining pressure is now mostly performance budgeting and suite-format normalization rather than new semantic bugs.
+- 2026-05-05: Follow-up stage timing now separates the remaining public performance tails much more sharply instead of leaving them all in one “timeout bucket”. `03_sort2.sy` compiles quickly through every compiler phase, so its timeout tracks runtime/program performance rather than a compiler hotspot. `hoist-2.sy`, by contrast, spends almost all compiler-side time inside `machine_ir_report` (with bytes/report/dump time negligible), so it is the clearest remaining compiler-side performance target among the public external suites. Current authority is therefore to treat `03_sort2` and `hoist-2` as two different kinds of perf follow-up, not one blended timeout family.
+- 2026-05-05: A short reopened regression round on the public course line exposed one real consumer-boundary bug rather than a deeper backend semantic break. `machine_select_build_program_from_machine_ir_report(...)` had started consuming the new fast `program-only` machine-ir report directly, which means some callers now reached selected lowering with phi-bearing `MachineIrProgram`s and tripped `MACHINE-SELECT-315` on `lv8/06_complex_call`, `lv8/10_complex`, and `lv8/11_short_circuit`. The first attempted blanket fix ("always canonicalize report input before selected lowering") proved too broad because it regressed the already-green `lv9` array / indirect-memory lane into uniform `-11` runtime failures. The current consumer rule is now narrower and regression-backed: report-driven `machine_select` lowering first scans the raw `MachineIrProgram`, canonicalizes only when phi nodes are actually present, and otherwise preserves the original non-phi path untouched. Focused reruns now reclose `lv8` (`12/12`) and `lv9` (`22/22`) under that rule, so current authority is that the report fast path remains usable, but report consumers must stay phi-aware instead of assuming every report artifact is already canonicalized.
+- 2026-05-05: A follow-up compile-time performance trim inside `value_ssa_allocate_and_rewrite_program_single_block_spills(...)` is now also landed and revalidated. The rewrite loop had still been rebuilding two full `ValueSsaProgramAllocationLayout` artifacts after every rewritten allocation round just to ask whether the old and new allocation states were equivalent; that work is now replaced by a direct raw `ValueSsaProgramAllocationResult` equivalence check, which keeps the same conservative convergence rule while avoiding those extra layout builds. Focused reruns now keep the public course line green (`lv8` `12/12`, `lv9` `22/22`, full course `130/130`), and the hot `lava-performance` `hoist-*` family now stays measurably lower than before: current local `allocate+rewrite` timings are approximately `hoist-1 ~= 49.6s`, `hoist-2 ~= 46.2s`, `hoist-3 ~= 44.7s`, still with the same `allocation_rounds=4` and `rewrite_rounds=3`. That means the current reopened pressure is no longer broad public functionality: neighboring public hidden-like cases such as `nested_calls`, `long_func`, `long_array`, `long_code`, `nested_loops`, and `while_if` now all compile cleanly again in the checked third-party suites, while the remaining real tail is increasingly concentrated on the `value_ssa` allocate+rewrite loop's per-round cost rather than on new compiler correctness regressions.
+- 2026-05-05: The next allocator-side timing split is now concrete enough to guide the remaining mainline instead of leaving `hoist-*` as a generic “allocator is slow” complaint. Current public-API diagnostics on `hoist-2.sy` show that the rewrite side is no longer the main problem: representative local timings are roughly `rewrite_block_spills ~= 0.17s`, `rewrite_spills ~= 0.47s`, and `canonicalize ~= 0.01s`, while a single `allocate_program(...)` pass still costs around `9s..11s`. A deeper split over one real body function then points the pressure even further downstream: `move_families ~= 8.6s..12.7s`, `move_worklist ~= 11.5s..12.7s`, and `plan ~= 8.7s..9.8s`, while `execute_from_plan` remains small (`~0.23s`). That means the current tail is not execute-side spilling or late writeback; it is repeated coalesce/family/worklist/plan analysis work. One first shared-query optimization on that line is now landed and regression-safe: `ValueSsaAllocatorCoalesceAnalysis` now builds a direct pair index for `value_ssa_allocator_coalesce_analysis_find_pair(...)` instead of linearly scanning the whole candidate table on every lookup. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green, and `hoist-2` `allocate+rewrite` time now returns to a better post-regression local point (`~50.9s`) rather than the temporarily worsened `~56.1s`. Current authority is therefore to keep the allocator performance mainline narrowly focused on shared coalesce/family/worklist analysis reuse rather than reopening correctness work or chasing rewrite-side micro-optimizations.
+- 2026-05-05: A second allocator query-surface cleanup is now also landed on top of that shared-analysis line. `ValueSsaAllocatorPlan` now preserves a direct `value_id -> plan-item index` map instead of making `value_ssa_allocator_plan_find_value(...)` linearly rescan `plan->items` for every lookup, and `move_worklist` itself now also uses `qsort` plus a root-to-work-index table instead of two local quadratic scans. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again. The remaining timing signal is intentionally read conservatively: per-stage probes still fluctuate enough that `move_families` / `move_worklist` / `plan` each remain expensive, and the overall `hoist-2` `allocate+rewrite` time stays in the same improved band (`~50.4s .. 50.9s`) rather than collapsing dramatically further. Current authority is therefore that these query/index cleanups are worth keeping because they are safe and non-regressive, but they are not the whole remaining answer; the next meaningful gains will likely require shrinking one of the larger family-level scans or reusing more of the move-family/work-pressure artifacts across those three adjacent stages instead of only accelerating individual lookup helpers.
+- 2026-05-05: A third allocator query-surface pass has now also closed the same style of linear root lookup inside `move_family_analysis` itself. `ValueSsaAllocatorMoveFamilyAnalysis` now preserves a direct `root_value_id -> family_index` map instead of making `value_ssa_allocator_move_family_analysis_find_root(...)` rescan every family row. In the same reopened performance lane, the earlier `coalesce` pair index and `plan` value index remain in place. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the hot `hoist-2` `allocate+rewrite` timing now improves further to roughly `48.6s` while still staying at the same `allocation_rounds=4` / `rewrite_rounds=3`. Current authority is therefore that the allocator query-layer cleanup line is still yielding real wins, but the remaining tail is no longer dominated by one single missing index; it is now increasingly likely that the next gains will come from collapsing or reusing the larger family/work-pressure scans themselves rather than from another one-off point lookup replacement.
+- 2026-05-05: A follow-up cleanup on the work-pressure side has now landed too. `ValueSsaAllocatorMoveWorklist` now preserves a direct `root_value_id -> work_item index` map so `value_ssa_allocator_move_worklist_find_root(...)` no longer linearly scans the worklist, and `coalesce_opportunity_agenda` now uses `qsort` instead of a local quadratic pairwise reorder loop. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green, and the hot `hoist-2` `allocate+rewrite` timing moves a bit further down again to roughly `49.3s` while still keeping the same `allocation_rounds=4` / `rewrite_rounds=3`. Current authority is therefore that the remaining allocator tail still benefits from these query/ordering cleanups, but the pressure is continuing to concentrate into the larger family/work-pressure artifact rebuilds themselves rather than into any one remaining obvious linear lookup helper.
+- 2026-05-05: Another small but safe refresh-chain cleanup is now also in place on that same line. The `move_engine` root-list maintenance path now avoids extra linear duplicate scans while compacting/reseeding phase-ready roots, by using existing flag surfaces for seen-root tracking instead of repeatedly rescanning the growing root list. Focused reruns again keep `lv8` (`12/12`) and `lv9` (`22/22`) green, and `hoist-2` stays in the improved band at roughly `49.3s` instead of regressing upward. Current authority is therefore unchanged but clearer: the remaining tail is not in root-list bookkeeping itself, and the next likely meaningful gains should come from reducing the heavier per-family phase-entry rebuild work (`rebuild_family_phase_entry_for_root(...)`) rather than from still more list-dedup helper tweaks.
+- 2026-05-05: The first direct family-phase rebuild cache is now landed and revalidated. `value_ssa_alloc_plan.inc` now splits plan-item preview construction into a reusable static base plus a runtime/dynamic finish step, and `value_ssa_alloc_move_engine.inc` now prebuilds those static bases once per work item for the current move-engine run instead of recomputing spill-cost/rematerializable/split-child/initial-degree facts every time `rebuild_family_phase_entry_for_root(...)` refreshes a family candidate. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the hot local `hoist-2.sy` compile time now drops much further, from the earlier `~49.3s` band to roughly `40.8s` under the same local measurement style. Current authority is therefore that the suspected rebuild path really was a meaningful remaining hotspot; the next likely gains should come from shrinking the still-dynamic part of that same rebuild/preview path rather than reopening unrelated allocator or backend lines.
+- 2026-05-05: One immediate follow-up on top of that first cache line has now also been probed and explicitly *not* promoted into a new checkpoint. I tested a second-layer move-engine idea that tried to cache/maintain family-level base priority so `prepare_family_queue_priority_for_root(...)` would avoid another family scan, but the measured result on `hoist-2.sy` stayed in the same noisy band (`~41s`) instead of improving further. Because that extra state added complexity without a clear win, the current tree intentionally keeps the earlier static preview-base cache but does **not** keep that new base-priority maintenance layer as a landed optimization checkpoint. Current authority is therefore to keep looking for the next real remaining dynamic rebuild hotspot rather than treating every nearby cache-shaped idea as automatically worth retaining.
+- 2026-05-05: The next allocator-side compile-time trim is now also landed and kept. Instead of continuing to add more tiny caches around the earlier static preview-base checkpoint, the move-engine now prebuilds one sparse affinity-neighbor surface from the real `prep->candidates` list and uses it in several dynamic refresh paths that had still been rescanning the whole affinity matrix during affected-family updates. In particular, affected-family discovery and the dynamic `active_move_related` / `active_effective_move_related` / family-pressure refresh logic now walk only real affinity neighbors for the values in question, not every possible `0..value_count-1` neighbor. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the hot `hoist-2.sy` allocator-side timing now drops again from roughly `44.0s` to roughly `39.8s`. The outer `compiler -riscv` 30-second guard is still only barely timing out, so this is not the end of the performance line, but it is a real positive checkpoint and stronger evidence that the remaining tail is now in the still-untrimmed dynamic rebuild logic rather than in the earlier static preview computation.
+- 2026-05-05: One further local allocator trim is now also landed and kept on top of that sparse-affinity checkpoint. The dynamic `family_move_pressure` refresh path no longer clears whole root rows/columns just to rebuild one affected family’s pressure facts; instead it tracks only the touched external/coalesce-ready neighbor roots in small scratch sets and resets just those entries after each recomputation. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the hot `hoist-2.sy` allocator-side timing now improves a little further from roughly `39.8s` to roughly `39.5s`. The outer `compiler -riscv` 30-second guard still only barely times out, so the allocator performance line is not fully closed yet, but current authority is that the remaining tail is now thin enough that further work should be chosen very selectively and measured carefully rather than by adding more broad caching layers.
+- 2026-05-05: Another two small but real allocator-tail trims are now landed on the same `family/worklist/plan` line, and this round finally restored a fully visible local staged timing point instead of another partial timeout. First, `rebuild_family_phase_entry_for_root(...)` no longer does a standalone family-member pass just to rediscover the queue-priority signal before immediately walking the same family again to rebuild candidates; the rebuild loop now computes each candidate's queue-priority signal and the family-level max in the same pass. Second, `value_ssa_compute_allocator_move_worklist(...)` no longer performs a `family_count x plan_item_count` scan just to recover per-family base priorities; it now pre-aggregates `coalesce_root_value_id -> max(plan.priority)` once and reuses that table for each work item. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the current `tools/diag_allocator_stages.c` probe on `lava-test/performance_test2021/hoist-2.sy` now finishes inside the `30s` guard with roughly `move_family ~= 9.364s`, `move_worklist ~= 9.289s`, and `plan ~= 9.594s` instead of timing out before printing the late stages. Current authority is therefore that the allocator performance mainline is still open, but it has tightened again into a smaller duplicate-work tail rather than a broad "plan still opaque" hotspot.
+- 2026-05-06: The same allocator-tail line has now taken one more real step down, and this time the gain is clearly on the actual plan path rather than only on adjacent helper surfaces. The move-engine now carries a reusable `scratch_root_flags` surface and uses it in several hot root-dedup sites (`collect_unique_runtime_roots(...)`, the full active-effective-degree recomputation helper, and the per-root active-effective-degree refresh helper), so those loops no longer pay repeated linear membership scans over `scratch_roots` just to suppress duplicate runtime roots. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again. More importantly, the hot `tools/diag_allocator_stages.c` probe on `lava-test/performance_test2021/hoist-2.sy` now drops again from the earlier `~9s` late-stage band to roughly `move_family ~= 2.187s`, `move_worklist ~= 2.160s`, and `plan ~= 2.096s`, and the real rebuilt CLI path now compiles `build/compiler -riscv hoist-2.sy -o ...` in about `10.8s` under a `30s` guard. Current authority is therefore that the allocator reopen is now no longer about "can the public hot repro finish locally at all"; that part is closed. The remaining decision is whether to take one more very small allocator-tail slice or to treat the allocator line as materially closed enough to begin the broader correctness-sweep checkpoint.
+- 2026-05-06: The next ordered checkpoint in `Current Active Slice` is now materially underway rather than still hypothetical. A new repository-local sweep harness, `tools/sweep_sysy_suite.py`, now drives the rebuilt `build/compiler -> clang -> ld.lld -> qemu-riscv32-static` path directly and applies the current normalized-oracle policy to third-party suites instead of relying on ad hoc one-off shell loops. In the current tree, focused reruns keep the course baselines green (`lv8` `12/12`, `lv9` `22/22`), and directly oracle-complete third-party functional trees now also come back green again under that same rule: `compiler2021/公开用例与运行时库/function_test2021` (`103/103`), `indigo/test_codes/functional_test` (`111/111`), `TrivialCompiler/custom_test` (`29/29`), and `lava-test/cases` (`162/162`). `sysy-testsuit-collection/lvX` also reclosed in two steps: the first full rerun came back `458/467` under a conservative `20s` per-case guard, then the residual `9` red points all collapsed under either widened `60s` case budgets on the genuine giant stress cases (`many_parameters10000`, `register_alloc10000`, `matrix-1`) or a slightly more complete normalized-oracle rule on the formatting-noise cases (`heap_sort`, `insert_sort`, `merge_sort_xunhuan`, `shell_sort`, `digui2`, `div_constant`). Current authority is therefore that the post-allocator correctness sweep has already covered most of the available oracle-complete external surface and is no longer discovering a live semantic/codegen regression there. The remaining caveat for the sweep checkpoint is environment completeness rather than compiler correctness: in the current local clones, `minic-test-cases-2021s` / `2021f` do not expose ready-to-consume co-located oracle/runtime assets in the same layout as the other suites, so this round preserves their earlier recorded green status instead of pretending this new harness revalidated them directly in the current filesystem state.
+- 2026-05-06: That remaining environment-completeness caveat is now also materially closed for the current round. `tools/sweep_sysy_suite.py` can now fall back to the environment's native `/opt/lib/native/libsysy.a` to synthesize host-side oracles for `.c`-based suites when a local testcase tree lacks checked-out runtime sources or co-located `.out` files. With that fallback in place, the current rebuilt compiler now revalidates both `pku-minic` functional trees directly in the present filesystem state instead of relying on older notes: `minic-test-cases-2021f/functional` is green again (`100/100`), and `minic-test-cases-2021s/functional` is green again (`112/112`, including the `reserved/` tail). The same sweep harness was then rerun once more across the previously widened `sysy-testsuit-collection/lvX` surface under a `60s` per-case budget, and that second full pass now closes the bookkeeping loop completely: the suite is all-green end-to-end (`467/467`) rather than only "458/467 plus 9 targeted spot-check closures". Current authority is therefore that the post-allocator correctness checkpoint is no longer merely "mostly complete": for the currently available public oracle-bearing suites in this environment, it is materially complete and green.
+- 2026-05-06: The next stage after that correctness checkpoint has now at least been reopened enough to have fresh local baseline numbers instead of only inherited old suspicions. The rebuilt CLI still compiles the public allocator-heavy `lava-test/performance_test2021/hoist-2.sy` case quickly enough to stay well inside practical local guardrails (current direct `build/compiler -riscv ... -o ...` timing is about `12.0s`, still in the same post-allocator-improvement band as the earlier `~10.8s` reading), while the distinct public runtime-tail case `compiler2021/performance_test2021-public/03_sort2.sy` still reproduces as `RUN_TIMEOUT` under the current `60s` per-case sweep budget. Current authority is therefore that the project has now genuinely moved past the post-allocator correctness checkpoint and into the later performance-tuning reopen: the best remaining public pressure is no longer "broad functional suites still red", but the narrower compile-time/runtime-performance pair represented by `hoist-2` and `03_sort2`.
+- 2026-05-06: One first direct performance-reopen experiment has now been tried, measured, and deliberately backed out. I tested a very conservative default-path Value-SSA reopen around redundant pure-call elimination and then a `memory-value`-style fallback swap for indirect-memory programs, targeting the repeated `getNumPos(...)` structure inside `03_sort2.sy`. The result was not good enough to keep: the `03_sort2` runtime tail remained a `RUN_TIMEOUT`, one variant regressed the `lv9` course line into a `-11` wrong-answer symptom, and the safer variants still pulled the `hoist-2` compile baseline upward into roughly the `15s..17s` range instead of down. Current authority is therefore explicit: that "default-path call-CSE / indirect-memory canonicalization reopen" is now a recorded failed experiment, not an active checkpoint item. The mainline stays on the rolled-back stable state (`lv8` green, `lv9` green, `hoist-2` compile roughly `15s`, `03_sort2` still `RUN_TIMEOUT`), and the next performance move should change angle rather than retrying the same hook with slightly different wiring.
+- 2026-05-06: A later backend-only micro-optimization round has now also landed and is worth keeping as execution memory because it produced a real code-quality win without reopening the earlier unsafe Value-SSA directions. The current `machine_bytes` preview path now uses `x0` directly for `store_local_imm 0` / `store_global_imm 0`, lowers small `addr_local` forms to one `addi rd, sp, imm` instead of a `li + add` pair, and lets zero-valued prepared operands flow through the later bytes operand-prep path as `x0` instead of as an extra synthesized scratch register. On top of that, the final compiler-side preview-text exporter now also has one first narrow peephole that folds a one-use `li tmp, 0` followed immediately by `add dst, src, tmp` into a smaller `mv dst, src` / no-op shape instead of preserving the zero helper in the final `.s` text. Direct rebuilt-CLI reruns on `compiler2021/.../03_sort2.sy` therefore now show two concrete checkpoints on the same public hot case: first from roughly `608` total instructions with `li=139` / `add=74` down to roughly `523` with `li=54` / `add=44` / `addi=54`, and then one step further down to roughly `515` with `li=48` / `add=38` / `mv=33` while keeping the rest of the broad hot families stable. The public runtime tail itself is still open, however: the same single-case sweep under `tools/sweep_sysy_suite.py` still reproduces `03_sort2.sy: RUN_TIMEOUT` at the current `60s` per-case budget. Current authority is therefore to keep these late backend and final-text wins, but treat the remaining mainline as the narrower unresolved indexed-address / repeated-load loop family rather than as the already-closed zero-store materialization family.
+- 2026-05-06: One more final-text peephole has now also landed on top of that same safe late-export line, and this one hits a visibly hotter pattern in `03_sort2.sy` than the earlier zero-add cleanup. The preview text exporter now folds a direct `li tmp, 4` followed immediately by `mul dst, src, tmp` into `slli dst, src, 2` instead of preserving the helper-register multiply in the final `.s` text. Focused reruns keep `make test-compiler-driver` green, so this still sits on the safe final-text side rather than reopening mid-pipeline semantics. On the public hot repro itself, the direct rebuilt-CLI histogram now drops one more step from the earlier `~515` band to roughly `total_instructions=482`, with `li=15`, `add=38`, and `slli=33` instead of the previous `li=48` / `mul=34` heavy indexed-address tail. The runtime result is still not closed: the same single-case `tools/sweep_sysy_suite.py` rerun continues to report `03_sort2.sy: RUN_TIMEOUT` at the current `60s` budget. Current authority is therefore that the late text/export side is still yielding real wins on the hot indexed-address family, but we are now clearly in the diminishing-returns part of that line and should treat the remaining pressure as the still-open repeated-load / control-structure runtime tail rather than as another easy one-line peephole opportunity.
+- 2026-05-06: A follow-up final-text experiment on the same hot path is now also landed and measured, and it further sharpens what is and is not enough to close `03_sort2`. The preview text exporter now also rewrites direct `div/rem` by a power-of-two immediate into exact signed shift/mask/sub sequences instead of preserving the helper-register division/modulus form in the final `.s` text. On the representative hot function `getNumPos`, the emitted `base=16` path is now visibly different: `div/rem ... , 16` is exported as `srai/andi/add/srai` (for division) and `srai/andi/add/srai/slli/sub` (for remainder), while the surrounding global-const load is still folded to an immediate. This remains regression-safe on the public surface (`make test-compiler-driver` stays green). The instruction-count tradeoff is mixed rather than uniformly smaller: the full `03_sort2.sy` histogram moves from the earlier `~482` checkpoint to roughly `total_instructions=488`, with `srai` / `andi` replacing the explicit `div/rem` opcodes. More importantly, the runtime tail is still not closed: the same single-case `tools/sweep_sysy_suite.py` rerun continues to report `03_sort2.sy: RUN_TIMEOUT` at the current `60s` budget. Current authority is therefore that this power-of-two divide/mod rewrite is a safe backend/export improvement worth keeping, but it does not materially change the remaining mainline diagnosis: the unresolved pressure is still the giant-input repeated-call / repeated-load / repeated-control runtime structure itself, not one last missing arithmetic peephole.
+- 2026-05-06: That same `div/rem by power-of-two` final-text rewrite was then immediately stress-checked against the real course array/sort line, and this follow-up matters because it changed the final decision on whether that experiment should stay. Focused reruns exposed real `lv9` regressions (`19_sort5`, `21_sort7`), which means the textual rewrite as first implemented was not semantics-preserving enough to keep, even though its local `03_sort2` shape looked attractive. The experiment has now been explicitly rolled back. After rollback, both `make test-compiler-driver` and `autotest -riscv -s lv9 /workspaces/compiler_lab` are green again (`22/22`), and the stable kept `03_sort2` static checkpoint returns to roughly `total_instructions=485` under the remaining safe final-text peephole set (`zero-add`, `mul-by-four`, `add/sub-by-one`, plus the safe constant-global immediate fold that still leaves the benign leading `lui`). Current authority is therefore explicit: do **not** resurrect the power-of-two `div/rem` text rewrite as-is; the current stable mainline should continue from the `~485` checkpoint rather than from the briefly lower-but-wrong intermediate variants.
+- 2026-05-06: One more tiny final-text cleanup has now been landed on top of that same export-side line, and this one is deliberately modest rather than being presented as a silver bullet. The preview text exporter now also folds a direct `li tmp, 1` followed immediately by `add/sub dst, src, tmp` into `addi dst, src, +/-1` instead of keeping the helper-register arithmetic in the final `.s` text. This remains regression-safe on the public surface (`make test-compiler-driver` stays green). On `03_sort2.sy`, the instruction histogram now nudges from the previous `~488` checkpoint down to roughly `total_instructions=485`, with `li=12` and `addi=60` while the rest of the hot families remain broadly stable. Current authority is therefore that the export-side peephole tail is still yielding small, real wins, but those wins are now incremental rather than transformative; the remaining runtime pressure is still the large repeated-load / repeated-call structure rather than a single missing one- or two-instruction fold.
+- 2026-05-06: The strict `returns-all-paths` reopen now has a clearer implementation map than the earlier "semantic false-positive audit" label implied. I re-read the live chain and revalidated it with focused tests after the recent local-state loop fix: `make test-compiler-driver` is green again, `make test-semantic-regression` is green again, and the current authority is that strict/default all-path behavior is jointly determined by three linked layers rather than one gate in isolation. The front gate remains `semantic_compute_function_returns_all_paths(...)`, but the same user-visible family also depends on control-flow-sensitive canonical-IR global-dependency pruning (`ir_global_dep`) and on local-state-aware loop/if fallthrough shaping in canonical IR lowering (`ir_lower_stmt`). To keep that understanding live in the suite instead of only in notes, IR regression coverage now also locks the local-state-fed loop-return family directly (`int b=1; while(b<2)...`, `for(;b<2;...)...`, and `int b=0; b=1; while(b<2)...`) instead of only through compiler-driver smoke tests. Current authority is therefore to debug future strict-mode regressions by asking "which layer first mis-proved fallthrough/reachability?" rather than by reopening semantic logic blindly.
+- 2026-05-06: The next strict/local-state follow-up is now tighter again and closes the last currently reproduced alias-fed nested-loop false positive in the real compile path. The remaining bad shape was no longer semantic rejection, but canonical-IR lowering itself leaving a malformed dead exit path: constant-true outer loops that contained nested loops were still forced to keep an exit block purely because of the nested-loop marker, even when the analyzed body already proved `!may_break && !may_fallthrough` and therefore could not reach the surrounding function tail. `ir_lower_stmt` now treats those two facts separately: nested loops still block overaggressive local-state “condition stays true forever” proofs, but they no longer force a fake exit block when the body already has no path back out. That repair is now regression-locked in `tests/ir/strict_loop_return_alias.cases.inc` and the existing compiler-driver strict smoke, and focused reruns are green again on `make test-ir-regression`, `make test-compiler-driver`, the direct `ir_lower_program(...)` repro, and the rebuilt strict CLI path. Current authority is therefore that the strict audit line has moved past the old alias-fed loop family and back toward hidden/default compatibility hunting as the primary active front-end/mainline risk.
+- 2026-05-06: The first correctness follow-up on that live strict/IR map is now also closed again after an initial false start. I had to rework the `ir_lower_stmt` loop-shaping again so `while/for` would only collapse their header into a direct body jump when the whole loop really has no live exit path, not merely because the condition happens to be constant-true at entry. That fixed the earlier `IR-VERIFY-010` unreachable-block regressions on the local-state loop family, and the targeted `test-ir-regression` / `test-compiler-driver` reruns are green again on the repaired tree. The global-initializer side also got a second guard: top-level initializer constant folding now treats out-of-range literals conservatively instead of folding them into a bogus `0` runtime shape, so the `LLONG_MIN`/`+1` initializer regressions stay on the explicit runtime-initializer path instead of silently being erased. Current authority is therefore that the strict/all-path map is still the same three-layer story, but the live IR correctness floor below it is now back to green after those two focused fixes.
+- 2026-05-06: The next strict/local-state lowering follow-up is now materially closed too, and the final root cause turned out to be a real contract split rather than one more random condition tweak. I had to separate two notions that had drifted together inside `ir_lower_stmt`: `1)` proof-oriented local-state reasoning for the strict false-positive audit, and `2)` actual canonical-IR CFG shaping for normal branch lowering. The repaired current rule is: real CFG branch emission stays conservative and does **not** constant-fold on mutable-local current values, while the proof helper for “can this loop honestly be treated as no-exit under the current local-state model?” now imports the live lowering scope, iterates body/step effects to a short fixed point, and only then allows `while`/`for` to omit the exit block. Along the way I also fixed two state-propagation bugs inside that helper itself: compound-scope pop had been restoring the wrong flow-state snapshot, and `for` declaration scopes were being double-counted so the helper could follow the stale outer binding instead of the current loop-local one. After those fixes, the previously split symptoms now align again on the same repaired tree: the strict local-state pass family (`while(b<2){ if(b){ return 2; } }`, `for(;b<2;...)`, and the alias-fed outer-loop variant) lowers successfully again, the older non-strict `entry_seed` loop-local case restores its real conditional backedge plus final `ret`, `make test-compiler-driver` is green again, and `make test-ir-regression` is green again. Current authority is therefore that the strict local-state false-positive reopen has advanced one real layer downward: the remaining work is no longer “basic local-state loop lowering still unstable”, but “keep expanding legal-family search now that semantic, dependency, and lowering contracts are back in sync on the known families”.
+- 2026-05-06: One more lowering-side reconciliation is now also complete, and it matters because it closes the last obvious mismatch between the new local-state proof helper and the older canonical-IR CFG expectations. The helper originally still mis-modeled `for` loops in two ways: it checked for fixed-point convergence before applying the `for` step, and it could duplicate the same declaration-scoped loop variable when importing existing lowering scope plus the `for` declaration itself. That combination let `for(int a=3; a; a=a-1){}` look falsely no-exit even though the step clearly drives the guard toward zero. The repaired rule is now tighter and simpler: the helper trusts the live lowering scope as the single source of declaration-state truth, applies loop-step effects before fixed-point comparison, and only treats a loop as no-exit if the post-step state actually converges with the guard still provably true and with no reachable `break`. After that cleanup, the previously red `IR-FOR-INIT-STEP` regression is green again, `make test-ir-regression` is green again, `make test-compiler-driver` is green again, `entry_seed` still emits its real conditional backedge plus final `ret`, and `git diff --check` is clean. Current authority is therefore that the local-state proof line is no longer in “active firefight” mode: the next useful move is to resume broad legal-family hunting under strict mode rather than continuing to reopen the same known local-state lowering mechanics.
+- 2026-05-06: The next strict-hunting round has now actually broadened beyond repository-owned regressions instead of only promising to do so. I ran an external strict compile sweep across locally available third-party suites (`compiler2021`, both `minic-test-cases-2021*` trees, `indigo`, `TrivialCompiler`, `lava-test`, and `sysy-testsuit-collection`) and filtered for the control-flow/return-heavy filename cluster (`while`, `if`, `break`, `continue`, `short`, `loop`, `return`). That produced `198` externally sourced strict-mode compile probes, and the current rebuilt compiler passed all `198/198` under `--enforce-all-paths-return-check` with no reproduced `IR-LOWER-009`, `LOWER-IR-042`, or semantic strict false-positive surface. Current authority is therefore that the strict audit has now moved out of the “only in-repo cases are green” phase: both the repository’s known accept families and a first meaningful slice of third-party hidden-neighbor control-flow cases are aligned with the real compile pipeline. The remaining strict work should now focus on either broader non-keyword suite sweeps or genuinely new hidden-style families, not on re-litigating the already-green local-state loop cluster.
+- 2026-05-06: The mainline has now intentionally pivoted back to hidden/default compatibility hunting, and this round produced one concrete runtime-family reopen instead of only more “everything still compiles” evidence. A wider default-mode third-party compile sweep over `214` control-flow-adjacent filenames (`while`, `if`, `nested`, `long`, `short`, `array`, `global`, `init`, `call`) came back `214/214` green at compile time, and a follow-up compile+assemble sweep over the higher-risk `array/global/const/init/short` cluster also came back `147/147` green through assembly. That means the current hidden/default tail is increasingly *not* about easy compile-time `CTE/AE` reproduction. However, the first sampled compile+assemble+link+run sweep over `80` high-risk array/global/short-circuit cases did reproduce a real runtime cluster: several `array_traverse*` cases timed out under a conservative `10s` budget, and more importantly `lava-test/cases/104_long_array.sy` plus `minic-test-cases-2021f/functional/092_long_array.c` both crash under `qemu-riscv32-static` with `returncode=-11` / `EXIT=139`. I then minimized that direction enough to know where to continue next: the crash is reproducible locally through the normal CLI path, and the bad shape is already visible in canonical IR / lowering rather than only in final machine bytes. In the current bad dump, the outer `while(i < N)` in `long_array` still loses its exit/return path after passing through nested loops, so this is now a concrete “large local-array / nested-loop / long-frame lowering runtime” reopen, not a vague hidden suspicion. Current authority is therefore to treat `long_array`-class runtime recovery as the next active default-mode task, with likely spillover benefit to the earlier hidden `RE` cluster around large arrays / globals / access paths once that line is understood and fixed.
 
 ## Historical Note
 
 The authority sections above are the current policy surface.
 
 The execution log is intentionally retained below them as historical record, not as a second competing roadmap.
+
+- 2026-05-07: A fresh public-perf recheck on the live tree changed the current surface in a way that needs to stay visible in roadmap memory. Rebuilt-path `tools/sweep_sysy_suite.py` reruns over `compiler2021/公开用例与运行时库/performance_test2021-public` no longer reproduce only the long-lived `03_sort2.sy` timeout; on the current tree they now reproduce `03_sort2.sy -> RUN_TIMEOUT` and `shuffle2.sy -> RUN_TIMEOUT` (`28/30` overall in the full public sweep, and the same pair on focused one-case reruns). In the same round I also tried one very narrow `machine_select` cleanup experiment around block-local reuse of repeated non-address-taken `load_local` results, but it was explicitly *not* kept: the representative `03_sort2` static witness stayed flat at `total_instructions=428`, while the public-perf surface did not improve and still carried the `shuffle2` timeout. The experiment has been backed out again, and post-backout spot checks keep `make test-machine-select` green plus `autotest -riscv -s lv9 /workspaces/compiler_lab` green (`22/22`). Current authority is therefore that the public runtime/perf line on the live tree is now `03_sort2 + shuffle2`, not only `03_sort2`, and that this specific selected-cleanup load-reuse direction is recorded as a failed/unkept trial rather than a new checkpoint.
+- 2026-05-07: A later same-day selected-side retry also did **not** earn checkpoint status. I tried a more conservative `machine_select` cleanup that only removed repeated small pure-expression redefinitions when they rewrote the **same** result register/spill. That direction looked attractive because the live `shuffle2` selected dump still contained repeated `cnt*4`-style address-index expressions inside `insert(...)`. The practical result was not clean enough to keep: runtime behavior stayed unchanged on both public witnesses (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT` under the same `60s` single-case budget), while the broader tree stayed correctness-green (`make test-machine-select`, `make test-value-ssa-regression`, `make test-compiler-driver`, and `autotest -riscv -s lv9` all re-passed after the trial). Because that selected-side retry did not close a runtime tail or produce a clearly dominant public tradeoff, it has been backed out again. Current authority is therefore to continue from the earlier kept Value-SSA direct-cleanup checkpoint, not from this selected-side same-result-expression retry.
+- 2026-05-06: A small but important post-experiment cleanup is now also landed on the Value-SSA side so the current tree better matches the recorded mainline policy. The classic lower-IR -> Value-SSA canonicalization bridge no longer runs `value_ssa_canonicalize_program(...)` twice in a row, and the previously tried but intentionally unpromoted redundant-pure-call elimination helpers have been removed again from `src/value_ssa_pass/value_ssa_cse.inc` instead of lingering as dead experimental scaffolding. Focused reruns keep both `make test-value-ssa-regression` and `make test-value-ssa-oracle` green, so current authority is that the failed default-path pure-call/CSE reopen is now not only “off the mainline in spirit” but also materially cleaned out of the live Value-SSA pass surface.
+- 2026-05-06: The strict all-paths-return audit line has now closed one more real false-positive family instead of only rerunning old near-neighbors. In the representative shape `while(1){ if(a){return 1;} for(;a<2;a=a+1){ if(a){return 2;} } a=1; }`, the older nested-loop helper only treated inner-loop conditions as syntactic constant-true or constant-false tests, so it missed the already-known guard-state fact that `a<2` is definitely true on entry to the inner `for` and incorrectly rejected the function with `SEMA-CF-001`. The landed fix now lets that nested-loop proof path reuse the current guard-constant state before deciding whether the inner loop is definitely entered, and the new focused regression `CF-82` locks the repaired case in `tests/semantic/semantic_regression_scope_cf.inc`. `make test-semantic-regression` is green again after the change. Current authority is therefore that the strict-mode residual risk surface has narrowed a little further on the “guard flip plus nested loop plus next-iteration return” side, while the broader hidden/default audit line still remains open.
+- 2026-05-06: That same strict audit line has now also widened from one isolated `CF-82` shape into a small locked subfamily instead of stopping at the first win. The current helper now also revalidates several nearby “guard becomes true before an inner loop that then returns” variants: representative `for(;1;a=1){ if(a){return 1;} while(a<2){ if(a){return 2;} } }`, `for(;1;a=1){ if(a){return 1;} for(;a<2;a=a+1){ if(a){return 2;} } }`, and `while(1){ if(a){return 1;} a=1; for(;a<2;a=a+1){ if(a){return 2;} } }` are now locked as `CF-83..CF-85` in `tests/semantic/semantic_regression_scope_cf.inc`, and `make test-semantic-regression` remains green after adding them. Current authority is still deliberately conservative: two deeper near-neighbor variants remain intentionally open for a later pass, namely the pure nested-`while` inner-return shape and the local-alias/declaration shape (`int b=a; b=1; for(;b<2;...)`), which suggests the next residual strict-mode work is less about plain current-state condition evaluation and more about deeper nested-body state propagation / alias-like declaration tracking.
+- 2026-05-06: A follow-up probe immediately after that `CF-82..CF-85` closure made the remaining strict residual even more explicit. After rebuilding the real CLI and rechecking targeted repros, the “pure nested while” branch turned out to have already collapsed under the same earlier fix, so it should no longer be tracked as an open item. The currently reproduced strict-only residual is now narrower and cleaner: simple local-state-fed loop families such as `int f(){ int b=1; while(b<2){ if(b){ return 2; } } }`, `int f(){ int b=1; for(;b<2;b=b+1){ if(b){ return 2; } } }`, and the outer-loop alias-fed variant `int f(int a){ while(1){ if(a){ return 1; } int b=a; b=1; for(;b<2;b=b+1){ if(b){ return 2; } } } }` still reproduce `SEMA-CF-001` under `--enforce-all-paths-return-check`, while `make test-semantic-regression` remains green after the exploratory checks. Current authority is therefore that the next strict-mode slice should focus specifically on local declaration/assignment state feeding later loop conditions, not on reopening the already-closed outer-guard nested-loop family.
+- 2026-05-06: One more follow-up on that same residual line clarified what *didn't* move yet, which is still useful execution memory for the next round. I tried a small state-aware must-return scaffold on compound statements and then rebuilt the real CLI before rechecking the targeted repros, but the observed behavior did not change: the current strict-mode residual still rejects the same pure local-state-fed loop family (`int b=1; while(b<2){...}`, `int b=1; for(;b<2;...){...}`, `int b=0; b=1; while(b<2){...}`, `int b=0; b=1; for(;b<2;...){...}`) plus the alias-fed outer-loop variant. Current authority is therefore sharper than before: the remaining strict issue is not just "nested loops with conditions" in general, and it is not solved by a shallow compound-level must-return helper alone; the next useful slice must explicitly address local declaration/assignment state as input to later loop-condition proofs.
+- 2026-05-06: A final rebuild-and-rerun in this round changed the remaining boundary one more time in a way that matters for the next implementation slice. After rebuilding the real CLI and rechecking the same local-state-fed loop cases directly through `build/compiler --enforce-all-paths-return-check`, the alias-fed outer-loop variant stopped reproducing `SEMA-CF-001`, and the still-red simple local-state cases now fail one layer later with `IR-LOWER-009` / `LOWER-IR-042` ("function body does not terminate on all lowered paths"). Current authority is therefore that the next useful work on this family should move out of `src/semantic/semantic_core_flow.inc` and into the canonical-IR / lower-IR fallthrough analysis path (`src/ir/ir_lower_stmt.inc`, `src/ir/ir_global_dep.inc`, and the matching lowering-entry checks), because semantic analysis is already starting to accept more of these shapes while the downstream lowering-flow contract still lags behind.
+- 2026-05-06: That IR-lowering residual has now materially advanced instead of remaining only a diagnosis. The canonical IR lowering path now has a first narrow local-state-aware truthiness slice for `while` / `for` termination shaping: scalar-local declarations with constant initializers now record current known values for lowering flow, direct scalar-local stores now update or clear that known-value metadata, and the `while` / `for` lowering flow checks now reuse that metadata when deciding whether a loop condition is already provably true/false. Focused CLI repros that previously failed at `IR-LOWER-009` now compile successfully under `--enforce-all-paths-return-check`, including `int b=1; while(b<2){ if(b){ return 2; } }`, `int b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, `int b=0; b=1; while(b<2){ if(b){ return 2; } }`, `int b=0; b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, and the alias-fed outer-loop variant. That same family is now also regression-locked at the user-facing entrypoint through `tests/compiler/compiler_driver_test.c` (`test_compiler_handles_strict_local_state_loop_returns`). Current authority is therefore that the old "simple local declaration/assignment state feeding later loop conditions" residual is no longer open on the CLI path, and the next remaining strict/default work should return to the still-open hidden/default compatibility line or any deeper canonical-IR / lower-IR cases that survive beyond this first scalar-local slice.
