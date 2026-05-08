@@ -240,7 +240,9 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
             *out_value = state->values[index - 1u];
             return 1;
         }
-        if (ctx && ir_eval_constant_int_expression((IrLowerContext *)ctx, expr, out_value)) {
+        if (index == 0u &&
+            ctx &&
+            ir_eval_constant_int_expression((IrLowerContext *)ctx, expr, out_value)) {
             return 1;
         }
         return 0;

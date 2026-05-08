@@ -1025,6 +1025,34 @@ static int test_ir_lowers_declared_calls_in_for_step_comma_expression(void) {
         "}\n");
 }
 
+static int test_ir_keeps_for_exit_when_function_step_updates_local_condition_value(void) {
+    return expect_ir_dump("IR-FOR-LOCAL-COND-CALL-STEP",
+        "int step(int a){return a+1;}\n"
+        "int main(){int b=0; for(;b<2;b=step(b)){} return b;}\n",
+        "func step(a.0) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = add a.0, 1\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    b.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt b.0, 2\n"
+        "    br tmp.0, bb.2, bb.4\n"
+        "  bb.2:\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.1 = call step(b.0)\n"
+        "    b.0 = mov tmp.1\n"
+        "    jmp bb.1\n"
+        "  bb.4:\n"
+        "    ret b.0\n"
+        "}\n");
+}
+
 static int test_ir_lowers_declared_calls_in_for_init_comma_expression(void) {
     return expect_ir_dump("IR-DECL-FOR-CALL-INIT-COMMA",
         "int init1(int a);\nint init2(int a);\nint main(int x){for(x=(init1(x),init2(x));x;x=x-1){} return x;}\n",
@@ -1791,6 +1819,7 @@ int main(void) {
     ok &= test_ir_lowers_declared_calls_in_for_logical_and_condition_and_step();
     ok &= test_ir_lowers_declared_calls_in_for_logical_or_condition_and_step();
     ok &= test_ir_lowers_declared_calls_in_for_step_comma_expression();
+    ok &= test_ir_keeps_for_exit_when_function_step_updates_local_condition_value();
     ok &= test_ir_lowers_declared_calls_in_for_init_comma_expression();
     ok &= test_ir_lowers_declared_calls_in_for_nested_short_circuit_condition();
     ok &= test_ir_lowers_declared_call_in_comma_expression();

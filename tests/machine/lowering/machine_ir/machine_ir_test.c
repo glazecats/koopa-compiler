@@ -1953,6 +1953,567 @@ static int test_machine_ir_cleanup_eliminates_dead_moves(void) {
     return ok;
 }
 
+static int build_machine_ir_indirect_load_address_use_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    size_t entry_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 4;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(4, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        program->register_bank.registers[i].register_id = i;
+        program->register_bank.registers[i].name = dup_text(i == 0 ? "r0" : i == 1 ? "r1" : i == 2 ? "r2" : "r3");
+        program->register_bank.registers[i].allocatable = 1u;
+    }
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "b", 0, NULL, error) ||
+        !machine_ir_function_append_block(function, &entry_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(0);
+    instruction.as.store.value = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.store.slot = machine_ir_slot_local(1);
+    instruction.as.store.value = machine_ir_operand_immediate(9);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.addr_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.mov_value = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_register(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(3);
+    instruction.as.load_indirect_addr = machine_ir_operand_register(2);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[entry_id], machine_ir_operand_register(3), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_machine_ir_cleanup_preserves_indirect_load_address_chain(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    MachineIrBasicBlock *block = NULL;
+    int ok = 1;
+
+    machine_ir_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_machine_ir_indirect_load_address_use_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: indirect-load-address cleanup setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: indirect-load-address cleanup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    block = &program.functions[0].blocks[0];
+    if (block->instruction_count < 5 ||
+        block->instructions[3].kind != MACHINE_IR_INSTR_BINARY ||
+        block->instructions[3].result.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[3].result.machine_register_id != 2u ||
+        block->instructions[4].kind != MACHINE_IR_INSTR_LOAD_INDIRECT ||
+        block->instructions[4].as.load_indirect_addr.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[4].as.load_indirect_addr.machine_register_id != 2u) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: indirect load address chain should stay live through cleanup\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&program);
+    return ok;
+}
+
+static int build_machine_ir_indirect_store_use_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    size_t entry_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 4;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(4, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        program->register_bank.registers[i].register_id = i;
+        program->register_bank.registers[i].name = dup_text(i == 0 ? "r0" : i == 1 ? "r1" : i == 2 ? "r2" : "r3");
+        program->register_bank.registers[i].allocatable = 1u;
+    }
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "src", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "dst0", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "dst1", 0, NULL, error) ||
+        !machine_ir_function_append_block(function, &entry_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(0);
+    instruction.as.store.value = machine_ir_operand_immediate(11);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.addr_slot = machine_ir_slot_local(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2);
+    instruction.as.mov_value = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(3);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(1);
+    instruction.as.binary.rhs = machine_ir_operand_register(2);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_register(3);
+    instruction.as.store_indirect.value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[entry_id], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_machine_ir_cleanup_preserves_indirect_store_inputs(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    MachineIrBasicBlock *block = NULL;
+    int ok = 1;
+
+    machine_ir_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_machine_ir_indirect_store_use_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: indirect-store cleanup setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: indirect-store cleanup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    block = &program.functions[0].blocks[0];
+    if (block->instruction_count < 5 ||
+        !block->instructions[1].has_result ||
+        block->instructions[1].result.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[1].result.machine_register_id != 0u ||
+        block->instructions[3].kind != MACHINE_IR_INSTR_BINARY ||
+        block->instructions[3].result.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[3].result.machine_register_id != 3u ||
+        block->instructions[4].kind != MACHINE_IR_INSTR_STORE_INDIRECT ||
+        block->instructions[4].as.store_indirect.addr.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[4].as.store_indirect.addr.machine_register_id != 3u ||
+        block->instructions[4].as.store_indirect.value.kind != MACHINE_IR_OPERAND_REGISTER ||
+        block->instructions[4].as.store_indirect.value.machine_register_id != 0u) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: indirect store address/value inputs should stay live through cleanup\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&program);
+    return ok;
+}
+
+static int build_machine_ir_cross_block_indirect_load_use_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    size_t entry_id;
+    size_t tail_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 4;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(4, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        program->register_bank.registers[i].register_id = i;
+        program->register_bank.registers[i].name = dup_text(i == 0 ? "r0" : i == 1 ? "r1" : i == 2 ? "r2" : "r3");
+        program->register_bank.registers[i].allocatable = 1u;
+    }
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "b", 0, NULL, error) ||
+        !machine_ir_function_append_block(function, &entry_id, NULL, error) ||
+        !machine_ir_function_append_block(function, &tail_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(0);
+    instruction.as.store.value = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.store.slot = machine_ir_slot_local(1);
+    instruction.as.store.value = machine_ir_operand_immediate(9);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.addr_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.mov_value = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_jump(&function->blocks[entry_id], tail_id, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_register(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[tail_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(3);
+    instruction.as.load_indirect_addr = machine_ir_operand_register(2);
+    if (!machine_ir_block_append_instruction(&function->blocks[tail_id], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[tail_id], machine_ir_operand_register(3), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_machine_ir_cleanup_preserves_cross_block_indirect_load_address_chain(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    int ok = 1;
+    int saw_binary_addr = 0;
+    int saw_indirect_load = 0;
+
+    machine_ir_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_machine_ir_cross_block_indirect_load_use_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: cross-block indirect-load setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: cross-block indirect-load cleanup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    for (size_t block_index = 0; block_index < program.functions[0].block_count; ++block_index) {
+        MachineIrBasicBlock *block = &program.functions[0].blocks[block_index];
+
+        for (size_t instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            MachineIrInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->kind == MACHINE_IR_INSTR_BINARY &&
+                instruction->has_result &&
+                instruction->result.kind == MACHINE_IR_OPERAND_REGISTER &&
+                instruction->result.machine_register_id == 2u) {
+                saw_binary_addr = 1;
+            }
+            if (instruction->kind == MACHINE_IR_INSTR_LOAD_INDIRECT &&
+                instruction->as.load_indirect_addr.kind == MACHINE_IR_OPERAND_REGISTER &&
+                instruction->as.load_indirect_addr.machine_register_id == 2u) {
+                saw_indirect_load = 1;
+            }
+        }
+    }
+
+    if (!saw_binary_addr || !saw_indirect_load) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: cross-block indirect load address chain should stay live through cleanup\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&program);
+    return ok;
+}
+
+static int build_machine_ir_cross_block_indirect_store_use_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    size_t entry_id;
+    size_t tail_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 4;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(4, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        program->register_bank.registers[i].register_id = i;
+        program->register_bank.registers[i].name = dup_text(i == 0 ? "r0" : i == 1 ? "r1" : i == 2 ? "r2" : "r3");
+        program->register_bank.registers[i].allocatable = 1u;
+    }
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "src", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "dst0", 0, NULL, error) ||
+        !machine_ir_function_append_local(function, "dst1", 0, NULL, error) ||
+        !machine_ir_function_append_block(function, &entry_id, NULL, error) ||
+        !machine_ir_function_append_block(function, &tail_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(0);
+    instruction.as.store.value = machine_ir_operand_immediate(11);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.addr_slot = machine_ir_slot_local(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2);
+    instruction.as.mov_value = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_jump(&function->blocks[entry_id], tail_id, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(3);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(1);
+    instruction.as.binary.rhs = machine_ir_operand_register(2);
+    if (!machine_ir_block_append_instruction(&function->blocks[tail_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_register(3);
+    instruction.as.store_indirect.value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[tail_id], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[tail_id], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int test_machine_ir_cleanup_preserves_cross_block_indirect_store_inputs(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    int ok = 1;
+    int saw_value_def_reg0 = 0;
+    int saw_binary_addr = 0;
+    int saw_store_indirect = 0;
+    int store_uses_loaded_reg = 0;
+    int store_uses_folded_immediate = 0;
+
+    machine_ir_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_machine_ir_cross_block_indirect_store_use_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: cross-block indirect-store setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: cross-block indirect-store cleanup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+
+    for (size_t block_index = 0; block_index < program.functions[0].block_count; ++block_index) {
+        MachineIrBasicBlock *block = &program.functions[0].blocks[block_index];
+
+        for (size_t instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            MachineIrInstruction *instruction = &block->instructions[instruction_index];
+
+            if (((instruction->kind == MACHINE_IR_INSTR_LOAD_LOCAL) ||
+                    (instruction->kind == MACHINE_IR_INSTR_MOV &&
+                        instruction->as.mov_value.kind == MACHINE_IR_OPERAND_IMMEDIATE &&
+                        instruction->as.mov_value.immediate == 11)) &&
+                instruction->has_result &&
+                instruction->result.kind == MACHINE_IR_OPERAND_REGISTER &&
+                instruction->result.machine_register_id == 0u) {
+                saw_value_def_reg0 = 1;
+            }
+            if (instruction->kind == MACHINE_IR_INSTR_BINARY &&
+                instruction->has_result &&
+                instruction->result.kind == MACHINE_IR_OPERAND_REGISTER &&
+                instruction->result.machine_register_id == 3u) {
+                saw_binary_addr = 1;
+            }
+            if (instruction->kind == MACHINE_IR_INSTR_STORE_INDIRECT &&
+                instruction->as.store_indirect.addr.kind == MACHINE_IR_OPERAND_REGISTER &&
+                instruction->as.store_indirect.addr.machine_register_id == 3u) {
+                saw_store_indirect = 1;
+                if (instruction->as.store_indirect.value.kind == MACHINE_IR_OPERAND_REGISTER &&
+                    instruction->as.store_indirect.value.machine_register_id == 0u) {
+                    store_uses_loaded_reg = 1;
+                }
+                if (instruction->as.store_indirect.value.kind == MACHINE_IR_OPERAND_IMMEDIATE &&
+                    instruction->as.store_indirect.value.immediate == 11) {
+                    store_uses_folded_immediate = 1;
+                }
+            }
+        }
+    }
+
+    if (!saw_binary_addr ||
+        !saw_store_indirect ||
+        !(store_uses_folded_immediate || (store_uses_loaded_reg && saw_value_def_reg0))) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: cross-block indirect store address/value inputs should stay live through cleanup\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&program);
+    return ok;
+}
+
 static int build_machine_ir_straight_line_cross_block_copy_program(MachineIrProgram *program, MachineIrError *error) {
     MachineIrFunction *function = NULL;
     size_t entry_id;
@@ -9559,6 +10120,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_cleanup_eliminates_dead_moves()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_preserves_indirect_load_address_chain()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_preserves_indirect_store_inputs()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_preserves_cross_block_indirect_load_address_chain()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_preserves_cross_block_indirect_store_inputs()) {
         return 1;
     }
     if (!test_machine_ir_cleanup_propagates_copies_across_single_predecessor_chain()) {

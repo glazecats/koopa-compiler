@@ -622,6 +622,25 @@ static void machine_ir_collect_block_use_def(const MachineIrProgram *program,
                     use_set[resource_index] = 1u;
                 }
                 break;
+            case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                if (machine_ir_operand_get_resource_index(
+                        program, function, instruction->as.load_indirect_addr, &resource_index) &&
+                    !seen_defs[resource_index]) {
+                    use_set[resource_index] = 1u;
+                }
+                break;
+            case MACHINE_IR_INSTR_STORE_INDIRECT:
+                if (machine_ir_operand_get_resource_index(
+                        program, function, instruction->as.store_indirect.addr, &resource_index) &&
+                    !seen_defs[resource_index]) {
+                    use_set[resource_index] = 1u;
+                }
+                if (machine_ir_operand_get_resource_index(
+                        program, function, instruction->as.store_indirect.value, &resource_index) &&
+                    !seen_defs[resource_index]) {
+                    use_set[resource_index] = 1u;
+                }
+                break;
             default:
                 break;
         }

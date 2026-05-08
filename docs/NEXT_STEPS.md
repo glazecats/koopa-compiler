@@ -33,6 +33,41 @@
 - `docs/backend/MACHINE_IMAGE_PLAN.md` is the current design/staging authority for the just-checkpointed post-ELF image-prep backend sibling.
 - `docs/ssa/MEMORY_SSA_DESIGN.md` is the current design/staging authority for the checkpointed memory-SSA line.
 
+## Quick Start Snapshot
+
+- Read this section first after a restart; only then drop into the long log below.
+- Current checkpoint status:
+  - stable recovery checkpoint: **kept**
+  - `03_sort1` / `03_sort3`: reclosed
+  - `lava-test/lava_test/kmp.sy`: reclosed
+  - `lv8`, `lv9`, `autotest -riscv`, `autotest -perf`: green
+- Current active remaining pressure is mainly perf / timeout oriented:
+  - public perf:
+    - `03_sort2.sy -> RUN_TIMEOUT`
+    - `shuffle2.sy -> RUN_TIMEOUT`
+  - external/private perf timeout cluster:
+    - `brainfuck-mandelbrot-nerf.sy`
+    - `dead-code-elimination-2.sy`
+    - `dead-code-elimination-3.sy`
+    - `hoist-2.sy`
+    - `hoist-3.sy`
+    - `instruction-combining-2.sy`
+    - `instruction-combining-3.sy`
+    - `integer-divide-optimization-2.sy`
+    - `integer-divide-optimization-3.sy`
+- Timeout interpretation policy:
+  - do **not** assume every local `RUN_TIMEOUT` is immediate proof of a compiler bug
+  - first classify each timeout as either:
+    1. likely local-environment-limited (memory / paging / host I/O heavy), or
+    2. likely real compiler/runtime pressure
+  - prefer static instruction count, opcode histograms, compile-time timings,
+    and testcase trip-count reasoning before overfitting to one local timeout
+- Current default next loop:
+  1. keep the recovered correctness-closed surfaces green
+  2. classify remaining timeout cases
+  3. optimize the genuine pressure cases for fewer instructions / less hot repeated work / better compile time
+  4. rerun focused correctness witnesses after each kept perf change
+
 ## Current Guidance
 
 1. Milestones A-E are closed for active implementation tracking.
@@ -121,6 +156,13 @@
     because they are closest to the course environment, then broaden with the
     public GitHub suites if those do not reproduce the remaining
     hidden-course failures.
+    A broader persistence follow-up is now also in place locally: the current
+    external suite roots under `/tmp/sysy-suites/` are mirrored under
+    `third_party/sysy-suites/` (without `.git` metadata) so they survive
+    image rebuilds instead of depending only on `/tmp/sysy-suites/`. The
+    mirrored `minic-test-cases-2021f/s/performance` directories now also
+    carry synthesized `.out` oracle files, so those mirrored paths can be
+    swept directly instead of returning `SKIP` for missing outputs.
 
 ## Current Active Slice
 
@@ -156,6 +198,42 @@
 - Current progress snapshot for that ordered line:
   - post-allocator correctness checkpoint:
     **complete / 100%**
+    - 2026-05-08 hidden-OJ follow-up: the latest course submission evidence
+      has reopened a concrete hidden/default compatibility cluster that should
+      now be treated as active plan memory rather than as vague future risk.
+      Current hidden-only red points reported from OJ are:
+      - likely shared segfault / array-object / global-object family (`RE`):
+        `05_global_arr_init`, `06_long_array`, `08_arr_access`,
+        `09_const_arr_read`, `14_short_circuit1`, `17_func_expr2`,
+        `18_global_var2`, `27_bfs2`, `32_global_1darr3`,
+        `33_global_2darr3`, `34_zero_init3`
+      - likely dead-loop / control-flow family (`RTLE`, treat as probable
+        semantic loop bugs before blaming missing optimization):
+        `20_loops3`, `22_func_param3`, `24_gcd3`
+      The nearest visible `lv9` array/public analogues remain green on the
+      rebuilt local compiler (`05_global_arr_init`, `06_long_array`,
+      `08_arr_access`, `09_const_arr_read` all PASS), so current authority is
+      that the reopened pressure is again hidden-only rather than a simple
+      regression on the nearest public course witnesses. The next debug order
+      should therefore prioritize the largest shared hidden family first:
+      array/global-object segfaults, then the probable loop-condition RTLE
+      family.
+    - 2026-05-08 RTLE follow-up: one concrete hidden-like dead-loop family is
+      now locally reproduced and closed instead of remaining only a naming
+      guess from OJ. The minimized repro shape is a `for` loop whose condition
+      depends on a mutable scalar local (`b < N`) while the step updates that
+      local through an unknown function call (`b = step(b)`). Canonical IR
+      lowering had been incorrectly proving that such a loop condition “stays
+      true forever” because the flow-state evaluator fell back to stale
+      scope-level `has_const_value` metadata for a tracked local after that
+      local’s current value had already become unknown. In practice that let
+      the loop header drop its exit branch entirely, which reproduced as
+      `RUN_TIMEOUT` on a focused synthetic cluster. The current tree now
+      blocks that fallback for tracked-but-unknown locals, keeps the exit
+      path, and revalidates the family on `make test-ir-regression`,
+      `make test-compiler-driver`, `lv9` (`22/22`), and a `91/91` local
+      loop/parameter/gcd differential sweep whose previous failures were all
+      on the `for(...; b < N; b = step(b))` subfamily.
     - course regression baselines remain green in the current tree:
       `lv8` (`12/12`) and `lv9` (`22/22`)
     - one reusable third-party sweep tool now exists in-repo:
@@ -170,12 +248,11 @@
       `segviol/indigo/test_codes/functional_test` (`111/111`),
       `TrivialCompiler/custom_test` (`29/29`),
       and `ustb-owl/lava-test/cases` (`162/162`)
-    - `jokerwyt/sysy-testsuit-collection/lvX` has been widened again in the
-      current tree, but the latest full sweep shows it is **not** all green:
-      current authority is `464/467`, with residual pressure concentrated in
-      `many_parameters10000.c -> COMPILE_TIMEOUT`,
-      `register_alloc10000.c -> COMPILE_TIMEOUT`, and
-      `matrix-1.c -> RUN_TIMEOUT`
+    - `jokerwyt/sysy-testsuit-collection/lvX` is now green again in the
+      rebuilt current tree (`467/467`). Older local memories about
+      `many_parameters10000.c`, `register_alloc10000.c`, and `matrix-1.c`
+      should now be treated as historical checkpoints rather than as live
+      red points.
     - the earlier local gap on `minic-test-cases-2021s` / `2021f` is now also
       materially closed in the current tree: the sweep harness can now fall
       back to the environment's native `libsysy.a` to synthesize host-side
@@ -219,7 +296,7 @@
       this widens the post-fix course-adjacent evidence surface materially
       beyond the earlier `compiler2021` / `lv8` / `lv9` checkpoint.
   - post-checkpoint performance reopen:
-    **in progress / roughly 76%**
+    **in progress / roughly 87%**
     - 2026-05-08 recovery note: the current rollback/repair checkpoint has
       now reclosed the visible `03_sort1/03_sort3` correctness regressions by
       backing out the final `compiler_driver` text-peephole invocation
@@ -256,6 +333,32 @@
       “must not regress” floor for any later narrow optimization retry, and do
       not spend the current turn-range on them unless a very obviously safe
       follow-up appears.
+    - timeout-evaluation policy for the current local environment is now
+      explicit: do **not** treat every `RUN_TIMEOUT` as immediate proof of a
+      compiler semantic or algorithmic regression. Some large perf inputs may
+      also miss the local budget because the workstation is memory-tight and
+      pays disproportionate paging / host-side I/O cost during full-input
+      execution. Therefore each timeout line should first be classified into:
+      1. likely local-environment-limited timeout (needs caution before
+         over-optimizing against it), or
+      2. likely real compiler/runtime pressure (worth active optimization).
+      Preferred evidence for that classification is: static instruction count
+      (`tools/analyze_riscv_asm.py`), direct opcode histograms, focused
+      compile-time timings, structural trip-count reasoning from the testcase
+      itself, and whether nearby smaller / equivalent witnesses already stay
+      green under the same rebuilt compiler.
+    - current next-round execution loop should therefore be:
+      1. keep the correctness-closed surfaces closed (`lv8`, `lv9`,
+         `03_sort1`, `03_sort3`, `lava-test/lava_test/kmp.sy`)
+      2. classify each remaining timeout by “local-memory-limited vs real
+         compiler/runtime pressure”
+      3. for the genuine pressure cases, prefer optimizations that either
+         reduce static instruction count or clearly remove hot repeated work
+         in the emitted program
+      4. treat compile-time speed itself as a first-class perf target, not
+         only generated-code runtime
+      5. after each kept perf chunk, rerun rotated focused correctness
+         witnesses before broadening again
     - a later same-day full sweep now supersedes several older “nearly all
       green” perf-side memories and should be treated as the live authority
       for the current workspace. The rebuilt tree still keeps the broad
@@ -1786,7 +1889,7 @@
       are actively catching real backend/text-export soundness edges rather
       than only adding redundant green rows.
   - hidden/default compatibility audit line:
-    **in progress / roughly 92%**
+    **in progress / roughly 94%**
     - the earlier local nested-call corruption repro was closed at the real
       downstream boundary in `machine_ir`, but hidden-course status must stay
       **reopened** because the platform symptom for `22_nested_calls` is still
@@ -1834,6 +1937,56 @@
       those public analogues are green again in the rebuilt tree, so the
       residual uncertainty is increasingly hidden-only rather than “one more
       nearby public testcase we have not rechecked yet”.
+    - 2026-05-08 follow-up: one more hidden-like backend/runtime corruption
+      bug has now been closed and regression-locked even though the exact OJ
+      cases are still unavailable locally. `machine_ir_copy_cleanup` had been
+      dropping indirect-memory producer chains because its backward
+      needed/live scan failed to mark `load_indirect` address operands and
+      `store_indirect` address/value operands as uses. That let
+      `addr_local/addr_global + index` chains disappear during
+      canonicalization, which directly explained the previously reproduced
+      `lava-test/lava_test/kmp.sy` segfault/mismatch. The fix is now kept and
+      locked by new `machine_ir` regressions for both indirect-load and
+      indirect-store use preservation, and focused rechecks stay green on
+      `make test-machine-ir`, `make test-compiler-driver`, `lv9` (`22/22`),
+      and `lava-test/lava_test/kmp.sy`. Current authority is therefore that
+      the hidden RE cluster has at least one real shared indirect-memory
+      corruption vector removed, even though the remaining OJ-only cases still
+      need a direct repro or a stronger synthetic analogue.
+    - 2026-05-08 second follow-up: the same `machine_ir_copy_cleanup` line had
+      one more narrower-but-real cross-block hole that is now also closed and
+      regression-locked. The block-liveness/use collection used by dead-def
+      cleanup was still ignoring successor-side `load_indirect` address uses
+      plus `store_indirect` address/value uses, which meant a predecessor-only
+      producer could still look dead when its only remaining consumer sat in a
+      later block. That reopened exactly the same class of hidden-like
+      corruption risk at CFG boundaries even after the earlier same-block
+      backward-scan repair. The current tree now marks those indirect operands
+      in block use-sets too, with dedicated `machine_ir` regressions for both
+      cross-block indirect-load and cross-block indirect-store preservation.
+      Focused rechecks are green again on `make test-machine-ir`,
+      `make test-compiler-driver`, `autotest -riscv -s lv9` (`22/22`), plus
+      the local synthetic hidden-neighbor CFG/array suite used to stress
+      short-circuit / func-expr / BFS-like indirect-memory edges. Current
+      authority is therefore that another plausible shared hidden RE vector has
+      been removed even though the exact OJ cases are still not reproduced
+      verbatim locally.
+    - 2026-05-08 RTLE follow-up: the hidden/default line now has one concrete
+      dead-loop closure too, not only more RE-side cleanup. A focused
+      differential sweep over `91` synthetic loop/parameter/gcd cases found a
+      real timeout cluster on `for (; b < N; b = step(b))` with a mutable
+      local condition variable and a call-based step expression. The root
+      cause was canonical IR lowering, not later optimization: the
+      flow-state proof path reused stale scope-level constant metadata for a
+      tracked local after that local had already become “unknown”, so the
+      `for` header could incorrectly conclude the condition stayed true and
+      drop the exit branch entirely. The fix is now landed and regression-
+      locked in `tests/ir/ir_regression_test.c`, and the same `91`-case local
+      sweep is green end-to-end after rebuilding the CLI compiler. Current
+      authority is therefore that the RTLE cluster is no longer a pure blind
+      hunt: at least one real loop-proof bug is now closed, while the
+      remaining hidden RTLE risk should focus on other loop/control-flow
+      shapes rather than this exact mutable-local + call-step family.
   - strict `returns-all-paths` audit line:
     **in progress / roughly 90%**
     - several real false-positive loop families are now fixed and locked

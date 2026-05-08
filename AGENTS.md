@@ -47,6 +47,24 @@
   - `MACHINE_LOG_PLAN.md`
   - `MACHINE_JOURNAL_PLAN.md`
 
+## Quick Read Checklist
+
+- Default restart reading order:
+  1. `AGENTS.md`
+  2. `docs/ir-conventions.md`
+  3. `docs/NEXT_STEPS.md`
+- Then read only the authority that matches the task:
+  - lower / downstream IR -> `docs/ir/LOWER_IR_DESIGN.md`
+  - SSA / allocator -> relevant `docs/ssa/*`
+  - backend machine stage -> relevant `docs/backend/*`
+- Default role in this thread is **Implementation Agent**.
+- Do not modify `lesson/` unless the user explicitly says so.
+- Before ending a work chunk, always check:
+  - progress memory is updated in `docs/NEXT_STEPS.md`
+  - the user gets active blocks plus rough percentages
+  - long-running command state is explicitly recorded
+  - correctness recheck cadence has not been silently skipped
+
 ## Shared Authority
 
 - `AGENTS.md` defines agent roles, startup rules, and scope boundaries.
