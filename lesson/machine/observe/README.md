@@ -4,6 +4,12 @@
 
 `apply 之后，执行结果怎么一步步整理成 observe / delta / trace / event / outcome / history / timeline / log / journal`
 
+如果按最近几轮代码同步来读，这条 observe 线现在最适合带着一个背景前提进入：
+
+- 前面的 runtime / object / ELF / image 线已经越来越强调 policy / provenance / honesty
+- 所以后面的 observe 不只是“把状态变化记下来”
+- 也是在给一条更真实的 machine 主线收尾
+
 最推荐的阅读顺序：
 
 1. `machine_observe_lesson.md`

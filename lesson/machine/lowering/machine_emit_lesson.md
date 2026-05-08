@@ -372,7 +372,7 @@
 
 `machine_layout verify -> machine_emit lower`
 
-也就是说，这层默认更喜欢吃：
+也就是说，这层当前的 input contract 更接近：
 
 - block order 已经稳定
 - terminator family 已经是 fallthrough-aware 的 layout program

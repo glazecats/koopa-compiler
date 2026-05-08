@@ -18,6 +18,17 @@
 - machine register model
 - SSA execution / interpretation support
 
+如果按当前未提交代码再把这条 SSA 主线更新一下，最值得先记住的是：
+
+1. `value_ssa_pass`
+   - default lower-ir build 已经不是固定 mode wrapper，而是会按程序形状走 fast-path
+2. `value_ssa_pass`
+   - current default line 已经开始显式服务 compile-time / perf hotspot，而不只是“把 dump 收好看”
+3. `value_ssa_alloc`
+   - allocator 已经有 no-move fast-path、rewrite-loop 增量重分配、artifact 侧索引表和 timing trace
+4. `memory_ssa_pass`
+   - memory-aware line 现在也更像正式 pass 主线：有 trace、有程序形状驱动 budget、有更保守的 join-load PRE 收口
+
 ---
 
 ## 1. 最推荐的阅读顺序

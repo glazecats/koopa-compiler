@@ -58,6 +58,30 @@
 
 ---
 
+## 最近同步
+
+如果你上次读 allocator 还停在“family runtime / rewrite loop 都已经存在，但每次都得走整套重活”，现在要更新成：
+
+1. **no-move 函数现在有一条明确的 fast-path**
+   - 当一个函数根本没有 move-related value 时
+   - planner 不必再硬走整套 family runtime / move-engine 状态机
+   - 而是可以直接建一份更像“degree-driven simplify/spill plan”的 no-move allocator plan
+
+2. **rewrite loop 现在不再默认整程序重分配**
+   - 改写轮次会先记录哪些 function 真的被 rewrite 过
+   - 后续 reallocate 只重算这些 function
+   - 其余 function 直接复用/克隆已有 allocation result
+
+3. **allocator 现在有一条正式 timing trace 开关**
+   - `VALUE_SSA_TRACE_TIMING`
+   - build / pipeline / rewrite-loop / per-function 阶段时间都可以直接打出来
+
+4. **artifact 查找也更像正式控制面了**
+   - coalesce / move-family / move-worklist / plan 现在都多了更直接的索引侧表
+   - 所以 lesson 口径上，当前 allocator 已经不只是“能 dump 一些结果”，而是开始认真提供可随机访问的 policy artifact
+
+---
+
 ## 1. 这层现在是什么
 
 当前 allocator 不是 machine backend，也不是完整寄存器分配器。
@@ -259,6 +283,11 @@
 - remove/freeze/spill 主计划
 - family-aware runtime state
 - spill cost / rematerializable / split-child 这些 planner 侧信号
+
+最近这一层还要多记一句：
+
+- 当当前函数根本没有 move-related value 时，planner 现在可以直接走一条 no-move plan fast-path
+- 所以不是每个函数都会把整套 family runtime machinery 全部跑一遍
 
 可以先记成：
 

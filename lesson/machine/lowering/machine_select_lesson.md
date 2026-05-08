@@ -156,10 +156,23 @@
    - 也就是说，当前 cleanup 还是标量 slot 模型更成熟
    - `lv9` 这轮是先让 indirect-memory path honest 地通过，而不是假装 cleanup 已经完全懂它
 
+而这轮未提交代码里，又把 indirect-memory 路线再往前推了一小步：
+
+5. **indirect-memory path 现在也开始有 very targeted cleanup**
+   - 比如重复 `addr_local` root 复用
+   - `copy self` noop 删除
+   - 某些 spill-backed pure expression 复用
+   - 重复 pure internal call 在 indirect block 下的复用
+
+所以 lesson 口径上要再精确一点：
+
+- 不是“indirect memory 完全没有 cleanup”
+- 而是“不会再跑旧的 full cleanup 主线，但已经开始有一组窄而诚实的 targeted cleanup”
+
 所以这层现在最准确的 lesson 口径变成：
 
 - selected op family 已经开始吃第一批 indirect-memory 形状
-- 但 selected cleanup 目前仍然是“标量 slot 路线最成熟、indirect 路线先保守直通”
+- 但 selected cleanup 目前仍然是“标量 slot 路线最成熟、indirect 路线先 targeted cleanup 再保守直通”
 
 ---
 

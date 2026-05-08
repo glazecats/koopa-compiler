@@ -115,6 +115,14 @@
 - `machine_elf` 现在既是标准 object-format 边界
 - 也是 artifact provenance / policy / relocation-family 的集中展示层
 
+如果按当前未提交代码继续往“为什么 lesson 里要在意它”这件事推一步，还要再记一句：
+
+- 这层 provenance / relocation-family / target-policy 信息已经不只服务内部 dump
+- 它现在会继续影响后面的
+  - `machine_image`
+  - runtime-side consumer
+  - 以及最终 preview-output 相关的讲法
+
 ---
 
 ## 1. 为什么需要 `machine_elf`

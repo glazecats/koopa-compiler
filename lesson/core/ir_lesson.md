@@ -60,6 +60,28 @@
 
 ---
 
+## 最近同步
+
+这轮 canonical IR lesson 最该补的，不是“又多几个 CFG case”，而是：
+
+1. **`ir_lower_stmt.inc` 现在有一条更明确的局部 flow-state 证明线**
+   - 它不再只依赖粗粒度 constant-truthiness
+   - 也会跟踪一部分 local declaration / assignment 喂给后续 loop 条件的状态
+
+2. **semantic 已经接受的 strict loop-return family，不会再轻易在 IR lowering 这里掉下来**
+   - 典型例子：
+     - `int b=1; while(b<2){ if(b){ return 2; } }`
+     - `int b=0; b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`
+
+3. **“未知内层 if” 现在会阻断过头的 loop-condition-stays-true 证明**
+   - IR lowering 不会再因为看见某条局部更新，就把真正还需要的 loop-header 条件块错误擦掉
+
+4. **测试面也多了一组专门的 strict-loop alias/return family**
+   - `tests/ir/strict_loop_return_alias.cases.inc`
+   - 这说明这条线已经不只是一次性修 bug，而是被当成正式回归面维护
+
+---
+
 ## 1. 文件定位
 
 - 接口：`include/ir.h`
@@ -1752,27 +1774,31 @@ func __program.init() { ... }
 23. `IR-WHILE-BREAK`：`while` 里的 `break` 会跳到 loop exit
 24. `IR-FOR-INIT-STEP`：`for` 生成 init/header/body/step/exit，并保留 for-init lowering
 25. `IR-NESTED-LOOP-CONTROL`：嵌套循环里的 `break/continue` 使用就近 loop target
-26. `IR-GLOBAL-COMPOUND-ASSIGN`：global 也能作为 compound assignment 目标
-27. `IR-GLOBAL-BITWISE-SHIFT-COMPOUND`：global 也能作为 `<<=` / `&=` / `^=` / `|=` 这类复合赋值目标
-28. `IR-GLOBAL-INCDEC`：global 也能作为 prefix/postfix update 目标
-29. `IR-PREFIX-DEC`：prefix `--x` 返回更新后的值
-30. `IR-POSTFIX-DEC`：postfix `x--` 先保留旧值再更新
-31. `IR-GLOBAL-INIT-DEP`：顶层 initializer 可依赖之前已知 initializer 的 global
-32. `IR-GLOBAL-SHADOW-LOCAL`：local 同名声明会遮蔽 global
-33. `IR-GLOBAL-RUNTIME-INIT`：不能静态求值但仍可 runtime lower 的 global initializer 会进入 `__global.init()`
-34. `IR-GLOBAL-RUNTIME-INIT-NO-MAIN`：没有 `main()` 时会额外导出 `__program.init()`
-35. `IR-GLOBAL-RUNTIME-INIT-DEP-ORDER`：runtime global initializer 若依赖未初始化 global，应报 `IR-LOWER-022`
-36. `IR-GLOBAL-RUNTIME-INIT-INDIRECT-DEP-ORDER`：间接读取未初始化 global 的 runtime initializer 也应报 `IR-LOWER-022`
-37. `IR-GLOBAL-RUNTIME-INIT-DEP-CYCLE`：runtime global initializer 命中环路时，`IR-LOWER-022` 会带 `dependency cycle: ...`
-38. `IR-GLOBAL-RUNTIME-INIT-DEP-PATH-VIA-CALLEE`：经由 callee body 命中的依赖拒绝会带 `dependency path via callee body: ...`
-39. `IR-GLOBAL-INIT-NEG-LLONG-MIN`：静态 evaluator 不安全时会回退到 runtime init，而不是在 lowering 期制造 host UB
-40. `IR-GLOBAL-INIT-ADD-OVERFLOW`：静态 evaluator 不愿直接给常量值时也会回退到 runtime init
-41. `IR-CALL-UNKNOWN-CALLEE-LOWER-GATE`：跳过 semantic gate 时，IR lowering 自己仍会拒绝未声明 callee（`IR-LOWER-025`）
-42. `IR-CALL-ARITY-MISMATCH-LOWER-GATE`：跳过 semantic gate 时，IR lowering 自己仍会拒绝 call arity mismatch（`IR-LOWER-026`）
-43. `IR-DECL-ARITY-MISMATCH-LOWER-GATE`：重复 declaration 的参数数不一致时，IR lowering 自己也会报 `IR-LOWER-020`
-44. `IR-DUPLICATE-DEF-LOWER-GATE`：重复 function body lowering 会报 `IR-LOWER-021`
-45. `IR-DECL-TERNARY-VALUE`：声明函数调用可出现在 ternary value expression 里
-46. `IR-DECL-TERNARY-COND`：声明函数调用可出现在 ternary condition path 里
+26. `IR-STRICT-LOCAL-STATE-WHILE-RETURN` / `IR-STRICT-LOCAL-STATE-FOR-RETURN` / `IR-STRICT-ASSIGNED-LOCAL-STATE-LOOP-RETURN`
+    ：local declaration/assignment-fed loop 条件现在也能把 must-return 证明带进 IR lowering
+27. `IR-LOOP-COND-PRESERVED-AFTER-UNKNOWN-IF-STATE`
+    ：`while(mon<=12){ if(getint()) mon=mon+1; }` 这类 shape 现在会保留真正的 loop-header 条件块
+28. `IR-GLOBAL-COMPOUND-ASSIGN`：global 也能作为 compound assignment 目标
+29. `IR-GLOBAL-BITWISE-SHIFT-COMPOUND`：global 也能作为 `<<=` / `&=` / `^=` / `|=` 这类复合赋值目标
+30. `IR-GLOBAL-INCDEC`：global 也能作为 prefix/postfix update 目标
+31. `IR-PREFIX-DEC`：prefix `--x` 返回更新后的值
+32. `IR-POSTFIX-DEC`：postfix `x--` 先保留旧值再更新
+33. `IR-GLOBAL-INIT-DEP`：顶层 initializer 可依赖之前已知 initializer 的 global
+34. `IR-GLOBAL-SHADOW-LOCAL`：local 同名声明会遮蔽 global
+35. `IR-GLOBAL-RUNTIME-INIT`：不能静态求值但仍可 runtime lower 的 global initializer 会进入 `__global.init()`
+36. `IR-GLOBAL-RUNTIME-INIT-NO-MAIN`：没有 `main()` 时会额外导出 `__program.init()`
+37. `IR-GLOBAL-RUNTIME-INIT-DEP-ORDER`：runtime global initializer 若依赖未初始化 global，应报 `IR-LOWER-022`
+38. `IR-GLOBAL-RUNTIME-INIT-INDIRECT-DEP-ORDER`：间接读取未初始化 global 的 runtime initializer 也应报 `IR-LOWER-022`
+39. `IR-GLOBAL-RUNTIME-INIT-DEP-CYCLE`：runtime global initializer 命中环路时，`IR-LOWER-022` 会带 `dependency cycle: ...`
+40. `IR-GLOBAL-RUNTIME-INIT-DEP-PATH-VIA-CALLEE`：经由 callee body 命中的依赖拒绝会带 `dependency path via callee body: ...`
+41. `IR-GLOBAL-INIT-NEG-LLONG-MIN`：静态 evaluator 不安全时会回退到 runtime init，而不是在 lowering 期制造 host UB
+42. `IR-GLOBAL-INIT-ADD-OVERFLOW`：静态 evaluator 不愿直接给常量值时也会回退到 runtime init
+43. `IR-CALL-UNKNOWN-CALLEE-LOWER-GATE`：跳过 semantic gate 时，IR lowering 自己仍会拒绝未声明 callee（`IR-LOWER-025`）
+44. `IR-CALL-ARITY-MISMATCH-LOWER-GATE`：跳过 semantic gate 时，IR lowering 自己仍会拒绝 call arity mismatch（`IR-LOWER-026`）
+45. `IR-DECL-ARITY-MISMATCH-LOWER-GATE`：重复 declaration 的参数数不一致时，IR lowering 自己也会报 `IR-LOWER-020`
+46. `IR-DUPLICATE-DEF-LOWER-GATE`：重复 function body lowering 会报 `IR-LOWER-021`
+47. `IR-DECL-TERNARY-VALUE`：声明函数调用可出现在 ternary value expression 里
+48. `IR-DECL-TERNARY-COND`：声明函数调用可出现在 ternary condition path 里
 
 例如这条：
 

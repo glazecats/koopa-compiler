@@ -78,6 +78,20 @@
 
 ---
 
+## 最近同步
+
+如果按当前未提交代码把这层和下游 `machine_ir` 再对齐一下，最值得先记三件事：
+
+1. `value_ssa_machine` 依然只负责 view/report/planning，不直接吸收 `machine_ir` 的 conservative/all-spill fallback
+   - 也就是说，下游 bridge 策略变复杂了，不代表这层自己变成“半个 machine_ir”
+2. 这反而更强调了它的边界价值
+   - allocator 结果先被稳定地解释成 machine register 词汇表
+   - 然后不同 machine-ir bridge 路径再各自消费这份解释
+3. lesson 口径上现在更适合把它理解成：
+   - “下游 bridge 可以变化，但上游 machine register 含义解释层最好稳定”
+
+---
+
 ## 1. 为什么需要 `value_ssa_machine`
 
 allocator 当前已经能产出很多结果：

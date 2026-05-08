@@ -681,6 +681,8 @@ func main() {
   - classic
   - memory-value
   - memory-full
+- 但真正的 default helper 现在已经不再简单等于这三档里的某一档
+  - 它会先按 lower-ir 形状决定是否走 fast-path，再决定要不要落回 canonicalized tier
 
 也就是说，当前 `value_ssa` core 的职责仍然是：
 

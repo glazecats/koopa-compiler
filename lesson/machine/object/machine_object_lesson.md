@@ -69,6 +69,14 @@
 
 - “consumer-facing summary/query surface 也开始成形”
 
+如果按当前未提交代码再往前推一句，这层现在也已经不只是服务 object 内部调用者：
+
+- profile / policy / fixup-family / global-object byte-size 这些信息
+- 后面会继续流进
+  - `machine_reloc`
+  - `machine_elf`
+  - 以及最终 preview-output 相关讲法
+
 ---
 
 ## 导学

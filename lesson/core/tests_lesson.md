@@ -174,12 +174,17 @@ $$
   - `SEMA-TOP-005`
 - IR / lower IR / SSA
   - bare `ret` 不再被一路伪装成 `ret 0`
+  - strict local-state-fed loop return family 现在也被单独锁住
+  - unknown-inner-`if` 不会再把 loop-header condition block 错删
 - machine middle
   - `machine_layout` 接受 void return
   - `machine_encode` verifier 现在显式检查 return shape
+  - `machine_select` indirect-memory path 也开始有 targeted cleanup regression
 - compiler driver
   - `compiler -riscv` 文本输出里有 `_start`
   - call span 周围的 caller-save 次序有专门回归
+  - zero global store 的 symbol fixup 绑定有专门回归
+  - preview text side 的 tail-call/label/fixup 关系也开始需要专门测试
 
 如果只看最新这轮你们刚收口的两条线，tests 里现在还多了两组特别值得单独记住的东西：
 
@@ -205,6 +210,7 @@ $$
 - `tests/compiler/compiler_driver_test.c`
   - `test_compiler_builds_riscv_backend_dump_from_source`
   - `test_compiler_saves_caller_regs_around_whole_call_span`
+  - `test_compiler_pretty_prints_zero_global_store_with_symbol_fixups`
 
 它们分别锁的是：
 
@@ -212,6 +218,7 @@ $$
 2. encode 边界不会把 bare return / value return 混成一种 payload
 3. 当前 `compiler -riscv` 输出已经包含 `_start` startup stub
 4. call 整段周围的 caller-save 插入顺序已经有文字级回归保护
+5. preview text exporter 不会再把零值 global store 绑错到别的 fixup/symbol
 
 如果只按最近几轮 IR / lower-IR 改动来归类，新增测试重点主要也是几组：
 
@@ -279,11 +286,11 @@ $$
   - 对应 `tests/value_ssa/value_ssa_regression_test.c`
   - 当前主要锁 straight-line dump、diamond + phi dump、straight-line / diamond / simple slot-carried loop / 代表性 loop-carried temp join / multi-backedge loop-carried temp / multi-carried-temp loop / nested-loop carried-temp family 的 `lower_ir -> value_ssa` exact dump、diamond / loop 的 CFG analysis、diamond / loop 的 phi-placement、diamond / loop 的 dominator-walk enter/leave 顺序、rename-state scope/bind/restore、block-local use rewrite、predecessor-specific phi-input rewrite、shared def-use analysis、scrambled SSA function 的 alpha-renaming、program-level canonicalize dump、dead-result call / dangerous binary 在 canonicalization / one-shot bridge 下仍保留、canonicalization fixed-point、one-shot canonicalized conversion bridge、canonicalize 对 malformed SSA 输入的拒绝、以及新拆分 `value_ssa_pass` 模块里的 normalize / identity / fold / redundant-binary、local/global load-forward、redundant-store / dead-store cleanup、same-return CFG fold、`jmp -> empty ret` fold、empty-jump threading、single-predecessor non-phi jump-block merge 等 pass 行为
   - 当前口径已经不是“conversion 只开始消费 lower-IR-side facts”，而是“strict conversion 已经吃 pruned phi lists、在 DFS 前预创建 phi、在 dominator walk 中用 rename state 处理 use/def、在 predecessor leave 直接填 successor phi incoming；finalize 只做 completeness check，而 SSA-native cleanup/optimization pass 已经拆到 `value_ssa_pass`”
-  - 另外这组测试现在也明确把 lower-ir one-shot bridge 的三档都锁住了：
+  - 另外这组测试现在也明确把 lower-ir one-shot bridge 的三档 explicit tier 都锁住了：
     - classic
     - memory-value
     - memory-full
-    以及 mode-based 入口、default 入口和 invalid mode 的拒绝路径
+    以及 mode-based 入口、shape-based default facade 入口和 invalid mode 的拒绝路径
 - `make test-value-ssa-verifier`
   - 对应 `tests/value_ssa/value_ssa_verifier_test.c`
   - 当前主要锁 verifier 对 valid phi、phi input count、duplicate SSA definition、unavailable use、unreachable block 的接受/拒绝路径
@@ -334,6 +341,7 @@ $$
     - unknown parameter-local 在 join 处能不能通过 value phi 复用
     - internal call 对不同 global 的 barrier 是否足够精细
     - memory-value tier 和 memory-full tier 的最终 dump 是否按预期分开
+    - facade/default 入口不会把“memory-full 是最强 canonicalized tier”误等同成“默认永远直接走 memory-full”
     - partial PRE 是否已经脱离 block-id 运气，真能覆盖 scrambled CFG
     - slot promotion / scalar replacement 是否已经把一部分 slot-carried 值真正收成 SSA-carried value
     - memory-aware CSE 是否已经能把 `add(phi, phi)` 收成 edge-result phi，并在必要时保守 materialize predecessor-side binary

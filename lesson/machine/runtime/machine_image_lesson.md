@@ -69,6 +69,11 @@
 - `machine_elf` 关心“它是不是标准 ELF”
 - `machine_image` 关心“如果把它当成要被装载的东西，它从哪来、现在住哪、哪些地址已知”
 
+如果按当前未提交代码再往“为什么这和最终输出有关”推一步，现在还可以再补一句：
+
+- provenance-aware image 不是纯 runtime 自娱自乐
+- 它是在给后面的 exec/load/runtime/observe 统一“这份东西从哪来、哪些地址事实可信”这一层背景
+
 ---
 
 ## 导学

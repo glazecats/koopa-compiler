@@ -55,6 +55,27 @@
 
 ---
 
+## 最近同步
+
+如果你之前还把 `memory_ssa_pass` 记成“已经有 forwarding / promotion / memory-value canonicalize，剩下 mostly 是补 case”，这轮还要补四件事：
+
+1. **这层现在有正式 trace 开关**
+   - `MEMORY_SSA_PASS_TRACE`
+   - 说明当前 memory-aware pipeline 已经开始把“为什么这一轮又变了 / 为什么这一步反复迭代”当成需要直接观察的工程现实
+
+2. **load forwarding 的迭代预算更像程序形状驱动，而不是固定小常数**
+   - deep short-circuit / branchy CFG 不再只靠一个拍脑袋的 restart 次数碰碰运气
+
+3. **join-load PRE 更保守了**
+   - 只有所有相关 predecessor 都能解释清楚 expected memory version 时，才补 predecessor load 再合流
+   - 否则宁可保留 join load，也不乱造 value phi
+
+4. **memory dump / regression 也更明确地把 entry version 当成第一等信息**
+   - `slot.N = ... entry=mem.0`
+   - 这让 lesson 里讲 “entry seed / first visible version” 时不必再只靠文字解释
+
+---
+
 ## 1. 为什么单独成模块
 
 如果把 memory-SSA 相关优化继续塞进 `value_ssa_pass`，会很容易把这几层混掉：
@@ -95,6 +116,7 @@
 当前 build 也已经显式跟踪：
 
 - `MEMORY_SSA_PASS_SPLIT_INCLUDES`
+- `MEMORY_SSA_PASS_TRACE`
 
 所以这层已经不再是“一个越写越大的实验大文件”，而是正式 split 成：
 
@@ -258,6 +280,12 @@ for each predecessor P of join J:
 - internal pure / readonly-on-other-global callee：只 kill 它真正会写的 tracked global
 
 所以现在 global forwarding 已经不只是：
+
+`call 就是一个完全黑盒的全局核弹`
+
+而更接近：
+
+`call 仍然是 barrier，但 barrier 开始带一点按 callee 事实细分的粒度`
 
 `比 local 多一个 call barrier`
 
@@ -1307,8 +1335,11 @@ lesson 里可以把使用建议写得直接一点：
 
 **memory-full**
 
-- 你想直接拿当前仓库里最强的 one-shot canonicalized Value-SSA
-- 普通生产式 caller 更适合从这里起步
+- 你想直接拿当前仓库里最强的 memory-aware canonicalized tier
+- 但这不再自动等同于“默认 helper 永远直接走这一档”
+- 当前普通 caller 还要记得区分：
+  - 你是在显式选 memory-full
+  - 还是在走已经带 fast-path 分流的 default helper
 
 ---
 

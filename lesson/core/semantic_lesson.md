@@ -148,6 +148,8 @@ $$
    - 比如 `int x = putint(1);` 现在要报 `SEMA-CALL-007`
 4. 课程 builtin 已经内建可见
    - 即使源码里没先声明，semantic 也知道它们的参数个数和返回类型
+5. strict return-flow 现在还会跟踪一部分“局部声明/赋值喂给后续 loop 条件”的状态
+   - 不再只会看外层 guard 是不是被参数或已有变量翻真
 
 最小例子可以直接这样讲：
 
@@ -256,6 +258,11 @@ walk_expr(expr):
    - 包括 body/step 会不会把 break guard 再压回 false
    - 以及 `if(a) break;` 与 `if(a) ... else break;` 两种分支极性
 
+6. **compound 里的局部声明/赋值也开始进入 must-return 证明**
+   - `int b=1; while(b<2){ if(b){ return 2; } }`
+   - `int b=0; b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`
+   这类形状现在不必再退回“只按语法常量猜”
+
 所以 lesson 口径上，现在最好把这条 semantic CF 线理解成：
 
 - 不是在做完全 path-sensitive symbolic execution
@@ -314,6 +321,10 @@ $$
 - `flow_collect_loop_exit_summary`
 - `flow_statement_may_change_guard_state`
 - `flow_expression_may_change_guard_state`
+- 以及最近新增的 compound-local tracked state 那一组 helper：
+  - `flow_state_track_declaration_stmt(...)`
+  - `flow_state_apply_expression_stmt(...)`
+  - `flow_statement_proves_must_return_with_state(...)`
 
 可以把它理解成三步：
 

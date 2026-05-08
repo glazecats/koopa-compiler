@@ -32,6 +32,15 @@ lesson 里会出现：
 2. `machine`
    - `machine_select` 的 CFG live-out-aware cleanup 正在从 fallback 收口成更稳定的 selected-side dataflow line
 
+如果按这轮未提交代码继续更新总图，还要再多记三条：
+
+3. `ssa`
+   - `value_ssa_build_default_from_lower_ir(...)` 已经不是“固定 mode 别名”，而是带 fast-path 分流的默认入口
+4. `ssa`
+   - allocator 现在已经有 no-move fast-path、rewrite-loop 增量重分配这类真正的 compile-time 优化
+5. `machine`
+   - 当前仓库已经不只是内部 backend artifact；`compiler -riscv` 输出的 preview asm、fixup/symbol 关系、caller-save/tail-call 收口也开始成为 lesson 里的现实主线
+
 ---
 
 ## 1. 目录怎么分

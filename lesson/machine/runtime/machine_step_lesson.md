@@ -49,7 +49,7 @@
    它现在更像后面 decode/payload/interp/transition 的统一 fetch-state authority。
 
 2. **它在真实 `compiler -riscv / -perf` 主链里的位置更稳了**
-   现在要把它理解成“launch 之后真正进入执行位置语境的第一层”，而不只是测试过渡态。
+   现在要把它理解成“launch 之后真正进入执行位置语境的第一层”，而不只是测试过渡态；它属于真实 backend 的执行侧主线，但不参与 preview asm 文本生成本身。
 
 ---
 

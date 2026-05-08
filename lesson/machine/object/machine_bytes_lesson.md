@@ -109,10 +109,21 @@
      - `load_indirect`
      - `store_indirect`
    - global object 的 `byte_size` 也开始往下游流，不再默认都像 4-byte scalar shell
+9. preview call lowering 现在更像真实 call-site patch 点
+   - 很多 call site 不再只是单个 `jal` 骨架
+   - `auipc + jalr` / 参数准备 / spill 回写会一起影响 patch span 和 target byte offset
+10. spill-backed binary / large-slot lowering 现在更强调 scratch honesty
+   - 大 offset/大 spill case 不再偷懒复用同一个 scratch 破坏 lhs/rhs
+   - 而是会明确把 address/materialization 分开准备
+11. `store imm 0` 现在会优先用 zero register
+   - 也就是 preview lane 不再为了写一个 `0` 先额外 materialize 临时值
+12. report 侧的 symbol surface 现在也更像正式查询面
+   - 不只是线性列出 symbol summary
+   - 还开始保留 by-name side index，方便后面的 object/reloc consumer 直接按名字找
 
 所以这层现在除了“第一次有 `unsigned char[]`”，还可以理解成：
 
-- “第一层真正开始为直达 `RISC-V` preview asm / object / reloc / elf 提供现实物料的地方”
+- “第一层真正开始为通往 `RISC-V` preview asm / object / reloc / elf 的下游链条提供现实物料的地方”
 
 如果按 `lv9` 这轮更具体地说：
 
@@ -281,6 +292,7 @@
 - fixup summary
 - symbol summary
 - section summary
+- symbol by-name side index
 
 典型 helper 包括：
 
@@ -293,6 +305,11 @@
 所以 `machine_bytes` 不只是“有 bytes”，它已经开始在回答：
 
 `这些 bytes 将来如何进入 object / relocation 语义`
+
+最近如果按 consumer 角度再多补一句，可以把 report 理解成：
+
+- 不只是“把所有 symbol summary 列出来”
+- 还开始准备“后面按名字快速查 symbol”这种更接近 object-side 使用习惯的 surface
 
 ---
 

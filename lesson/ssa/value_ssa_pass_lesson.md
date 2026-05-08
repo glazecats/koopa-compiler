@@ -59,6 +59,32 @@
 
 ---
 
+## 最近同步
+
+如果你之前还把 `value_ssa_pass` 记成“classic canonicalize + memory bridge wrapper”，现在要把它更新成：
+
+1. **default helper 不再等于固定一个 mode**
+   - `value_ssa_build_default_from_lower_ir(...)` 现在会先看 lower IR 形状，再决定是：
+     - 走 indirect-memory direct fast-cleanup
+     - 走 extreme straight-line hotspot fast-path
+     - 还是回到常规 canonicalized build
+
+2. **load/store cleanup 开始更明确地区分“安全可前推”和“地址已逃逸不能乱动”**
+   - local load forwarding 现在会避开 address-taken local
+   - global 侧现在多了一条 non-address-taken global forwarding
+   - store cleanup 里还多了 “unread scalar local store” 这一条非常实用的窄优化
+
+3. **pass 层开始承担第一批 very targeted perf work**
+   - 有了 `value_ssa_optimize_perf_hotspots(...)`
+   - 也有了 tiny internal helper inlining
+   - 但它们仍然是保守、特定形状驱动的 pass，不是突然长成通用 inliner / superoptimizer
+
+4. **有一条正式 timing trace 开关**
+   - `VALUE_SSA_TRACE_TIMING`
+   - 这意味着当前 pass 层除了“能变换”，也开始认真服务 perf 诊断
+
+---
+
 ## 1. 这层为什么单独存在
 
 `value_ssa_pass` 的出现，是为了把这些东西从 core 拿出来：
@@ -83,11 +109,13 @@
 - pipeline：`src/value_ssa_pass/value_ssa_pass_pipeline.inc`
 - trivial simplify：`src/value_ssa_pass/value_ssa_simplify.inc`
 - load forwarding：`src/value_ssa_pass/value_ssa_load_forward.inc`
+- tiny helper inline：`src/value_ssa_pass/value_ssa_inline_helper.inc`
 - store cleanup：`src/value_ssa_pass/value_ssa_store_dce.inc`
 - normalize：`src/value_ssa_pass/value_ssa_normalize.inc`
 - identity：`src/value_ssa_pass/value_ssa_identity.inc`
 - fold：`src/value_ssa_pass/value_ssa_fold.inc`
 - redundant binary：`src/value_ssa_pass/value_ssa_cse.inc`
+- perf hotspot：`src/value_ssa_pass/value_ssa_perf_hotspot.inc`
 - CFG simplify：`src/value_ssa_pass/value_ssa_simplify_cfg.inc`
 - dead-value DCE：`src/value_ssa_pass/value_ssa_dce.inc`
 
@@ -105,6 +133,7 @@
 - `value_ssa_simplify_cfg(...)`
 - `value_ssa_eliminate_dead_value_defs(...)`
 - `value_ssa_canonicalize_program(...)`
+- `value_ssa_optimize_perf_hotspots(...)`
 - `value_ssa_build_from_lower_ir_with_canonicalization(...)`
 - `value_ssa_build_default_from_lower_ir(...)`
 - `value_ssa_build_memory_value_canonicalized_from_lower_ir(...)`
@@ -207,10 +236,12 @@ ret 1
 - `value_ssa_forward_local_loads(...)`
 - `value_ssa_forward_global_loads(...)`
 
-这两条 pass 都很保守：
+这两条 pass 现在都更明确地带着“地址逃逸边界”：
 
-- local：同 block，或 single-idom straight chain
+- local：同 block，或 single-idom straight chain；但 address-taken local 不再乱 forward
 - global：同 block，或 single-idom straight chain，但 `call` 会 kill known globals
+- global 侧还多了一条更窄、但更诚实的 internal helper：
+  - **只对 non-address-taken global 做 forwarding**
 
 它们的定位是：
 
@@ -242,10 +273,25 @@ ret ssa.0
 ret 7
 ```
 
+如果要把最近这轮新边界一起记住，可以再补一句：
+
+- `addr_local a.0` 一旦出现，local-forward 就不再把 `a.0` 当“纯 slot 值缓存”
+- `addr_global g.0` 一旦出现，新的 non-address-taken global-forward 也会把 `g.0` 退出“安全可前推”集合
+
+所以当前 authority 已经不是“见到 store/load 就尽量前推”，而是：
+
+`只在地址没逃逸、call 没杀死、CFG 还保持 straight-chain 时才前推`
+
 ### 4.3 store cleanup
 
 - `value_ssa_eliminate_redundant_stores(...)`
 - `value_ssa_eliminate_dead_stores(...)`
+
+另外，这一组内部现在还多了一条很实用的窄 cleanup：
+
+- unread scalar local-store elimination
+  - 如果某个 scalar local 从头到尾既没 `load_local`，也没 `addr_local`
+  - 那么写给它的 `store_local` 可以整批视作“没人观察到”
 
 两者区别：
 
@@ -281,6 +327,15 @@ ret ssa.0
 ```
 
 当前当 straight-chain knowledge 还成立时，后一个“重复写相同值”的 store 就会被视作冗余写。
+
+而 unread scalar local-store cleanup 的最小例子更像：
+
+```text
+store_local a.0, 1
+ret 0
+```
+
+如果 `a.0` 从来没被读，也没被取地址，那么这条 `store_local a.0, 1` 现在就可以直接删掉。
 
 ### 4.4 binary cleanup
 
@@ -515,7 +570,7 @@ func main() {
 
 1. classic：只走 old Value-SSA canonicalize
 2. memory-value：把 memory 形状先收稳，但不强行继续折 arithmetic
-3. memory-full：当前最强的默认 one-shot 结果
+3. memory-full：当前最强的 canonicalized one-shot 结果
 
 ### 5.1.4 这条 mode dispatch 的伪代码
 
@@ -527,8 +582,7 @@ build_from_lower_ir_with_canonicalization(program, mode):
         case CLASSIC:
             build raw value_ssa from lower_ir
             canonicalize once
-            canonicalize second time
-            return stable classic result
+            return classic result
 
         case MEMORY_VALUE:
             delegate to memory_ssa_pass_build_memory_canonicalized_from_lower_ir(...)
@@ -542,7 +596,7 @@ build_from_lower_ir_with_canonicalization(program, mode):
 
 这里有两个课上很值得强调的小点：
 
-1. classic 分支现在会主动 canonicalize 两次，目的就是把 classic one-shot 也收成稳定 fixed point
+1. classic 分支现在就是“一次 raw build + 一次 classic canonicalize”
 2. memory 两个分支并不在 `value_ssa_pass` 里重写一遍逻辑，而是直接委托给 `memory_ssa_pass`
 
 所以这层 bridge 的职责非常清楚：
@@ -559,40 +613,76 @@ int value_ssa_build_default_from_lower_ir(const LowerIrProgram *program,
     ValueSsaError *error);
 ```
 
-它当前不是“随便挑一个默认”，而是已经被 enum 明确锁成：
+这条 helper 现在已经**不等于**“直接把 `DEFAULT` enum 喂给 mode-based API”。
 
-```c
-VALUE_SSA_LOWER_IR_CANONICALIZE_DEFAULT = VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL
+它当前更接近：
+
+```text
+if lower_ir uses indirect memory:
+    build raw value_ssa
+    run one narrow direct fast-cleanup line
+else if lower_ir looks like an extreme straight-line hotspot:
+    build raw value_ssa only
+else:
+    fall back to build_from_lower_ir_with_canonicalization(DEFAULT)
 ```
 
-也就是说，当前默认策略等于：
+也就是说，当前默认 helper 的 lesson 口径应该改成：
 
-`memory-full`
+- **它不是单纯的 mode alias**
+- **它是带形状判断的 policy entrypoint**
+- `DEFAULT` enum 仍然重要
+  - 但它主要服务 mode-based API / fallback canonicalized branch 这一支
+- 真正的 default build 现在已经开始为：
+  - indirect-memory 程序
+  - 极端 straight-line compile-time hotspot
 
-这很值得写进 lesson，因为它意味着：
+这两类 case 做专门分流。
 
-- 普通 caller 如果不想自己选策略，应该优先走 default helper
-- 仓库当前对“最推荐的 lower_ir -> value_ssa one-shot 入口”已经有明确态度
-- 如果以后默认策略变了，改 enum 就够，不必去搜一堆 call site
+### 5.1.6 这条 default policy 当前到底优化了什么
 
-### 5.1.6 当前 bridge tier 的支持 / 不支持
+如果把这条 helper 拆开讲，当前最值得记的是：
+
+1. **indirect-memory direct fast-cleanup**
+   - 先 raw build
+   - 再跑一条偏窄、偏性能导向的 direct cleanup：
+     - local load forward
+     - unread scalar local-store cleanup
+     - edge repeated indirect-load forward
+     - non-address-taken global forward
+     - same-block repeated indirect-load forward
+     - repeated pure internal-call reuse
+     - tiny helper inline
+     - address-root reuse
+     - narrow redundant-binary cleanup
+
+2. **extreme straight-line hotspot fast-path**
+   - 如果 lower IR 已经是极端单块、超长、无间接内存热点
+   - 当前 default helper 会宁可先 raw build
+   - 目的不是追求“最干净 dump”，而是先把 compiler compile-time 压下来
+
+3. **常规路径仍然回到 canonicalized build**
+   - 也就是 lesson 过去讲的 classic / memory-value / memory-full 那套 mode dispatch
+
+### 5.1.7 当前 bridge tier 的支持 / 不支持
 
 **当前已经讲得稳的：**
 
 - classic / memory-value / memory-full 三档都存在
 - mode-based API 存在
 - default helper 存在
+- default helper 已经有有限的 shape-based fast-path
 - invalid mode 会拒绝，而不是 silently fallback
 - `memory-value` 与 `memory-full` 的差异已经有回归 authority
 
 **当前不要讲成已有的：**
 
-- 动态 profile-guided mode 选择
-- auto-tuning bridge policy
+- 真正 profile-guided auto-tuning bridge
+- 任意 per-function 粒度的自适应 mode 混跑
 - alias-aware lower-ir bridge mode
-- per-function 自适应切换不同 memory pipeline
+- 通用 aggressive indirect-memory optimizer
 
-### 5.2 pipeline 现在怎么排
+### 5.2 classic canonicalization pipeline 现在怎么排
 
 当前 canonicalization pipeline 会串起：
 
@@ -612,6 +702,16 @@ VALUE_SSA_LOWER_IR_CANONICALIZE_DEFAULT = VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY
 14. CFG simplify
 15. dead-value DCE 再跑一遍
 16. alpha-renaming
+
+这里有个最近最容易讲错的点：
+
+- **上面这条 16-step pipeline 是 classic / canonicalize 主线**
+- **不是所有 default build 都必经这整条线**
+
+因为前面已经提到：
+
+- indirect-memory 程序现在会优先走 direct fast-cleanup
+- extreme straight-line hotspot 甚至可能直接停在 raw build
 
 这说明它不是“一次 pass 就变好”，而是：
 

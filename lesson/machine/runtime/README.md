@@ -4,6 +4,13 @@
 
 `ELF / image 之后，如果真的要加载、启动、单步解释、更新状态，这条运行时主线怎么长`
 
+当前如果只看最近几轮代码同步，这条 runtime 线最重要的背景更新其实不是“runtime 自己又多了一个新 stage”，而是：
+
+- 上游 `machine_elf -> machine_image` 的 provenance / policy 信息现在更完整
+- 所以下游 runtime lesson 现在更适合被理解成：
+  - 不只是消费“某些 bytes”
+  - 也是在消费一份越来越诚实的 executable/image artifact
+
 最推荐的阅读顺序：
 
 1. `machine_image_lesson.md`

@@ -72,6 +72,14 @@
 
 - `test_machine_encode_verifier_enforces_return_shapes`
 
+如果按当前未提交代码继续往下补，这层还可以再多记一句：
+
+5. **encode 的 return-shape contract 已经不只是中间层自嗨**
+   - 它会直接影响后面
+     - `machine_bytes`
+     - preview asm 文本输出
+     - compiler-driver 对 bare return / value return 的最终区分
+
 ---
 
 ## 导学
@@ -383,7 +391,7 @@
 
 `machine_emit verify -> machine_encode lower`
 
-也就是说，这层默认更喜欢吃：
+也就是说，这层当前的 input contract 更接近：
 
 - emitted label 已稳定
 - block 顺序已稳定

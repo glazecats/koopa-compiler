@@ -133,6 +133,25 @@
 
 这条线迈出第一步了。
 
+如果按“当前未提交代码到底新加了什么”继续往下补，还要再记四件事：
+
+1. **`allocate+rewrite -> machine_ir` bridge 现在不再永远强制 full rewrite**
+   - 对普通程序，还是走 clone + allocate + rewrite + lower
+   - 对更重、更保守的输入形状，会退成 conservative allocate-only lowering
+   - 对极端大 case，甚至可以直接走 all-spill lowering
+
+2. **这层现在已经把“保守降级策略”变成正式 bridge contract**
+   - lesson 口径上不要再把 `machine_ir` 理解成“永远吃到 fully rewritten SSA”
+
+3. **report/helper 也多了一条更轻的 flat-program-only 入口**
+   - 说明当前 machine-ir 已经开始认真区分：
+     - 什么时候需要 full report artifact
+     - 什么时候只想快速拿到 lowered program
+
+4. **bridge 也开始公开 timing trace**
+   - 这层自己的开关是 `MACHINE_IR_TRACE_TIMING`
+   - 从 lesson 角度更重要的是：allocate / layout / lower 的阶段时间已经被当成工程现实来对待
+
 ---
 
 ## 1. 为什么需要 `machine_ir`
@@ -578,6 +597,30 @@ for each function in ValueSsaProgram:
 `每个 value use/def 都要经过 allocation view 翻译`
 
 也就是说，bridge 的核心工作不是 CFG 变形，而是 operand 投影。
+
+### 7.1 当前 bridge 不再只有一种“全套 allocate+rewrite”姿势
+
+如果你以前把这层桥接记成：
+
+`clone SSA -> allocate+rewrite -> build machine view -> lower`
+
+现在要把它更新成三档：
+
+1. **normal path**
+   - 最熟悉的 clone + allocate+rewrite + lower
+
+2. **conservative allocate-only path**
+   - 当程序已经出现更重的参数/间接内存/大调用形状时
+   - `machine_ir` 可以只拿 allocation result，不强求先把整份 SSA fully rewrite 成“漂亮形状”
+
+3. **all-spill fallback**
+   - 对极端大的 case，bridge 甚至可以直接构一份 all-spill allocation result
+   - 然后继续 lower 成保守但 honest 的 machine-ir
+
+这条更新的 lesson 重点不是“某个 heuristic 门槛是多少”，而是：
+
+- `machine_ir` 现在已经把“先活着 lower 下去”当成正式策略
+- 它不再假装所有输入都适合同一条最精细的 allocate+rewrite 线
 
 ---
 

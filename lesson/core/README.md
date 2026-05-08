@@ -25,6 +25,17 @@
 8. `tests`
    - 这些层怎么被测试锁住
 
+如果按当前未提交代码再把这条 core 主线更新到“更接近真实工程状态”，可以再多记四件事：
+
+1. `semantic`
+   - strict return-flow 现在已经不只看外层常量条件，也开始追踪一部分 local declaration / assignment 喂给 loop 条件的状态
+2. `ir`
+   - semantic 已接受的 strict loop-return family，不会再轻易在 IR lowering 这里掉成 `IR-LOWER-009` / `LOWER-IR-042`
+3. `lower_ir`
+   - builtin void call 的 lowering 现在更诚实：call 本体可无结果，但旧值流若还需要 temp，会显式补 `mov 0`
+4. `tests`
+   - 这几条线现在都不只是“代码里修过”，而是已经有 focused regression 在锁
+
 ---
 
 ## 1. 最推荐的阅读顺序

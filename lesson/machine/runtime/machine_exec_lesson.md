@@ -89,7 +89,7 @@
    之间的正式收口层
 
 2. **当前整个主线已经有真实 `compiler -riscv / -perf` CLI 入口**
-   所以 exec 这层不再只是“内部练习 artifact”，而是已经真的处在一条会导出 preview asm 的主链中间。
+   所以 exec 这层不再只是“内部练习 artifact”，而是已经真的处在一条会继续走向 load/runtime/最终执行相关 consumer 的 backend 主链中间。
 
 因此现在对这层的理解最好从：
 
@@ -97,7 +97,7 @@
 
 更新成：
 
-- “为后面的 load/runtime/CLI export 真正立 executable-candidate contract”
+- “为后面的 load/runtime/执行侧 consumer 真正立 executable-candidate contract”
 
 ---
 

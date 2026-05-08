@@ -92,11 +92,11 @@
 你现在最好把这层再多记两件事：
 
 1. **runtime 已经不是纯内部视图**
-   它现在更明确地服务于后面的：
-   - launch
-   - step
-   - decode/interp/state
-   - 以及最终 preview asm / executable-path 主线
+  它现在更明确地服务于后面的：
+  - launch
+  - step
+  - decode/interp/state
+  - 以及最终 executable-path / observe-side 主线
 
 2. **上游 image provenance 现在会继续往下游流**
    也就是说，runtime 不只是“load map + stack”，还处在一条会继承上游 artifact provenance 的消费链上。

@@ -36,6 +36,17 @@
 
 - `machine_select` 的 CFG live-out-aware cleanup 已经不再只是实验性 fallback，而是更接近 checkpoint 的 selected-side cleanup 主线
 
+如果按当前未提交代码继续更新 machine 总览，还要再补四件事：
+
+1. `machine_ir`
+   - `allocate+rewrite -> machine_ir` bridge 不再只有 full rewrite 一条姿势；现在已经有 conservative allocate-only 和 all-spill fallback
+2. `machine_select`
+   - indirect-memory 路线不再只是完全直通，开始有 very targeted cleanup
+3. `machine_bytes`
+   - preview lane 现在更像真实 object/raw-material 主线：call patch span、large spill/slot honesty、zero-register store、symbol by-name query 都开始成为一等现实
+4. `compiler driver`
+   - 当前 machine 主线已经部分穿透到最终文本输出层：preview asm 的 fixup/symbol 绑定、caller-save span、tail-call epilogue 收口也开始成为需要被教学和测试正视的边界
+
 lesson 里会经常出现：
 
 - `generic-elf32`

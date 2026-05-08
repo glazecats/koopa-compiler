@@ -73,6 +73,16 @@
 
 - `relocation record -> 可直接被 ELF / consumer 查询的 relocation-family surface`
 
+如果按当前未提交代码再往“为什么这不是只给内部结构看的”推进一步，还可以再补一句：
+
+- 这层 relocation-family / preview addend honesty / zero-patch fallthrough honesty
+- 不只是 reloc 自己的整洁度
+- 也是后面
+  - `machine_elf`
+  - `machine_image`
+  - 以及 preview-output 相关解释
+  能不能继续说真话的上游前提
+
 ---
 
 ## 导学

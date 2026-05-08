@@ -4,6 +4,15 @@
 
 `Value-SSA / machine register model 已经准备好之后，怎么一步步落成 machine-facing artifact`
 
+如果按当前未提交代码再补一个总览更新，这条 lowering 线现在最值得先记三件事：
+
+1. `machine_ir`
+   - bridge 不再只有 full allocate+rewrite 一条路径，已经有 conservative allocate-only / all-spill fallback
+2. `machine_select`
+   - selected cleanup 已经不只是 fallback；同时 indirect-memory 路线也开始有 targeted cleanup
+3. `machine_encode`
+   - bare return / value return contract 现在已经被显式 verifier 锁住
+
 最推荐的阅读顺序：
 
 1. `machine_ir_lesson.md`

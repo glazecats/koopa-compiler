@@ -62,6 +62,25 @@
 
 ---
 
+## 最近同步
+
+如果你之前还把 lower IR 记成“slot/value split 已经稳定，剩下 mostly 是 verifier/dump 维护”，这轮还要补三件事：
+
+1. **local metadata 现在会继续保留 `array_rank`**
+   - downstream 不再只能把 local 当成无差别 scalar shell
+   - lesson 口径上可以理解成：lower IR 现在也开始认真给后面的 address/indirect-memory line 保留对象形状
+
+2. **builtin void call 的 lowering 更诚实了**
+   - `putint/putch/putarray/starttime/stoptime` 这类 builtin call
+   - lower IR 里的 `call` 本体现在可以是真的“无结果 call”
+   - 如果上游 canonical IR 还留了一个 temp-result 占位，lowerer 会额外补一条 `mov 0` 来续上旧值流
+
+3. **因此 call-result contract 现在要分成两层看**
+   - `call` 指令本体：结果是 optional 的
+   - 但一旦 caller 还需要一个 value 名字，lowerer 会显式合成后续 value 定义，而不是假装 void builtin 本身返回了一个 temp
+
+---
+
 ## 1. 为什么需要 `lower_ir`
 
 当前编译链的推荐方向已经明确成：
@@ -208,6 +227,12 @@ $$
 - `load_*` / `store_*` 是 slot 边界指令
 - `addr_*` 是显式取址指令
 - `load_indirect` / `store_indirect` 是第一批真正绕过 slot-name、走 address-value 的内存 op
+
+最近这组指令里还要再补一条课上很容易漏掉的 boundary：
+
+- `call` 现在不必一律 `has_result = 1`
+- 对 builtin void callees，lower IR 可以保留一条真正的 resultless `call`
+- 但如果上游还有 temp-use 需要续命，lowerer 会在 call 后面补一条 `tmp = mov 0`
 
 当前二元算子覆盖：
 

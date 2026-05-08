@@ -51,7 +51,7 @@
 结合最近的主线变化，当前这层最好再多记两点：
 
 1. **load 现在更明确服务于真实 `compiler -riscv / -perf` 导出链**
-   也就是说，它不只是内部结构，而是在一条会继续导向 preview asm / downstream runtime 的真实主链中。
+   也就是说，它不只是内部结构，而是在一条已经和真实 backend/export 主线接上的下游 runtime 链中。
 
 2. **上游 image 的 provenance-aware 语义现在更值得往下游保留地理解**
    lesson 里最好把 load 想成：

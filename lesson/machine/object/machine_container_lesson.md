@@ -418,7 +418,7 @@ MachineContainerFile =
 
 `machine_reloc verify -> machine_container build`
 
-也就是说，这层默认更喜欢吃：
+也就是说，这层当前的 input contract 更接近：
 
 - relocation sections 已经稳定
 - relocation records 已经稳定
@@ -822,10 +822,10 @@ ret 0
 2. 这一层最大的新增信息是 header/table/string/payload 的 file layout
 3. 同一个 section 在这一层第一次同时拥有 logical span 和 file offset
 4. layout summary 在这一层已经是非常关键的 consumer surface
-5. 这层还不是 ELF，但已经是明确的 internal final serialized artifact
+5. 这层还不是 ELF，但已经是明确的 internal final-serialization boundary
 
 ---
 
 ## 18. 一句话总结
 
-`machine_container` 把 relocation-facing artifact 序列化成仓库内部稳定的最终容器字节；它的关键不只是“拼出一串 bytes”，而是让 header/table/string/payload 的整体文件布局、container section 的 file offset，以及最终 byte image 的查询接口第一次真正作为 internal final-serialization artifact 成形，因此它是走向真实目标文件格式之前的内部最终容器边界。
+`machine_container` 把 relocation-facing artifact 序列化成仓库内部稳定的最终容器镜像；它的关键不只是“拼出一串 bytes”，而是让 header/table/string/payload 的整体文件布局、container section 的 file offset，以及最终 byte image 的查询接口第一次真正作为 internal final-serialization boundary 成形，因此它是走向真实目标文件格式之前的内部最终容器边界。
