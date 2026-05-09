@@ -455,6 +455,65 @@ static int test_compiler_folds_call_arg_load_swap_in_text(void) {
     return ok;
 }
 
+int compiler_test_optimize_riscv_preview_call_arg_load_swaps(char **io_text);
+int compiler_test_optimize_riscv_preview_zero_adds(char **io_text);
+
+static int test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1(void) {
+    static const char *source_text =
+        "  lw a1, 0(a0)\n"
+        "  lw a0, 0(a1)\n"
+        "  mv t5, a0\n"
+        "  mv a0, a1\n"
+        "  mv a1, t5\n"
+        "  call ext\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: call-arg swap regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_call_arg_load_swaps(&text) ||
+        !text ||
+        strstr(text, "  mv t5, a0\n  mv a0, a1\n  mv a1, t5\n  call ext\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: call-arg swap regression should keep the unsafe pattern unchanged\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label(void) {
+    static const char *source_text =
+        "  li a1, 0\n"
+        "  add a0, a2, a1\n"
+        ".Lkeep_zero:\n"
+        "  add a3, a1, a4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: zero-add cross-label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_zero_adds(&text) ||
+        !text ||
+        strstr(text, "  li a1, 0\n  add a0, a2, a1\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: zero-add fold should keep zero materialization when the reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_removes_repeated_indexed_address_sequence_in_text(void) {
     static const char *source =
         "const int base = 16;\n"
@@ -795,6 +854,60 @@ static int test_compiler_handles_strict_local_state_loop_returns(void) {
     return ok;
 }
 
+static int test_compiler_preserves_assignment_condition_break_loop_exit(void) {
+    static const char *source =
+        "int foo(){return 1;}"
+        "int main(){ int b=1; while(1){ if(b = foo()) break; } return 3; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, "  call foo\n") == NULL ||
+        strstr(output, "  beq a0, zero, .Lmain_1\n") == NULL ||
+        strstr(output, "  li a0, 3\n") == NULL ||
+        strstr(output, "  j .Lmain_1\n") != NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: assignment-condition break loop exit compile mismatch: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_mutated_global_condition_from_initializer(void) {
+    static const char *source =
+        "int g=0;"
+        "int f(int x){ g = x; if (g < 0) return 1; return 0; }\n"
+        "int main(){ return f(getint()); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, ".globl f\n.type f, @function\nf:\n") == NULL ||
+        strstr(output, "  lui t5, %hi(g)\n") == NULL ||
+        strstr(output, "  sw a0, %lo(g)(t5)\n") == NULL ||
+        strstr(output, "  blt a0, zero, ") == NULL ||
+        strstr(output, "  li a0, 1\n") == NULL ||
+        strstr(output, "  call getint\n") == NULL ||
+        strstr(output, "  call f\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: mutated-global condition should not fold from initializer metadata: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_handles_extreme_arity_compile_smoke(void) {
     enum { kArgCount = 300, kSourceCapacity = 65536 };
     CompilerError error;
@@ -935,6 +1048,10 @@ int main(void) {
     ok &= test_compiler_reuses_stack_address_rematerialization_in_text();
     ok &= test_compiler_folds_indexed_local_base_offset_in_text();
     ok &= test_compiler_folds_call_arg_load_swap_in_text();
+    ok &= test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1();
+    ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
+    ok &= test_compiler_removes_repeated_indexed_address_sequence_in_text();
+    ok &= test_compiler_reuses_repeated_indexed_address_sequence_in_text();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
     ok &= test_compiler_saves_caller_regs_around_whole_call_span();
     ok &= test_compiler_preserves_a0_across_nested_call_spans();
@@ -942,6 +1059,8 @@ int main(void) {
     ok &= test_compiler_handles_memory_ssa_loop_local_entry_seed_case();
     ok &= test_compiler_handles_memory_ssa_join_binary_limit_case();
     ok &= test_compiler_handles_strict_local_state_loop_returns();
+    ok &= test_compiler_preserves_assignment_condition_break_loop_exit();
+    ok &= test_compiler_does_not_fold_mutated_global_condition_from_initializer();
     ok &= test_compiler_handles_extreme_arity_compile_smoke();
     ok &= test_compiler_pretty_prints_far_call_pseudo_for_giant_arity();
 

@@ -462,6 +462,12 @@ static int test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_globa
         "dependency path: a -> b");
 }
 
+static int test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_global_array_subscript(void) {
+    return expect_ir_lower_fails("IR-GLOBAL-RUNTIME-INIT-DEP-ARRAY-SUBSCRIPT",
+        "int a;\nint b[1];\nint a=b[0];\nint main(){return a;}\n",
+        "depends on not-yet-initialized global 'b'");
+}
+
 static int test_ir_rejects_runtime_global_initializer_indirect_dep_on_uninitialized_global(void) {
     return expect_ir_lower_fails("IR-GLOBAL-RUNTIME-INIT-INDIRECT-DEP-ORDER",
         "int b;\nint seed(){return 7;}\nint read_b(){return b;}\nint a=read_b();\nint b=seed();\nint main(){return a+b;}\n",
@@ -1656,6 +1662,49 @@ static int test_ir_lowers_strict_assigned_local_state_loop_return_family(void) {
         "int f(){int b=0; b=1; while(b<2){ if(b){ return 2; } }}\n");
 }
 
+static int test_ir_keeps_while_exit_when_postfix_update_changes_condition_local(void) {
+    return expect_ir_dump("IR-WHILE-POSTFIX-UPDATE-EXIT",
+        "int main(){ int b=0; while(b<3){ b++; } return b; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    b.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt b.0, 3\n"
+        "    br tmp.0, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    tmp.1 = mov b.0\n"
+        "    tmp.2 = mov tmp.1\n"
+        "    tmp.3 = add tmp.1, 1\n"
+        "    b.0 = mov tmp.3\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ret b.0\n"
+        "}\n");
+}
+
+static int test_ir_keeps_for_exit_when_compound_step_changes_condition_local(void) {
+    return expect_ir_dump("IR-FOR-COMPOUND-STEP-EXIT",
+        "int main(){ int b=0; for(; b<3; b+=1){ } return b; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    b.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt b.0, 3\n"
+        "    br tmp.0, bb.2, bb.4\n"
+        "  bb.2:\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.1 = mov b.0\n"
+        "    tmp.2 = add tmp.1, 1\n"
+        "    b.0 = mov tmp.2\n"
+        "    jmp bb.1\n"
+        "  bb.4:\n"
+        "    ret b.0\n"
+        "}\n");
+}
+
 static int test_ir_preserves_loop_condition_after_unknown_if_state_update(void) {
     return expect_ir_dump("IR-LOOP-COND-PRESERVED-AFTER-UNKNOWN-IF-STATE",
         "int getint(); int main(){ int mon = 1; while(mon <= 12){ if(getint()) mon = mon + 1; } return 0; }\n",
@@ -1679,6 +1728,38 @@ static int test_ir_preserves_loop_condition_after_unknown_if_state_update(void) 
         "    jmp bb.5\n"
         "  bb.5:\n"
         "    jmp bb.1\n"
+        "}\n");
+}
+
+static int test_ir_keeps_post_if_local_condition_when_branch_facts_disagree(void) {
+    return expect_ir_dump("IR-IF-MERGE-LOCAL-COND",
+        "int putch(int x);\n"
+        "int getint();\n"
+        "int main(){int x=getint();int flag;if(x>0) flag=0; else flag=1; if(flag==1) putch(45); return 0;}\n",
+        "declare getint()\n"
+        "\n"
+        "declare putch(x.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call getint()\n"
+        "    x.0 = mov tmp.0\n"
+        "    tmp.1 = gt x.0, 0\n"
+        "    br tmp.1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    flag.1 = mov 0\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    flag.1 = mov 1\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.2 = eq flag.1, 1\n"
+        "    br tmp.2, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    tmp.3 = call putch(45)\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    ret 0\n"
         "}\n");
 }
 
@@ -1769,6 +1850,7 @@ int main(void) {
     ok &= test_ir_lowers_runtime_global_initializer_via_internal_init_function();
     ok &= test_ir_exports_program_initializer_when_main_is_absent();
     ok &= test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_global();
+    ok &= test_ir_rejects_runtime_global_initializer_dep_on_uninitialized_global_array_subscript();
     ok &= test_ir_rejects_runtime_global_initializer_indirect_dep_on_uninitialized_global();
     ok &= test_ir_reports_runtime_global_initializer_dependency_cycle_chain();
     ok &= test_ir_accepts_runtime_global_initializer_when_only_unreachable_dead_read_mentions_uninitialized_global();
@@ -1820,6 +1902,8 @@ int main(void) {
     ok &= test_ir_lowers_declared_calls_in_for_logical_or_condition_and_step();
     ok &= test_ir_lowers_declared_calls_in_for_step_comma_expression();
     ok &= test_ir_keeps_for_exit_when_function_step_updates_local_condition_value();
+    ok &= test_ir_keeps_while_exit_when_postfix_update_changes_condition_local();
+    ok &= test_ir_keeps_for_exit_when_compound_step_changes_condition_local();
     ok &= test_ir_lowers_declared_calls_in_for_init_comma_expression();
     ok &= test_ir_lowers_declared_calls_in_for_nested_short_circuit_condition();
     ok &= test_ir_lowers_declared_call_in_comma_expression();
@@ -1856,6 +1940,7 @@ int main(void) {
     ok &= test_ir_lowers_strict_local_state_for_return_family();
     ok &= test_ir_lowers_strict_assigned_local_state_loop_return_family();
     ok &= test_ir_preserves_loop_condition_after_unknown_if_state_update();
+    ok &= test_ir_keeps_post_if_local_condition_when_branch_facts_disagree();
     ok &= test_ir_lowers_nested_loop_alias_return_family_without_malformed_exit_block();
     ok &= test_ir_lowers_while_break_exit();
     ok &= test_ir_lowers_for_init_step_cfg();

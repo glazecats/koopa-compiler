@@ -636,19 +636,25 @@ static int compiler_emit_global_sections(
         }
         for (global_index = 0u; global_index < program->global_count; ++global_index) {
             const MachineEmitGlobal *global = &program->globals[global_index];
+            size_t byte_size;
 
             if (!global->name || global->name[0] == '\0' || !global->has_initializer) {
                 continue;
             }
+            byte_size = global->byte_size ? global->byte_size : 4u;
             if (!compiler_builder_appendf(
                     builder,
                     ".globl %s\n.type %s, @object\n.size %s, %zu\n.p2align 2\n%s:\n  .word %lld\n",
                     global->name,
                     global->name,
                     global->name,
-                    global->byte_size ? global->byte_size : 4u,
+                    byte_size,
                     global->name,
                     global->initializer_value)) {
+                return 0;
+            }
+            if (byte_size > 4u &&
+                !compiler_builder_appendf(builder, "  .zero %zu\n", byte_size - 4u)) {
                 return 0;
             }
         }
@@ -691,7 +697,6 @@ static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_and_k
     const CompilerRiscvPreviewCache *cache,
     size_t patch_byte_offset,
     MachineBytesFixupKind kind) {
-    const MachineBytesFixupSummary *fixup = NULL;
     size_t lo = 0u;
     size_t hi;
     size_t index;
@@ -720,11 +725,8 @@ static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_and_k
         if (candidate->kind == kind) {
             return candidate;
         }
-        if (!fixup) {
-            fixup = candidate;
-        }
     }
-    return fixup;
+    return NULL;
 }
 
 static const MachineBytesFixupSummary *compiler_find_call_fixup_covering_offset_cached(
@@ -1532,6 +1534,35 @@ static int compiler_riscv_preview_reg_is_used_again_before_redefinition(
     return 0;
 }
 
+static int compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
+    char **lines,
+    size_t line_count,
+    size_t start_index,
+    const char *reg_name) {
+    size_t index;
+
+    if (!lines || !reg_name || reg_name[0] == '\0') {
+        return 0;
+    }
+    for (index = start_index; index < line_count; ++index) {
+        const char *line = lines[index];
+
+        if (!line) {
+            continue;
+        }
+        if (compiler_riscv_preview_line_is_label(line)) {
+            return 1;
+        }
+        if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_uses_reg(line, reg_name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int compiler_optimize_riscv_preview_tail_calls(char **io_text) {
     char *text = NULL;
     char *copy = NULL;
@@ -1694,7 +1725,7 @@ static int compiler_optimize_riscv_preview_zero_adds(char **io_text) {
             compiler_riscv_preview_line_is_li_zero(lines[index], zero_reg, sizeof(zero_reg)) &&
             compiler_riscv_preview_line_is_add_regs(lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
             (strcmp(rs1, zero_reg) == 0 || strcmp(rs2, zero_reg) == 0) &&
-            (!compiler_riscv_preview_reg_is_used_again_before_redefinition(
+            (!compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
                     lines, line_count, index + 2u, zero_reg) ||
                 strcmp(rd, zero_reg) == 0)) {
             const char *kept_reg = strcmp(rs1, zero_reg) == 0 ? rs2 : rs1;
@@ -1724,6 +1755,10 @@ cleanup:
     free(lines);
     free(copy);
     return ok;
+}
+
+int compiler_test_optimize_riscv_preview_zero_adds(char **io_text) {
+    return compiler_optimize_riscv_preview_zero_adds(io_text);
 }
 
 static int compiler_optimize_riscv_preview_mul_by_four(char **io_text) {
@@ -2427,6 +2462,7 @@ static int compiler_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
             strcmp(first_reg, "a1") == 0 &&
             strcmp(second_reg, "a0") == 0 &&
             strcmp(second_base, "a0") != 0 &&
+            strcmp(second_base, "a1") != 0 &&
             strcmp(lines[index + 2u], "  mv t5, a0") == 0 &&
             strcmp(lines[index + 3u], "  mv a0, a1") == 0 &&
             strcmp(lines[index + 4u], "  mv a1, t5") == 0 &&
@@ -2456,6 +2492,10 @@ cleanup:
     free(lines);
     free(copy);
     return ok;
+}
+
+int compiler_test_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
+    return compiler_optimize_riscv_preview_call_arg_load_swaps(io_text);
 }
 
 static int compiler_optimize_riscv_preview_stack_staged_call_args(char **io_text) {

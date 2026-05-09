@@ -180,6 +180,13 @@
        only generated-code/runtime performance
      - any newly reproduced external-suite pressure that survives the
        normalized-oracle sweeps
+     - current external-suite note: raw `autotest -riscv -t lava-test/lava_test`
+       can still false-flag the `many_parameters*` / `register_alloc*` /
+       `test` cluster because those `.out` files are `CRLF`-terminated, but
+       the repository's normalized-oracle sweep now revalidates the suite as
+       genuinely green again (`tools/sweep_sysy_suite.py ... lava_test`
+       => `21/21 PASS`), so this cluster should no longer be tracked as a
+       live compiler red point
   3. after that performance round settles, reopen explicit target-direction
      tuning:
      - converge the machine-register count toward the final RISC-V direction
@@ -198,6 +205,441 @@
 - Current progress snapshot for that ordered line:
   - post-allocator correctness checkpoint:
     **complete / 100%**
+    - 2026-05-08 ordered source reread follow-up: the current hidden/default
+      compatibility line is now also doing a slow file-by-file reread through
+      the post-lower-IR stack instead of only chasing testcase names. That
+      reread has now reached `value_ssa`, and one concrete structural verifier
+      hole is closed in the live tree: `VALUE_SSA_INSTR_CALL` now rejects the
+      malformed shape `arg_count == 0 && args != NULL` instead of accepting it
+      silently. `tests/value_ssa/value_ssa_regression_test.c` now carries a
+      focused regression that mutates a valid sample program into exactly that
+      bad call shape, and the kept local rechecks for this audit point are
+      `make test-value-ssa-regression` PASS and
+      `make test-value-ssa-verifier` PASS.
+    - 2026-05-08 ordered `value_ssa_pass` reread follow-up: one real
+      optimizer-soundness hole is now closed in the local-store cleanup line.
+      `value_ssa_eliminate_unread_scalar_local_stores(...)`,
+      `value_ssa_eliminate_redundant_stores(...)`, and
+      `value_ssa_eliminate_dead_stores(...)` had been treating address-taken
+      scalar locals too aggressively, which let a shape like
+      `addr_local x ; store_local x, 7 ; load_indirect addr(x)` lose the
+      defining store even though the memory write was still observed through
+      the indirect load path. The live tree now collects function-local
+      `addr_local` facts and disables those local-slot store cleanups for
+      address-taken locals instead of pretending only direct `load_local`
+      reads matter. Focused kept rechecks after this closure are
+      `make test-value-ssa-regression` PASS and
+      `make test-compiler-driver` PASS, and the regression suite now also
+      locks both the direct dead-store repro and the default-conversion
+      address-taken scalar local witness.
+    - 2026-05-08 ordered `value_ssa_pass` reread follow-up 2: one matching
+      global-memory soundness cluster is now also closed in the live tree.
+      The generic global load-forward / redundant-store / dead-store line had
+      been treating indirect memory steps too weakly, so shapes like
+      `store_global g, 9 ; addr_global g ; store_indirect ... ; load_global g`
+      or `store_global g, 9 ; load_global g ; addr_global g ; store_indirect
+      ... ; store_global g, loaded` could still be misoptimized as if the
+      indirect memory step had not touched the same global. The current tree
+      now uses a lightweight address-root proof inside the global optimization
+      passes: if an indirect store is proven rooted at a different slot (for
+      example `addr_global arr` vs `g`), unrelated forwarding/redundant-store
+      cleanup may still proceed; if the indirect root matches the same global
+      or cannot be proven disjoint, the affected global state is
+      conservatively invalidated. Dead-store cleanup now also treats
+      `load_indirect` as a global observer barrier instead of pretending only
+      direct `load_global` reads matter. Focused kept rechecks after this
+      closure are `make test-value-ssa-regression` PASS and
+      `make test-compiler-driver` PASS, and the regression suite now locks
+      both the new indirect-store/load global barriers and the earlier
+      non-alias witness (`arr` vs `g`).
+    - 2026-05-08 ordered `value_ssa` / `simplify_cfg` reread follow-up: one
+      small but real structural void-return hole is now closed too. Fresh
+      `ValueSsaBasicBlock` entries had been leaving their `terminator` payload
+      uninitialized, `value_ssa_block_set_void_return(...)` did not clear the
+      stale `return_value` fields, and `value_ssa_compact_value_ids(...)`
+      inside CFG simplification had been remapping `return_value` for every
+      `RETURN` terminator even when `has_return_value == 0`. In practice the
+      common zero-init path often hid this, but the contract was still wrong:
+      stale payload bits from a void return must not participate in SSA
+      remapping at all. The live tree now zero-initializes new block
+      terminators, explicitly clears the void-return payload, and only remaps
+      return SSA refs when the return actually carries a value. Focused kept
+      rechecks after this closure are `make test-value-ssa-regression` PASS
+      and `make test-value-ssa-verifier` PASS, and the regression suite now
+      also locks a dedicated builder-side stale-payload witness for void
+      returns.
+    - 2026-05-08 ordered downstream machine-view reread follow-up: one public
+      API semantics bug is now closed in `value_ssa_machine`. The machine-view
+      builder had been storing `used_machine_register_ids` and register-group
+      ids as allocator color / bank index rather than as the public
+      `register_id` field from `ValueSsaMachineRegisterDesc`. Current flat/split
+      banks happened to hide this because their ids matched indices, but a
+      non-identity custom bank would query the wrong "machine register ids"
+      back out of the view. The live tree now keeps public machine register ids
+      in those query surfaces and maps them back into bank indices internally
+      only when it actually needs the bank row. Focused kept rechecks after
+      this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS, and the machine test suite now
+      also locks a dedicated non-identity-register-id witness (`10`/`20`)
+      so this id/index mix-up stays closed.
+    - 2026-05-08 ordered downstream machine-protection reread follow-up: the
+      same public-id/index confusion was also present one layer deeper in
+      `value_ssa_machine_protection`. Register protection pressure had been
+      aggregating agenda items by treating public `machine_register_id` as if
+      it were a dense used-register array index, and preservation hints had
+      still been checking caller-clobber policy by indexing
+      `bank->registers[source_machine_register_id]` directly. With a
+      non-identity bank this could misbucket pressure rows or skip a real
+      caller-clobbered source register entirely. The live tree now aggregates
+      pressure by used-register slot while preserving public machine register
+      ids in the outward-facing items/queries, and preservation-hint source
+      checks now map the public id back into the bank before consulting
+      machine policy. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS, and the machine test suite now also
+      locks dedicated non-identity register-id witnesses for both
+      register-pressure lookup and preservation-hint source/suggested ids.
+    - 2026-05-08 ordered allocator rewrite-loop reread follow-up: one
+      multi-round spill-family stability hole is now closed in
+      `value_ssa_alloc`. The allocate+rewrite loop had been recomputing each
+      function's `spill_local_floor` from the **current** `local_count` at the
+      start of every rewrite iteration. That let spill locals introduced by an
+      earlier rewrite round gradually stop looking like spill locals in later
+      rounds, which in turn risked misclassifying reload/store spill-family
+      values as ordinary locals during the next rewriteability scan. The live
+      tree now freezes those per-function floors from iteration 0 onward, so
+      all spill locals created during the first and later rewrite rounds keep
+      the same "spill-local" side of the boundary instead of drifting back
+      into the ordinary-local range. Focused kept rechecks after this closure
+      are `make test-value-ssa-alloc` PASS, `make test-value-ssa-machine`
+      PASS, and `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered backend-text reread follow-up: one small but real
+      RISC-V text peephole safety hole is now closed in
+      `compiler_optimize_riscv_preview_call_arg_load_swaps(...)`. The old
+      rewrite only rejected the dangerous case `second_base == a0` before
+      collapsing
+      `lw a1, ... ; lw a0, ... ; mv t5, a0 ; mv a0, a1 ; mv a1, t5 ; call`.
+      That was too weak, because `second_base == a1` is also unsafe: in the
+      original sequence the second load may depend on the just-loaded `a1`
+      value as its address base, so swapping the two loads can change the
+      memory address and silently change the call argument. The live tree now
+      refuses this peephole when the second load is based on either `a0` or
+      `a1`, and `tests/compiler/compiler_driver_test.c` now locks a focused
+      text-level regression for the `second_base == a1` shape. Focused kept
+      rechecks after this closure are `make test-compiler-driver` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-09 ordered hidden/default compatibility follow-up: the
+      remaining `sysy-testsuit-collection/lvX/bigintsub.c` red point from the
+      latest full sweep has now split into, and closed as, two real bugs.
+      First, the final RISC-V text peephole
+      `compiler_optimize_riscv_preview_zero_adds(...)` had been deleting a
+      `li reg, 0` seed even when that zero-valued register was still needed in
+      a later labeled block. In the live `compare()` repro this turned
+      `BigIntLength[0]` address formation into `base + stale a1`, which
+      flipped the sign decision for the whole testcase. The live tree now
+      treats labels as control-flow barriers for that peephole's safety check,
+      and `tests/compiler/compiler_driver_test.c` now locks a focused
+      cross-label regression for the unsafe shape. Second, canonical-IR
+      lowering had been sharing mutable-local const-state across unknown
+      `if/else` siblings while lowering them serially, so a join like
+      `if (x>0) flag=0; else flag=1; if (flag==1) ...` could incorrectly fold
+      the post-join condition to always true from the later branch's facts.
+      The live tree now clones branch-local lowering scope snapshots for
+      unknown `if` arms and merges only the intersection of const facts at the
+      join, and `tests/ir/ir_regression_test.c` now locks the focused
+      `flag/putch(45)` repro. Focused kept rechecks after this closure are
+      `make test-compiler-driver` PASS, `make test-ir-regression` PASS, the
+      direct `flag_merge_putch2` CLI repro now lowering to a real conditional
+      branch again, and
+      `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/sysy-testsuit-collection/lvX --filter bigintsub --verbose-failures --case-timeout 60`
+      => `1/1 PASS`.
+    - 2026-05-08 ordered allocator-record reread follow-up: the allocation
+      result object itself now has a complete `function_name` lifecycle again.
+      `ValueSsaAllocationResult` had been declaring `char *function_name`
+      without clearing it in `value_ssa_allocation_result_init(...)` or
+      releasing it in `value_ssa_allocation_result_free(...)`, so any caller
+      that chose to use that field would have been sitting on an uninitialized
+      pointer / leak hazard. The live tree now null-initializes the field,
+      frees it, and also preserves it through the allocation-result clone
+      helper; `tests/value_ssa/value_ssa_alloc_test.c` now carries a small
+      focused lifecycle regression for that field. Focused kept rechecks after
+      this closure are `make test-value-ssa-alloc` PASS and
+      `make test-value-ssa-machine` PASS.
+    - 2026-05-09 ordered allocator reread follow-up: split-child edge reuse
+      now refuses to treat an ordinary branch arm as reusable just because it
+      ends in `mov ...; jmp successor`. Reuse now requires the candidate block
+      to be a genuine unique-predecessor split child of the same branch block,
+      and the focused allocator regression now locks the no-accidental-reuse
+      case.
+    - 2026-05-08 ordered machine-dump reread follow-up: one small but real
+      crash-proofing hole is now closed in `value_ssa_machine`'s dump layer.
+      `value_ssa_dump_function_machine_allocation_view(...)` and
+      `value_ssa_dump_program_machine_allocation_view(...)` had been assuming
+      their artifact arrays were structurally present whenever the associated
+      counts were nonzero, which meant a malformed in-memory view could reach
+      null dereferences while formatting debug output instead of failing
+      cleanly with a verifier-style contract error. The live tree now checks
+      the key count/array invariants for function/program machine dump
+      artifacts up front and rejects malformed views with explicit machine
+      errors before any array walk begins. `tests/value_ssa/value_ssa_machine_test.c`
+      now locks both malformed-function-view and malformed-program-view dump
+      regressions, and focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine call-clobber dump reread follow-up: the same
+      crash-proofing line has now also reached `value_ssa_machine_call_clobber`.
+      `value_ssa_dump_machine_call_clobber_risk_report(...)` and
+      `value_ssa_dump_program_machine_call_clobber_risk_report(...)` had still
+      been trusting `item_count` / `function_count` / filter-count metadata
+      without first checking that the backing arrays were present, so malformed
+      in-memory report artifacts could still turn a debug dump into a null
+      dereference instead of a clean contract failure. The live tree now
+      validates those machine call-clobber dump artifacts up front and rejects
+      malformed reports with explicit errors before any iteration begins.
+      `tests/value_ssa/value_ssa_machine_test.c` now also locks malformed
+      single-report and malformed program-report dump regressions, and focused
+      kept rechecks after this closure are `make test-value-ssa-machine` PASS
+      and `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine protection/planning dump reread follow-up:
+      the same dump-side crash-proofing line has now also been extended across
+      the downstream `value_ssa_machine_protection` report family. The machine
+      protection agenda, program protection report, register-pressure report,
+      preservation-hint report, and final planning report dumps had still been
+      assuming their nested `function_views` / `items` / filter arrays were
+      structurally present whenever the corresponding counts were nonzero, so a
+      malformed in-memory artifact could still turn later debug/report dumping
+      into a null dereference. The live tree now validates those top-level dump
+      contracts before any iteration begins and rejects malformed artifacts
+      with explicit machine errors instead of walking bad pointers. The machine
+      test suite now also locks malformed dump regressions for protection
+      agenda, protection report, pressure report, preservation-hint report,
+      and planning report artifacts. Focused kept rechecks after this closure
+      are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine query-surface reread follow-up: one small
+      but real output-parameter hygiene hole is now closed in the public
+      register-bank query helpers. `value_ssa_machine_register_bank_get_register(...)`
+      and `value_ssa_machine_register_bank_find_register_by_name(...)` had
+      been returning failure without first clearing their output pointer/index
+      slots, which meant a caller reusing old storage could accidentally keep a
+      stale successful lookup result after a failed query. The live tree now
+      nulls/zeros those outputs on entry before checking the lookup contract,
+      and `tests/value_ssa/value_ssa_machine_test.c` now locks focused failure-
+      path regressions for both helpers. Focused kept rechecks after this
+      closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine summary-query reread follow-up: the same
+      output-parameter hygiene line also reached the top-level machine summary
+      helpers. The public summary queries for call-clobber risk,
+      protection agenda/report, register-pressure report, hotspot report,
+      preservation-hint report, and planning report now clear their output
+      slots up front before validating the report pointer, so a failed lookup
+      or null report can no longer leave stale counts behind in caller-owned
+      storage. The machine regression suite now also locks a focused null-
+      report output-clearing witness for those summary surfaces. Focused kept
+      rechecks after this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine allocation-query reread follow-up: the same
+      failure-path hygiene line now also covers the earlier
+      `value_ssa_machine_query` allocation surfaces. The register-bank summary,
+      function/program machine-allocation summaries, program-level allocation
+      function lookup, and allocate+rewrite machine-report summary/stat helpers
+      had still been returning failure without first clearing all caller-owned
+      outputs, so stale counts or stale function-view pointers could survive a
+      failed query. The live tree now zeros/nulls those public outputs before
+      validating the query contract, and the machine regression suite now also
+      locks focused failure-path witnesses for those allocation-query helpers.
+      Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine placement-query reread follow-up: one last
+      same-family API hygiene hole is now also closed on the direct placement
+      surface. `value_ssa_function_machine_allocation_view_get_placement(...)`
+      had still been returning failure without first nulling `out_placement`,
+      which meant a caller reusing old storage could accidentally retain a
+      stale placement pointer after a failed lookup. The live tree now clears
+      that output slot on entry, and the machine regression suite now locks a
+      dedicated failed-placement-query witness. Focused kept rechecks after
+      this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine local-summary reread follow-up: the same
+      failure-path hygiene line now also reached one remaining lower-level
+      local summary helper under `value_ssa_machine_protection`.
+      `value_ssa_machine_register_protection_pressure_view_get_summary(...)`
+      now clears its output counters before validating the input view pointer,
+      so a failed summary query can no longer leak stale pressure totals back
+      to the caller. The machine regression suite now also locks a focused
+      null-view summary witness for that helper. Focused kept rechecks after
+      this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine call-clobber query reread follow-up: one
+      same-family API hygiene / malformed-artifact hole is now also closed on
+      the `value_ssa_machine_call_clobber` query surface. The local/program
+      call-clobber summary and filter helpers had still been trusting malformed
+      in-memory reports, and `get_functions_with_risky_values(...)` could still
+      hand a stale array pointer back to the caller even when the risky-function
+      count was zero. The live tree now rejects malformed call-clobber report
+      artifacts cleanly on the public query path, and the zero-count risky
+      filter now preserves the same "count zero => output pointer NULL" contract
+      as the sibling machine-allocation filters. The machine regression suite
+      now also locks both the malformed-report failure path and the zero-count
+      risky-filter pointer-clear witness. Focused kept rechecks after this
+      closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine protection query reread follow-up: the same
+      malformed-artifact contract now also reaches the downstream
+      `value_ssa_machine_protection` query family. The agenda, program
+      protection, register-pressure, program register-pressure, hotspot report,
+      preservation-hint report, and planning report query helpers now reject
+      malformed backing artifacts instead of walking missing arrays or
+      returning success on structurally broken reports. The machine regression
+      suite now also locks focused malformed-report / failure-path witnesses
+      for the affected protection/query surfaces. Focused kept rechecks after
+      this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine function-view contract reread follow-up: the
+      same malformed-artifact hardening now also reaches two remaining
+      function-level machine views under `value_ssa_machine_protection`.
+      Hotspot views and preservation-hint views now reject stale payload
+      shapes such as "no hotspot but leftover hotspot item counts" and
+      "no hint but leftover candidate/protected-count payload" instead of
+      quietly reporting success on builder-impossible in-memory artifacts.
+      The machine regression suite now also locks focused malformed
+      hotspot-view and hint-view summary/candidate failure-path witnesses.
+      Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine planning contract reread follow-up: one more
+      outer/inner contract gap is now closed on the `planning` surface.
+      Function/program planning queries and dumps had still only been checking
+      the outer planning shell, so malformed nested pressure/hotspot/hint
+      subviews could still slip through an apparently valid planning view or
+      report. The live tree now validates those nested machine subviews before
+      planning summaries/dumps succeed, and the machine regression suite now
+      also locks a focused malformed planning-view summary failure-path
+      witness. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine nested-report reread follow-up: the same
+      outer/inner contract hardening has now been extended back through the
+      remaining program-level machine report families. Program call-clobber,
+      protection, register-pressure, hotspot, and preservation-hint reports
+      now validate their nested function views too, so a report no longer
+      counts as healthy if one of its embedded per-function artifacts is
+      already structurally broken. The machine regression suite now also locks
+      focused malformed nested-report witnesses for those surfaces. Focused
+      kept rechecks after this closure are `make test-value-ssa-machine` PASS
+      and `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine core-builder reread follow-up: one lower-
+      level malformed-bank crash path is now also closed in
+      `value_ssa_machine_core`. Function/program machine-allocation view
+      builders and the internal register-id lookup helper had still been
+      assuming that `bank->register_count > 0` implied `bank->registers != NULL`,
+      so a structurally broken machine bank could reach direct
+      `bank->registers[...]` access during machine-view construction instead of
+      failing cleanly at the builder boundary. The live tree now rejects that
+      malformed-bank shape up front, and the machine regression suite now also
+      locks focused malformed-bank builder witnesses for both function and
+      program machine-view construction. Focused kept rechecks after this
+      closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine bank-identity reread follow-up: the same
+      lower-level machine-view construction line now also rejects duplicate
+      public `register_id` values inside one bank. Those ids are used as
+      stable lookup keys throughout the machine-view / pressure / preservation
+      / planning surfaces, so duplicate ids could silently collapse register
+      identity and misbucket later group/query results. The live tree now
+      treats duplicate register ids as malformed bank input for function/program
+      machine-view construction, and the machine regression suite now also
+      locks focused duplicate-id malformed-bank witnesses for both builders.
+      Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine allocation-query contract reread follow-up:
+      one more same-family malformed-artifact hole is now closed on the raw
+      machine-allocation query surface itself. Helpers such as
+      `get_machine_colored_values(...)`, `get_spilled_values(...)`,
+      `get_caller_clobbered_values(...)`, and `get_used_machine_registers(...)`
+      had still been returning success even when their exposed counts were
+      nonzero but the corresponding backing arrays were missing. The live tree
+      now rejects those malformed allocation-view shapes cleanly on the public
+      query path, and the machine regression suite now also locks focused
+      malformed allocation-query failure-path witnesses. Focused kept rechecks
+      after this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine bank-dump contract reread follow-up: the
+      same malformed-bank hardening now also reaches the textual dump side.
+      `value_ssa_dump_machine_register_bank(...)` had still been trusting
+      broken bank artifacts, so shapes like `register_count > 0 && registers ==
+      NULL` or duplicate public `register_id` rows could still reach the dump
+      formatter instead of being rejected at the machine boundary. The live
+      tree now validates machine-bank dump artifacts up front, and the machine
+      regression suite now also locks focused malformed-bank and duplicate-id
+      dump failure witnesses. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine report-query reread follow-up: the same
+      nested-artifact hardening now also reaches the
+      `allocate_rewrite_machine_report` query surface. The report-level
+      `get_program_view(...)`, `get_function_view(...)`, and summary helpers
+      had still been trusting the embedded machine `program view` even when
+      that nested artifact was already structurally broken, so report queries
+      could still return success on malformed in-memory reports. The live tree
+      now validates the nested machine-allocation view before those report
+      queries succeed, and the machine regression suite now also locks a
+      focused malformed machine-report query witness. Focused kept rechecks
+      after this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-09 ordered machine allocation nested-query reread follow-up:
+      the same nested-artifact rule is now also applied one level lower on the
+      raw machine-allocation query surface. Program allocation summaries and
+      by-name lookups now reject a malformed outer `program view` when any
+      embedded per-function machine-allocation view is already structurally
+      broken, instead of reporting success on a half-valid shell. The machine
+      regression suite now also locks a focused malformed nested program-
+      allocation query witness. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-09 ordered machine report-dump error-propagation follow-up: one
+      small but real diagnostics bug is now also closed on the allocate+rewrite
+      machine-report dump wrapper. `value_ssa_dump_allocate_rewrite_machine_
+      report_artifact(...)` had still been overwriting downstream malformed-
+      artifact failures with its own generic `VALUE-SSA-MACHINE-026` "out of
+      memory" code, which hid the real nested machine-view error source. The
+      live tree now preserves the underlying nested dump/query error instead of
+      flattening everything into the wrapper's generic OOM code, and the
+      machine regression suite now also locks a focused malformed machine-
+      report dump witness for that propagation path. Focused kept rechecks
+      after this closure are `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine malformed-bank reread follow-up: one small
+      but real crash-proofing hole is now also closed on the machine register-
+      bank query surface itself. `value_ssa_machine_register_bank_get_summary(...)`
+      and `value_ssa_machine_register_bank_find_register_by_name(...)` had
+      still been assuming that `register_count > 0` implied `registers != NULL`,
+      so a malformed in-memory bank artifact could reach a null dereference
+      during summary or name-based lookup instead of failing cleanly. The live
+      tree now rejects that malformed-bank shape up front, and the machine
+      regression suite now also locks dedicated malformed-bank summary and name-
+      lookup failure witnesses. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
+    - 2026-05-08 ordered machine hotspot/planning dump reread follow-up: the
+      same dump-side crash-proofing line has now also been extended to the last
+      two downstream report surfaces that had still been trusting their top-
+      level artifact wiring too much. `value_ssa_dump_program_machine_register_
+      protection_hotspot_report(...)` had still been iterating
+      `function_views` without first rejecting the malformed shape
+      `function_count > 0 && function_views == NULL`, and
+      `value_ssa_dump_function_machine_planning_view(...)` had still been
+      assuming its nested pressure/hint sub-artifacts were structurally present
+      whenever their counts implied real contents. The live tree now rejects
+      those malformed hotspot/planning artifact shapes up front instead of
+      letting debug/report dumping walk bad pointers, and
+      `tests/value_ssa/value_ssa_machine_test.c` now also locks focused
+      malformed hotspot-report and malformed function-planning dump
+      regressions. Focused kept rechecks after this closure are
+      `make test-value-ssa-machine` PASS and
+      `make test-value-ssa-regression` PASS.
     - 2026-05-08 hidden-OJ follow-up: the latest course submission evidence
       has reopened a concrete hidden/default compatibility cluster that should
       now be treated as active plan memory rather than as vague future risk.
@@ -1889,7 +2331,7 @@
       are actively catching real backend/text-export soundness edges rather
       than only adding redundant green rows.
   - hidden/default compatibility audit line:
-    **in progress / roughly 94%**
+    **in progress / roughly 98%**
     - the earlier local nested-call corruption repro was closed at the real
       downstream boundary in `machine_ir`, but hidden-course status must stay
       **reopened** because the platform symptom for `22_nested_calls` is still
@@ -1987,6 +2429,155 @@
       hunt: at least one real loop-proof bug is now closed, while the
       remaining hidden RTLE risk should focus on other loop/control-flow
       shapes rather than this exact mutable-local + call-step family.
+    - 2026-05-08 next RTLE follow-up: the same canonical-IR loop-proof line
+      had another real dead-loop hole on ordinary local updates, not only the
+      earlier call-based step family. The flow-state evaluator was still not
+      modeling `++`, `--`, or compound assignments such as `+=` / `-=` for
+      tracked scalar locals, so loops like `while (b < 3) { b++; }` and
+      `for (; b < 3; b += 1) {}` could still be misproved as “condition stays
+      true forever” and lose their exit edge. That family is now fixed in
+      `ir_lower_stmt` by teaching flow-state evaluation to update tracked
+      identifier values across prefix/postfix increment/decrement and compound
+      assignment forms, with new IR regressions plus a focused `5/5`
+      compile/link/run probe suite all green after rebuilding `build/compiler`.
+      Current authority is therefore that the hidden RTLE hunt has now closed
+      two distinct loop-proof subfamilies inside canonical IR instead of only
+      the original call-step witness.
+    - 2026-05-09 loop/control-flow reread follow-up: the same
+      `ir_lower_stmt` proof layer had one more real control-flow soundness
+      hole on assignment-valued conditions. `ir_lower_flow_state_eval_expr(...)`
+      was clearing the tracked local to "unknown" for shapes like
+      `b = foo()` when the RHS was non-constant, but it still returned
+      success without producing a known truthiness value; on top of that, the
+      main condition fast path (`ir_try_eval_condition_truthiness_with_scope`)
+      was still skipping scope-aware flow evaluation entirely and consulting
+      only the older expression-only truthiness helper. In practice this let
+      `while (1) { if (b = foo()) break; } return 3;` collapse into an
+      unconditional dead loop, because the `if` condition was misclassified
+      as known-false during lowering/proof instead of being treated as
+      unknown runtime control. The live tree now treats assignment conditions
+      with non-constant RHS as unknown in the flow-state evaluator and
+      evaluates condition truthiness through the current scope-aware
+      flow-state path before falling back to the older pure-expression helper.
+      A user-facing compiler-driver regression now locks the minimal repro,
+      and focused rechecks are green on `make test-compiler-driver`,
+      `make test-ir-regression`, and the current repository-wide `make test`
+      sweep. Current authority is therefore that another concrete hidden-like
+      loop/control-flow RTLE source is now closed in canonical IR lowering,
+      specifically for assignment-in-condition shapes that guard `break` /
+      `continue` exits.
+    - 2026-05-09 public-course control-flow follow-up: the next broad
+      course-facing rerun finally reproduced a public cluster instead of only
+      hidden-course suspicions. A live `autotest -riscv` pass exposed
+      `lv7/04_while_if` (WA), `lv7/06_nested_while` (TLE),
+      `lv7/08_if_break` (WA), `lv7/09_continue` (TLE), and
+      `lv7/10_if_continue` (WA). Reading those witnesses together showed two
+      more over-aggressive shortcuts in `ir_lower_stmt`: loop-body condition
+      pruning was still willing to reuse scope-local flow facts while already
+      inside a loop body, and the `body_forces_non_exit` fast path still
+      treated nested-loop / continue-heavy bodies as if they could not reach a
+      real exit edge. The live tree now keeps both boundaries stricter: the
+      scope-aware condition truthiness fast path is disabled while lowering
+      inside an active loop body, and `body_forces_non_exit` now refuses to
+      fire for bodies that may reach `continue` or that already contain nested
+      loops. Focused public rechecks are now green on the exact reproduced
+      cluster (`autotest -riscv -s lv7` => `12/12`), in addition to the
+      earlier `make test-compiler-driver`, `make test-ir-regression`, and
+      repository-wide `make test` evidence. Current authority is therefore
+      that the public `lv7` while/break/continue family is materially
+      reclosed, and future control-flow hunting should move past that public
+      cluster instead of treating it as an open red point.
+    - 2026-05-09 perf follow-up: the next wider course rerun immediately
+      surfaced a second concrete public cluster after the `lv7` closure, and
+      this one was not another loop-body CFG issue but a runtime global-value
+      truthiness mistake. The live `autotest -riscv` pass stayed green through
+      `lv7`, `lv8`, and `lv9`, but reopened `perf/00_bitset1`,
+      `perf/01_bitset2`, and `perf/02_bitset3` as uniform `WRONG ANSWER`
+      cases with observed `-11` output. A smaller direct repro then showed the
+      same root cause even more clearly:
+      `int g=0; g=x; if (g < 0) ...` was being folded as if `g` still kept its
+      compile-time initializer value. The bug lived in
+      `ir_lower_flow_state_eval_expr(...)`: when an identifier was not a
+      tracked local binding, it still fell back to the generic constant-
+      expression evaluator, which in turn treated scalar globals with constant
+      initializers as if they were immutable runtime constants. The live tree
+      now restricts that flow-state evaluator to current local-scope facts
+      only, instead of consulting global initializer metadata for runtime
+      truthiness folding. Focused rechecks are green on the exact public perf
+      reopening (`autotest -riscv -s perf` now re-closes
+      `00_bitset1..02_bitset3`), plus `make test-compiler-driver`,
+      `make test-ir-regression`, and the already-reclosed `lv7/lv8/lv9`
+      course subsets. Current authority is therefore that the new bitset
+      regression cluster is materially closed, and the remaining perf line can
+      return to performance pressure rather than correctness drift.
+    - 2026-05-08 front-end audit follow-up: the ordered reread of
+      lexer/parser/semantic code also found one real semantic soundness hole
+      even though it does not currently look like the main hidden RE/RTLE
+      driver. `semantic_scope_rules` had been rejecting writes to plain
+      `const` scalars but still allowed writes through const-array elements
+      and const-array `++/--` forms (`a[0] = 3`, `a[0]++`). That is now fixed
+      and regression-locked in the semantic suite. Current authority is that
+      this front-end repair is worth keeping as general correctness hardening,
+      while the main hidden compatibility pressure still remains deeper in the
+      IR/backend runtime path because OJ-visible RE/RTLE symptoms did not
+      materially shift on this semantic issue alone.
+    - 2026-05-08 global-init audit follow-up: the ordered IR reread then found
+      one real array/global dependency hole inside `ir_global_dep`. Runtime
+      global-initializer dependency collection and dependency-path tracing were
+      both skipping `AST_EXPR_SUBSCRIPT`, so a top-level initializer like
+      `int a = b[0];` could silently miss its dependency on global `b` and
+      slip past the existing `IR-LOWER-022` guard even though the scalar
+      `int a = b;` form was already rejected. The current tree now traverses
+      both subscript base and index expressions in the dependency collector and
+      trace walker, with a new IR regression locking the direct
+      global-array-subscript case and a rebuilt CLI repro now failing as
+      expected with `dependency path: a -> b`. Current authority is therefore
+      that the hidden RE/global-family audit has one more concrete closure in
+      the canonical global-initializer layer rather than only more broad
+      synthetic green sweeps.
+    - 2026-05-08 compiler-driver audit follow-up: the ordered reread then
+      found one logic bug in the final RISC-V text-export fixup lookup path.
+      `compiler_find_fixup_at_patch_offset_and_kind_cached(...)` used to fall
+      back to returning “the first fixup at that patch offset” even when the
+      requested fixup kind did not match, which meant the pretty-printer could
+      theoretically misclassify an instruction as a data-address / data-load /
+      data-store symbolic form just because some *other* fixup shared the same
+      patch offset. The current tree now requires an exact kind match and
+      returns `NULL` otherwise. Focused rechecks stay green on
+      `make test-compiler-driver` and `autotest -riscv -s lv9` (`22/22`).
+      Current authority is that this is a correctness hardening fix in the
+      final text-export boundary; it has not yet produced a standalone hidden
+      repro by itself, but it removes one dangerous wrong-fixup fallback from
+      the executable assembly printer.
+    - 2026-05-09 compiler-driver audit follow-up: the continued ordered reread
+      found another real text-export correctness hole in
+      `compiler_emit_global_sections(...)`. The `.sdata` path had been
+      emitting exactly one `.word` for every initialized global object even
+      when that object's recorded `byte_size` was larger than `4`, which left
+      the pretty-printed assembly structurally inconsistent with the object's
+      advertised size and with the already-more-honest downstream
+      bytes/object/ELF artifact layers. The live tree now keeps the first
+      initialized word and emits a trailing `.zero (byte_size - 4)` padding
+      block for larger initialized objects instead of silently truncating the
+      textual data definition. Focused rechecks are green on
+      `make test-compiler-driver` and the current repository-wide `make test`
+      sweep. Current authority is that this is another kept compiler-driver
+      hardening fix; source-level SysY array initializers still usually travel
+      through `.sbss + __global.init`, so this closure is recorded primarily
+      as an executable-assembly/export honesty repair rather than as the main
+      hidden-course RE root cause.
+    - 2026-05-08 lower-ir audit follow-up: the ordered reread of the
+      post-IR boundary also found one verifier hole in `lower_ir` itself. The
+      temp-availability check (`LOWER-IR-VERIFY-059`) had been validating
+      `mov`, `binary`, `call`, and direct `store_*` uses, but it still skipped
+      indirect-memory operands entirely, so `load_indirect addr`,
+      `store_indirect addr`, and `store_indirect value` could evade the
+      all-incoming-path definition check. The current tree now validates those
+      indirect temp uses too, with new verifier regressions covering join-path
+      partial-definition shapes for both indirect load and indirect store.
+      Current authority is that this is another real downstream-hardening fix
+      in the `lower_ir -> value_ssa` boundary family, aligned with the earlier
+      machine-ir indirect-use closures.
   - strict `returns-all-paths` audit line:
     **in progress / roughly 90%**
     - several real false-positive loop families are now fixed and locked

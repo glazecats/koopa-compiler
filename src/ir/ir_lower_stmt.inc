@@ -120,6 +120,119 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
     IrLowerFlowState *state,
     long long *out_value);
 
+static int ir_lower_flow_state_eval_mutating_identifier_update(const IrLowerContext *ctx,
+    IrLowerFlowState *state,
+    const char *name,
+    size_t name_length,
+    TokenType op,
+    const AstExpression *rhs_expr,
+    int return_original_value,
+    long long *out_value) {
+    size_t index;
+    long long lhs = 0;
+    long long rhs = 0;
+    long long result = 0;
+
+    (void)ctx;
+
+    if (!state || !name || name_length == 0 || !out_value) {
+        return 0;
+    }
+
+    index = ir_lower_flow_state_resolve_binding(state, name, name_length);
+    if (index == 0u) {
+        return 0;
+    }
+
+    if (!state->known[index - 1u]) {
+        state->known[index - 1u] = 0u;
+        return 0;
+    }
+    lhs = state->values[index - 1u];
+
+    switch (op) {
+    case TOKEN_PLUS_PLUS:
+        result = ir_normalize_sysy_int_value(lhs + 1);
+        break;
+    case TOKEN_MINUS_MINUS:
+        result = ir_normalize_sysy_int_value(lhs - 1);
+        break;
+    case TOKEN_PLUS_ASSIGN:
+    case TOKEN_MINUS_ASSIGN:
+    case TOKEN_STAR_ASSIGN:
+    case TOKEN_SLASH_ASSIGN:
+    case TOKEN_PERCENT_ASSIGN:
+    case TOKEN_AMP_ASSIGN:
+    case TOKEN_CARET_ASSIGN:
+    case TOKEN_PIPE_ASSIGN:
+    case TOKEN_SHIFT_LEFT_ASSIGN:
+    case TOKEN_SHIFT_RIGHT_ASSIGN:
+        if (!rhs_expr || !ir_lower_flow_state_eval_expr(ctx, rhs_expr, state, &rhs)) {
+            state->known[index - 1u] = 0u;
+            return 0;
+        }
+        switch (op) {
+        case TOKEN_PLUS_ASSIGN:
+            result = ir_normalize_sysy_int_value(lhs + rhs);
+            break;
+        case TOKEN_MINUS_ASSIGN:
+            result = ir_normalize_sysy_int_value(lhs - rhs);
+            break;
+        case TOKEN_STAR_ASSIGN:
+            result = ir_normalize_sysy_int_value(lhs * rhs);
+            break;
+        case TOKEN_SLASH_ASSIGN:
+            if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+                state->known[index - 1u] = 0u;
+                return 0;
+            }
+            result = ir_normalize_sysy_int_value(lhs / rhs);
+            break;
+        case TOKEN_PERCENT_ASSIGN:
+            if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+                state->known[index - 1u] = 0u;
+                return 0;
+            }
+            result = ir_normalize_sysy_int_value(lhs % rhs);
+            break;
+        case TOKEN_AMP_ASSIGN:
+            result = lhs & rhs;
+            break;
+        case TOKEN_CARET_ASSIGN:
+            result = lhs ^ rhs;
+            break;
+        case TOKEN_PIPE_ASSIGN:
+            result = lhs | rhs;
+            break;
+        case TOKEN_SHIFT_LEFT_ASSIGN:
+            if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+                state->known[index - 1u] = 0u;
+                return 0;
+            }
+            result = ir_normalize_sysy_int_value(lhs << rhs);
+            break;
+        case TOKEN_SHIFT_RIGHT_ASSIGN:
+            if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+                state->known[index - 1u] = 0u;
+                return 0;
+            }
+            result = ir_normalize_sysy_int_value(lhs >> rhs);
+            break;
+        default:
+            state->known[index - 1u] = 0u;
+            return 0;
+        }
+        break;
+    default:
+        return 0;
+    }
+
+    state->known[index - 1u] = 1u;
+    state->values[index - 1u] = result;
+    *out_value = return_original_value ? lhs : result;
+    return 1;
+}
+
 static int ir_lower_flow_state_eval_binary(const IrLowerContext *ctx,
     const AstExpression *expr,
     IrLowerFlowState *state,
@@ -240,13 +353,20 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
             *out_value = state->values[index - 1u];
             return 1;
         }
-        if (index == 0u &&
-            ctx &&
-            ir_eval_constant_int_expression((IrLowerContext *)ctx, expr, out_value)) {
-            return 1;
-        }
         return 0;
     case AST_EXPR_UNARY:
+        if ((base->as.unary.op == TOKEN_PLUS_PLUS || base->as.unary.op == TOKEN_MINUS_MINUS) &&
+            base->as.unary.operand &&
+            base->as.unary.operand->kind == AST_EXPR_IDENTIFIER) {
+            return ir_lower_flow_state_eval_mutating_identifier_update(ctx,
+                state,
+                base->as.unary.operand->as.identifier.name,
+                base->as.unary.operand->as.identifier.name_length,
+                base->as.unary.op,
+                NULL,
+                0,
+                out_value);
+        }
         if (!ir_lower_flow_state_eval_expr(ctx, base->as.unary.operand, state, &operand)) {
             return 0;
         }
@@ -283,12 +403,33 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
             }
             if (!ir_lower_flow_state_eval_expr(ctx, base->as.binary.right, state, &operand)) {
                 state->known[index - 1u] = 0u;
-                return 1;
+                return 0;
             }
             state->known[index - 1u] = 1u;
             state->values[index - 1u] = ir_normalize_sysy_int_value(operand);
             *out_value = state->values[index - 1u];
             return 1;
+        }
+        if ((base->as.binary.op == TOKEN_PLUS_ASSIGN ||
+                base->as.binary.op == TOKEN_MINUS_ASSIGN ||
+                base->as.binary.op == TOKEN_STAR_ASSIGN ||
+                base->as.binary.op == TOKEN_SLASH_ASSIGN ||
+                base->as.binary.op == TOKEN_PERCENT_ASSIGN ||
+                base->as.binary.op == TOKEN_AMP_ASSIGN ||
+                base->as.binary.op == TOKEN_CARET_ASSIGN ||
+                base->as.binary.op == TOKEN_PIPE_ASSIGN ||
+                base->as.binary.op == TOKEN_SHIFT_LEFT_ASSIGN ||
+                base->as.binary.op == TOKEN_SHIFT_RIGHT_ASSIGN) &&
+            base->as.binary.left &&
+            base->as.binary.left->kind == AST_EXPR_IDENTIFIER) {
+            return ir_lower_flow_state_eval_mutating_identifier_update(ctx,
+                state,
+                base->as.binary.left->as.identifier.name,
+                base->as.binary.left->as.identifier.name_length,
+                base->as.binary.op,
+                base->as.binary.right,
+                0,
+                out_value);
         }
         if (base->as.binary.op == TOKEN_AND_AND) {
             if (!ir_lower_flow_state_eval_expr(ctx, base->as.binary.left, state, &cond)) {
@@ -319,6 +460,20 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
             return 1;
         }
         return ir_lower_flow_state_eval_binary(ctx, base, state, out_value);
+    case AST_EXPR_POSTFIX:
+        if ((base->as.postfix.op == TOKEN_PLUS_PLUS || base->as.postfix.op == TOKEN_MINUS_MINUS) &&
+            base->as.postfix.operand &&
+            base->as.postfix.operand->kind == AST_EXPR_IDENTIFIER) {
+            return ir_lower_flow_state_eval_mutating_identifier_update(ctx,
+                state,
+                base->as.postfix.operand->as.identifier.name,
+                base->as.postfix.operand->as.identifier.name_length,
+                base->as.postfix.op,
+                NULL,
+                1,
+                out_value);
+        }
+        return 0;
     case AST_EXPR_TERNARY:
         if (!ir_lower_flow_state_eval_expr(ctx, base->as.ternary.condition, state, &cond)) {
             return 0;
@@ -981,10 +1136,33 @@ static int ir_try_eval_condition_truthiness_with_scope(const IrLowerContext *ctx
     const AstExpression *expr,
     int *out_known,
     int *out_truthy) {
+    IrLowerFlowState state;
+    long long truthy = 0;
+
     if (!out_known || !out_truthy) {
         return 0;
     }
-    (void)ctx;
+    *out_known = 0;
+    *out_truthy = 0;
+
+    /*
+     * Outside loops we can safely reuse current scope facts for straight-line
+     * truthiness pruning. Inside a loop body the same local may have a
+     * different value on later iterations, so folding `if (i == 5)` from the
+     * entry-state `i == 0` would be unsound.
+     */
+    if (ctx && expr && ctx->loop_targets.count == 0u) {
+        ir_lower_flow_state_init(&state);
+        if (!ir_lower_flow_state_import_scope(ctx, &state)) {
+            return 0;
+        }
+        if (ir_lower_flow_state_eval_expr(ctx, expr, &state, &truthy)) {
+            *out_known = 1;
+            *out_truthy = truthy != 0;
+            return 1;
+        }
+    }
+
     return ir_dependency_try_eval_condition_truthiness(expr, out_known, out_truthy);
 }
 
@@ -1695,6 +1873,8 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
     size_t exit_block_id = 0;
     int condition_known = 0;
     int condition_truthy = 0;
+    int condition_constant_known = 0;
+    int condition_constant_truthy = 0;
     IrLowerLoopTransferInfo body_info = {1, 0, 0, 0};
     int body_has_nested_loop = 0;
     int needs_exit_block = 1;
@@ -1722,6 +1902,11 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
             &condition_truthy)) {
         return 0;
     }
+    if (!ir_dependency_try_eval_condition_truthiness(condition_expr,
+            &condition_constant_known,
+            &condition_constant_truthy)) {
+        return 0;
+    }
     if (condition_known && !condition_truthy) {
         return 1;
     }
@@ -1737,7 +1922,11 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
     }
     {
         int body_forces_non_exit =
-            condition_known && condition_truthy && !body_info.may_break && !body_info.may_fallthrough;
+            (((!body_has_nested_loop) && condition_known && condition_truthy) ||
+                (condition_constant_known && condition_constant_truthy)) &&
+            !body_info.may_break &&
+            !body_info.may_continue &&
+            !body_info.may_fallthrough;
         int proven_stays_true =
             !body_has_nested_loop && ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
         needs_exit_block = !(body_forces_non_exit || proven_stays_true);
@@ -1822,6 +2011,8 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     size_t init_expr_limit = stmt->expression_count;
     int condition_known = 1;
     int condition_truthy = 1;
+    int condition_constant_known = 1;
+    int condition_constant_truthy = 1;
     int body_has_continue = 0;
     int body_may_fallthrough = 1;
     IrLowerLoopTransferInfo body_info = {1, 0, 0, 0};
@@ -1876,10 +2067,20 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     if (condition_expr) {
         condition_known = 0;
         condition_truthy = 0;
+        condition_constant_known = 0;
+        condition_constant_truthy = 0;
         if (!ir_try_eval_condition_truthiness_with_scope(ctx,
                 condition_expr,
                 &condition_known,
                 &condition_truthy)) {
+            if (scope_pushed) {
+                ir_lower_scope_stack_pop(&ctx->scopes);
+            }
+            return 0;
+        }
+        if (!ir_dependency_try_eval_condition_truthiness(condition_expr,
+                &condition_constant_known,
+                &condition_constant_truthy)) {
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -1911,7 +2112,11 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
 
     {
         int body_forces_non_exit =
-            condition_known && condition_truthy && !body_info.may_break && !body_info.may_fallthrough;
+            (((!body_has_nested_loop) && condition_known && condition_truthy) ||
+                (condition_constant_known && condition_constant_truthy)) &&
+            !body_info.may_break &&
+            !body_info.may_continue &&
+            !body_info.may_fallthrough;
         int proven_stays_true =
             !body_has_nested_loop && ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
         needs_exit_block = !(body_forces_non_exit || proven_stays_true);
@@ -2038,15 +2243,23 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     size_t continue_block_id;
     size_t then_exit_block_id = 0;
     size_t else_exit_block_id = 0;
+    IrLowerScopeStack entry_scopes;
+    IrLowerScopeStack then_scopes;
+    IrLowerScopeStack else_scopes;
     int has_else;
     int condition_known = 0;
     int condition_truthy = 0;
     int then_fallthrough;
     int else_fallthrough;
+    int ok = 0;
 
     if (!ctx || !stmt || !ctx->function || !ctx->has_block) {
         return 0;
     }
+
+    memset(&entry_scopes, 0, sizeof(entry_scopes));
+    memset(&then_scopes, 0, sizeof(then_scopes));
+    memset(&else_scopes, 0, sizeof(else_scopes));
 
     condition_expr = (stmt->has_condition_expression &&
         stmt->condition_expression_index < stmt->expression_count)
@@ -2057,7 +2270,7 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
             stmt->line,
             stmt->column,
             "IR-LOWER-007: if statement missing condition expression");
-        return 0;
+        goto cleanup;
     }
 
     has_else = stmt->child_count >= 2;
@@ -2066,88 +2279,154 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
             condition_expr,
             &condition_known,
             &condition_truthy)) {
-        return 0;
+        goto cleanup;
     }
 
     if (condition_known) {
         if (condition_truthy) {
-            return stmt->child_count >= 1 ? ir_lower_statement(ctx, stmt->children[0]) : 1;
+            ok = stmt->child_count >= 1 ? ir_lower_statement(ctx, stmt->children[0]) : 1;
+            goto cleanup;
         }
-        return has_else ? ir_lower_statement(ctx, stmt->children[1]) : 1;
+        ok = has_else ? ir_lower_statement(ctx, stmt->children[1]) : 1;
+        goto cleanup;
+    }
+
+    if (!ir_lower_scope_stack_clone(&ctx->scopes, &entry_scopes) ||
+        !ir_lower_scope_stack_clone(&ctx->scopes, &then_scopes) ||
+        !ir_lower_scope_stack_clone(&ctx->scopes, &else_scopes)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-019: failed to snapshot if-branch scope state during IR lowering");
+        goto cleanup;
     }
 
     if (!ir_function_append_block(ctx->function, &then_block_id, NULL, ctx->error)) {
-        return 0;
+        goto cleanup;
     }
 
     if (has_else) {
         if (!ir_function_append_block(ctx->function, &else_block_id, NULL, ctx->error) ||
             !ir_lower_boolean_branch(ctx, condition_expr, then_block_id, else_block_id)) {
-            return 0;
+            goto cleanup;
         }
     } else {
         if (!ir_function_append_block(ctx->function, &continue_block_id, NULL, ctx->error) ||
             !ir_lower_boolean_branch(ctx, condition_expr, then_block_id, continue_block_id)) {
-            return 0;
+            goto cleanup;
         }
         else_block_id = continue_block_id;
     }
 
+    ir_lower_scope_stack_free(&ctx->scopes);
+    ctx->scopes = then_scopes;
+    memset(&then_scopes, 0, sizeof(then_scopes));
     ctx->block_id = then_block_id;
     ctx->has_block = 1;
     if (stmt->child_count >= 1 && !ir_lower_statement(ctx, stmt->children[0])) {
-        return 0;
+        goto cleanup;
     }
     then_fallthrough = ctx->has_block && !ir_lower_current_block(ctx)->has_terminator;
     if (ctx->has_block) {
         then_exit_block_id = ctx->block_id;
     }
+    then_scopes = ctx->scopes;
+    memset(&ctx->scopes, 0, sizeof(ctx->scopes));
 
     if (has_else) {
+        ir_lower_scope_stack_free(&ctx->scopes);
+        ctx->scopes = else_scopes;
+        memset(&else_scopes, 0, sizeof(else_scopes));
         ctx->block_id = else_block_id;
         ctx->has_block = 1;
         if (!ir_lower_statement(ctx, stmt->children[1])) {
-            return 0;
+            goto cleanup;
         }
         else_fallthrough = ctx->has_block && !ir_lower_current_block(ctx)->has_terminator;
         if (ctx->has_block) {
             else_exit_block_id = ctx->block_id;
         }
+        else_scopes = ctx->scopes;
+        memset(&ctx->scopes, 0, sizeof(ctx->scopes));
 
         if (then_fallthrough || else_fallthrough) {
             IrBasicBlock *then_exit_block;
             IrBasicBlock *else_exit_block;
 
             if (!ir_function_append_block(ctx->function, &continue_block_id, NULL, ctx->error)) {
-                return 0;
+                goto cleanup;
             }
             then_exit_block = ir_function_get_block_mut(ctx->function, then_exit_block_id);
             else_exit_block = ir_function_get_block_mut(ctx->function, else_exit_block_id);
             if (then_fallthrough &&
                 !ir_block_set_jump(then_exit_block, continue_block_id, ctx->error)) {
-                return 0;
+                goto cleanup;
             }
             if (else_fallthrough &&
                 !ir_block_set_jump(else_exit_block, continue_block_id, ctx->error)) {
-                return 0;
+                goto cleanup;
             }
             ctx->block_id = continue_block_id;
             ctx->has_block = 1;
         } else {
             ctx->has_block = 0;
         }
+
+        if (then_fallthrough && else_fallthrough) {
+            if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes) ||
+                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &else_scopes)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to merge if-branch scope state during IR lowering");
+                goto cleanup;
+            }
+        } else if (then_fallthrough) {
+            ctx->scopes = then_scopes;
+            memset(&then_scopes, 0, sizeof(then_scopes));
+        } else if (else_fallthrough) {
+            ctx->scopes = else_scopes;
+            memset(&else_scopes, 0, sizeof(else_scopes));
+        } else {
+            if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if-branch scope state during IR lowering");
+                goto cleanup;
+            }
+        }
     } else {
         IrBasicBlock *then_exit_block = ir_function_get_block_mut(ctx->function, then_exit_block_id);
 
         if (then_fallthrough &&
             !ir_block_set_jump(then_exit_block, continue_block_id, ctx->error)) {
-            return 0;
+            goto cleanup;
         }
         ctx->block_id = continue_block_id;
         ctx->has_block = 1;
+
+        if (then_fallthrough) {
+            ctx->scopes = then_scopes;
+            memset(&then_scopes, 0, sizeof(then_scopes));
+        } else {
+            if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to restore if scope state during IR lowering");
+                goto cleanup;
+            }
+        }
     }
 
-    return 1;
+    ok = 1;
+
+cleanup:
+    ir_lower_scope_stack_free(&entry_scopes);
+    ir_lower_scope_stack_free(&then_scopes);
+    ir_lower_scope_stack_free(&else_scopes);
+    return ok;
 }
 
 static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {

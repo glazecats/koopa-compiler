@@ -102,6 +102,11 @@ static int ir_lower_scope_update_binding_const_value_by_local_id(IrLowerScopeSta
     size_t local_id,
     int has_const_value,
     long long const_value);
+static int ir_lower_scope_stack_clone(const IrLowerScopeStack *src,
+    IrLowerScopeStack *dest);
+static int ir_lower_scope_stack_merge_const_facts(IrLowerScopeStack *dest,
+    const IrLowerScopeStack *lhs,
+    const IrLowerScopeStack *rhs);
 
 static void ir_basic_block_free(IrBasicBlock *block);
 static void ir_function_free(IrFunction *function);

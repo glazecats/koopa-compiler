@@ -1,4 +1,5 @@
 - Canonical IR is non-SSA, block-based, and verifier-backed; pass outputs must preserve entry reachability plus dense block/temp IDs.
+- Canonical IR local-const/truthiness pruning must not reuse one `if` branch's mutable-local constant facts while lowering the sibling branch; branch-local scope facts need independent snapshots and only the intersection may survive at join points.
 - First-version lower IR is a downstream stage, not an in-place rewrite of canonical IR; phase 1 keeps the same function/basic-block/terminator CFG shape and only changes the value/storage boundary.
 - First-version lower IR splits value refs from slot refs on purpose: value instructions consume temps/immediates only, while locals/globals appear only through explicit `load_*` / `store_*` slot operations.
 - Lower IR must be able to accept any verifier-legal canonical IR, not only the output of the canonical default pass pipeline; canonical `ir_pass` cleanup may improve shapes, but it is not part of the lower-IR semantic contract.
@@ -86,6 +87,7 @@
   check, so the current bytes-side range-failure class can be surfaced from
   selected form itself rather than only after lowering into later middle
   layers.
+- Final RISC-V text peepholes must treat labels as control-flow boundaries for liveness-style safety checks: a register feeding `li 0 ; add ...` cannot be assumed dead just because it is unused later in the same linear scan if a later labeled block still consumes that register value.
 - The first non-generic byte lane is `MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW`. It currently emits fixed-width 4-byte RISC-V instruction skeletons for the landed subset and moves call/control fixup patch spans to instruction starts, but it is still intentionally conservative rather than claiming a full ABI-complete encoder.
 - That `riscv32-preview` byte lane is now also slightly more honest for known internal control-flow and same-program call targets: when the target byte offset is already known inside the current program, the emitted preview `jal` / branch words now carry the matching PC-relative immediate instead of leaving every preview target displacement at zero.
 - The post-bytes artifact chain now preserves that backend choice too: `machine_object` keeps the originating `MachineBytesTargetProfile`, and `machine_reloc` may now surface the matching nonzero preview addend for internal `riscv32-preview` targets whose byte offsets are already known, rather than flattening every relocation addend back to `0`.

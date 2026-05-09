@@ -224,4 +224,121 @@ static int ir_lower_scope_update_binding_const_value_by_local_id(IrLowerScopeSta
     return 0;
 }
 
+static int ir_lower_scope_stack_clone(const IrLowerScopeStack *src,
+    IrLowerScopeStack *dest) {
+    size_t frame_index;
+
+    if (!src || !dest) {
+        return 0;
+    }
+
+    dest->frames = NULL;
+    dest->count = 0;
+    dest->capacity = 0;
+
+    if (src->count == 0u) {
+        return 1;
+    }
+
+    dest->frames = (IrLowerScope *)calloc(src->count, sizeof(IrLowerScope));
+    if (!dest->frames) {
+        return 0;
+    }
+    dest->count = src->count;
+    dest->capacity = src->count;
+
+    for (frame_index = 0; frame_index < src->count; ++frame_index) {
+        const IrLowerScope *src_frame = &src->frames[frame_index];
+        IrLowerScope *dest_frame = &dest->frames[frame_index];
+        size_t binding_index;
+
+        if (src_frame->count == 0u) {
+            continue;
+        }
+
+        dest_frame->bindings = (IrLowerBinding *)calloc(src_frame->count, sizeof(IrLowerBinding));
+        if (!dest_frame->bindings) {
+            ir_lower_scope_stack_free(dest);
+            return 0;
+        }
+        dest_frame->count = src_frame->count;
+        dest_frame->capacity = src_frame->count;
+
+        for (binding_index = 0; binding_index < src_frame->count; ++binding_index) {
+            const IrLowerBinding *src_binding = &src_frame->bindings[binding_index];
+            IrLowerBinding *dest_binding = &dest_frame->bindings[binding_index];
+
+            *dest_binding = *src_binding;
+            dest_binding->array_extents = NULL;
+
+            if (src_binding->array_rank > 0u && src_binding->array_extents) {
+                size_t extent_count = src_binding->array_rank;
+
+                dest_binding->array_extents = (size_t *)malloc(extent_count * sizeof(size_t));
+                if (!dest_binding->array_extents) {
+                    ir_lower_scope_stack_free(dest);
+                    return 0;
+                }
+                memcpy(dest_binding->array_extents,
+                    src_binding->array_extents,
+                    extent_count * sizeof(size_t));
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int ir_lower_scope_stack_merge_const_facts(IrLowerScopeStack *dest,
+    const IrLowerScopeStack *lhs,
+    const IrLowerScopeStack *rhs) {
+    size_t frame_index;
+
+    if (!dest || !lhs || !rhs) {
+        return 0;
+    }
+
+    if (dest->count != lhs->count || lhs->count != rhs->count) {
+        return 0;
+    }
+
+    for (frame_index = 0; frame_index < dest->count; ++frame_index) {
+        IrLowerScope *dest_frame = &dest->frames[frame_index];
+        const IrLowerScope *lhs_frame = &lhs->frames[frame_index];
+        const IrLowerScope *rhs_frame = &rhs->frames[frame_index];
+        size_t binding_index;
+
+        if (dest_frame->count != lhs_frame->count || lhs_frame->count != rhs_frame->count) {
+            return 0;
+        }
+
+        for (binding_index = 0; binding_index < dest_frame->count; ++binding_index) {
+            IrLowerBinding *dest_binding = &dest_frame->bindings[binding_index];
+            const IrLowerBinding *lhs_binding = &lhs_frame->bindings[binding_index];
+            const IrLowerBinding *rhs_binding = &rhs_frame->bindings[binding_index];
+
+            if (dest_binding->name != lhs_binding->name ||
+                lhs_binding->name != rhs_binding->name ||
+                dest_binding->local_id != lhs_binding->local_id ||
+                lhs_binding->local_id != rhs_binding->local_id ||
+                dest_binding->kind != lhs_binding->kind ||
+                lhs_binding->kind != rhs_binding->kind) {
+                return 0;
+            }
+
+            if (!(lhs_binding->has_const_value &&
+                    rhs_binding->has_const_value &&
+                    lhs_binding->const_value == rhs_binding->const_value)) {
+                dest_binding->has_const_value = 0;
+                dest_binding->const_value = 0;
+            } else {
+                dest_binding->has_const_value = 1;
+                dest_binding->const_value = lhs_binding->const_value;
+            }
+        }
+    }
+
+    return 1;
+}
+
 #endif
