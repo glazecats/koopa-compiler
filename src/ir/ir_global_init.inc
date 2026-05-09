@@ -25,6 +25,9 @@ static const IrBuiltinFunctionInfo k_ir_builtin_functions[] = {
     {"stoptime", 0u},
 };
 
+static int ir_function_find_last_unterminated_block(const IrFunction *function,
+    size_t *out_block_id);
+
 static const IrBuiltinFunctionInfo *ir_find_builtin_function_info(const char *name) {
     size_t builtin_index;
 
@@ -741,20 +744,14 @@ static int ir_ensure_runtime_global_init_function(IrProgram *program,
         return 0;
     }
 
-    if (function->has_body) {
-        if (function->block_count != 1 || !function->blocks || function->blocks[0].has_terminator) {
-            ir_set_error(error,
-                0,
-                0,
-                "IR-LOWER-024: reserved internal helper '%s' cannot be user-defined",
-                IR_RUNTIME_GLOBAL_INIT_FUNCTION_NAME);
-            return 0;
-        }
-    } else {
+    if (!function->has_body) {
         if (!ir_function_append_block(function, NULL, NULL, error)) {
             return 0;
         }
         function->has_body = 1;
+    } else if (!function->blocks || function->block_count == 0u) {
+        ir_set_error(error, 0, 0, "IR-INT-059: runtime initializer helper has no entry block");
+        return 0;
     }
 
     if (out_function) {
@@ -768,6 +765,8 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
     IrGlobal *global,
     const AstExpression *initializer_expr,
     IrError *error) {
+    size_t append_block_id = 0u;
+
     if (global && global->array_rank > 0u) {
         IrLowerContext ctx;
         IrValueRef base_address;
@@ -778,25 +777,18 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
         if (!program || !runtime_init_function || !global || !initializer_expr || !global->array_extents) {
             return 0;
         }
-        if (runtime_init_function->block_count == 0 || !runtime_init_function->blocks) {
+        if (!ir_function_find_last_unterminated_block(runtime_init_function, &append_block_id)) {
             ir_set_error(error,
                 initializer_expr->line,
                 initializer_expr->column,
-                "IR-INT-059: runtime initializer helper has no entry block");
-            return 0;
-        }
-        if (runtime_init_function->blocks[0].has_terminator) {
-            ir_set_error(error,
-                initializer_expr->line,
-                initializer_expr->column,
-                "IR-INT-060: runtime initializer helper was unexpectedly terminated early");
+                "IR-INT-060: runtime initializer helper has no appendable block");
             return 0;
         }
 
         memset(&ctx, 0, sizeof(ctx));
         ctx.program = program;
         ctx.function = runtime_init_function;
-        ctx.block_id = 0u;
+        ctx.block_id = append_block_id;
         ctx.has_block = 1;
         ctx.error = error;
 
@@ -852,25 +844,18 @@ static int ir_emit_runtime_initializer_assignment(IrProgram *program,
     if (!program || !runtime_init_function || !global || !initializer_expr) {
         return 0;
     }
-    if (runtime_init_function->block_count == 0 || !runtime_init_function->blocks) {
+    if (!ir_function_find_last_unterminated_block(runtime_init_function, &append_block_id)) {
         ir_set_error(error,
             initializer_expr->line,
             initializer_expr->column,
-            "IR-INT-059: runtime initializer helper has no entry block");
-        return 0;
-    }
-    if (runtime_init_function->blocks[0].has_terminator) {
-        ir_set_error(error,
-            initializer_expr->line,
-            initializer_expr->column,
-            "IR-INT-060: runtime initializer helper was unexpectedly terminated early");
+            "IR-INT-060: runtime initializer helper has no appendable block");
         return 0;
     }
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.program = program;
     ctx.function = runtime_init_function;
-    ctx.block_id = 0;
+    ctx.block_id = append_block_id;
     ctx.has_block = 1;
     ctx.error = error;
 
@@ -915,6 +900,27 @@ static int ir_prepend_startup_runtime_init_call(IrFunction *function,
     }
 
     return 1;
+}
+
+static int ir_function_find_last_unterminated_block(const IrFunction *function,
+    size_t *out_block_id) {
+    size_t block_index;
+
+    if (out_block_id) {
+        *out_block_id = 0u;
+    }
+    if (!function || !function->blocks || function->block_count == 0u || !out_block_id) {
+        return 0;
+    }
+
+    for (block_index = function->block_count; block_index > 0u; --block_index) {
+        if (!function->blocks[block_index - 1u].has_terminator) {
+            *out_block_id = block_index - 1u;
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static int ir_finalize_runtime_init_function_returns_zero(IrFunction *function,
@@ -1454,6 +1460,15 @@ int ir_lower_program(const AstProgram *ast_program,
         }
         if (!external->name || external->name[0] == '\0') {
             continue;
+        }
+        if (strcmp(external->name, IR_RUNTIME_GLOBAL_INIT_FUNCTION_NAME) == 0 ||
+            strcmp(external->name, IR_PROGRAM_INIT_FUNCTION_NAME) == 0) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-LOWER-024: reserved internal helper '%s' cannot be user-defined",
+                external->name);
+            return 0;
         }
 
         if (!ir_ensure_function_signature(out_program, external, NULL, error)) {

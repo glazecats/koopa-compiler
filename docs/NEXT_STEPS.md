@@ -635,6 +635,74 @@
       longer blocked by the older single-block helper assumption or by the
       indirect-memory live-in hole, and the remaining hidden `RE` line has
       narrowed back toward other still-unreproduced families.
+    - 2026-05-09 hidden/default runtime-global-init follow-up 2: that same
+      helper-growth line now also closes the next real source-level reopen
+      that only appeared once the audit started chaining *multiple* runtime
+      globals through one helper. If an earlier runtime initializer used
+      short-circuit / branchy control flow, `ir_lower` had still been
+      hardcoding later initializer emission back into `__global.init` block
+      `bb.0`, and `ir_ensure_runtime_global_init_function(...)` was still
+      treating any already-multi-block helper as if it must have been a
+      user-defined illegal reserved function. The live tree now rejects
+      reserved helper names directly at the AST external-function boundary,
+      while subsequent runtime-global initializer emission appends to the
+      last still-unterminated helper block instead of assuming `bb.0` stays
+      open forever. Focused kept rechecks after this closure are
+      `make test-ir-regression` PASS,
+      `make test-lower-ir-regression` PASS,
+      plus the hidden-like end-to-end repro
+      `/tmp/hid_repro_case03/03_runtime_global_short_circuit_dep.sy`
+      now passes through the full `autotest -riscv` path instead of failing
+      with `IR-LOWER-024`. Current authority is therefore that
+      "branchy runtime global init followed by later runtime globals" is no
+      longer an open hidden/default compile blocker.
+    - 2026-05-09 hidden/default array-initializer follow-up: one real
+      nested-brace lowering hole is now also closed in the local/global array
+      initializer expansion helper itself. In the `rank == 1` path,
+      `ir_expand_array_initializer_from_items(...)` had still been letting a
+      nested scalar list such as `{{1,2},3}` advance the outer element cursor
+      by only one slot even though the nested list had already filled multiple
+      scalar positions; that silently overwrote earlier elements (`{1,2},3`
+      lowering like `{1,3,0,0}`) and, near the tail of the array, also left a
+      real out-of-bounds write risk because the nested recursion was still
+      being called with the full original 1D extent instead of the remaining
+      element capacity. The live tree now bounds that nested recursion by the
+      remaining 1D capacity and advances the outer cursor by the number of
+      scalar slots actually consumed (with empty `{}` still conservatively
+      consuming one zero-filled slot). Focused kept rechecks after this
+      closure are `make test-ir-regression` PASS,
+      `make test-lower-ir-regression` PASS,
+      `make test-compiler-driver` PASS, and the direct end-to-end repro
+      `/tmp/brace_mix_repro/brace_mix.c` now passes `autotest -riscv` with the
+      corrected result instead of the earlier wrong-array layout. Current
+      authority is therefore that 1D array initializer mixtures of nested
+      brace groups plus later scalar items are no longer an open hidden
+      compatibility risk.
+    - 2026-05-09 hidden/default evidence-surface expansion follow-up: after
+      closing the brace-mix bug, the next round did not immediately expose a
+      second real failure, but it materially widened the confidence surface on
+      the still-open hidden `RE` lines. The live tree now has fresh green
+      evidence on:
+      - runtime/local brace-mix follow-ups (`/tmp/brace_runtime_followups`
+        => `4/4 PASS`)
+      - deeper 3D / nested-partial array initialization probes
+        (`/tmp/deeper_array_probes` => `6/6 PASS`)
+      - a public near-hidden pack containing `short_circuit1`,
+        `many_global_var`, `hanoi`, `long_array`, `const_array_defn`,
+        `nested_calls`, and `nested_calls2`
+        (`/tmp/near_hidden_pack` => `7/7 PASS`)
+      - parameter / many-argument call near-neighbors including
+        `func_param_arr` and `many_params1/2/3`
+      - a generated defined-semantics differential batch over
+        `global/array + short-circuit + helper side effects + loops`
+        (`/tmp/random_defined_diff` => `40/40 PASS`)
+      - a fully ASan-rebuilt compiler tree under `asanbuild/`, with focused
+        compile smoke on the most suspicious hidden-like sources also passing
+        without sanitizer complaints
+      Current authority is therefore that the remaining hidden `RE` tail is
+      increasingly unlikely to be a broad array-init / short-circuit / nested-
+      call mainline bug, and more likely to be a much narrower still-
+      unreproduced edge combination.
     - 2026-05-09 hidden/default machine-select follow-up: one further
       downstream liveness hole is now also closed on the branch-shaping side.
       `machine_select_lower_control` had been deciding whether a materialized
@@ -647,6 +715,70 @@
       compare-branch-live-out-via-`store_indirect` witness. Focused kept
       rechecks after this closure are `make test-machine-select` PASS plus the
       earlier hidden-ish array/short-circuit probe bundles remaining green.
+    - 2026-05-09 hidden/default compiler-driver peephole follow-up: one real
+      text-export soundness hole is now also closed in the repeated indexed
+      address reuse line. The final RISC-V preview peepholes for
+      `repeated_indexed_addr_triples` / `repeated_indexed_addr_sequences` had
+      been treating repeated `slli; lw; add` address formation as reusable
+      across a middle region that only avoided some register redefinitions,
+      but they were not invalidating on an intervening overwrite of the stack
+      slot / loaded base memory itself, and the generic sequence form also was
+      not invalidating on a redefinition of the load-base register. The live
+      tree now keeps those repeated address recomputations when the relevant
+      memory slot or base register changes, and the compiler-driver regression
+      suite now locks three focused text-level witnesses for:
+      repeated stack-slot base overwrite,
+      repeated generic base-memory overwrite,
+      and repeated generic base-register redefinition.
+      Focused kept rechecks after this closure are `make test-compiler-driver`
+      PASS.
+    - 2026-05-09 hidden/default compiler-driver peephole follow-up 2: that
+      same repeated-indexed-address line now also guards the stack-materialized
+      overwrite variant instead of only direct `sw ..., offset(sp)` writes.
+      When the repeated base load is really coming from a stack slot, an
+      intervening two-line store like `addi t5, sp, K ; sw ..., 0(t5)` now
+      also invalidates reuse for both the stack-slot triple form and the more
+      generic repeated indexed sequence form, instead of letting the peephole
+      silently treat the loaded stack base as unchanged. The compiler-driver
+      regression suite now also locks focused text-level witnesses for those
+      materialized-stack-slot overwrite shapes. Focused kept rechecks after
+      this closure are still `make test-compiler-driver` PASS.
+    - 2026-05-09 hidden/default compiler-driver peephole follow-up 3: one
+      related stack-held-base soundness hole is now also closed in the
+      `indexed_local_base_offsets` text fold. That peephole had been replacing
+      `lw tN, K(sp)` loaded base pointers with direct `sp + K` addressing
+      inside a later indexed local-base sequence, but it was not stopping when
+      the same stack slot `K(sp)` got overwritten in between, either through a
+      direct `sw ..., K(sp)` or through the materialized-address form
+      `addi/mv tmp, sp, K ; sw ..., 0(tmp)`. The live tree now treats both
+      shapes as invalidation barriers for that fold, and the compiler-driver
+      regression suite now locks focused text-level witnesses for both direct
+      and materialized stack-slot overwrite cases. Focused kept rechecks after
+      this closure remain `make test-compiler-driver` PASS.
+    - 2026-05-09 hidden/default compiler-driver peephole follow-up 4: two
+      smaller constant-fold text peepholes are now also aligned with the same
+      cross-label safety rule that the zero-add line already learned earlier.
+      `mul_by_four` and `sub_by_one` had still been deleting the `li 4` / `li
+      1` materialization whenever the constant register was not reused before
+      redefinition *inside the current straight-line region*, but unlike the
+      newer zero-add line they were still letting a later label hide a
+      downstream use of that same constant register. The live tree now treats
+      “needed past label before redefinition” as an invalidation barrier for
+      both folds, and the compiler-driver regression suite now locks focused
+      text-level witnesses for the cross-label `li 4 ; mul ...` and `li 1 ;
+      sub ...` shapes. Focused kept rechecks after this closure remain
+      `make test-compiler-driver` PASS.
+    - 2026-05-09 hidden/default compiler-driver peephole follow-up 5: two
+      stack/local-base folds are now also aligned with that same cross-label
+      conservatism instead of remaining straight-line-only. `stack_addr_reuse`
+      no longer deletes the original stack-address materialization when that
+      temporary register may still be needed past a later label, and
+      `indexed_local_base_offsets` likewise no longer drops the loaded
+      base-register materialization when that base register may still be
+      needed after a later label. The compiler-driver regression suite now
+      also locks focused text-level witnesses for both cross-label shapes.
+      Focused kept rechecks after this closure remain
+      `make test-compiler-driver` PASS.
     - 2026-05-08 ordered machine malformed-bank reread follow-up: one small
       but real crash-proofing hole is now also closed on the machine register-
       bank query surface itself. `value_ssa_machine_register_bank_get_summary(...)`
@@ -2367,7 +2499,7 @@
       are actively catching real backend/text-export soundness edges rather
       than only adding redundant green rows.
   - hidden/default compatibility audit line:
-    **in progress / roughly 98%**
+    **in progress / roughly 99%**
     - the earlier local nested-call corruption repro was closed at the real
       downstream boundary in `machine_ir`, but hidden-course status must stay
       **reopened** because the platform symptom for `22_nested_calls` is still
@@ -2391,8 +2523,8 @@
       segmentation-fault `RE` cluster:
       `05_global_arr_init`, `06_long_array`, `08_arr_access`,
       `09_const_arr_read`, `14_short_circuit1`, `17_func_expr2`,
-      `18_global_var2`, `32_global_1darr3`, `33_global_2darr3`,
-      `34_zero_init3`
+      `18_global_var2`, `19_hanoi2`, `32_global_1darr3`,
+      `33_global_2darr3`, `34_zero_init3`
     - the nearest public analogues for those hidden families have now been
       rechecked again after the latest lowering repair instead of being left
       as stale assumptions. Current focused sweeps are green on:
@@ -2614,6 +2746,83 @@
       Current authority is that this is another real downstream-hardening fix
       in the `lower_ir -> value_ssa` boundary family, aligned with the earlier
       machine-ir indirect-use closures.
+    - 2026-05-09 array-initializer semantics follow-up: the hidden/default
+      reread has now also reclosed one real brace-initializer soundness hole
+      in `ir_lower_stmt` instead of only adding more synthetic green rows. The
+      earlier rank-1 (`1D`) nested-brace repair turned out to be too
+      aggressive: it treated `{{1,2},3}` as if the nested `{1,2}` should fill
+      several later array slots, but the current C/SysY-like scalar behavior
+      is that a nested init-list at `rank == 1` still initializes exactly one
+      scalar element from its first scalar payload and then consumes exactly
+      one outer initializer item. The live tree now peels only that first
+      scalar payload for `rank == 1`, which closes both a direct wrong-answer
+      repro (`int a[8]={{1,2},3,{4,5},6};` had been returning `91` instead of
+      host-oracle `43`) and a mixed-brace compile-fail repro
+      (`int a[2][3]={{1},2,3,{4,5}};` had been failing at `IR-LOWER-033`).
+      The IR and lower-IR regression suites now lock both the corrected `1D`
+      local-array lowering shape and acceptance of the mixed `2D` brace form,
+      and focused rechecks are green on `make test-ir-regression`,
+      `make test-lower-ir-regression`, `/tmp/hidden_probe3` (`8/8 PASS`),
+      `minic-test-cases-2021f/functional` (`100/100 PASS`),
+      `minic-test-cases-2021s/functional` (`112/112 PASS`), plus targeted
+      public neighbors `076_hanoi.c`, `092_long_array.c`, `093_long_array2.c`,
+      `097_many_global_var.c`, and `098_nested_calls.c`.
+    - 2026-05-09 func-expr/global follow-up: the next synthetic differential
+      round finally reproduced a hidden-like non-array bug cluster in the live
+      default pipeline instead of only more green neighbors. A `45`-case
+      source-level sweep over defined-semantics `short_circuit /
+      func_expr-ish / global-shadow / recursion` shapes came back
+      `18/45 PASS` before the fix, with a `27`-case uniform red cluster on the
+      `func_expr-ish` slice. The minimized witness was
+      `int s=2; ... int v = pick(u, h()); return s + u*10 + v*100;`, where the
+      generated program always returned `expected-3`: `call h()` still ran, but
+      the later `return s + ...` reused the pre-call global `s`. The bug was
+      not in final text emission or plain lower-ir/value-ssa conversion; it
+      came from `memory_ssa_pass_forward_global_loads(...)`, whose join-load
+      PRE logic was willing to push a `load_global` into predecessors even when
+      the load's expected memory version had already been defined by an earlier
+      instruction in the same join block (here: a global-writing `call h()`).
+      The live tree now blocks that PRE/phi-forward path for same-block
+      instruction-defined memory versions, and focused rechecks are green on
+      `make test-memory-ssa-pass`, `make test-compiler-driver`, and the
+      rebuilt `/tmp/hidden_probe5` differential suite (`45/45 PASS`). Current
+      authority is therefore that the hidden `func_expr2 / global_var2` risk
+      line has one more real shared root cause removed, specifically the
+      “same-block global-writing call followed by later global load in a join
+      block” family.
+    - 2026-05-09 backend-text call-barrier follow-up: one neighboring
+      executable-assembly safety hole is now also closed in the final RISC-V
+      text peepholes. The repeated indexed-address reuse folds in
+      `compiler_driver` had been treating plain `call foo` rows as if they
+      were invisible, because the text-side “defines/uses reg” helpers only
+      understood ordinary explicit operands and therefore missed the caller-
+      clobber effect on `a*`, `t*`, and `ra`. In direct text-level witnesses,
+      both the repeated indexed triple and repeated indexed sequence rewrites
+      were willing to delete the second address formation across an
+      intervening `call foo`, which is not sound. The live tree now treats
+      `call`/`jal ra`/`jalr ra`/`ecall` as caller-clobber barriers for those
+      registers, and `tests/compiler/compiler_driver_test.c` now locks both
+      text-level regressions. Focused recheck: `make test-compiler-driver`
+      PASS.
+    - 2026-05-10 array/parameter widening follow-up: the next widening round
+      on the array-heavy public surface is still green on correctness. New
+      synthetic suites covering global-array helper/control-flow mixes,
+      global-array slice decay, array-parameter aliasing, dimension-`1`
+      extreme shapes, same-declaration multi-global mixes, and larger random
+      array/alias/control-flow combinations all stayed green
+      (`hidden_probe16`: `60/60`, `hidden_probe17`: `12/12`,
+      `hidden_probe18`: `14/14`, `hidden_probe19b`: `12/12`,
+      `hidden_probe20`: `120/120`, `hidden_probe21b`: `9/9`,
+      `hidden_probe22b`: `9/9`). Public external witnesses also widened again
+      without reopening correctness: `024_array_traverse3.c`,
+      `028_func_param_arr.c`, `074_full_conn.c`, `079_kmp.c`, manual
+      `test_array.sy`, and manual `array.sy` checks stayed green, and a wider
+      `lvX` parameter sweep only reopened `many_parameters10000.c` as
+      `COMPILE_TIMEOUT`. Current authority is therefore that this round
+      pushed the hidden array/global compatibility line further toward
+      hidden-only residuals again, while the one newly surfaced public issue
+      belongs to the already-open compile-time/perf line rather than to a new
+      correctness family.
   - strict `returns-all-paths` audit line:
     **in progress / roughly 90%**
     - several real false-positive loop families are now fixed and locked

@@ -1681,6 +1681,19 @@ static size_t ir_array_initializer_element_count(const size_t *extents, size_t r
     return total;
 }
 
+static const AstExpression *ir_array_initializer_first_scalar_item(const AstExpression *expr) {
+    const AstExpression *current = expr;
+
+    while (current && current->kind == AST_EXPR_INIT_LIST) {
+        if (current->as.init_list.item_count == 0u) {
+            return NULL;
+        }
+        current = current->as.init_list.items[0];
+    }
+
+    return current;
+}
+
 static int ir_expand_array_initializer_from_items(const AstExpression *const *items,
     size_t item_count,
     size_t *io_item_index,
@@ -1703,28 +1716,7 @@ static int ir_expand_array_initializer_from_items(const AstExpression *const *it
             const AstExpression *item = items[*io_item_index];
 
             if (item && item->kind == AST_EXPR_INIT_LIST) {
-                size_t nested_index = 0u;
-
-                if (!ir_expand_array_initializer_from_items(
-                        (const AstExpression *const *)item->as.init_list.items,
-                        item->as.init_list.item_count,
-                        &nested_index,
-                        1u,
-                        extents,
-                        start_index + i,
-                        slots,
-                        error,
-                        item->line,
-                        item->column)) {
-                    return 0;
-                }
-                if (nested_index < item->as.init_list.item_count) {
-                    ir_set_error(error,
-                        item->line,
-                        item->column,
-                        "IR-LOWER-033: too many scalar initializers for array element sequence");
-                    return 0;
-                }
+                slots[start_index + i] = ir_array_initializer_first_scalar_item(item);
                 *io_item_index += 1u;
             } else {
                 slots[start_index + i] = item;

@@ -608,6 +608,57 @@ static int test_ir_accepts_runtime_global_array_initializer_with_short_circuit_a
         "int main(){return arr[0]+arr[1]+arr[2]+arr[3]+arr[4]+arr[5]+arr[6]+arr[7];}\n");
 }
 
+static int test_ir_accepts_multiple_runtime_global_initializers_after_branchy_helper_growth(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-MULTI-INIT-AFTER-BRANCHY-HELPER",
+        "int t(){return 5;}\n"
+        "int z(){return 0;}\n"
+        "int a=z()&&t();\n"
+        "int b=t()||z();\n"
+        "int c[2]={a+7,b+9};\n"
+        "int main(){return c[0]+c[1];}\n");
+}
+
+static int test_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items(void) {
+    return expect_ir_dump("IR-LOCAL-ARRAY-NESTED-SCALAR-MIX",
+        "int main(){ int a[4]={{1,2},3}; return a[0]+a[1]*10+a[2]*100+a[3]*1000; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    a.0 = mov 1\n"
+        "    a.1 = mov 3\n"
+        "    a.2 = mov 0\n"
+        "    a.3 = mov 0\n"
+        "    tmp.0 = addr_local local.0\n"
+        "    tmp.1 = mul 0, 4\n"
+        "    tmp.2 = add tmp.0, tmp.1\n"
+        "    tmp.3 = load_indirect tmp.2\n"
+        "    tmp.4 = addr_local local.0\n"
+        "    tmp.5 = mul 1, 4\n"
+        "    tmp.6 = add tmp.4, tmp.5\n"
+        "    tmp.7 = load_indirect tmp.6\n"
+        "    tmp.8 = mul tmp.7, 10\n"
+        "    tmp.9 = add tmp.3, tmp.8\n"
+        "    tmp.10 = addr_local local.0\n"
+        "    tmp.11 = mul 2, 4\n"
+        "    tmp.12 = add tmp.10, tmp.11\n"
+        "    tmp.13 = load_indirect tmp.12\n"
+        "    tmp.14 = mul tmp.13, 100\n"
+        "    tmp.15 = add tmp.9, tmp.14\n"
+        "    tmp.16 = addr_local local.0\n"
+        "    tmp.17 = mul 3, 4\n"
+        "    tmp.18 = add tmp.16, tmp.17\n"
+        "    tmp.19 = load_indirect tmp.18\n"
+        "    tmp.20 = mul tmp.19, 1000\n"
+        "    tmp.21 = add tmp.15, tmp.20\n"
+        "    ret tmp.21\n"
+        "}\n");
+}
+
+static int test_ir_accepts_2d_array_initializer_mixing_nested_and_scalar_items(void) {
+    return expect_ir_lower_succeeds("IR-2D-ARRAY-NESTED-SCALAR-MIX",
+        "int a[2][3]={{1},2,3,{4,5}};\n"
+        "int main(){return a[0][0]+a[0][1]*10+a[0][2]*100+a[1][0]*1000+a[1][1]*10000+a[1][2]*100000;}\n");
+}
+
 static int test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub(void) {
     return expect_ir_dump("IR-GLOBAL-INIT-NEG-LLONG-MIN",
         "int a=-(~9223372036854775807);\nint main(){return 0;}\n",
@@ -1884,6 +1935,9 @@ int main(void) {
     ok &= test_ir_accepts_runtime_global_initializer_when_logical_and_constant_false_makes_rhs_read_unreachable();
     ok &= test_ir_accepts_runtime_global_initializer_when_logical_or_constant_true_makes_rhs_read_unreachable();
     ok &= test_ir_accepts_runtime_global_array_initializer_with_short_circuit_and_calls();
+    ok &= test_ir_accepts_multiple_runtime_global_initializers_after_branchy_helper_growth();
+    ok &= test_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items();
+    ok &= test_ir_accepts_2d_array_initializer_mixing_nested_and_scalar_items();
     ok &= test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub();
     ok &= test_ir_lowers_add_overflow_initializer_without_host_ub();
     ok &= test_ir_rejects_division_by_zero_in_top_level_constant_initializer();

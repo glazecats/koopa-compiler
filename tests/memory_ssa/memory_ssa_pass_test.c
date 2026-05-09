@@ -1,4 +1,9 @@
 #include "memory_ssa_pass.h"
+#include "ir.h"
+#include "lexer.h"
+#include "lower_ir.h"
+#include "parser.h"
+#include "semantic.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -181,6 +186,94 @@ static int expect_built_memory_canonicalized_dump(const char *case_id,
     free(actual_text);
     lower_ir_program_free(&lower_program);
     value_ssa_program_free(&ssa_program);
+    return ok;
+}
+
+static int build_lower_ir_from_source_text(const char *source,
+    LowerIrProgram *program,
+    LowerIrError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message,
+                sizeof(error->message),
+                "memory-ssa-pass source builder received invalid input");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_options, 0, sizeof(lower_options));
+
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens)) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "lexer_tokenize failed");
+        }
+        goto cleanup;
+    }
+    if (!parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error)) {
+        if (error) {
+            error->line = parser_error.line;
+            error->column = parser_error.column;
+            snprintf(error->message, sizeof(error->message), "%s", parser_error.message);
+        }
+        goto cleanup;
+    }
+    if (!semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error)) {
+        if (error) {
+            error->line = semantic_error.line;
+            error->column = semantic_error.column;
+            snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+        }
+        goto cleanup;
+    }
+    if (!ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error)) {
+        if (error) {
+            error->line = ir_error.line;
+            error->column = ir_error.column;
+            snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+        }
+        goto cleanup;
+    }
+    if (!lower_ir_lower_from_ir(&ir_program, &lower_options, program, error)) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        lower_ir_program_free(program);
+    }
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
     return ok;
 }
 
@@ -409,6 +502,19 @@ static int build_lower_ir_global_store_observed_by_caller_program(LowerIrProgram
     }
 
     return 1;
+}
+
+static int build_lower_ir_join_local_then_same_block_global_call_load_program(LowerIrProgram *program,
+    LowerIrError *error) {
+    static const char *source =
+        "int s=2;\n"
+        "int f0(){ s=s+1; return 0; }\n"
+        "int f1(){ s=s+2; return 1; }\n"
+        "int h(){ s=s+3; return s%5; }\n"
+        "int pick(int x,int y){ return x*10+y; }\n"
+        "int main(){ int c=f1(); int u = c ? (f1()) : (f0()); int v = pick(u, h()); return s + u*10 + v*100; }\n";
+
+    return build_lower_ir_from_source_text(source, program, error);
 }
 
 static int build_invalid_input_program(ValueSsaProgram *program, ValueSsaError *error) {
@@ -14622,6 +14728,71 @@ static int test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_global_s
         "}\n");
 }
 
+static int test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_join_local_then_same_block_global_call_load(void) {
+    return expect_built_canonicalized_dump(
+        "MEMORY-SSA-PASS-BUILD-CANONICALIZE-JOIN-LOCAL-SAME-BLOCK-GLOBAL-CALL-LOAD",
+        build_lower_ir_join_local_then_same_block_global_call_load_program,
+        "global s.0 = 2\n"
+        "\n"
+        "func f0() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global s.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    store_global s.0, ssa.1\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func f1() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global s.0\n"
+        "    ssa.1 = add ssa.0, 2\n"
+        "    store_global s.0, ssa.1\n"
+        "    ret 1\n"
+        "}\n"
+        "\n"
+        "func h() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global s.0\n"
+        "    ssa.1 = add ssa.0, 3\n"
+        "    store_global s.0, ssa.1\n"
+        "    ssa.2 = mod ssa.1, 5\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func pick(x.0, y.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = mul ssa.0, 10\n"
+        "    ssa.2 = load_local y.1\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call f1()\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.1 = call f1()\n"
+        "    ssa.2 = mul ssa.1, 10\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = call f0()\n"
+        "    ssa.4 = mul ssa.3, 10\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.5 = phi [bb.1: ssa.1], [bb.2: ssa.3]\n"
+        "    ssa.6 = phi [bb.1: ssa.2], [bb.2: ssa.4]\n"
+        "    ssa.7 = call h()\n"
+        "    ssa.8 = call pick(ssa.5, ssa.7)\n"
+        "    ssa.9 = load_global s.0\n"
+        "    ssa.10 = add ssa.6, ssa.9\n"
+        "    ssa.11 = mul ssa.8, 100\n"
+        "    ssa.12 = add ssa.10, ssa.11\n"
+        "    ret ssa.12\n"
+        "}\n");
+}
+
 static int test_memory_ssa_pass_pipeline_fold_exposed_constant(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -18502,6 +18673,7 @@ int main(void) {
     ok &= test_memory_ssa_pass_build_memory_canonicalized_from_lower_ir_fold_program();
     ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_fold_program();
     ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_global_store_observed_by_caller();
+    ok &= test_memory_ssa_pass_build_canonicalized_from_lower_ir_keeps_join_local_then_same_block_global_call_load();
     ok &= test_memory_ssa_pass_pipeline_combo();
     ok &= test_memory_ssa_pass_pipeline_fold_exposed_constant();
     ok &= test_memory_ssa_pass_pipeline_eliminates_redundant_global_store_after_load();

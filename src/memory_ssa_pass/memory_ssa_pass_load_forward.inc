@@ -149,6 +149,23 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
         return 1;
     }
     join_expected_version_id = memory_instruction->accesses[0].use_version_id;
+    if (join_expected_version_id < memory_def_use->version_count &&
+        memory_def_use->has_def &&
+        memory_def_use->has_def[join_expected_version_id] &&
+        memory_def_use->def_kinds &&
+        memory_def_use->def_kinds[join_expected_version_id] == MEMORY_SSA_VERSION_DEF_INSTR &&
+        memory_def_use->def_block_ids &&
+        memory_def_use->def_block_ids[join_expected_version_id] == block_id) {
+        /*
+         * PRE/phi-forward is only sound when the join load is reading the
+         * incoming joined memory state itself. If the expected version is
+         * already defined by an instruction earlier in this same block
+         * (notably a global-writing call), pushing the load into predecessors
+         * would read the pre-definition memory state instead of the current
+         * block-local version.
+         */
+        return 1;
+    }
 
     phi_inputs = (ValueSsaPhiInput *)calloc(predecessor_count, sizeof(ValueSsaPhiInput));
     pending_insert_input_indices = (size_t *)calloc(predecessor_count ? predecessor_count : 1u, sizeof(size_t));

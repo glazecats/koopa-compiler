@@ -88,6 +88,7 @@
   selected form itself rather than only after lowering into later middle
   layers.
 - Final RISC-V text peepholes must treat labels as control-flow boundaries for liveness-style safety checks: a register feeding `li 0 ; add ...` cannot be assumed dead just because it is unused later in the same linear scan if a later labeled block still consumes that register value.
+- Final RISC-V text peepholes must also treat `call`-like rows (`call`, `jal ra, ...`, `jalr ra, ...`, and conservatively `ecall`) as caller-clobber barriers for `ra`, `a*`, and `t*` registers. Reusing an earlier array-address formation sequence across one of those rows is not sound just because the surrounding plain-text scan sees no explicit redefinition of `a0`/`t6` in between.
 - The first non-generic byte lane is `MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW`. It currently emits fixed-width 4-byte RISC-V instruction skeletons for the landed subset and moves call/control fixup patch spans to instruction starts, but it is still intentionally conservative rather than claiming a full ABI-complete encoder.
 - That `riscv32-preview` byte lane is now also slightly more honest for known internal control-flow and same-program call targets: when the target byte offset is already known inside the current program, the emitted preview `jal` / branch words now carry the matching PC-relative immediate instead of leaving every preview target displacement at zero.
 - The post-bytes artifact chain now preserves that backend choice too: `machine_object` keeps the originating `MachineBytesTargetProfile`, and `machine_reloc` may now surface the matching nonzero preview addend for internal `riscv32-preview` targets whose byte offsets are already known, rather than flattening every relocation addend back to `0`.
@@ -649,6 +650,7 @@
 - On that same known-entry-store helper loop, the global-only scalar-replacement layer is now also on the stronger side of the boundary rather than sitting with promotion. `memory_ssa_pass_scalar_replace_global_slots(...)` no longer keeps the entry `store_global g.0, 9`; like `memory_ssa_pass_canonicalize_memory_values(...)` and the full pipeline, it may delete the store/load/exit path entirely and collapse the loop to pure `call helper(); jmp`. So the current `M2` contract now distinguishes the known-entry-store loop ladder as: forwarding stops at `mov 9`, promotion remains conservative at `load_global g.0`, and canonicalize/scalar-replace/pipeline all already collapse to the helper self-loop.
 - The same precise helper-call story now also has a pure repeated-load sibling instead of only store-seeded or phi-shaped families. In the representative straight-line case `call helper(); load_global g.0; ... later load_global g.0`, where the internal helper reads only `h.1`, `memory_ssa_pass_forward_global_loads(...)` already reuses the first `load_global g.0`, and `memory_ssa_pass_canonicalize_memory_values(...)` plus the full pipeline both stabilize at the same single-load form `call helper(); load_global g.0; ret ...`. So the current `M2` contract now includes a direct read-only helper-call repeated-load reuse ladder as well, not only loop ladders and join/materialization families.
 - That same helper-call precision now also has a first explicit partial-phi-forward global family at the raw forwarding layer, not only repeated-load and loop examples. In representative two-way, scrambled, ancestor-reuse, and multi-pred join shapes where an internal helper reads only `h.1`, `memory_ssa_pass_forward_global_loads(...)` may now propagate one `g.0` memory version across the join by inserting missing predecessor-side loads when needed, building join phis over sibling loads, and preferring an already available ancestor value when one edge already carries it. So the current `M2` contract now includes a coherent readonly-helper forwarding family for global join propagation itself, not only later scalar-replace/canonicalize/pipeline consumers.
+- That same partial-phi-forward global line now also has an explicit same-block call-definition guard. If a join block first executes a global-writing instruction in the block itself (most importantly an internal `call` that defines the current global memory version) and only then performs `load_global g.0`, raw `memory_ssa_pass_forward_global_loads(...)` must not PRE that load into predecessors just because the block has multiple incoming edges. The predecessor-side values describe the pre-call version, not the same-block post-call version, so same-block instruction-defined global versions are a hard stop for that join-load PRE path.
 - On top of that same readonly-helper join family, the global-only scalar-replacement layer is now also stronger than the raw forwarding surface rather than merely preserving it. In representative two-way, scrambled, ancestor-reuse, and multi-pred join shapes after a helper that only reads `h.1`, `memory_ssa_pass_forward_global_loads(...)` still exposes the surviving `g.0` meaning through join-local `phi/mov` glue, but `memory_ssa_pass_scalar_replace_global_slots(...)` already goes further and collapses the whole family to the simpler `call helper(); load_global g.0; ret ...` form. So the current `M2` contract now includes not only readonly-helper join forwarding itself, but also the next higher layer's ability to flatten that forwarding-shaped global carrier skeleton away when nothing else still needs the join structure.
 - That same global-only scalar-replacement layer now also has explicit readonly-helper store-shape authority instead of being documented only on repeated-load, join, and loop ladders. In representative dead-store-before-helper and redundant-store-after-helper shapes where the internal helper reads only `h.1`, `memory_ssa_pass_scalar_replace_global_slots(...)` already deletes the `g.0` carrier store entirely and simplifies the program to `call helper(); ret 0`. So the current `M2` contract now spells out that the same slot-precise helper-call summary feeding the pure-global join ladder also reaches the direct global-store cleanup shapes at the scalar-replacement tier, not only the later memory-value / pipeline consumers.
 - That same readonly-helper join family now also reaches the intermediate and full high-level canonicalizers rather than stopping at scalar replacement. In representative two-way, scrambled, ancestor-reuse, and multi-pred helper-join shapes, both `memory_ssa_pass_canonicalize_memory_values(...)` and `memory_ssa_pass_run_pipeline(...)` already stabilize at the same flattened `call helper(); load_global g.0; ret ...` form as `memory_ssa_pass_scalar_replace_global_slots(...)`, while the raw forwarding layer still surfaces the more explicit `phi/mov` glue. So the current `M2` contract now has a full layered story for readonly-helper global joins: forwarding preserves the join-carried read shape, and scalar-replace/canonicalize/pipeline all know how to compress it further when no remaining user needs that explicit join structure.
@@ -769,6 +771,25 @@
   parameters/locals plus `ret 0` on every explicit return site. The runtime
   global-init finalization path now also seals any still-unterminated helper
   block with `ret 0` after lowering finishes.
+- That same runtime-global-init memory now also applies across *later*
+  top-level runtime initializers, not only within the first branchy one.
+  Once an earlier initializer has grown `__global.init` beyond `bb.0`, later
+  initializer emission must append into the last still-unterminated helper
+  block instead of assuming the entry block remains open forever. The
+  reserved helper-name check also belongs at the AST external-function
+  boundary, not in the helper reuse path, so a legitimate compiler-grown
+  multi-block `__global.init` is not misdiagnosed as a user-defined illegal
+  reserved function.
+- Array-initializer expansion memory: in the 1D (`rank == 1`) brace-expansion
+  path, a nested init-list still initializes exactly one scalar element, not a
+  whole remaining scalar run. A shape like `int a[4] = {{1,2}, 3};` should
+  behave like `a[0] = 1; a[1] = 3;` with the extra `2` treated as excess
+  nested scalar material, because the inner braces belong to the current
+  scalar element rather than to several later array slots. The practical rule
+  for the current expander is therefore: consume one outer element token,
+  recursively peel only the first scalar payload from nested braces, and leave
+  later outer items aligned to later array elements instead of advancing by the
+  whole nested scalar count.
 - Lower-IR temp-live-in memory: indirect memory ops are part of the real temp
   use surface for phi/liveness pruning. `load_indirect addr` and both
   `store_indirect addr/value` operands must be treated the same way as other
@@ -782,3 +803,36 @@
   to the machine-IR result-use surface for that live-out query; otherwise
   branch shaping can incorrectly fold away a compare result that is still
   consumed in successor blocks through indirect memory.
+- Compiler-driver preview peephole memory: repeated indexed address reuse is
+  only sound while both the address-building registers *and* the memory/base
+  facts that feed the repeated `lw` stay unchanged. For the stack-slot triple
+  form, an intervening `sw ... same_offset(sp)` invalidates reuse; for the
+  generic repeated indexed sequence form, both `sw ... same_offset(base_reg)`
+  and any redefinition of that `base_reg` invalidate reuse. Otherwise the
+  final text peephole can silently reuse a stale address base and miscompile a
+  later array access.
+- That same stack-slot rule also applies to the materialized-address form, not
+  only to direct `sw ..., offset(sp)` syntax. If the compiler has materialized
+  the slot address as `addi/mv temp, sp, K` and then stores through `0(temp)`,
+  that still counts as overwriting the loaded stack base and must invalidate
+  repeated indexed-address reuse. Otherwise a later text peephole can miss the
+  alias just because the overwrite reached the same slot through a temporary
+  base register.
+- Compiler-driver stack-held-base memory: the `indexed_local_base_offsets`
+  fold must also treat the stack slot that originally supplied a loaded base
+  pointer as mutable state, not just the `base_reg` temporary itself. If a
+  later region overwrites that `K(sp)` slot, either directly via
+  `sw ..., K(sp)` or indirectly via `addi/mv tmp, sp, K ; sw ..., 0(tmp)`,
+  the earlier loaded base pointer is no longer a stable stand-in for `sp + K`
+  and the fold must stop.
+- Compiler-driver constant-materialization memory: the same “needed past a
+  label before redefinition” rule now applies to `mul_by_four` and
+  `sub_by_one`, not only to `zero_adds`. A `li 4` / `li 1` feeding one foldable
+  arithmetic row cannot be deleted if that materialized constant register may
+  still be used after a later label before being redefined.
+- Compiler-driver cross-label memory: that same “needed past a label before
+  redefinition” rule also applies to stack/local-base materializations, not
+  only scalar constant registers. A stack-address temp kept alive by
+  `stack_addr_reuse`, or a base register that `indexed_local_base_offsets`
+  wants to erase, must stay in place if a later label can still observe that
+  register before it is redefined.

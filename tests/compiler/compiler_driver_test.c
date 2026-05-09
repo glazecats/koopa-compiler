@@ -457,6 +457,12 @@ static int test_compiler_folds_call_arg_load_swap_in_text(void) {
 
 int compiler_test_optimize_riscv_preview_call_arg_load_swaps(char **io_text);
 int compiler_test_optimize_riscv_preview_zero_adds(char **io_text);
+int compiler_test_optimize_riscv_preview_mul_by_four(char **io_text);
+int compiler_test_optimize_riscv_preview_sub_by_one(char **io_text);
+int compiler_test_optimize_riscv_preview_stack_addr_reuse(char **io_text);
+int compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(char **io_text);
+int compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(char **io_text);
+int compiler_test_optimize_riscv_preview_indexed_local_base_offsets(char **io_text);
 
 static int test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1(void) {
     static const char *source_text =
@@ -507,6 +513,415 @@ static int test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label(voi
         !text ||
         strstr(text, "  li a1, 0\n  add a0, a2, a1\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: zero-add fold should keep zero materialization when the reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base(void) {
+    static const char *source_text =
+        "  addi t0, sp, 24\n"
+        "  sw t0, 0(sp)\n"
+        "  addi t6, sp, 24\n"
+        "  sw a1, 0(t6)\n"
+        "  lw a0, 0(sp)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: stack-address materialized-store regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_stack_addr_reuse(&text) ||
+        !text ||
+        strstr(text, "  addi a0, sp, 24\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: stack-address reuse should not fire when the saved slot is overwritten through a materialized stack base\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label(void) {
+    static const char *source_text =
+        "  addi t0, sp, 24\n"
+        "  sw t0, 0(sp)\n"
+        "  lw a0, 0(sp)\n"
+        ".Lkeep_tmp:\n"
+        "  add a1, t0, a2\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: stack-address cross-label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_stack_addr_reuse(&text) ||
+        !text ||
+        strstr(text, "  addi t0, sp, 24\n  sw t0, 0(sp)\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: stack-address reuse should keep tmp materialization when the tmp reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label(void) {
+    static const char *source_text =
+        "  li a1, 4\n"
+        "  mul a0, a2, a1\n"
+        ".Lkeep_scale:\n"
+        "  mul a3, a4, a1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mul-by-four cross-label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mul_by_four(&text) ||
+        !text ||
+        strstr(text, "  li a1, 4\n  mul a0, a2, a1\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mul-by-four fold should keep scale materialization when the reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label(void) {
+    static const char *source_text =
+        "  li a1, 1\n"
+        "  sub a0, a2, a1\n"
+        ".Lkeep_one:\n"
+        "  sub a3, a4, a1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: sub-by-one cross-label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_sub_by_one(&text) ||
+        !text ||
+        strstr(text, "  li a1, 1\n  sub a0, a2, a1\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: sub-by-one fold should keep one materialization when the reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_stack_slot_store(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n"
+        "  sw a1, 24(sp)\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-triple regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(&text) ||
+        !text ||
+        strstr(text, "  sw a1, 24(sp)\n  slli a0, a2, 2\n  lw t6, 24(sp)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed triple fold should keep recomputation when the base slot is overwritten\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_base_store(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n"
+        "  sw a1, 0(s1)\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence store regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, "  sw a1, 0(s1)\n  slli a0, a2, 2\n  lw t6, 0(s1)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should keep recomputation when the loaded base memory is overwritten\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_base_reg_redefinition(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n"
+        "  mv s1, a3\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence base-reg regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, "  mv s1, a3\n  slli a0, a2, 2\n  lw t6, 0(s1)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should keep recomputation when the load base register is redefined\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_materialized_stack_slot_store(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n"
+        "  addi t5, sp, 24\n"
+        "  sw a1, 0(t5)\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-triple materialized-store regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(&text) ||
+        !text ||
+        strstr(text, "  sw a1, 0(t5)\n  slli a0, a2, 2\n  lw t6, 24(sp)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed triple fold should keep recomputation when the stack base slot is overwritten via materialized stack address\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_materialized_stack_slot_store(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n"
+        "  addi t5, sp, 24\n"
+        "  sw a1, 0(t5)\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence materialized-store regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, "  sw a1, 0(t5)\n  slli a0, a2, 2\n  lw t6, 24(sp)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should keep recomputation when the stack-loaded base slot is overwritten via materialized stack address\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_call(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n"
+        "  call foo\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-triple call-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(&text) ||
+        !text ||
+        strstr(text, "  call foo\n  slli a0, a2, 2\n  lw t6, 24(sp)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed triple fold should keep recomputation across call barrier\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_call(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n"
+        "  call foo\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence call-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, "  call foo\n  slli a0, a2, 2\n  lw t6, 0(s1)\n  add a0, t6, a0\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should keep recomputation across call barrier\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_indexed_local_base_offset_across_stack_slot_overwrite(void) {
+    static const char *source_text =
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n"
+        "  sw a3, 24(sp)\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: indexed-local-base-offset stack overwrite regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_indexed_local_base_offsets(&text) ||
+        !text ||
+        strstr(text, "  sw a3, 24(sp)\n  add a0, t6, a2\n  lw a1, 0(a0)\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: indexed local base offset fold should keep recomputation when the stack-held base pointer slot is overwritten\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_indexed_local_base_offset_across_materialized_stack_slot_overwrite(void) {
+    static const char *source_text =
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n"
+        "  addi t5, sp, 24\n"
+        "  sw a3, 0(t5)\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: indexed-local-base-offset materialized overwrite regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_indexed_local_base_offsets(&text) ||
+        !text ||
+        strstr(text, "  sw a3, 0(t5)\n  add a0, t6, a2\n  lw a1, 0(a0)\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: indexed local base offset fold should keep recomputation when the stack-held base pointer slot is overwritten through a materialized stack address\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_indexed_local_base_offset_when_base_reg_is_needed_past_label(void) {
+    static const char *source_text =
+        "  addi t6, sp, 24\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n"
+        ".Lkeep_base:\n"
+        "  add a3, t6, a4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: indexed-local-base-offset cross-label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_indexed_local_base_offsets(&text) ||
+        !text ||
+        strstr(text, "  addi t6, sp, 24\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: indexed local base offset fold should keep base-reg materialization when the base reg is needed past a label\n");
         ok = 0;
     }
 
@@ -908,6 +1323,41 @@ static int test_compiler_does_not_fold_mutated_global_condition_from_initializer
     return ok;
 }
 
+static int test_compiler_keeps_global_reload_after_same_block_global_writing_call(void) {
+    static const char *source =
+        "int s=2;"
+        "int f0(){ s=s+1; return 0; }"
+        "int f1(){ s=s+2; return 1; }"
+        "int h(){ s=s+3; return s%5; }"
+        "int pick(int x,int y){ return x*10+y; }"
+        "int main(){ int c=f1(); int u = c ? (f1()) : (f0()); int v = pick(u, h()); return s + u*10 + v*100; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, ".globl h\n.type h, @function\nh:\n") == NULL ||
+        strstr(output,
+            ".Lmain_3:\n"
+            "  call h\n"
+            "  mv a1, a0\n"
+            "  lw a0, 12(sp)\n"
+            "  call pick\n"
+            "  mv a2, a0\n"
+            "  lui t5, %hi(s)\n"
+            "  lw a0, %lo(s)(t5)\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: same-block global-writing call should preserve later global reload: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_handles_extreme_arity_compile_smoke(void) {
     enum { kArgCount = 300, kSourceCapacity = 65536 };
     CompilerError error;
@@ -1050,6 +1500,20 @@ int main(void) {
     ok &= test_compiler_folds_call_arg_load_swap_in_text();
     ok &= test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
+    ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
+    ok &= test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label();
+    ok &= test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base();
+    ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_stack_slot_store();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_materialized_stack_slot_store();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_call();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_base_store();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_base_reg_redefinition();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_materialized_stack_slot_store();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_call();
+    ok &= test_compiler_does_not_fold_indexed_local_base_offset_across_stack_slot_overwrite();
+    ok &= test_compiler_does_not_fold_indexed_local_base_offset_across_materialized_stack_slot_overwrite();
+    ok &= test_compiler_does_not_fold_indexed_local_base_offset_when_base_reg_is_needed_past_label();
     ok &= test_compiler_removes_repeated_indexed_address_sequence_in_text();
     ok &= test_compiler_reuses_repeated_indexed_address_sequence_in_text();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
@@ -1061,6 +1525,7 @@ int main(void) {
     ok &= test_compiler_handles_strict_local_state_loop_returns();
     ok &= test_compiler_preserves_assignment_condition_break_loop_exit();
     ok &= test_compiler_does_not_fold_mutated_global_condition_from_initializer();
+    ok &= test_compiler_keeps_global_reload_after_same_block_global_writing_call();
     ok &= test_compiler_handles_extreme_arity_compile_smoke();
     ok &= test_compiler_pretty_prints_far_call_pseudo_for_giant_arity();
 
