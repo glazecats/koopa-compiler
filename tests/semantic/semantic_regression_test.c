@@ -265,6 +265,8 @@ int main(void) {
     ok &= test_semantic_rejects_const_top_level_without_initializer();
     ok &= test_semantic_rejects_assignment_to_const();
     ok &= test_semantic_rejects_assignment_to_const_parameter();
+    ok &= test_semantic_rejects_assignment_to_const_array_element();
+    ok &= test_semantic_rejects_increment_of_const_array_element();
     ok &= test_semantic_ast_primary_return_flow_ignores_tampered_metadata();
     ok &= test_semantic_ast_primary_callable_ignores_tampered_metadata();
     ok &= test_semantic_ast_primary_chained_call_ignores_tampered_metadata();

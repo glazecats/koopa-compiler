@@ -268,6 +268,32 @@ static int expect_layout_value_list(const char *case_id,
     return 1;
 }
 
+static int test_value_ssa_allocation_result_manages_function_name_lifecycle(void) {
+    ValueSsaAllocationResult result;
+    int ok = 1;
+
+    memset(&result, 0xA5, sizeof(result));
+    value_ssa_allocation_result_init(&result);
+    if (result.function_name != NULL) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: allocation-result init did not clear function_name\n");
+        ok = 0;
+    }
+
+    result.function_name = (char *)malloc(5u);
+    if (!result.function_name) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: allocation-result lifecycle setup allocation failed\n");
+        return 0;
+    }
+    memcpy(result.function_name, "main", 5u);
+    value_ssa_allocation_result_free(&result);
+    if (result.function_name != NULL) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: allocation-result free did not clear function_name\n");
+        ok = 0;
+    }
+
+    return ok;
+}
+
 static int expect_layout_color_group(const char *case_id,
     const ValueSsaFunctionAllocationLayout *layout,
     size_t color,
@@ -10133,6 +10159,86 @@ static int build_alloc_loop_backedge_single_phi_and_tail_split_program(ValueSsaP
     return 1;
 }
 
+static int build_alloc_branch_direct_edge_with_plain_other_arm_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *branch = NULL;
+    ValueSsaBasicBlock *join = NULL;
+    ValueSsaBasicBlock *other_arm = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaPhiInput phi_inputs[2];
+    size_t cond_value;
+    size_t spill_value;
+    size_t other_value;
+    size_t phi_value;
+
+    value_ssa_program_init(program);
+    if (!value_ssa_program_append_function(program, "branch_direct_edge_with_plain_other_arm", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &branch, error) ||
+        !value_ssa_function_append_block(function, NULL, &join, error) ||
+        !value_ssa_function_append_block(function, NULL, &other_arm, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    entry = &function->blocks[0];
+    branch = &function->blocks[1];
+    join = &function->blocks[2];
+    other_arm = &function->blocks[3];
+
+    cond_value = value_ssa_function_allocate_value(function);
+    spill_value = value_ssa_function_allocate_value(function);
+    other_value = value_ssa_function_allocate_value(function);
+    phi_value = value_ssa_function_allocate_value(function);
+    if (cond_value == (size_t)-1 || spill_value == (size_t)-1 ||
+        other_value == (size_t)-1 || phi_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.mov_value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.result = value_ssa_value_id(spill_value);
+    instruction.as.mov_value = value_ssa_value_immediate(42);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (!value_ssa_block_set_branch(branch, value_ssa_value_id(cond_value), 2, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(other_value);
+    instruction.as.mov_value = value_ssa_value_immediate(7);
+    if (!value_ssa_block_append_instruction(other_arm, &instruction, error) ||
+        !value_ssa_block_set_jump(other_arm, 2, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    phi_inputs[0].predecessor_block_id = 1;
+    phi_inputs[0].value = value_ssa_value_id(spill_value);
+    phi_inputs[1].predecessor_block_id = 3;
+    phi_inputs[1].value = value_ssa_value_id(other_value);
+    if (!value_ssa_block_append_phi(join, phi_value, phi_inputs, 2, error) ||
+        !value_ssa_block_set_return(join, value_ssa_value_id(phi_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_alloc_loop_backedge_two_spilled_shared_phi_input_program(ValueSsaProgram *program,
     ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
@@ -16231,6 +16337,60 @@ static int test_value_ssa_rewrite_program_jump_edge_single_phi_pair_can_follow_l
         strstr(actual_text, "bb.4:") != NULL) {
         fprintf(stderr,
             "[value-ssa-alloc] FAIL: jump-edge-single-phi-after-local expected the predecessor local split child to satisfy the lone phi consumer without opening a separate split edge block, got:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_rewrite_program_does_not_reuse_plain_other_branch_arm_as_split_child_edge(void) {
+    ValueSsaProgram program;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+    static const size_t spilled_values[] = {1};
+
+    if (!build_alloc_branch_direct_edge_with_plain_other_arm_program(&program, &error)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: plain-other-arm setup failed: %s\n", error.message);
+        return 0;
+    }
+
+    value_ssa_program_allocation_result_init(&result);
+    if (!prepare_manual_spill_result_for_values(&result, &program, spilled_values, 1, &error)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: plain-other-arm manual spill result failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!value_ssa_rewrite_program_block_local_spill_splits(&program, &result, &error)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: plain-other-arm rewrite failed: %s\n", error.message);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: plain-other-arm dump failed\n");
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strstr(actual_text,
+            "bb.1:\n"
+            "    br ssa.0, bb.2, bb.3\n") == NULL ||
+        strstr(actual_text,
+            "bb.3:\n"
+            "    ssa.2 = mov 7\n"
+            "    jmp bb.2\n") == NULL ||
+        strstr(actual_text, "ssa.4 = mov ssa.1") != NULL ||
+        strstr(actual_text, "ssa.3 = phi [bb.1: ssa.1], [bb.3: ssa.2]\n") == NULL) {
+        fprintf(stderr,
+            "[value-ssa-alloc] FAIL: plain-other-arm expected no split-child reuse from an ordinary branch arm block, got:\n%s\n",
             actual_text);
         ok = 0;
     }
@@ -23547,6 +23707,7 @@ int main(void) {
     ok &= test_value_ssa_rewrite_program_processes_two_edge_split_families_for_same_value();
     ok &= test_value_ssa_rewrite_program_composes_jump_edge_phi_and_local_tail_splits();
     ok &= test_value_ssa_rewrite_program_jump_edge_single_phi_pair_can_follow_local_split();
+    ok &= test_value_ssa_rewrite_program_does_not_reuse_plain_other_branch_arm_as_split_child_edge();
     ok &= test_value_ssa_rewrite_program_split_child_spill_reuses_parent_spill_family();
     ok &= test_value_ssa_rewrite_program_split_chain_spill_reuses_root_family();
     ok &= test_value_ssa_rewrite_program_reuses_unique_predecessor_reload();
@@ -23593,6 +23754,7 @@ int main(void) {
     ok &= test_value_ssa_allocate_and_rewrite_program_reports_stats();
     ok &= test_value_ssa_allocate_and_rewrite_program_smoke_stats_without_rewrite();
     ok &= test_value_ssa_allocate_and_rewrite_program_stats_dump();
+    ok &= test_value_ssa_allocation_result_manages_function_name_lifecycle();
     if (!ok) {
         return 1;
     }

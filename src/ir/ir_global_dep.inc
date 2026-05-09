@@ -612,6 +612,20 @@ static int ir_trace_global_dependency_from_expr(IrGlobalDepTrace *trace,
             expr->as.inner,
             scope_stack,
             out_found);
+    case AST_EXPR_SUBSCRIPT:
+        if (!ir_trace_global_dependency_from_expr(trace,
+                expr->as.subscript.base,
+                scope_stack,
+                out_found)) {
+            return 0;
+        }
+        if (*out_found) {
+            return 1;
+        }
+        return ir_trace_global_dependency_from_expr(trace,
+            expr->as.subscript.index,
+            scope_stack,
+            out_found);
     case AST_EXPR_UNARY:
         return ir_trace_global_dependency_from_expr(trace,
             expr->as.unary.operand,
@@ -1461,6 +1475,23 @@ static int ir_collect_global_dependencies_from_expr(IrGlobalDepCollector *collec
     case AST_EXPR_PAREN:
         return ir_collect_global_dependencies_from_expr(collector,
             expr->as.inner,
+            scope_stack,
+            deps,
+            dep_count,
+            dep_capacity,
+            error);
+    case AST_EXPR_SUBSCRIPT:
+        if (!ir_collect_global_dependencies_from_expr(collector,
+                expr->as.subscript.base,
+                scope_stack,
+                deps,
+                dep_count,
+                dep_capacity,
+                error)) {
+            return 0;
+        }
+        return ir_collect_global_dependencies_from_expr(collector,
+            expr->as.subscript.index,
             scope_stack,
             deps,
             dep_count,

@@ -236,6 +236,97 @@ static int test_memory_ssa_verifier_rejects_phi_input_count_mismatch(void) {
     return ok;
 }
 
+static int test_memory_ssa_verifier_rejects_call_access_to_local_slot(void) {
+    MemorySsaProgram program;
+    MemorySsaError error;
+    MemorySsaFunction *function = NULL;
+    MemorySsaBasicBlock *block = NULL;
+    MemorySsaInstruction instruction;
+    MemorySsaAccess access;
+    size_t version0;
+    int ok;
+
+    memory_ssa_program_init(&program);
+    if (!memory_ssa_program_append_function(&program, "main", 1, &function, &error) ||
+        !memory_ssa_function_append_tracked_slot(function, value_ssa_slot_local(0), "a.0", NULL, &error) ||
+        !memory_ssa_function_append_block(function, NULL, &block, &error)) {
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+    version0 = memory_ssa_function_allocate_version(function);
+    if (version0 == (size_t)-1 ||
+        !memory_ssa_function_set_entry_version(function, 0, version0, &error)) {
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.instruction.as.call.callee_name = (char *)malloc(6u);
+    if (!instruction.instruction.as.call.callee_name) {
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+    memcpy(instruction.instruction.as.call.callee_name, "touch", 6u);
+    memset(&access, 0, sizeof(access));
+    access.slot_id = 0;
+    access.has_use_version = 1;
+    access.use_version_id = version0;
+    if (!memory_ssa_instruction_append_access(&instruction, &access, &error) ||
+        !memory_ssa_block_append_instruction(block, &instruction, &error) ||
+        !memory_ssa_block_set_return(block, value_ssa_value_immediate(0), &error)) {
+        free_temp_instruction(&instruction);
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+    free_temp_instruction(&instruction);
+
+    ok = expect_verifier_rejects("MEMORY-SSA-CALL-LOCAL-SLOT", &program, "MEMORY-SSA-058");
+    memory_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_memory_ssa_verifier_rejects_effect_free_call_access(void) {
+    MemorySsaProgram program;
+    MemorySsaError error;
+    MemorySsaFunction *function = NULL;
+    MemorySsaBasicBlock *block = NULL;
+    MemorySsaInstruction instruction;
+    MemorySsaAccess access;
+    int ok;
+
+    memory_ssa_program_init(&program);
+    if (!memory_ssa_program_append_function(&program, "main", 1, &function, &error) ||
+        !memory_ssa_function_append_tracked_slot(function, value_ssa_slot_global(0), "g.0", NULL, &error) ||
+        !memory_ssa_function_append_block(function, NULL, &block, &error)) {
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.instruction.as.call.callee_name = (char *)malloc(6u);
+    if (!instruction.instruction.as.call.callee_name) {
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+    memcpy(instruction.instruction.as.call.callee_name, "touch", 6u);
+    memset(&access, 0, sizeof(access));
+    access.slot_id = 0;
+    if (!memory_ssa_instruction_append_access(&instruction, &access, &error) ||
+        !memory_ssa_block_append_instruction(block, &instruction, &error) ||
+        !memory_ssa_block_set_return(block, value_ssa_value_immediate(0), &error)) {
+        free_temp_instruction(&instruction);
+        memory_ssa_program_free(&program);
+        return 0;
+    }
+    free_temp_instruction(&instruction);
+
+    ok = expect_verifier_rejects("MEMORY-SSA-CALL-EFFECT-FREE", &program, "MEMORY-SSA-057");
+    memory_ssa_program_free(&program);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -243,6 +334,8 @@ int main(void) {
     ok &= test_memory_ssa_verifier_rejects_duplicate_version_definition();
     ok &= test_memory_ssa_verifier_rejects_load_without_access();
     ok &= test_memory_ssa_verifier_rejects_phi_input_count_mismatch();
+    ok &= test_memory_ssa_verifier_rejects_call_access_to_local_slot();
+    ok &= test_memory_ssa_verifier_rejects_effect_free_call_access();
     if (!ok) {
         return 1;
     }

@@ -8,12 +8,14 @@ typedef struct {
     ValueSsaFunction *function;
     const ValueSsaCfgAnalysis *analysis;
     ValueSsaRenameState *state;
+    const unsigned char *address_taken_locals;
 } ValueSsaLocalRedundantStoreContext;
 
 typedef struct {
     const ValueSsaProgram *program;
     ValueSsaFunction *function;
     const ValueSsaCfgAnalysis *analysis;
+    const ValueSsaDefUseAnalysis *def_use;
     ValueSsaRenameState *state;
 } ValueSsaGlobalRedundantStoreContext;
 
@@ -48,6 +50,31 @@ static int value_ssa_compact_removed_instructions(ValueSsaBasicBlock *block,
     return 1;
 }
 
+static int value_ssa_collect_address_taken_locals(const ValueSsaFunction *function,
+    unsigned char *address_taken_locals) {
+    size_t block_index;
+
+    if (!function || !address_taken_locals) {
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL &&
+                instruction->as.addr_slot.id < function->local_count) {
+                address_taken_locals[instruction->as.addr_slot.id] = 1u;
+            }
+        }
+    }
+
+    return 1;
+}
+
 static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
 
@@ -59,6 +86,7 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         unsigned char *slot_observed = NULL;
+        unsigned char *address_taken_locals = NULL;
         size_t block_index;
         int has_candidate = 0;
 
@@ -67,7 +95,10 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
         }
 
         slot_observed = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
-        if (!slot_observed) {
+        address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+        if (!slot_observed || !address_taken_locals) {
+            free(slot_observed);
+            free(address_taken_locals);
             value_ssa_set_error(error,
                 0,
                 0,
@@ -75,9 +106,19 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
                 function->name ? function->name : "<anon>");
             return 0;
         }
+        if (!value_ssa_collect_address_taken_locals(function, address_taken_locals)) {
+            free(slot_observed);
+            free(address_taken_locals);
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-265: failed collecting address-taken locals in function '%s'",
+                function->name ? function->name : "<anon>");
+            return 0;
+        }
 
         for (block_index = 0; block_index < function->local_count; ++block_index) {
-            if (function->locals[block_index].array_rank > 0u) {
+            if (function->locals[block_index].array_rank > 0u || address_taken_locals[block_index]) {
                 slot_observed[block_index] = 1u;
             }
         }
@@ -126,6 +167,7 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
                 remove_flags = (unsigned char *)calloc(block->instruction_count, sizeof(unsigned char));
                 if (!remove_flags) {
                     free(slot_observed);
+                    free(address_taken_locals);
                     value_ssa_set_error(error,
                         0,
                         0,
@@ -147,6 +189,7 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
                 if (!value_ssa_compact_removed_instructions(block, remove_flags)) {
                     free(remove_flags);
                     free(slot_observed);
+                    free(address_taken_locals);
                     value_ssa_set_error(error,
                         0,
                         0,
@@ -159,6 +202,7 @@ static int value_ssa_eliminate_unread_scalar_local_stores(ValueSsaProgram *progr
         }
 
         free(slot_observed);
+        free(address_taken_locals);
     }
 
     return value_ssa_verify_program(program, error);
@@ -177,7 +221,8 @@ static int value_ssa_eliminate_redundant_local_stores_enter_block(const ValueSsa
 
     (void)function;
 
-    if (!context || !context->function || !context->analysis || !context->state) {
+    if (!context || !context->function || !context->analysis || !context->state ||
+        !context->address_taken_locals) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-230: invalid redundant-local-store contract");
         return 0;
     }
@@ -218,6 +263,9 @@ static int value_ssa_eliminate_redundant_local_stores_enter_block(const ValueSsa
                 ValueSsaValueRef known_value;
                 size_t slot_id = instruction->as.store.slot.id;
 
+                if (context->address_taken_locals[slot_id]) {
+                    break;
+                }
                 if (context->state->has_current_value[slot_id]) {
                     if (!value_ssa_rename_state_lookup(context->state, slot_id, &known_value, error)) {
                         free(remove_flags);
@@ -240,6 +288,7 @@ static int value_ssa_eliminate_redundant_local_stores_enter_block(const ValueSsa
             break;
         case VALUE_SSA_INSTR_LOAD_LOCAL:
             if (instruction->as.load_slot.id < context->function->local_count &&
+                !context->address_taken_locals[instruction->as.load_slot.id] &&
                 instruction->result.kind == VALUE_SSA_VALUE_ID &&
                 !value_ssa_rename_state_bind(context->state,
                     instruction->as.load_slot.id,
@@ -299,7 +348,8 @@ static int value_ssa_eliminate_redundant_global_stores_enter_block(const ValueSs
 
     (void)function;
 
-    if (!context || !context->program || !context->function || !context->analysis || !context->state) {
+    if (!context || !context->program || !context->function || !context->analysis ||
+        !context->def_use || !context->state) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-233: invalid redundant-global-store contract");
         return 0;
     }
@@ -374,6 +424,19 @@ static int value_ssa_eliminate_redundant_global_stores_enter_block(const ValueSs
         case VALUE_SSA_INSTR_CALL:
             for (global_index = 0; global_index < context->program->global_count; ++global_index) {
                 if (!value_ssa_rename_state_clear(context->state, global_index, error)) {
+                    free(remove_flags);
+                    return 0;
+                }
+            }
+            break;
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            for (global_index = 0; global_index < context->program->global_count; ++global_index) {
+                if (value_ssa_pass_store_indirect_may_alias_global(
+                        context->function,
+                        context->def_use,
+                        instruction->as.store_indirect.addr,
+                        global_index) &&
+                    !value_ssa_rename_state_clear(context->state, global_index, error)) {
                     free(remove_flags);
                     return 0;
                 }
@@ -530,6 +593,7 @@ static int value_ssa_compact_cross_block_removed_instructions(ValueSsaFunction *
 }
 
 static int value_ssa_eliminate_dead_local_stores_across_straight_chain(ValueSsaFunction *function,
+    const unsigned char *address_taken_locals,
     ValueSsaError *error) {
     ValueSsaCfgAnalysis analysis;
     size_t *preorder = NULL;
@@ -539,7 +603,7 @@ static int value_ssa_eliminate_dead_local_stores_across_straight_chain(ValueSsaF
     size_t order_index;
     int ok = 0;
 
-    if (!function) {
+    if (!function || (!address_taken_locals && function->local_count > 0)) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-238: invalid cross-block local store DCE contract");
         return 0;
     }
@@ -586,12 +650,14 @@ static int value_ssa_eliminate_dead_local_stores_across_straight_chain(ValueSsaF
 
             switch (instruction->kind) {
             case VALUE_SSA_INSTR_LOAD_LOCAL:
-                if (instruction->as.load_slot.id < function->local_count) {
+                if (instruction->as.load_slot.id < function->local_count &&
+                    !address_taken_locals[instruction->as.load_slot.id]) {
                     state_row[instruction->as.load_slot.id].valid = 0;
                 }
                 break;
             case VALUE_SSA_INSTR_STORE_LOCAL:
-                if (instruction->as.store.slot.id < function->local_count) {
+                if (instruction->as.store.slot.id < function->local_count &&
+                    !address_taken_locals[instruction->as.store.slot.id]) {
                     ValueSsaPendingStoreSite *site = &state_row[instruction->as.store.slot.id];
 
                     if (site->valid) {
@@ -684,6 +750,10 @@ static int value_ssa_eliminate_dead_global_stores_across_straight_chain(const Va
                     state_row[instruction->as.load_slot.id].valid = 0;
                 }
                 break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                memset(state_row, 0, program->global_count * sizeof(ValueSsaPendingStoreSite));
+                break;
             case VALUE_SSA_INSTR_STORE_GLOBAL:
                 if (instruction->as.store.slot.id < program->global_count) {
                     ValueSsaPendingStoreSite *site = &state_row[instruction->as.store.slot.id];
@@ -721,13 +791,14 @@ cleanup_global_chain:
 
 static int value_ssa_eliminate_dead_local_stores_in_block(ValueSsaFunction *function,
     ValueSsaBasicBlock *block,
+    const unsigned char *address_taken_locals,
     ValueSsaError *error) {
     unsigned char *slot_observed = NULL;
     unsigned char *remove_flags = NULL;
     size_t instruction_index;
     size_t local_index;
 
-    if (!function || !block) {
+    if (!function || !block || (!address_taken_locals && function->local_count > 0)) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-223: invalid local store DCE contract");
         return 0;
     }
@@ -751,6 +822,12 @@ static int value_ssa_eliminate_dead_local_stores_in_block(ValueSsaFunction *func
     if (block->terminator.kind != VALUE_SSA_TERM_RETURN) {
         for (local_index = 0; local_index < function->local_count; ++local_index) {
             slot_observed[local_index] = 1;
+        }
+    } else {
+        for (local_index = 0; local_index < function->local_count; ++local_index) {
+            if (address_taken_locals[local_index]) {
+                slot_observed[local_index] = 1u;
+            }
         }
     }
 
@@ -844,6 +921,12 @@ static int value_ssa_eliminate_overwritten_global_stores_in_block(const ValueSsa
                 last_store_index[instruction->as.load_slot.id] = (size_t)-1;
             }
             break;
+        case VALUE_SSA_INSTR_LOAD_INDIRECT:
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            for (global_index = 0; global_index < program->global_count; ++global_index) {
+                last_store_index[global_index] = (size_t)-1;
+            }
+            break;
         case VALUE_SSA_INSTR_CALL:
             for (global_index = 0; global_index < program->global_count; ++global_index) {
                 last_store_index[global_index] = (size_t)-1;
@@ -880,10 +963,12 @@ int value_ssa_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         ValueSsaCfgAnalysis analysis;
+        ValueSsaDefUseAnalysis def_use;
         ValueSsaRenameState local_state;
         ValueSsaRenameState global_state;
         ValueSsaLocalRedundantStoreContext local_context;
         ValueSsaGlobalRedundantStoreContext global_context;
+        unsigned char *address_taken_locals = NULL;
         int ok = 1;
 
         if (!function->has_body || (function->local_count == 0 && program->global_count == 0)) {
@@ -891,15 +976,34 @@ int value_ssa_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError
         }
 
         value_ssa_cfg_analysis_init(&analysis);
+        value_ssa_def_use_analysis_init(&def_use);
         value_ssa_rename_state_init(&local_state);
         value_ssa_rename_state_init(&global_state);
 
-        ok = value_ssa_compute_cfg_analysis(function, &analysis, error);
+        ok = value_ssa_compute_cfg_analysis(function, &analysis, error) &&
+            value_ssa_compute_def_use_analysis(function, &def_use, error);
+
+        if (ok && function->local_count > 0) {
+            address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+            if (!address_taken_locals || !value_ssa_collect_address_taken_locals(function, address_taken_locals)) {
+                free(address_taken_locals);
+                value_ssa_rename_state_free(&global_state);
+                value_ssa_rename_state_free(&local_state);
+                value_ssa_cfg_analysis_free(&analysis);
+                value_ssa_set_error(error,
+                    0,
+                    0,
+                    "VALUE-SSA-236: failed preparing local address-taken flags in function '%s'",
+                    function->name ? function->name : "<anon>");
+                return 0;
+            }
+        }
 
         if (ok && function->local_count > 0) {
             local_context.function = function;
             local_context.analysis = &analysis;
             local_context.state = &local_state;
+            local_context.address_taken_locals = address_taken_locals;
             ok = value_ssa_rename_state_prepare(&local_state, function->local_count, error) &&
                 value_ssa_walk_dominator_tree(function,
                     &analysis,
@@ -913,6 +1017,7 @@ int value_ssa_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError
             global_context.program = program;
             global_context.function = function;
             global_context.analysis = &analysis;
+            global_context.def_use = &def_use;
             global_context.state = &global_state;
             ok = value_ssa_rename_state_prepare(&global_state, program->global_count, error) &&
                 value_ssa_walk_dominator_tree(function,
@@ -925,7 +1030,9 @@ int value_ssa_eliminate_redundant_stores(ValueSsaProgram *program, ValueSsaError
 
         value_ssa_rename_state_free(&global_state);
         value_ssa_rename_state_free(&local_state);
+        value_ssa_def_use_analysis_free(&def_use);
         value_ssa_cfg_analysis_free(&analysis);
+        free(address_taken_locals);
         if (!ok) {
             return 0;
         }
@@ -944,26 +1051,57 @@ int value_ssa_eliminate_dead_stores(ValueSsaProgram *program, ValueSsaError *err
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
+        unsigned char *address_taken_locals = NULL;
         size_t block_index;
 
         if (!function->has_body) {
             continue;
         }
 
-        for (block_index = 0; block_index < function->block_count; ++block_index) {
-            if (!value_ssa_eliminate_dead_local_stores_in_block(function, &function->blocks[block_index], error) ||
-                !value_ssa_eliminate_overwritten_global_stores_in_block(program,
-                    function,
-                    &function->blocks[block_index],
-                    error)) {
+        if (function->local_count > 0) {
+            address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+            if (!address_taken_locals) {
+                value_ssa_set_error(error,
+                    0,
+                    0,
+                    "VALUE-SSA-229: out of memory preparing local address-taken flags in function '%s'",
+                    function->name ? function->name : "<anon>");
+                return 0;
+            }
+            if (!value_ssa_collect_address_taken_locals(function, address_taken_locals)) {
+                free(address_taken_locals);
+                value_ssa_set_error(error,
+                    0,
+                    0,
+                    "VALUE-SSA-229: failed collecting local address-taken flags in function '%s'",
+                    function->name ? function->name : "<anon>");
                 return 0;
             }
         }
 
-        if (!value_ssa_eliminate_dead_local_stores_across_straight_chain(function, error) ||
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            if (!value_ssa_eliminate_dead_local_stores_in_block(function,
+                    &function->blocks[block_index],
+                    address_taken_locals,
+                    error) ||
+                !value_ssa_eliminate_overwritten_global_stores_in_block(program,
+                    function,
+                    &function->blocks[block_index],
+                    error)) {
+                free(address_taken_locals);
+                return 0;
+            }
+        }
+
+        if (!value_ssa_eliminate_dead_local_stores_across_straight_chain(function,
+                address_taken_locals,
+                error) ||
             !value_ssa_eliminate_dead_global_stores_across_straight_chain(program, function, error)) {
+            free(address_taken_locals);
             return 0;
         }
+
+        free(address_taken_locals);
     }
 
     return value_ssa_verify_program(program, error);

@@ -430,6 +430,145 @@ static int test_lower_ir_verifier_rejects_temp_use_before_definition(void) {
     return ok;
 }
 
+static int test_lower_ir_verifier_rejects_load_indirect_addr_use_before_definition(void) {
+    LowerIrProgram program;
+    LowerIrError error;
+    LowerIrFunction *function;
+    LowerIrBasicBlock *entry_block;
+    LowerIrBasicBlock *then_block;
+    LowerIrBasicBlock *else_block;
+    LowerIrBasicBlock *join_block;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+    int ok;
+
+    lower_ir_program_init(&program);
+    if (!lower_ir_program_append_function(&program, "main", 1, &function, &error) ||
+        !lower_ir_function_append_block(function, NULL, &entry_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &join_block, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(entry_block, lower_ir_value_immediate(1), 1u, 2u, &error) ||
+        !lower_ir_block_set_jump(else_block, 3u, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, &error) ||
+        !lower_ir_block_set_jump(then_block, 3u, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(temp0);
+    if (!lower_ir_block_append_instruction(join_block, &instruction, &error) ||
+        !lower_ir_block_set_return(join_block, lower_ir_value_temp(temp1), &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_verifier_rejects("LOWER-IR-VERIFY-LOAD-INDIRECT-ADDR-BEFORE-DEF",
+        &program,
+        "LOWER-IR-VERIFY-059");
+    lower_ir_program_free(&program);
+    return ok;
+}
+
+static int test_lower_ir_verifier_rejects_store_indirect_inputs_use_before_definition(void) {
+    LowerIrProgram program;
+    LowerIrError error;
+    LowerIrFunction *function;
+    LowerIrBasicBlock *entry_block;
+    LowerIrBasicBlock *then_block;
+    LowerIrBasicBlock *else_block;
+    LowerIrBasicBlock *join_block;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+    int ok;
+
+    lower_ir_program_init(&program);
+    if (!lower_ir_program_append_function(&program, "main", 1, &function, &error) ||
+        !lower_ir_function_append_block(function, NULL, &entry_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, &error) ||
+        !lower_ir_function_append_block(function, NULL, &join_block, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(function);
+    temp1 = lower_ir_function_allocate_temp(function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    if (!lower_ir_block_set_branch(entry_block, lower_ir_value_immediate(1), 1u, 2u, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.mov_value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, &error) ||
+        !lower_ir_block_set_jump(then_block, 3u, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, &error) ||
+        !lower_ir_block_set_jump(else_block, 3u, &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp0);
+    instruction.as.store_indirect.value = lower_ir_value_temp(temp1);
+    if (!lower_ir_block_append_instruction(join_block, &instruction, &error) ||
+        !lower_ir_block_set_return(join_block, lower_ir_value_immediate(0), &error)) {
+        lower_ir_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_verifier_rejects("LOWER-IR-VERIFY-STORE-INDIRECT-INPUTS-BEFORE-DEF",
+        &program,
+        "LOWER-IR-VERIFY-059");
+    lower_ir_program_free(&program);
+    return ok;
+}
+
 static int test_lower_ir_verifier_rejects_duplicate_temp_definition_in_block(void) {
     LowerIrProgram program;
     LowerIrError error;
@@ -1047,6 +1186,8 @@ int main(void) {
     ok &= test_lower_ir_verifier_rejects_unreachable_block();
     ok &= test_lower_ir_verifier_rejects_temp_without_definition();
     ok &= test_lower_ir_verifier_rejects_temp_use_before_definition();
+    ok &= test_lower_ir_verifier_rejects_load_indirect_addr_use_before_definition();
+    ok &= test_lower_ir_verifier_rejects_store_indirect_inputs_use_before_definition();
     ok &= test_lower_ir_verifier_rejects_duplicate_temp_definition_in_block();
     ok &= test_lower_ir_verifier_rejects_hidden_store_result_fake_temp_definition();
     ok &= test_lower_ir_verifier_accepts_join_temp_multi_definition();

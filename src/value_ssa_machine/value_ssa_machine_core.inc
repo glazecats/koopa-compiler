@@ -127,6 +127,53 @@ void value_ssa_allocate_rewrite_machine_report_free(ValueSsaAllocateRewriteMachi
     value_ssa_allocate_rewrite_machine_report_init(report);
 }
 
+static int value_ssa_machine_find_bank_index_by_register_id(const ValueSsaMachineRegisterBank *bank,
+    size_t machine_register_id,
+    size_t *out_register_index) {
+    size_t register_index;
+
+    if (out_register_index) {
+        *out_register_index = (size_t)-1;
+    }
+    if (!bank || !out_register_index || (bank->register_count > 0 && !bank->registers)) {
+        return 0;
+    }
+
+    for (register_index = 0; register_index < bank->register_count; ++register_index) {
+        if (bank->registers[register_index].register_id == machine_register_id) {
+            *out_register_index = register_index;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int value_ssa_machine_register_bank_contract_valid(const ValueSsaMachineRegisterBank *bank) {
+    size_t lhs_index;
+    size_t rhs_index;
+
+    if (!bank) {
+        return 0;
+    }
+    if (bank->register_count > 0 && !bank->registers) {
+        return 0;
+    }
+    for (lhs_index = 0; lhs_index < bank->register_count; ++lhs_index) {
+        if (bank->registers[lhs_index].caller_clobbered && bank->registers[lhs_index].callee_preserved) {
+            return 0;
+        }
+    }
+    for (lhs_index = 0; lhs_index < bank->register_count; ++lhs_index) {
+        for (rhs_index = lhs_index + 1; rhs_index < bank->register_count; ++rhs_index) {
+            if (bank->registers[lhs_index].register_id == bank->registers[rhs_index].register_id) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 int value_ssa_build_flat_machine_register_bank(size_t register_count,
     ValueSsaMachineRegisterBank *out_bank,
     ValueSsaError *error) {
@@ -224,7 +271,7 @@ int value_ssa_build_function_machine_allocation_view(const ValueSsaFunctionAlloc
     size_t *register_value_counts = NULL;
     int ok = 0;
 
-    if (!layout || !bank || !out_view) {
+    if (!layout || !out_view || !value_ssa_machine_register_bank_contract_valid(bank)) {
         value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-004: invalid function machine allocation view contract");
         return 0;
     }
@@ -308,7 +355,8 @@ int value_ssa_build_function_machine_allocation_view(const ValueSsaFunctionAlloc
             }
             if (!used_register_flags[placement->color]) {
                 used_register_flags[placement->color] = 1u;
-                out_view->used_machine_register_ids[out_view->used_machine_register_count++] = placement->color;
+                out_view->used_machine_register_ids[out_view->used_machine_register_count++] =
+                    bank->registers[placement->color].register_id;
             }
             ++register_value_counts[placement->color];
         } else if (placement->kind == VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_SPILL) {
@@ -330,17 +378,26 @@ int value_ssa_build_function_machine_allocation_view(const ValueSsaFunctionAlloc
 
         out_view->machine_register_group_count = out_view->used_machine_register_count;
         for (register_group_index = 0; register_group_index < out_view->used_machine_register_count; ++register_group_index) {
-            size_t register_id = out_view->used_machine_register_ids[register_group_index];
+            size_t machine_register_id = out_view->used_machine_register_ids[register_group_index];
+            size_t register_index = (size_t)-1;
             ValueSsaMachineRegisterValueGroup *group = &out_view->machine_register_groups[register_group_index];
 
-            group->machine_register_id = register_id;
-            group->machine_register_name = bank->registers[register_id].name;
-            group->value_count = register_value_counts[register_id];
+            if (!value_ssa_machine_find_bank_index_by_register_id(bank, machine_register_id, &register_index) ||
+                register_index >= bank->register_count) {
+                free(register_write_offsets);
+                value_ssa_function_machine_allocation_view_free(out_view);
+                value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-029: machine register id is missing from bank");
+                goto cleanup;
+            }
+
+            group->machine_register_id = machine_register_id;
+            group->machine_register_name = bank->registers[register_index].name;
+            group->value_count = register_value_counts[register_index];
             group->value_ids = group->value_count > 0 ? (size_t *)malloc(group->value_count * sizeof(size_t)) : NULL;
             if (group->value_count > 0 && !group->value_ids) {
                 free(register_write_offsets);
                 value_ssa_function_machine_allocation_view_free(out_view);
-                value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-029: out of memory building register-group members");
+                value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-030: out of memory building register-group members");
                 goto cleanup;
             }
         }
@@ -378,7 +435,7 @@ int value_ssa_build_program_machine_allocation_view(const ValueSsaProgramAllocat
     size_t function_index;
     int ok = 0;
 
-    if (!layout || !bank || !out_view) {
+    if (!layout || !out_view || !value_ssa_machine_register_bank_contract_valid(bank)) {
         value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-009: invalid program machine allocation view contract");
         return 0;
     }

@@ -214,6 +214,15 @@ static int value_ssa_verify_instruction(const ValueSsaProgram *program,
                 instruction->as.call.arg_count);
             return 0;
         }
+        if (instruction->as.call.arg_count == 0 && instruction->as.call.args) {
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-058: bb.%zu instruction %zu call has arg_count=0 but non-NULL args table",
+                block->id,
+                instruction_index);
+            return 0;
+        }
         for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
             if (!value_ssa_verify_value_ref(instruction->as.call.args[arg_index],
                     function->next_value_id,

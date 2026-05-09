@@ -111,6 +111,9 @@ int value_ssa_dump_allocate_rewrite_machine_report_artifact(
     const ValueSsaProgramMachineAllocationView *view = NULL;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-024: invalid allocate+rewrite machine report artifact contract");
@@ -124,16 +127,22 @@ int value_ssa_dump_allocate_rewrite_machine_report_artifact(
     }
 
     builder.data = NULL;
-    builder.length = 0;
+   builder.length = 0;
     builder.capacity = 0;
     *out_text = NULL;
 
     if (!value_ssa_machine_append_format(&builder,
             "allocate+rewrite machine-report allocation_rounds=%zu rewrite_rounds=%zu\n",
             allocation_rounds,
-            rewrite_rounds) ||
-        !value_ssa_dump_program_machine_allocation_view(view, &machine_text, error) ||
-        !value_ssa_machine_append_format(&builder, "%s", machine_text ? machine_text : "")) {
+            rewrite_rounds)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-026: out of memory building allocate+rewrite machine report");
+        goto cleanup;
+    }
+    if (!value_ssa_dump_program_machine_allocation_view(view, &machine_text, error)) {
+        goto cleanup;
+    }
+    if (!value_ssa_machine_append_format(&builder, "%s", machine_text ? machine_text : "")) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-026: out of memory building allocate+rewrite machine report");
         goto cleanup;
@@ -157,6 +166,9 @@ int value_ssa_dump_allocate_rewrite_machine_report(
     ValueSsaAllocateRewriteMachineReport machine_report;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!report || !bank || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-027: invalid allocate+rewrite machine report dump contract");
@@ -206,6 +218,9 @@ int value_ssa_allocate_and_rewrite_program_single_block_spills_machine_report_du
     ValueSsaAllocateRewriteMachineReport machine_report;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!program || !bank || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-055: invalid allocate+rewrite machine report dump entry contract");
@@ -297,6 +312,9 @@ int value_ssa_allocate_function_machine_view_dump(const ValueSsaFunction *functi
     ValueSsaFunctionMachineAllocationView view;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!function || !bank || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-062: invalid function machine-view dump entry contract");
@@ -319,6 +337,9 @@ int value_ssa_allocate_program_machine_view_dump(const ValueSsaProgram *program,
     ValueSsaProgramMachineAllocationView view;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!program || !bank || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-063: invalid program machine-view dump entry contract");
@@ -341,6 +362,9 @@ int value_ssa_allocate_function_flat_machine_view_dump(const ValueSsaFunction *f
     ValueSsaMachineRegisterBank bank;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!function || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-064: invalid flat function machine-view dump entry contract");
@@ -363,6 +387,9 @@ int value_ssa_allocate_program_flat_machine_view_dump(const ValueSsaProgram *pro
     ValueSsaMachineRegisterBank bank;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!program || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-065: invalid flat program machine-view dump entry contract");
@@ -386,6 +413,9 @@ int value_ssa_allocate_and_rewrite_program_single_block_spills_flat_machine_repo
     ValueSsaMachineRegisterBank bank;
     int ok = 0;
 
+    if (out_text) {
+        *out_text = NULL;
+    }
     if (!program || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-057: invalid flat-machine report dump entry contract");

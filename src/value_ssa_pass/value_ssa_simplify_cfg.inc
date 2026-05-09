@@ -597,7 +597,9 @@ static int value_ssa_compact_value_ids(ValueSsaFunction *function, ValueSsaError
 
         switch (block->terminator.kind) {
         case VALUE_SSA_TERM_RETURN:
-            value_ssa_remap_value_ref(&block->terminator.as.return_value, old_to_new_value);
+            if (block->terminator.has_return_value) {
+                value_ssa_remap_value_ref(&block->terminator.as.return_value, old_to_new_value);
+            }
             break;
         case VALUE_SSA_TERM_BRANCH:
             value_ssa_remap_value_ref(&block->terminator.as.branch.condition, old_to_new_value);

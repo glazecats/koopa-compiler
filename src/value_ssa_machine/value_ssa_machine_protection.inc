@@ -4,6 +4,581 @@
 #include "value_ssa_machine.c"
 #else
 
+static int value_ssa_machine_protection_agenda_dump_contract_valid(
+    const ValueSsaMachineProtectionAgenda *agenda) {
+    size_t item_index;
+    size_t actual_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!agenda) {
+        return 0;
+    }
+    if (agenda->item_count > 0 && !agenda->items) {
+        return 0;
+    }
+    if (agenda->item_count > agenda->value_count) {
+        return 0;
+    }
+    for (item_index = 0; item_index < agenda->item_count; ++item_index) {
+        const ValueSsaMachineProtectionAgendaItem *item = &agenda->items[item_index];
+
+        if (item->risk_class <= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE ||
+            item->risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
+            return 0;
+        }
+        ++actual_risk_class_counts[item->risk_class];
+    }
+    for (item_index = 0; item_index < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++item_index) {
+        if (agenda->risk_class_counts[item_index] != actual_risk_class_counts[item_index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_protection_report_dump_contract_valid(
+    const ValueSsaProgramMachineProtectionReport *report) {
+    size_t function_index;
+    size_t risk_class;
+    size_t actual_total_value_count = 0;
+    size_t actual_total_item_count = 0;
+    size_t actual_functions_with_items_count = 0;
+    size_t actual_total_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+    size_t actual_functions_with_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_items_count > 0 && !report->function_indices_with_items) {
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaMachineProtectionAgenda *agenda = &report->function_views[function_index].agenda;
+
+        if (!value_ssa_machine_protection_agenda_dump_contract_valid(agenda)) {
+            return 0;
+        }
+        actual_total_value_count += agenda->value_count;
+        actual_total_item_count += agenda->item_count;
+        if (agenda->item_count > 0) {
+            if (actual_functions_with_items_count >= report->functions_with_items_count ||
+                report->function_indices_with_items[actual_functions_with_items_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_items_count;
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            actual_total_risk_class_counts[risk_class] += agenda->risk_class_counts[risk_class];
+            if (risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE ||
+                agenda->risk_class_counts[risk_class] == 0) {
+                continue;
+            }
+            if (actual_functions_with_risk_class_counts[risk_class] >= report->functions_with_risk_class_counts[risk_class] ||
+                report->function_indices_with_risk_class[risk_class]
+                        [actual_functions_with_risk_class_counts[risk_class]] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_risk_class_counts[risk_class];
+        }
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (report->functions_with_risk_class_counts[risk_class] > 0 &&
+            !report->function_indices_with_risk_class[risk_class]) {
+            return 0;
+        }
+        if (report->total_risk_class_counts[risk_class] != actual_total_risk_class_counts[risk_class] ||
+            report->functions_with_risk_class_counts[risk_class] != actual_functions_with_risk_class_counts[risk_class]) {
+            return 0;
+        }
+    }
+    if (report->functions_with_items_count != actual_functions_with_items_count ||
+        report->total_value_count != actual_total_value_count || report->total_item_count != actual_total_item_count) {
+        return 0;
+    }
+    return 1;
+}
+
+static ValueSsaMachinePreservationReason value_ssa_machine_preservation_hint_candidate_reason_code(
+    const ValueSsaMachinePreservationHintCandidate *candidate);
+
+static int value_ssa_machine_register_protection_pressure_view_dump_contract_valid(
+    const ValueSsaMachineRegisterProtectionPressureView *view) {
+    size_t item_index;
+    size_t other_index;
+    size_t actual_total_item_count = 0;
+    size_t actual_total_protection_priority = 0;
+    size_t actual_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!view) {
+        return 0;
+    }
+    if (view->pressured_register_count > 0 && !view->items) {
+        return 0;
+    }
+    for (item_index = 0; item_index < view->pressured_register_count; ++item_index) {
+        const ValueSsaMachineRegisterProtectionPressureItem *item = &view->items[item_index];
+        size_t actual_item_risk_count = 0;
+        size_t risk_class;
+
+        if (item->item_count > 0 && !item->value_ids) {
+            return 0;
+        }
+        if (item->item_count == 0 || item->total_protection_priority == 0 ||
+            item->max_protection_priority == 0 || item->max_protection_priority > item->total_protection_priority) {
+            return 0;
+        }
+        for (other_index = item_index + 1; other_index < view->pressured_register_count; ++other_index) {
+            if (item->machine_register_id == view->items[other_index].machine_register_id) {
+                return 0;
+            }
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            actual_item_risk_count += item->risk_class_counts[risk_class];
+        }
+        if (actual_item_risk_count != item->item_count) {
+            return 0;
+        }
+        actual_total_item_count += item->item_count;
+        actual_total_protection_priority += item->total_protection_priority;
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            actual_risk_class_counts[risk_class] += item->risk_class_counts[risk_class];
+        }
+    }
+    if (view->total_item_count != actual_total_item_count ||
+        view->total_protection_priority != actual_total_protection_priority) {
+        return 0;
+    }
+    for (item_index = 0; item_index < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++item_index) {
+        if (view->risk_class_counts[item_index] != actual_risk_class_counts[item_index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_machine_function_register_protection_hotspot_view_contract_valid(
+    const ValueSsaFunctionMachineRegisterProtectionHotspotView *view) {
+    size_t risk_class;
+    size_t positive_risk_class_count = 0;
+    size_t actual_item_risk_count = 0;
+
+    if (!view) {
+        return 0;
+    }
+    if (!view->has_hotspot) {
+        if (view->hotspot.machine_register_name || view->hotspot.item_count > 0 ||
+            view->hotspot.total_protection_priority > 0 || view->hotspot.max_protection_priority > 0) {
+            return 0;
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            if (view->hotspot.risk_class_counts[risk_class] > 0) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (!view->hotspot.machine_register_name || view->hotspot.item_count == 0 ||
+        view->hotspot.total_protection_priority == 0 || view->hotspot.max_protection_priority == 0 ||
+        view->hotspot.max_protection_priority > view->hotspot.total_protection_priority ||
+        view->hotspot.machine_register_id == (size_t)-1) {
+        return 0;
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (view->hotspot.risk_class_counts[risk_class] > 0) {
+            ++positive_risk_class_count;
+        }
+        actual_item_risk_count += view->hotspot.risk_class_counts[risk_class];
+    }
+    if (positive_risk_class_count == 0 || actual_item_risk_count != view->hotspot.item_count) {
+        return 0;
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(
+    const ValueSsaProgramMachineRegisterProtectionPressureReport *report) {
+    size_t function_index;
+    size_t risk_class;
+    size_t actual_total_value_count = 0;
+    size_t actual_total_item_count = 0;
+    size_t actual_total_protection_priority = 0;
+    size_t actual_total_pressured_register_count = 0;
+    size_t actual_functions_with_pressure_count = 0;
+    size_t actual_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+    size_t actual_functions_with_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_pressure_count > 0 && !report->function_indices_with_pressure) {
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaMachineRegisterProtectionPressureView *pressure_view =
+            &report->function_views[function_index].pressure_view;
+
+        if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(pressure_view)) {
+            return 0;
+        }
+        actual_total_value_count += pressure_view->total_value_count;
+        actual_total_item_count += pressure_view->total_item_count;
+        actual_total_protection_priority += pressure_view->total_protection_priority;
+        actual_total_pressured_register_count += pressure_view->pressured_register_count;
+        if (pressure_view->pressured_register_count > 0) {
+            if (actual_functions_with_pressure_count >= report->functions_with_pressure_count ||
+                report->function_indices_with_pressure[actual_functions_with_pressure_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_pressure_count;
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            actual_risk_class_counts[risk_class] += pressure_view->risk_class_counts[risk_class];
+            if (risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE ||
+                pressure_view->risk_class_counts[risk_class] == 0) {
+                continue;
+            }
+            if (actual_functions_with_risk_class_counts[risk_class] >= report->functions_with_risk_class_counts[risk_class] ||
+                report->function_indices_with_risk_class[risk_class]
+                        [actual_functions_with_risk_class_counts[risk_class]] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_risk_class_counts[risk_class];
+        }
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (report->functions_with_risk_class_counts[risk_class] > 0 &&
+            !report->function_indices_with_risk_class[risk_class]) {
+            return 0;
+        }
+        if (report->risk_class_counts[risk_class] != actual_risk_class_counts[risk_class] ||
+            report->functions_with_risk_class_counts[risk_class] != actual_functions_with_risk_class_counts[risk_class]) {
+            return 0;
+        }
+    }
+    if (report->functions_with_pressure_count != actual_functions_with_pressure_count ||
+        report->total_value_count != actual_total_value_count || report->total_item_count != actual_total_item_count ||
+        report->total_protection_priority != actual_total_protection_priority ||
+        report->total_pressured_register_count != actual_total_pressured_register_count) {
+        return 0;
+    }
+    return 1;
+}
+
+static int value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(
+    const ValueSsaFunctionMachinePreservationHintView *view) {
+    size_t risk_class;
+    size_t positive_risk_class_count = 0;
+    size_t candidate_index;
+    size_t actual_source_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!view) {
+        return 0;
+    }
+    if (!view->has_hint) {
+        if (view->source_machine_register_name || view->suggested_machine_register_name || view->protected_item_count > 0 ||
+            view->protected_total_priority > 0 || view->protected_max_priority > 0 || view->candidate_count > 0 ||
+            view->candidates) {
+            return 0;
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            if (view->source_risk_class_counts[risk_class] > 0) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (view->candidate_count == 0 || !view->candidates) {
+        return 0;
+    }
+    if (!view->source_machine_register_name || !view->suggested_machine_register_name ||
+        view->protected_item_count == 0 || view->protected_total_priority == 0 || view->protected_max_priority == 0 ||
+        view->primary_reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+        return 0;
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (view->source_risk_class_counts[risk_class] > 0) {
+            ++positive_risk_class_count;
+        }
+        actual_source_risk_class_counts[risk_class] += view->source_risk_class_counts[risk_class];
+    }
+    if (positive_risk_class_count == 0) {
+        return 0;
+    }
+    for (candidate_index = 0; candidate_index < view->candidate_count; ++candidate_index) {
+        const ValueSsaMachinePreservationHintCandidate *candidate = &view->candidates[candidate_index];
+
+        if (!candidate->machine_register_name || !candidate->suggested_machine_register_name || !candidate->primary_reason ||
+            candidate->protected_item_count == 0 || candidate->protected_total_priority == 0 ||
+            candidate->protected_max_priority == 0) {
+            return 0;
+        }
+        if (candidate->protected_item_count != view->protected_item_count ||
+            candidate->protected_total_priority != view->protected_total_priority ||
+            candidate->protected_max_priority != view->protected_max_priority) {
+            return 0;
+        }
+        if (strcmp(candidate->primary_reason,
+                value_ssa_machine_preservation_reason_name(
+                    value_ssa_machine_preservation_hint_candidate_reason_code(candidate))) != 0) {
+            return 0;
+        }
+        if (candidate->suggested_register_total_priority > 0 && candidate->suggested_register_max_priority == 0) {
+            return 0;
+        }
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (view->source_risk_class_counts[risk_class] != actual_source_risk_class_counts[risk_class]) {
+            return 0;
+        }
+    }
+    if (view->primary_reason != value_ssa_machine_preservation_hint_candidate_reason_code(&view->candidates[0]) ||
+        view->suggested_machine_register_id != view->candidates[0].suggested_machine_register_id ||
+        strcmp(view->suggested_machine_register_name, view->candidates[0].suggested_machine_register_name) != 0 ||
+        strcmp(view->primary_reason ? value_ssa_machine_preservation_reason_name(view->primary_reason) : "unknown",
+            view->candidates[0].primary_reason ? view->candidates[0].primary_reason : "unknown") != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(
+    const ValueSsaProgramMachinePreservationHintReport *report) {
+    size_t function_index;
+    size_t reason_index;
+    size_t actual_functions_with_hints_count = 0;
+    size_t actual_reason_counts[VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT] = {0};
+    size_t actual_functions_with_reason_counts[VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_hints_count > 0 && !report->function_indices_with_hints) {
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaFunctionMachinePreservationHintView *view = &report->function_views[function_index];
+
+        if (!value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(view)) {
+            return 0;
+        }
+        if (!view->has_hint) {
+            continue;
+        }
+        if (actual_functions_with_hints_count >= report->functions_with_hints_count ||
+            report->function_indices_with_hints[actual_functions_with_hints_count] != function_index) {
+            return 0;
+        }
+        ++actual_functions_with_hints_count;
+        if (view->primary_reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+            return 0;
+        }
+        if (actual_functions_with_reason_counts[view->primary_reason] >= report->functions_with_reason_counts[view->primary_reason] ||
+            report->function_indices_with_reason[view->primary_reason]
+                    [actual_functions_with_reason_counts[view->primary_reason]] != function_index) {
+            return 0;
+        }
+        ++actual_reason_counts[view->primary_reason];
+        ++actual_functions_with_reason_counts[view->primary_reason];
+    }
+    for (reason_index = 0; reason_index < VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT; ++reason_index) {
+        if (report->functions_with_reason_counts[reason_index] > 0 &&
+            !report->function_indices_with_reason[reason_index]) {
+            return 0;
+        }
+        if (report->reason_counts[reason_index] != actual_reason_counts[reason_index] ||
+            report->functions_with_reason_counts[reason_index] != actual_functions_with_reason_counts[reason_index]) {
+            return 0;
+        }
+    }
+    if (report->functions_with_hints_count != actual_functions_with_hints_count) {
+        return 0;
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(
+    const ValueSsaProgramMachineRegisterProtectionHotspotReport *report) {
+    size_t function_index;
+    size_t actual_total_hotspot_priority = 0;
+    size_t actual_total_hotspot_item_count = 0;
+    size_t actual_functions_with_hotspots_count = 0;
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_hotspots_count > 0 && !report->function_indices_with_hotspots) {
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaFunctionMachineRegisterProtectionHotspotView *view = &report->function_views[function_index];
+
+        if (!value_ssa_machine_function_register_protection_hotspot_view_contract_valid(view)) {
+            return 0;
+        }
+        if (!view->has_hotspot) {
+            continue;
+        }
+        if (actual_functions_with_hotspots_count >= report->functions_with_hotspots_count ||
+            report->function_indices_with_hotspots[actual_functions_with_hotspots_count] != function_index) {
+            return 0;
+        }
+        ++actual_functions_with_hotspots_count;
+        actual_total_hotspot_priority += view->hotspot.total_protection_priority;
+        actual_total_hotspot_item_count += view->hotspot.item_count;
+    }
+    if (report->functions_with_hotspots_count != actual_functions_with_hotspots_count ||
+        report->total_hotspot_priority != actual_total_hotspot_priority ||
+        report->total_hotspot_item_count != actual_total_hotspot_item_count) {
+        return 0;
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_planning_report_dump_contract_valid(
+    const ValueSsaProgramMachinePlanningReport *report) {
+    size_t risk_class;
+    size_t function_index;
+    size_t actual_total_value_count = 0;
+    size_t actual_total_pressure_item_count = 0;
+    size_t actual_total_pressure_priority = 0;
+    size_t actual_total_hotspot_priority = 0;
+    size_t actual_total_hint_priority = 0;
+    size_t actual_functions_with_pressure_count = 0;
+    size_t actual_functions_with_hotspots_count = 0;
+    size_t actual_functions_with_hints_count = 0;
+    size_t actual_pressure_reason_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+    size_t actual_functions_with_pressure_reason_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+    size_t actual_hint_reason_counts[VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT] = {0};
+    size_t actual_functions_with_hint_reason_counts[VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_pressure_count > 0 && !report->function_indices_with_pressure) {
+        return 0;
+    }
+    if (report->functions_with_hotspots_count > 0 && !report->function_indices_with_hotspots) {
+        return 0;
+    }
+    if (report->functions_with_hints_count > 0 && !report->function_indices_with_hints) {
+        return 0;
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (report->functions_with_pressure_reason_counts[risk_class] > 0 &&
+            !report->function_indices_with_pressure_reason[risk_class]) {
+            return 0;
+        }
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT; ++risk_class) {
+        if (report->functions_with_hint_reason_counts[risk_class] > 0 &&
+            !report->function_indices_with_hint_reason[risk_class]) {
+            return 0;
+        }
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaFunctionMachinePlanningView *view = &report->function_views[function_index];
+
+        if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(&view->pressure_view) ||
+            !value_ssa_machine_function_register_protection_hotspot_view_contract_valid(&view->hotspot_view) ||
+            !value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(
+                &view->preservation_hint_view)) {
+            return 0;
+        }
+        actual_total_value_count += view->pressure_view.total_value_count;
+        actual_total_pressure_item_count += view->pressure_view.total_item_count;
+        actual_total_pressure_priority += view->pressure_view.total_protection_priority;
+        if (view->pressure_view.pressured_register_count > 0) {
+            if (actual_functions_with_pressure_count >= report->functions_with_pressure_count ||
+                report->function_indices_with_pressure[actual_functions_with_pressure_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_pressure_count;
+            for (risk_class = VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_CROSSING;
+                 risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT;
+                 ++risk_class) {
+                if (view->pressure_view.risk_class_counts[risk_class] == 0) {
+                    continue;
+                }
+                if (actual_functions_with_pressure_reason_counts[risk_class] >=
+                    report->functions_with_pressure_reason_counts[risk_class] ||
+                    report->function_indices_with_pressure_reason[risk_class]
+                            [actual_functions_with_pressure_reason_counts[risk_class]] != function_index) {
+                    return 0;
+                }
+                ++actual_pressure_reason_counts[risk_class];
+                ++actual_functions_with_pressure_reason_counts[risk_class];
+            }
+        }
+        if (view->hotspot_view.has_hotspot) {
+            if (actual_functions_with_hotspots_count >= report->functions_with_hotspots_count ||
+                report->function_indices_with_hotspots[actual_functions_with_hotspots_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_hotspots_count;
+            actual_total_hotspot_priority += view->hotspot_view.hotspot.total_protection_priority;
+        }
+        if (view->preservation_hint_view.has_hint) {
+            ValueSsaMachinePreservationReason reason = view->preservation_hint_view.primary_reason;
+
+            if (actual_functions_with_hints_count >= report->functions_with_hints_count ||
+                report->function_indices_with_hints[actual_functions_with_hints_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_hints_count;
+            actual_total_hint_priority += view->preservation_hint_view.protected_total_priority;
+            if (reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+                return 0;
+            }
+            if (actual_functions_with_hint_reason_counts[reason] >= report->functions_with_hint_reason_counts[reason] ||
+                report->function_indices_with_hint_reason[reason]
+                        [actual_functions_with_hint_reason_counts[reason]] != function_index) {
+                return 0;
+            }
+            ++actual_hint_reason_counts[reason];
+            ++actual_functions_with_hint_reason_counts[reason];
+        }
+    }
+    if (report->functions_with_pressure_count != actual_functions_with_pressure_count ||
+        report->functions_with_hotspots_count != actual_functions_with_hotspots_count ||
+        report->functions_with_hints_count != actual_functions_with_hints_count ||
+        report->total_value_count != actual_total_value_count ||
+        report->total_pressure_item_count != actual_total_pressure_item_count ||
+        report->total_pressure_priority != actual_total_pressure_priority ||
+        report->total_hotspot_priority != actual_total_hotspot_priority ||
+        report->total_hint_priority != actual_total_hint_priority) {
+        return 0;
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+        if (report->pressure_reason_counts[risk_class] != actual_pressure_reason_counts[risk_class] ||
+            report->functions_with_pressure_reason_counts[risk_class] !=
+                actual_functions_with_pressure_reason_counts[risk_class]) {
+            return 0;
+        }
+    }
+    for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT; ++risk_class) {
+        if (report->hint_reason_counts[risk_class] != actual_hint_reason_counts[risk_class] ||
+            report->functions_with_hint_reason_counts[risk_class] !=
+                actual_functions_with_hint_reason_counts[risk_class]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int value_ssa_machine_compare_protection_items(
     const ValueSsaMachineProtectionAgendaItem *lhs,
     const ValueSsaMachineProtectionAgendaItem *rhs) {
@@ -109,6 +684,29 @@ static void value_ssa_machine_sort_register_pressure_view(
     }
 }
 
+static int value_ssa_machine_find_pressure_used_register_index(
+    const ValueSsaFunctionMachineAllocationView *machine_view,
+    size_t machine_register_id,
+    size_t *out_used_index) {
+    size_t used_index;
+
+    if (out_used_index) {
+        *out_used_index = (size_t)-1;
+    }
+    if (!machine_view || !out_used_index || !machine_view->used_machine_register_ids) {
+        return 0;
+    }
+
+    for (used_index = 0; used_index < machine_view->used_machine_register_count; ++used_index) {
+        if (machine_view->used_machine_register_ids[used_index] == machine_register_id) {
+            *out_used_index = used_index;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int value_ssa_machine_compare_preservation_hint_candidates(
     const ValueSsaMachinePreservationHintCandidate *lhs,
     const ValueSsaMachinePreservationHintCandidate *rhs) {
@@ -159,13 +757,19 @@ static ValueSsaMachinePreservationReason value_ssa_machine_preservation_hint_can
     if (!candidate) {
         return VALUE_SSA_MACHINE_PRESERVATION_REASON_UNKNOWN;
     }
-    if (candidate->suggested_register_total_priority > 0) {
-        return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LOWER_PROTECTION_PRESSURE;
+    if (candidate->suggested_register_item_count == 0) {
+        return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_EMPTY;
     }
-    if (candidate->suggested_register_item_count > 0) {
+    if (candidate->suggested_register_total_priority == 0) {
         return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED;
     }
-    return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_EMPTY;
+    if (candidate->suggested_register_total_priority < candidate->protected_total_priority) {
+        return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LOWER_PROTECTION_PRESSURE;
+    }
+    if (candidate->suggested_register_item_count < candidate->protected_item_count) {
+        return VALUE_SSA_MACHINE_PRESERVATION_REASON_TARGET_LESS_OCCUPIED;
+    }
+    return VALUE_SSA_MACHINE_PRESERVATION_REASON_UNKNOWN;
 }
 
 static void value_ssa_machine_sort_preservation_hint_candidates(
@@ -877,10 +1481,10 @@ int value_ssa_build_machine_register_protection_pressure_view(
         goto cleanup;
     }
 
-    register_item_counts = (size_t *)calloc(machine_view->machine_register_count, sizeof(size_t));
-    register_write_offsets = (size_t *)calloc(machine_view->machine_register_count, sizeof(size_t));
+    register_item_counts = (size_t *)calloc(machine_view->used_machine_register_count, sizeof(size_t));
+    register_write_offsets = (size_t *)calloc(machine_view->used_machine_register_count, sizeof(size_t));
     out_view->items = (ValueSsaMachineRegisterProtectionPressureItem *)calloc(
-        machine_view->machine_register_count, sizeof(ValueSsaMachineRegisterProtectionPressureItem));
+        machine_view->used_machine_register_count, sizeof(ValueSsaMachineRegisterProtectionPressureItem));
     if (!register_item_counts || !register_write_offsets || !out_view->items) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-111: out of memory building register protection pressure view");
@@ -889,24 +1493,25 @@ int value_ssa_build_machine_register_protection_pressure_view(
 
     for (item_index = 0; item_index < agenda.item_count; ++item_index) {
         const ValueSsaMachineProtectionAgendaItem *agenda_item = &agenda.items[item_index];
-        size_t register_id = agenda_item->machine_register_id;
+        size_t used_index = (size_t)-1;
 
-        if (register_id >= machine_view->machine_register_count) {
+        if (!value_ssa_machine_find_pressure_used_register_index(
+                machine_view, agenda_item->machine_register_id, &used_index)) {
             value_ssa_machine_set_error(
                 error, 0, 0, "VALUE-SSA-MACHINE-112: invalid machine register id in protection agenda");
             goto cleanup;
         }
-        ++register_item_counts[register_id];
+        ++register_item_counts[used_index];
     }
 
-    for (register_index = 0; register_index < machine_view->machine_register_count; ++register_index) {
+    for (register_index = 0; register_index < machine_view->used_machine_register_count; ++register_index) {
         ValueSsaMachineRegisterProtectionPressureItem *item;
 
         if (register_item_counts[register_index] == 0) {
             continue;
         }
         item = &out_view->items[out_view->pressured_register_count++];
-        item->machine_register_id = register_index;
+        item->machine_register_id = machine_view->used_machine_register_ids[register_index];
         item->machine_register_name = NULL;
         item->item_count = register_item_counts[register_index];
         item->value_ids = (size_t *)malloc(item->item_count * sizeof(size_t));
@@ -919,19 +1524,26 @@ int value_ssa_build_machine_register_protection_pressure_view(
 
     for (item_index = 0; item_index < agenda.item_count; ++item_index) {
         const ValueSsaMachineProtectionAgendaItem *agenda_item = &agenda.items[item_index];
-        size_t register_id = agenda_item->machine_register_id;
+        size_t used_index = (size_t)-1;
         size_t pressured_index;
+
+        if (!value_ssa_machine_find_pressure_used_register_index(
+                machine_view, agenda_item->machine_register_id, &used_index)) {
+            value_ssa_machine_set_error(
+                error, 0, 0, "VALUE-SSA-MACHINE-112: invalid machine register id in protection agenda");
+            goto cleanup;
+        }
 
         for (pressured_index = 0; pressured_index < out_view->pressured_register_count; ++pressured_index) {
             ValueSsaMachineRegisterProtectionPressureItem *item = &out_view->items[pressured_index];
 
-            if (item->machine_register_id != register_id) {
+            if (item->machine_register_id != agenda_item->machine_register_id) {
                 continue;
             }
             if (!item->machine_register_name) {
                 item->machine_register_name = agenda_item->machine_register_name;
             }
-            item->value_ids[register_write_offsets[register_id]++] = agenda_item->value_id;
+            item->value_ids[register_write_offsets[used_index]++] = agenda_item->value_id;
             ++item->risk_class_counts[agenda_item->risk_class];
             item->total_protection_priority += agenda_item->protection_priority;
             if (agenda_item->protection_priority > item->max_protection_priority) {
@@ -1206,9 +1818,16 @@ int value_ssa_build_function_machine_preservation_hint_view(
     if (!source_item->machine_register_name || source_item->item_count == 0 || source_item->total_protection_priority == 0) {
         return 1;
     }
-    if (source_item->machine_register_id >= bank->register_count || !bank->registers ||
-        !bank->registers[source_item->machine_register_id].caller_clobbered) {
-        return 1;
+    {
+        size_t source_register_index = (size_t)-1;
+
+        if (!bank->registers ||
+            !value_ssa_machine_find_bank_index_by_register_id(
+                bank, source_item->machine_register_id, &source_register_index) ||
+            source_register_index >= bank->register_count ||
+            !bank->registers[source_register_index].caller_clobbered) {
+            return 1;
+        }
     }
 
     for (register_index = 0; register_index < bank->register_count; ++register_index) {
@@ -1840,7 +2459,22 @@ int value_ssa_machine_protection_agenda_get_summary(
     size_t *out_crossing_count,
     size_t *out_repeated_count,
     size_t *out_hot_count) {
-    if (!agenda) {
+    if (out_value_count) {
+        *out_value_count = 0;
+    }
+    if (out_item_count) {
+        *out_item_count = 0;
+    }
+    if (out_crossing_count) {
+        *out_crossing_count = 0;
+    }
+    if (out_repeated_count) {
+        *out_repeated_count = 0;
+    }
+    if (out_hot_count) {
+        *out_hot_count = 0;
+    }
+    if (!value_ssa_machine_protection_agenda_dump_contract_valid(agenda)) {
         return 0;
     }
 
@@ -1875,7 +2509,7 @@ int value_ssa_machine_protection_agenda_find_value(
     if (out_item) {
         *out_item = NULL;
     }
-    if (!agenda) {
+    if (!value_ssa_machine_protection_agenda_dump_contract_valid(agenda)) {
         return 0;
     }
 
@@ -1898,7 +2532,16 @@ int value_ssa_program_machine_protection_report_get_summary(
     size_t *out_function_count,
     size_t *out_total_value_count,
     size_t *out_total_item_count) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_item_count) {
+        *out_total_item_count = 0;
+    }
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -1921,7 +2564,8 @@ int value_ssa_program_machine_protection_report_get_function_view(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -1942,7 +2586,8 @@ int value_ssa_program_machine_protection_report_get_function_view_by_name(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report) || !function_name ||
+        !report->function_views) {
         return 0;
     }
 
@@ -1972,7 +2617,7 @@ int value_ssa_program_machine_protection_report_get_functions_with_items(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -1998,7 +2643,8 @@ int value_ssa_program_machine_protection_report_get_functions_with_risk_class(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
         risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE) {
         return 0;
     }
@@ -2023,7 +2669,31 @@ int value_ssa_machine_register_protection_pressure_view_get_summary(
     size_t *out_crossing_count,
     size_t *out_repeated_count,
     size_t *out_hot_count) {
-    if (!view) {
+    if (out_machine_register_count) {
+        *out_machine_register_count = 0;
+    }
+    if (out_pressured_register_count) {
+        *out_pressured_register_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_item_count) {
+        *out_total_item_count = 0;
+    }
+    if (out_total_protection_priority) {
+        *out_total_protection_priority = 0;
+    }
+    if (out_crossing_count) {
+        *out_crossing_count = 0;
+    }
+    if (out_repeated_count) {
+        *out_repeated_count = 0;
+    }
+    if (out_hot_count) {
+        *out_hot_count = 0;
+    }
+    if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(view)) {
         return 0;
     }
 
@@ -2063,7 +2733,7 @@ int value_ssa_machine_register_protection_pressure_view_get_register_item(
     if (out_item) {
         *out_item = NULL;
     }
-    if (!view || !out_item || !view->items) {
+    if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(view) || !out_item || !view->items) {
         return 0;
     }
 
@@ -2083,7 +2753,8 @@ int value_ssa_machine_register_protection_pressure_view_get_register_item_at(
     if (out_item) {
         *out_item = NULL;
     }
-    if (!view || !out_item || item_index >= view->pressured_register_count || !view->items) {
+    if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(view) || !out_item ||
+        item_index >= view->pressured_register_count || !view->items) {
         return 0;
     }
 
@@ -2098,7 +2769,22 @@ int value_ssa_program_machine_register_protection_pressure_report_get_summary(
     size_t *out_total_item_count,
     size_t *out_total_protection_priority,
     size_t *out_total_pressured_register_count) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_item_count) {
+        *out_total_item_count = 0;
+    }
+    if (out_total_protection_priority) {
+        *out_total_protection_priority = 0;
+    }
+    if (out_total_pressured_register_count) {
+        *out_total_pressured_register_count = 0;
+    }
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2127,7 +2813,8 @@ int value_ssa_program_machine_register_protection_pressure_report_get_function_v
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -2148,7 +2835,8 @@ int value_ssa_program_machine_register_protection_pressure_report_get_function_v
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report) ||
+        !function_name || !report->function_views) {
         return 0;
     }
 
@@ -2179,7 +2867,7 @@ int value_ssa_program_machine_register_protection_pressure_report_get_functions_
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2205,7 +2893,8 @@ int value_ssa_program_machine_register_protection_pressure_report_get_functions_
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
         risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE) {
         return 0;
     }
@@ -2242,7 +2931,7 @@ int value_ssa_function_machine_register_protection_hotspot_view_get_summary(
     if (out_hotspot) {
         *out_hotspot = NULL;
     }
-    if (!view) {
+    if (!value_ssa_machine_function_register_protection_hotspot_view_contract_valid(view)) {
         return 0;
     }
 
@@ -2271,7 +2960,22 @@ int value_ssa_program_machine_register_protection_hotspot_report_get_summary(
     size_t *out_total_item_count,
     size_t *out_total_hotspot_priority,
     size_t *out_total_hotspot_item_count) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_item_count) {
+        *out_total_item_count = 0;
+    }
+    if (out_total_hotspot_priority) {
+        *out_total_hotspot_priority = 0;
+    }
+    if (out_total_hotspot_item_count) {
+        *out_total_hotspot_item_count = 0;
+    }
+    if (!value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2300,7 +3004,8 @@ int value_ssa_program_machine_register_protection_hotspot_report_get_function_vi
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -2321,7 +3026,8 @@ int value_ssa_program_machine_register_protection_hotspot_report_get_function_vi
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(report) ||
+        !function_name || !report->function_views) {
         return 0;
     }
 
@@ -2352,7 +3058,7 @@ int value_ssa_program_machine_register_protection_hotspot_report_get_functions_w
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2387,7 +3093,7 @@ int value_ssa_function_machine_preservation_hint_view_get_summary(
     if (out_total_hint_priority) {
         *out_total_hint_priority = 0;
     }
-    if (!view) {
+    if (!value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(view)) {
         return 0;
     }
 
@@ -2416,7 +3122,8 @@ int value_ssa_function_machine_preservation_hint_view_get_candidate_at(
     if (out_candidate) {
         *out_candidate = NULL;
     }
-    if (!view || !out_candidate || candidate_index >= view->candidate_count || !view->candidates) {
+    if (!value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(view) || !out_candidate ||
+        candidate_index >= view->candidate_count || !view->candidates) {
         return 0;
     }
 
@@ -2430,7 +3137,19 @@ int value_ssa_program_machine_preservation_hint_report_get_summary(
     size_t *out_total_value_count,
     size_t *out_total_item_count,
     size_t *out_total_hint_priority) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_item_count) {
+        *out_total_item_count = 0;
+    }
+    if (out_total_hint_priority) {
+        *out_total_hint_priority = 0;
+    }
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2456,7 +3175,8 @@ int value_ssa_program_machine_preservation_hint_report_get_reason_count(
     if (out_count) {
         *out_count = 0;
     }
-    if (!report || reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report) ||
+        reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
         return 0;
     }
 
@@ -2473,7 +3193,8 @@ int value_ssa_program_machine_preservation_hint_report_get_function_view(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -2494,7 +3215,8 @@ int value_ssa_program_machine_preservation_hint_report_get_function_view_by_name
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report) ||
+        !function_name || !report->function_views) {
         return 0;
     }
 
@@ -2524,7 +3246,7 @@ int value_ssa_program_machine_preservation_hint_report_get_functions_with_hints(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2550,7 +3272,8 @@ int value_ssa_program_machine_preservation_hint_report_get_functions_with_reason
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report) ||
+        reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
         return 0;
     }
 
@@ -2590,7 +3313,9 @@ int value_ssa_function_machine_planning_view_get_summary(
     if (out_has_hint) {
         *out_has_hint = 0;
     }
-    if (!view) {
+    if (!view || !value_ssa_machine_register_protection_pressure_view_dump_contract_valid(&view->pressure_view) ||
+        !value_ssa_machine_function_register_protection_hotspot_view_contract_valid(&view->hotspot_view) ||
+        !value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(&view->preservation_hint_view)) {
         return 0;
     }
 
@@ -2623,7 +3348,25 @@ int value_ssa_program_machine_planning_report_get_summary(
     size_t *out_total_pressure_priority,
     size_t *out_total_hotspot_priority,
     size_t *out_total_hint_priority) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_pressure_item_count) {
+        *out_total_pressure_item_count = 0;
+    }
+    if (out_total_pressure_priority) {
+        *out_total_pressure_priority = 0;
+    }
+    if (out_total_hotspot_priority) {
+        *out_total_hotspot_priority = 0;
+    }
+    if (out_total_hint_priority) {
+        *out_total_hint_priority = 0;
+    }
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2655,7 +3398,8 @@ int value_ssa_program_machine_planning_report_get_hint_reason_count(
     if (out_count) {
         *out_count = 0;
     }
-    if (!report || reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) ||
+        reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
         return 0;
     }
 
@@ -2672,7 +3416,8 @@ int value_ssa_program_machine_planning_report_get_function_view(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -2693,7 +3438,8 @@ int value_ssa_program_machine_planning_report_get_function_view_by_name(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) || !function_name ||
+        !report->function_views) {
         return 0;
     }
 
@@ -2723,7 +3469,7 @@ int value_ssa_program_machine_planning_report_get_functions_with_pressure(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2743,7 +3489,8 @@ int value_ssa_program_machine_planning_report_get_pressure_reason_count(
     if (out_count) {
         *out_count = 0;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
         return 0;
     }
 
@@ -2766,7 +3513,8 @@ int value_ssa_program_machine_planning_report_get_functions_with_pressure_reason
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
         return 0;
     }
 
@@ -2790,7 +3538,7 @@ int value_ssa_program_machine_planning_report_get_functions_with_hotspots(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2813,7 +3561,7 @@ int value_ssa_program_machine_planning_report_get_functions_with_hints(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -2837,7 +3585,8 @@ int value_ssa_program_machine_planning_report_get_functions_with_hint_reason(
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report) ||
+        reason >= VALUE_SSA_MACHINE_PRESERVATION_REASON_COUNT) {
         return 0;
     }
     if (out_count) {
@@ -2859,6 +3608,11 @@ int value_ssa_dump_machine_protection_agenda(
     if (!agenda || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-098: invalid machine protection agenda dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_protection_agenda_dump_contract_valid(agenda)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-180: malformed machine protection agenda artifact");
         return 0;
     }
 
@@ -2919,6 +3673,11 @@ int value_ssa_dump_program_machine_protection_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-101: invalid program machine protection report dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_protection_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-181: malformed program machine protection report artifact");
         return 0;
     }
 
@@ -3042,6 +3801,11 @@ int value_ssa_dump_machine_register_protection_pressure_view(
             error, 0, 0, "VALUE-SSA-MACHINE-121: invalid register protection pressure dump contract");
         return 0;
     }
+    if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-182: malformed register protection pressure artifact");
+        return 0;
+    }
 
     builder.data = NULL;
     builder.length = 0;
@@ -3114,6 +3878,11 @@ int value_ssa_dump_program_machine_register_protection_pressure_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-126: invalid program register protection pressure report dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_register_protection_pressure_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-183: malformed program register protection pressure artifact");
         return 0;
     }
 
@@ -3240,6 +4009,11 @@ int value_ssa_dump_function_machine_register_protection_hotspot_view(
             error, 0, 0, "VALUE-SSA-MACHINE-142: invalid function register protection hotspot dump contract");
         return 0;
     }
+    if (!value_ssa_machine_function_register_protection_hotspot_view_contract_valid(view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-190: malformed function register protection hotspot artifact");
+        return 0;
+    }
 
     builder.data = NULL;
     builder.length = 0;
@@ -3286,6 +4060,11 @@ int value_ssa_dump_program_machine_register_protection_hotspot_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-145: invalid program register protection hotspot report dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_register_protection_hotspot_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-187: malformed program register protection hotspot artifact");
         return 0;
     }
 
@@ -3357,6 +4136,11 @@ int value_ssa_dump_function_machine_preservation_hint_view(
     if (!view || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-157: invalid function preservation hint dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-184: malformed function preservation hint artifact");
         return 0;
     }
 
@@ -3433,6 +4217,11 @@ int value_ssa_dump_program_machine_preservation_hint_report(
             error, 0, 0, "VALUE-SSA-MACHINE-160: invalid program preservation hint report dump contract");
         return 0;
     }
+    if (!value_ssa_machine_program_machine_preservation_hint_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-185: malformed program preservation hint artifact");
+        return 0;
+    }
 
     builder.data = NULL;
     builder.length = 0;
@@ -3505,6 +4294,14 @@ int value_ssa_dump_function_machine_planning_view(
             error, 0, 0, "VALUE-SSA-MACHINE-175: invalid function planning view dump contract");
         return 0;
     }
+    if (!value_ssa_machine_register_protection_pressure_view_dump_contract_valid(&view->pressure_view) ||
+        !value_ssa_machine_function_register_protection_hotspot_view_contract_valid(&view->hotspot_view) ||
+        !value_ssa_machine_function_machine_preservation_hint_view_dump_contract_valid(
+            &view->preservation_hint_view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-188: malformed function planning view artifact");
+        return 0;
+    }
 
     builder.data = NULL;
     builder.length = 0;
@@ -3545,6 +4342,11 @@ int value_ssa_dump_program_machine_planning_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-177: invalid program planning report dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_planning_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-186: malformed program planning report artifact");
         return 0;
     }
 

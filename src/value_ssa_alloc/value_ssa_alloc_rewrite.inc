@@ -243,6 +243,21 @@ static int value_ssa_alloc_find_unique_predecessor_block(const ValueSsaFunction 
     return 1;
 }
 
+static int value_ssa_alloc_block_has_unique_predecessor(const ValueSsaFunction *function,
+    size_t block_id,
+    size_t expected_predecessor_block_id) {
+    size_t predecessor_block_id = (size_t)-1;
+
+    if (!function || block_id >= function->block_count || expected_predecessor_block_id >= function->block_count) {
+        return 0;
+    }
+
+    if (!value_ssa_alloc_find_unique_predecessor_block(function, block_id, &predecessor_block_id)) {
+        return 0;
+    }
+    return predecessor_block_id == expected_predecessor_block_id;
+}
+
 static int value_ssa_alloc_insert_local_split_child_for_block_uses(ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *def_use,
     size_t value_id,
@@ -533,21 +548,29 @@ static int value_ssa_alloc_find_existing_split_child_edge(const ValueSsaFunction
     size_t successor_block_id,
     size_t *out_split_block_id) {
     size_t candidate_block_id = (size_t)-1;
+    size_t predecessor_block_id = (size_t)-1;
 
     if (!function || !predecessor_block || !out_split_block_id ||
         !predecessor_block->has_terminator || predecessor_block->terminator.kind != VALUE_SSA_TERM_BRANCH) {
         return 0;
     }
 
+    predecessor_block_id = (size_t)(predecessor_block - function->blocks);
+    if (predecessor_block_id >= function->block_count) {
+        return 0;
+    }
+
     if (predecessor_block->terminator.as.branch.then_target < function->block_count) {
         size_t then_target = predecessor_block->terminator.as.branch.then_target;
-        if (value_ssa_alloc_block_is_reusable_split_child_edge(&function->blocks[then_target], successor_block_id)) {
+        if (value_ssa_alloc_block_is_reusable_split_child_edge(&function->blocks[then_target], successor_block_id) &&
+            value_ssa_alloc_block_has_unique_predecessor(function, then_target, predecessor_block_id)) {
             candidate_block_id = then_target;
         }
     }
     if (predecessor_block->terminator.as.branch.else_target < function->block_count) {
         size_t else_target = predecessor_block->terminator.as.branch.else_target;
-        if (value_ssa_alloc_block_is_reusable_split_child_edge(&function->blocks[else_target], successor_block_id)) {
+        if (value_ssa_alloc_block_is_reusable_split_child_edge(&function->blocks[else_target], successor_block_id) &&
+            value_ssa_alloc_block_has_unique_predecessor(function, else_target, predecessor_block_id)) {
             if (candidate_block_id != (size_t)-1 && candidate_block_id != else_target) {
                 return 0;
             }

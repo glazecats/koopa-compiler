@@ -375,6 +375,7 @@ int memory_ssa_verify_program(const MemorySsaProgram *program, MemorySsaError *e
 
                 for (access_index = 0; access_index < instruction->access_count; ++access_index) {
                     const MemorySsaAccess *access = &instruction->accesses[access_index];
+                    size_t other_access_index;
 
                     if (access->slot_id >= function->tracked_slot_count) {
                         free(reachable);
@@ -410,10 +411,52 @@ int memory_ssa_verify_program(const MemorySsaProgram *program, MemorySsaError *e
                                 "MEMORY-SSA-054: bb.%zu instr %zu defines invalid version mem.%zu",
                                 block->id,
                                 instruction_index,
-                                access->def_version_id);
+                            access->def_version_id);
                             return 0;
                         }
                         ++version_defs[access->def_version_id];
+                    }
+                    if (instruction->instruction.kind == VALUE_SSA_INSTR_CALL) {
+                        if (!access->has_use_version && !access->has_def_version) {
+                            free(reachable);
+                            free(version_defs);
+                            memory_ssa_set_error(error,
+                                0,
+                                0,
+                                "MEMORY-SSA-057: bb.%zu call instr %zu has effect-free slot.%zu access",
+                                block->id,
+                                instruction_index,
+                                access->slot_id);
+                            return 0;
+                        }
+                        if (function->tracked_slots[access->slot_id].slot.kind != VALUE_SSA_SLOT_GLOBAL) {
+                            free(reachable);
+                            free(version_defs);
+                            memory_ssa_set_error(error,
+                                0,
+                                0,
+                                "MEMORY-SSA-058: bb.%zu call instr %zu references non-global slot.%zu",
+                                block->id,
+                                instruction_index,
+                                access->slot_id);
+                            return 0;
+                        }
+                        for (other_access_index = access_index + 1;
+                             other_access_index < instruction->access_count;
+                             ++other_access_index) {
+                            if (instruction->accesses[other_access_index].slot_id == access->slot_id) {
+                                free(reachable);
+                                free(version_defs);
+                                memory_ssa_set_error(error,
+                                    0,
+                                    0,
+                                    "MEMORY-SSA-059: bb.%zu call instr %zu repeats slot.%zu",
+                                    block->id,
+                                    instruction_index,
+                                    access->slot_id);
+                                return 0;
+                            }
+                        }
                     }
                 }
 

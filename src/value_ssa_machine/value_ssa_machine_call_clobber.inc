@@ -4,6 +4,107 @@
 #include "value_ssa_machine.c"
 #else
 
+static int value_ssa_machine_call_clobber_risk_report_dump_contract_valid(
+    const ValueSsaMachineCallClobberRiskReport *report) {
+    size_t item_index;
+    size_t actual_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->item_count > 0 && !report->items) {
+        return 0;
+    }
+    if (report->item_count > report->value_count) {
+        return 0;
+    }
+    for (item_index = 0; item_index < report->item_count; ++item_index) {
+        const ValueSsaMachineCallClobberRiskItem *item = &report->items[item_index];
+
+        if (item->risk_class <= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE ||
+            item->risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT || item->call_crossing_count == 0) {
+            return 0;
+        }
+        ++actual_risk_class_counts[item->risk_class];
+    }
+    for (item_index = 0; item_index < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++item_index) {
+        if (report->risk_class_counts[item_index] != actual_risk_class_counts[item_index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(
+    const ValueSsaProgramMachineCallClobberRiskReport *report) {
+    size_t function_index;
+    size_t risk_class;
+    size_t actual_total_value_count = 0;
+    size_t actual_total_risky_value_count = 0;
+    size_t actual_functions_with_risky_values_count = 0;
+    size_t actual_total_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+    size_t actual_functions_with_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT] = {0};
+
+    if (!report) {
+        return 0;
+    }
+    if (report->function_count > 0 && !report->function_views) {
+        return 0;
+    }
+    if (report->functions_with_risky_values_count > 0 && !report->function_indices_with_risky_values) {
+        return 0;
+    }
+    for (function_index = 0; function_index < report->function_count; ++function_index) {
+        const ValueSsaMachineCallClobberRiskReport *risk_report = &report->function_views[function_index].risk_report;
+
+        if (!value_ssa_machine_call_clobber_risk_report_dump_contract_valid(risk_report)) {
+            return 0;
+        }
+        actual_total_value_count += risk_report->value_count;
+        actual_total_risky_value_count += risk_report->item_count;
+        if (risk_report->item_count > 0) {
+            if (actual_functions_with_risky_values_count >= report->functions_with_risky_values_count ||
+                report->function_indices_with_risky_values[actual_functions_with_risky_values_count] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_risky_values_count;
+        }
+        for (risk_class = 0; risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT; ++risk_class) {
+            actual_total_risk_class_counts[risk_class] += risk_report->risk_class_counts[risk_class];
+            if (risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE ||
+                risk_report->risk_class_counts[risk_class] == 0) {
+                continue;
+            }
+            if (actual_functions_with_risk_class_counts[risk_class] >= report->functions_with_risk_class_counts[risk_class] ||
+                report->function_indices_with_risk_class[risk_class]
+                        [actual_functions_with_risk_class_counts[risk_class]] != function_index) {
+                return 0;
+            }
+            ++actual_functions_with_risk_class_counts[risk_class];
+        }
+    }
+    for (risk_class = VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_CROSSING;
+         risk_class < VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT;
+         ++risk_class) {
+        if (report->functions_with_risk_class_counts[risk_class] > 0 &&
+            !report->function_indices_with_risk_class[risk_class]) {
+            return 0;
+        }
+        if (report->total_risk_class_counts[risk_class] != actual_total_risk_class_counts[risk_class] ||
+            report->functions_with_risk_class_counts[risk_class] != actual_functions_with_risk_class_counts[risk_class]) {
+            return 0;
+        }
+    }
+    if (report->total_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE] !=
+            actual_total_risk_class_counts[VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE] ||
+        report->functions_with_risky_values_count != actual_functions_with_risky_values_count ||
+        report->total_value_count != actual_total_value_count ||
+        report->total_risky_value_count != actual_total_risky_value_count) {
+        return 0;
+    }
+    return 1;
+}
+
 static ValueSsaMachineCallClobberRiskClass value_ssa_machine_classify_call_clobber_risk(
     size_t call_crossing_count,
     size_t call_density_sum,
@@ -363,7 +464,13 @@ int value_ssa_machine_call_clobber_risk_report_get_summary(
     const ValueSsaMachineCallClobberRiskReport *report,
     size_t *out_value_count,
     size_t *out_total_risky_value_count) {
-    if (!report) {
+    if (out_value_count) {
+        *out_value_count = 0;
+    }
+    if (out_total_risky_value_count) {
+        *out_total_risky_value_count = 0;
+    }
+    if (!value_ssa_machine_call_clobber_risk_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -383,7 +490,8 @@ int value_ssa_machine_call_clobber_risk_report_get_class_count(
     if (out_count) {
         *out_count = 0;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
+    if (!value_ssa_machine_call_clobber_risk_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
         return 0;
     }
 
@@ -406,7 +514,7 @@ int value_ssa_machine_call_clobber_risk_report_find_value(
     if (out_item) {
         *out_item = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_call_clobber_risk_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -431,7 +539,8 @@ int value_ssa_program_machine_call_clobber_risk_report_get_class_count(
     if (out_count) {
         *out_count = 0;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT) {
         return 0;
     }
 
@@ -446,7 +555,16 @@ int value_ssa_program_machine_call_clobber_risk_report_get_summary(
     size_t *out_function_count,
     size_t *out_total_value_count,
     size_t *out_total_risky_value_count) {
-    if (!report) {
+    if (out_function_count) {
+        *out_function_count = 0;
+    }
+    if (out_total_value_count) {
+        *out_total_value_count = 0;
+    }
+    if (out_total_risky_value_count) {
+        *out_total_risky_value_count = 0;
+    }
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report)) {
         return 0;
     }
 
@@ -469,7 +587,8 @@ int value_ssa_program_machine_call_clobber_risk_report_get_function_view(
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !out_view || function_index >= report->function_count || !report->function_views) {
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report) || !out_view ||
+        function_index >= report->function_count || !report->function_views) {
         return 0;
     }
 
@@ -490,7 +609,8 @@ int value_ssa_program_machine_call_clobber_risk_report_get_function_view_by_name
     if (out_view) {
         *out_view = NULL;
     }
-    if (!report || !function_name || !report->function_views) {
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report) || !function_name ||
+        !report->function_views) {
         return 0;
     }
 
@@ -520,14 +640,14 @@ int value_ssa_program_machine_call_clobber_risk_report_get_functions_with_risky_
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report)) {
         return 0;
     }
 
     if (out_count) {
         *out_count = report->functions_with_risky_values_count;
     }
-    if (out_function_indices) {
+    if (out_function_indices && report->functions_with_risky_values_count > 0) {
         *out_function_indices = report->function_indices_with_risky_values;
     }
     return 1;
@@ -546,7 +666,8 @@ int value_ssa_program_machine_call_clobber_risk_report_get_functions_with_risk_c
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report || risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report) ||
+        risk_class >= VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_COUNT ||
         risk_class == VALUE_SSA_MACHINE_CALL_CLOBBER_RISK_CLASS_NONE) {
         return 0;
     }
@@ -571,6 +692,11 @@ int value_ssa_dump_machine_call_clobber_risk_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-071: invalid machine call-clobber risk dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_call_clobber_risk_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-090: malformed machine call-clobber risk report artifact");
         return 0;
     }
 
@@ -625,6 +751,11 @@ int value_ssa_dump_program_machine_call_clobber_risk_report(
     if (!report || !out_text) {
         value_ssa_machine_set_error(
             error, 0, 0, "VALUE-SSA-MACHINE-078: invalid program machine call-clobber risk dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_call_clobber_risk_report_dump_contract_valid(report)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-091: malformed program machine call-clobber risk report artifact");
         return 0;
     }
 

@@ -144,6 +144,7 @@ static void value_ssa_basic_block_free(ValueSsaBasicBlock *block) {
     block->instruction_count = 0;
     block->instruction_capacity = 0;
     block->has_terminator = 0;
+    memset(&block->terminator, 0, sizeof(block->terminator));
 }
 
 static void value_ssa_function_free(ValueSsaFunction *function) {
@@ -795,6 +796,7 @@ int value_ssa_block_set_void_return(ValueSsaBasicBlock *block, ValueSsaError *er
     block->has_terminator = 1;
     block->terminator.kind = VALUE_SSA_TERM_RETURN;
     block->terminator.has_return_value = 0;
+    block->terminator.as.return_value = value_ssa_value_immediate(0);
     return 1;
 }
 

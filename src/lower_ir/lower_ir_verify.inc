@@ -519,6 +519,42 @@ static int lower_ir_verify_temp_availability(const LowerIrFunction *function, Lo
                     return 0;
                 }
                 break;
+            case LOWER_IR_INSTR_LOAD_INDIRECT:
+                if (!lower_ir_verify_temp_use_is_available(instruction->as.load_indirect_addr,
+                        available,
+                        temp_count,
+                        block->id,
+                        "load_indirect addr",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                break;
+            case LOWER_IR_INSTR_STORE_INDIRECT:
+                if (!lower_ir_verify_temp_use_is_available(instruction->as.store_indirect.addr,
+                        available,
+                        temp_count,
+                        block->id,
+                        "store_indirect addr",
+                        error) ||
+                    !lower_ir_verify_temp_use_is_available(instruction->as.store_indirect.value,
+                        available,
+                        temp_count,
+                        block->id,
+                        "store_indirect value",
+                        error)) {
+                    free(block_defs);
+                    free(in_sets);
+                    free(out_sets);
+                    free(edges);
+                    free(available);
+                    return 0;
+                }
+                break;
             case LOWER_IR_INSTR_LOAD_LOCAL:
             case LOWER_IR_INSTR_LOAD_GLOBAL:
             default:

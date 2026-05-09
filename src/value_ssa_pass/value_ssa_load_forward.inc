@@ -15,6 +15,7 @@ typedef struct {
     const ValueSsaProgram *program;
     ValueSsaFunction *function;
     const ValueSsaCfgAnalysis *analysis;
+    const ValueSsaDefUseAnalysis *def_use;
     ValueSsaRenameState *state;
 } ValueSsaGlobalLoadForwardContext;
 
@@ -22,6 +23,7 @@ typedef struct {
     const ValueSsaProgram *program;
     ValueSsaFunction *function;
     const ValueSsaCfgAnalysis *analysis;
+    const ValueSsaDefUseAnalysis *def_use;
     ValueSsaRenameState *state;
     const unsigned char *address_taken_globals;
 } ValueSsaNonAddressTakenGlobalLoadForwardContext;
@@ -135,7 +137,8 @@ static int value_ssa_global_load_forward_enter_block(const ValueSsaFunction *fun
 
     (void)function;
 
-    if (!context || !context->program || !context->function || !context->analysis || !context->state) {
+    if (!context || !context->program || !context->function || !context->analysis ||
+        !context->def_use || !context->state) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-221: invalid global-load-forward contract");
         return 0;
     }
@@ -191,6 +194,18 @@ static int value_ssa_global_load_forward_enter_block(const ValueSsaFunction *fun
         case VALUE_SSA_INSTR_CALL:
             for (global_index = 0; global_index < context->program->global_count; ++global_index) {
                 if (!value_ssa_rename_state_clear(context->state, global_index, error)) {
+                    return 0;
+                }
+            }
+            break;
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            for (global_index = 0; global_index < context->program->global_count; ++global_index) {
+                if (value_ssa_pass_store_indirect_may_alias_global(
+                        context->function,
+                        context->def_use,
+                        instruction->as.store_indirect.addr,
+                        global_index) &&
+                    !value_ssa_rename_state_clear(context->state, global_index, error)) {
                     return 0;
                 }
             }
@@ -303,6 +318,7 @@ int value_ssa_forward_global_loads(ValueSsaProgram *program, ValueSsaError *erro
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         ValueSsaCfgAnalysis analysis;
+        ValueSsaDefUseAnalysis def_use;
         ValueSsaRenameState state;
         ValueSsaGlobalLoadForwardContext context;
         int ok;
@@ -312,13 +328,16 @@ int value_ssa_forward_global_loads(ValueSsaProgram *program, ValueSsaError *erro
         }
 
         value_ssa_cfg_analysis_init(&analysis);
+        value_ssa_def_use_analysis_init(&def_use);
         value_ssa_rename_state_init(&state);
         context.program = program;
         context.function = function;
         context.analysis = &analysis;
+        context.def_use = &def_use;
         context.state = &state;
 
         ok = value_ssa_compute_cfg_analysis(function, &analysis, error) &&
+            value_ssa_compute_def_use_analysis(function, &def_use, error) &&
             value_ssa_rename_state_prepare(&state, program->global_count, error) &&
             value_ssa_walk_dominator_tree(function,
                 &analysis,
@@ -328,6 +347,7 @@ int value_ssa_forward_global_loads(ValueSsaProgram *program, ValueSsaError *erro
                 error);
 
         value_ssa_rename_state_free(&state);
+        value_ssa_def_use_analysis_free(&def_use);
         value_ssa_cfg_analysis_free(&analysis);
         if (!ok) {
             if (error && !error->message[0]) {
@@ -390,7 +410,8 @@ static int value_ssa_non_address_taken_global_load_forward_enter_block(const Val
 
     (void)function;
 
-    if (!context || !context->program || !context->function || !context->analysis || !context->state ||
+    if (!context || !context->program || !context->function || !context->analysis ||
+        !context->def_use || !context->state ||
         !context->address_taken_globals) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-253: invalid non-address-taken global-load-forward contract");
         return 0;
@@ -455,6 +476,19 @@ static int value_ssa_non_address_taken_global_load_forward_enter_block(const Val
                 }
             }
             break;
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            for (global_index = 0; global_index < context->program->global_count; ++global_index) {
+                if (!context->address_taken_globals[global_index] &&
+                    value_ssa_pass_store_indirect_may_alias_global(
+                        context->function,
+                        context->def_use,
+                        instruction->as.store_indirect.addr,
+                        global_index) &&
+                    !value_ssa_rename_state_clear(context->state, global_index, error)) {
+                    return 0;
+                }
+            }
+            break;
         default:
             break;
         }
@@ -510,6 +544,7 @@ int value_ssa_forward_non_address_taken_global_loads(ValueSsaProgram *program, V
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         ValueSsaCfgAnalysis analysis;
+        ValueSsaDefUseAnalysis def_use;
         ValueSsaRenameState state;
         ValueSsaNonAddressTakenGlobalLoadForwardContext context;
         int ok;
@@ -519,14 +554,17 @@ int value_ssa_forward_non_address_taken_global_loads(ValueSsaProgram *program, V
         }
 
         value_ssa_cfg_analysis_init(&analysis);
+        value_ssa_def_use_analysis_init(&def_use);
         value_ssa_rename_state_init(&state);
         context.program = program;
         context.function = function;
         context.analysis = &analysis;
+        context.def_use = &def_use;
         context.state = &state;
         context.address_taken_globals = address_taken_globals;
 
         ok = value_ssa_compute_cfg_analysis(function, &analysis, error) &&
+            value_ssa_compute_def_use_analysis(function, &def_use, error) &&
             value_ssa_rename_state_prepare(&state, program->global_count, error) &&
             value_ssa_walk_dominator_tree(function,
                 &analysis,
@@ -536,6 +574,7 @@ int value_ssa_forward_non_address_taken_global_loads(ValueSsaProgram *program, V
                 error);
 
         value_ssa_rename_state_free(&state);
+        value_ssa_def_use_analysis_free(&def_use);
         value_ssa_cfg_analysis_free(&analysis);
         if (!ok) {
             free(address_taken_globals);

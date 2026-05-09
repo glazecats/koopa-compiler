@@ -107,6 +107,12 @@
 - Prefer placing new implementation design/proposal documents under `docs/` instead of the repository root.
 - If review finds issues outside its owned scope, report them rather than editing.
 - Do not overwrite, revert, or refactor another agent's owned area without explicit user approval.
+- Repository sync memory for this thread:
+  - when creating a kept checkpoint commit for the active workstream, prefer remembering that the repository has **two** intended remotes: GitHub (`origin`) and GitLab (`gitlab`)
+  - after a commit that the user expects to preserve/share, do not stop at only one remote by habit; unless the user explicitly says otherwise, treat the default push checklist as:
+    1. `git push origin <branch>`
+    2. `git push gitlab <branch>`
+  - do not assume one forge auto-syncs from the other; GitHub and GitLab should be treated as independently updated remotes unless an explicit mirroring setup is confirmed later
 
 ## Progress Reporting
 

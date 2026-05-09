@@ -1346,3 +1346,29 @@ static int test_semantic_rejects_assignment_to_const_parameter(void) {
 
     return run_callable_diag_case(&c);
 }
+
+static int test_semantic_rejects_assignment_to_const_array_element(void) {
+    const CallableDiagCase c = {
+        "const-array-assign",
+        "int f(){ const int a[2] = {1, 2}; a[0] = 3; return a[0]; }\n",
+        "SEMA-CONST-001",
+        "assignment to const object is not allowed",
+        1,
+        40,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_increment_of_const_array_element(void) {
+    const CallableDiagCase c = {
+        "const-array-post-inc",
+        "int f(){ const int a[2] = {1, 2}; a[0]++; return a[0]; }\n",
+        "SEMA-CONST-001",
+        "assignment to const object is not allowed",
+        1,
+        39,
+    };
+
+    return run_callable_diag_case(&c);
+}

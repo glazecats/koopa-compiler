@@ -450,6 +450,25 @@ static int semantic_binary_op_is_assignment(TokenType op) {
     }
 }
 
+static const char *semantic_mutated_lvalue_identifier_name(const AstExpression *expr) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+
+    if (!base) {
+        return NULL;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_IDENTIFIER:
+        return base->as.identifier.name;
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_mutated_lvalue_identifier_name(base->as.subscript.base);
+    case AST_EXPR_PAREN:
+        return semantic_mutated_lvalue_identifier_name(base->as.inner);
+    default:
+        return NULL;
+    }
+}
+
 static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
     const AstProgram *program,
     size_t func_index,
@@ -1010,6 +1029,26 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             error,
             depth + 1);
     case AST_EXPR_UNARY:
+        if ((expr->as.unary.op == TOKEN_PLUS_PLUS || expr->as.unary.op == TOKEN_MINUS_MINUS) &&
+            semantic_scope_name_is_const(
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                semantic_mutated_lvalue_identifier_name(expr->as.unary.operand))) {
+            if (error) {
+                char preview[128];
+                char msg[512];
+                const char *name = semantic_mutated_lvalue_identifier_name(expr->as.unary.operand);
+                format_callee_preview(name, preview, sizeof(preview));
+                snprintf(msg,
+                    sizeof(msg),
+                    "SEMA-CONST-001: identifier=%s; assignment to const object is not allowed",
+                    preview);
+                semantic_set_error(error, expr->line, expr->column, msg);
+            }
+            return 0;
+        }
         return semantic_scope_check_expression_with_visibility_impl(expr->as.unary.operand,
             program,
             func_index,
@@ -1020,6 +1059,26 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
             error,
             depth + 1);
     case AST_EXPR_POSTFIX:
+        if ((expr->as.postfix.op == TOKEN_PLUS_PLUS || expr->as.postfix.op == TOKEN_MINUS_MINUS) &&
+            semantic_scope_name_is_const(
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                semantic_mutated_lvalue_identifier_name(expr->as.postfix.operand))) {
+            if (error) {
+                char preview[128];
+                char msg[512];
+                const char *name = semantic_mutated_lvalue_identifier_name(expr->as.postfix.operand);
+                format_callee_preview(name, preview, sizeof(preview));
+                snprintf(msg,
+                    sizeof(msg),
+                    "SEMA-CONST-001: identifier=%s; assignment to const object is not allowed",
+                    preview);
+                semantic_set_error(error, expr->line, expr->column, msg);
+            }
+            return 0;
+        }
         return semantic_scope_check_expression_with_visibility_impl(expr->as.postfix.operand,
                 program,
                 func_index,
@@ -1050,19 +1109,17 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 depth + 1);
     case AST_EXPR_BINARY:
         if (semantic_binary_op_is_assignment(expr->as.binary.op) &&
-            expr->as.binary.left &&
-            expr->as.binary.left->kind == AST_EXPR_IDENTIFIER &&
-            expr->as.binary.left->as.identifier.name &&
             semantic_scope_name_is_const(
                 program,
                 func_index,
                 include_current_external,
                 scopes,
-                expr->as.binary.left->as.identifier.name)) {
+                semantic_mutated_lvalue_identifier_name(expr->as.binary.left))) {
             if (error) {
                 char preview[128];
                 char msg[512];
-                format_callee_preview(expr->as.binary.left->as.identifier.name, preview, sizeof(preview));
+                const char *name = semantic_mutated_lvalue_identifier_name(expr->as.binary.left);
+                format_callee_preview(name, preview, sizeof(preview));
                 snprintf(msg,
                     sizeof(msg),
                     "SEMA-CONST-001: identifier=%s; assignment to const object is not allowed",

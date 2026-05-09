@@ -4,6 +4,91 @@
 #include "value_ssa_machine.c"
 #else
 
+static int value_ssa_machine_function_allocation_view_dump_contract_valid(
+    const ValueSsaFunctionMachineAllocationView *view) {
+    size_t group_index;
+
+    if (!view) {
+        return 0;
+    }
+    if (view->value_count > 0 && !view->placements) {
+        return 0;
+    }
+    if (view->caller_clobbered_value_count > 0 && !view->caller_clobbered_value_ids) {
+        return 0;
+    }
+    if (view->callee_preserved_value_count > 0 && !view->callee_preserved_value_ids) {
+        return 0;
+    }
+    if (view->used_machine_register_count > 0 && !view->used_machine_register_ids) {
+        return 0;
+    }
+    if (view->used_machine_register_count != view->machine_register_group_count) {
+        return 0;
+    }
+    if (view->machine_register_group_count > 0 && !view->machine_register_groups) {
+        return 0;
+    }
+    for (group_index = 0; group_index < view->machine_register_group_count; ++group_index) {
+        const ValueSsaMachineRegisterValueGroup *group = &view->machine_register_groups[group_index];
+
+        if (group->value_count > 0 && !group->value_ids) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_machine_register_bank_dump_contract_valid(const ValueSsaMachineRegisterBank *bank) {
+    size_t lhs_index;
+    size_t rhs_index;
+
+    if (!bank) {
+        return 0;
+    }
+    if (bank->register_count > 0 && !bank->registers) {
+        return 0;
+    }
+    for (lhs_index = 0; lhs_index < bank->register_count; ++lhs_index) {
+        if (bank->registers[lhs_index].caller_clobbered && bank->registers[lhs_index].callee_preserved) {
+            return 0;
+        }
+    }
+    for (lhs_index = 0; lhs_index < bank->register_count; ++lhs_index) {
+        for (rhs_index = lhs_index + 1; rhs_index < bank->register_count; ++rhs_index) {
+            if (bank->registers[lhs_index].register_id == bank->registers[rhs_index].register_id) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int value_ssa_machine_program_allocation_view_dump_contract_valid(
+    const ValueSsaProgramMachineAllocationView *view) {
+    if (!view) {
+        return 0;
+    }
+    if (view->function_count > 0 && !view->function_views) {
+        return 0;
+    }
+    if (view->functions_with_machine_colors_count > 0 && !view->function_indices_with_machine_colors) {
+        return 0;
+    }
+    if (view->functions_with_spills_count > 0 && !view->function_indices_with_spills) {
+        return 0;
+    }
+    if (view->functions_with_caller_clobbered_values_count > 0 &&
+        !view->function_indices_with_caller_clobbered_values) {
+        return 0;
+    }
+    if (view->functions_with_callee_preserved_values_count > 0 &&
+        !view->function_indices_with_callee_preserved_values) {
+        return 0;
+    }
+    return 1;
+}
+
 int value_ssa_dump_machine_register_bank(const ValueSsaMachineRegisterBank *bank,
     char **out_text,
     ValueSsaError *error) {
@@ -12,6 +97,10 @@ int value_ssa_dump_machine_register_bank(const ValueSsaMachineRegisterBank *bank
 
     if (!bank || !out_text) {
         value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-011: invalid machine register bank dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_register_bank_dump_contract_valid(bank)) {
+        value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-067: malformed machine register bank artifact");
         return 0;
     }
 
@@ -56,6 +145,11 @@ int value_ssa_dump_function_machine_allocation_view(const ValueSsaFunctionMachin
 
     if (!view || !out_text) {
         value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-014: invalid function machine allocation dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_function_allocation_view_dump_contract_valid(view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-065: malformed function machine allocation dump artifact");
         return 0;
     }
 
@@ -217,6 +311,11 @@ int value_ssa_dump_program_machine_allocation_view(const ValueSsaProgramMachineA
 
     if (!view || !out_text) {
         value_ssa_machine_set_error(error, 0, 0, "VALUE-SSA-MACHINE-018: invalid program machine allocation dump contract");
+        return 0;
+    }
+    if (!value_ssa_machine_program_allocation_view_dump_contract_valid(view)) {
+        value_ssa_machine_set_error(
+            error, 0, 0, "VALUE-SSA-MACHINE-066: malformed program machine allocation dump artifact");
         return 0;
     }
 

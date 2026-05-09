@@ -366,6 +366,10 @@ Current approximate position inside that larger stage:
   - the current split-family line now spans three connected layers:
     block-local split formation, downstream rewrite-family reuse, and a first
     planner-side spill tie-break signal
+  - split-child edge reuse now also has one extra honesty boundary: an
+    ordinary branch arm that merely ends in `mov ...; jmp successor` is no
+    longer treated as a reusable split child unless it is actually the unique
+    predecessor split block for that branch path
   - split-family structure now also begins to affect later select/retry
   decisions: equal-pressure blocker choice and equal-pressure retry recovery
   choice can both prefer split children in one first narrow slice

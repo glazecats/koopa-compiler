@@ -9,6 +9,7 @@ void value_ssa_allocation_result_init(ValueSsaAllocationResult *result) {
         return;
     }
 
+    result->function_name = NULL;
     result->value_count = 0;
     result->color_budget = 0;
     result->spill_slot_count = 0;
@@ -49,6 +50,7 @@ void value_ssa_allocation_result_free(ValueSsaAllocationResult *result) {
         return;
     }
 
+    free(result->function_name);
     free(result->colors);
     free(result->has_color);
     free(result->spill_flags);
@@ -130,6 +132,15 @@ static int value_ssa_clone_allocation_result(const ValueSsaAllocationResult *src
     dst->retry_eviction_blocker_value_ids = NULL;
     dst->retry_eviction_blocker_recolored_flags = NULL;
     dst->retry_eviction_blocker_new_colors = NULL;
+
+    if (src->function_name) {
+        dst->function_name = value_ssa_alloc_strdup(src->function_name);
+        if (!dst->function_name) {
+            value_ssa_allocation_result_free(dst);
+            value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-235: out of memory cloning allocation result");
+            return 0;
+        }
+    }
 
     alloc_count = src->value_count ? src->value_count : 1u;
     if (src->colors) {

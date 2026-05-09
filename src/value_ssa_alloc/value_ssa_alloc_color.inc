@@ -454,7 +454,9 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
         return 0;
     }
     for (function_index = 0; function_index < program->function_count; ++function_index) {
-        spill_local_floors[function_index] = program->functions[function_index].local_count;
+        if (iteration_count == 0) {
+            spill_local_floors[function_index] = program->functions[function_index].local_count;
+        }
     }
 
     if (!value_ssa_alloc_run_program_rewrite_stage(program,

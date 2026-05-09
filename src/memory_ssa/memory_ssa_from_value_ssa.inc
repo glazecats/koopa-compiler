@@ -649,6 +649,7 @@ static int memory_ssa_mark_phi_blocks(const ValueSsaFunction *input_function,
                             state, instruction->as.call.callee_name, slot_index, &reads_global, &writes_global)) {
                         free(definition_blocks);
                         free(phi_blocks);
+                        free(live_in_blocks);
                         memory_ssa_set_error(
                             error, 0, 0, "MEMORY-SSA-077: failed to classify call effects during phi placement");
                         return 0;
