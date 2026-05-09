@@ -625,8 +625,39 @@ static int lower_ir_return_terminator_is_zero_immediate(const LowerIrTerminator 
         terminator->as.return_value.immediate == 0;
 }
 
+static int lower_ir_verify_internal_init_function_returns_zero_only(const LowerIrFunction *function,
+    const char *name,
+    LowerIrError *error) {
+    size_t block_index;
+
+    if (!function || !name || name[0] == '\0') {
+        lower_ir_set_error(error, 0, 0, "LOWER-IR-VERIFY-007: invalid verifier contract");
+        return 0;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        const LowerIrBasicBlock *block = &function->blocks[block_index];
+
+        if (!block->has_terminator) {
+            continue;
+        }
+        if (block->terminator.kind == LOWER_IR_TERM_RETURN &&
+            !lower_ir_return_terminator_is_zero_immediate(&block->terminator)) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-037: internal initializer function '%s' return sites must terminate with 'ret 0'",
+                name);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int lower_ir_verify_internal_init_function_shape(const LowerIrFunction *function,
     const char *name,
+    int require_single_body_block,
     LowerIrError *error) {
     const LowerIrBasicBlock *entry_block;
 
@@ -644,23 +675,30 @@ static int lower_ir_verify_internal_init_function_shape(const LowerIrFunction *f
         return 0;
     }
 
-    if (!function->has_body || function->block_count != 1 || !function->blocks) {
+    if (!function->has_body || function->block_count == 0u || !function->blocks ||
+        (require_single_body_block && function->block_count != 1u)) {
         lower_ir_set_error(error,
             0,
             0,
-            "LOWER-IR-VERIFY-036: internal initializer function '%s' must have exactly one body block",
+            require_single_body_block
+                ? "LOWER-IR-VERIFY-036: internal initializer function '%s' must have exactly one body block"
+                : "LOWER-IR-VERIFY-036: internal initializer function '%s' must have at least one body block",
             name);
         return 0;
     }
 
     entry_block = &function->blocks[0];
-    if (!entry_block->has_terminator ||
-        !lower_ir_return_terminator_is_zero_immediate(&entry_block->terminator)) {
-        lower_ir_set_error(error,
-            0,
-            0,
-            "LOWER-IR-VERIFY-037: internal initializer function '%s' entry block must terminate with 'ret 0'",
-            name);
+    if (require_single_body_block) {
+        if (!entry_block->has_terminator ||
+            !lower_ir_return_terminator_is_zero_immediate(&entry_block->terminator)) {
+            lower_ir_set_error(error,
+                0,
+                0,
+                "LOWER-IR-VERIFY-037: internal initializer function '%s' entry block must terminate with 'ret 0'",
+                name);
+            return 0;
+        }
+    } else if (!lower_ir_verify_internal_init_function_returns_zero_only(function, name, error)) {
         return 0;
     }
 
@@ -707,12 +745,14 @@ static int lower_ir_verify_runtime_global_initializer_contract(const LowerIrProg
     if (runtime_init_function &&
         !lower_ir_verify_internal_init_function_shape(runtime_init_function,
             k_runtime_init_name,
+            0,
             error)) {
         return 0;
     }
     if (program_init_function &&
         !lower_ir_verify_internal_init_function_shape(program_init_function,
             k_program_init_name,
+            1,
             error)) {
         return 0;
     }

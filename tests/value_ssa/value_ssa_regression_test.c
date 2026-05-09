@@ -201,6 +201,96 @@ static int build_lower_ir_diamond_program(LowerIrProgram *program, LowerIrError 
     return 1;
 }
 
+static int build_lower_ir_diamond_store_indirect_phi_program(LowerIrProgram *program, LowerIrError *error) {
+    LowerIrGlobal *global = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *then_block = NULL;
+    LowerIrBasicBlock *else_block = NULL;
+    LowerIrBasicBlock *join_block = NULL;
+    LowerIrInstruction instruction;
+    size_t local_a_id;
+    size_t addr_temp;
+    size_t cond_temp;
+    size_t value_temp;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "g", &global, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "a", 1, &local_a_id, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &join_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    addr_temp = lower_ir_function_allocate_temp(function);
+    cond_temp = lower_ir_function_allocate_temp(function);
+    value_temp = lower_ir_function_allocate_temp(function);
+    if (addr_temp == (size_t)-1 || cond_temp == (size_t)-1 || value_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(addr_temp);
+    instruction.as.addr_slot = lower_ir_slot_global(global->id);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(cond_temp);
+    instruction.as.load_slot = lower_ir_slot_local(local_a_id);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_branch(entry, lower_ir_value_temp(cond_temp), 1, 2, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(value_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, error) ||
+        !lower_ir_block_set_jump(then_block, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(value_temp);
+    instruction.as.mov_value = lower_ir_value_immediate(2);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, error) ||
+        !lower_ir_block_set_jump(else_block, 3, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(addr_temp);
+    instruction.as.store_indirect.value = lower_ir_value_temp(value_temp);
+    if (!lower_ir_block_append_instruction(join_block, &instruction, error) ||
+        !lower_ir_block_set_return(join_block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_lower_ir_scrambled_diamond_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrInstruction instruction;
@@ -9034,6 +9124,29 @@ static int test_value_ssa_conversion_diamond_program(void) {
         "}\n");
 }
 
+static int test_value_ssa_conversion_diamond_store_indirect_phi_program(void) {
+    return expect_converted_dump("VALUE-SSA-CONVERT-DIAMOND-STORE-INDIRECT-PHI",
+        build_lower_ir_diamond_store_indirect_phi_program,
+        "global g.0\n"
+        "\n"
+        "func main(a.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global g.0\n"
+        "    ssa.1 = load_local a.0\n"
+        "    br ssa.1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.2 = mov 1\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = mov 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ssa.4 = phi [bb.1: ssa.2], [bb.2: ssa.3]\n"
+        "    store_indirect ssa.0, ssa.4\n"
+        "    ret 0\n"
+        "}\n");
+}
+
 static int test_value_ssa_conversion_simple_loop_program(void) {
     return expect_converted_dump("VALUE-SSA-CONVERT-SIMPLE-LOOP",
         build_lower_ir_loop_program,
@@ -10529,6 +10642,7 @@ int main(void) {
     ok &= test_value_ssa_eliminate_dead_value_defs_preserves_dangerous_dead_binary();
     ok &= test_value_ssa_conversion_straight_line_program();
     ok &= test_value_ssa_conversion_diamond_program();
+    ok &= test_value_ssa_conversion_diamond_store_indirect_phi_program();
     ok &= test_value_ssa_conversion_scrambled_diamond_program();
     ok &= test_value_ssa_conversion_simple_loop_program();
     ok &= test_value_ssa_conversion_loop_carried_temp_program();

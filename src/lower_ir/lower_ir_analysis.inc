@@ -876,6 +876,18 @@ int lower_ir_collect_temp_live_in_blocks(const LowerIrFunction *function,
                     use_before_def_blocks[block_index] = 1;
                 }
                 break;
+            case LOWER_IR_INSTR_LOAD_INDIRECT:
+                if (!defined && lower_ir_value_uses_temp(instruction->as.load_indirect_addr, temp_id)) {
+                    use_before_def_blocks[block_index] = 1;
+                }
+                break;
+            case LOWER_IR_INSTR_STORE_INDIRECT:
+                if (!defined &&
+                    (lower_ir_value_uses_temp(instruction->as.store_indirect.addr, temp_id) ||
+                        lower_ir_value_uses_temp(instruction->as.store_indirect.value, temp_id))) {
+                    use_before_def_blocks[block_index] = 1;
+                }
+                break;
             case LOWER_IR_INSTR_LOAD_LOCAL:
             case LOWER_IR_INSTR_LOAD_GLOBAL:
                 break;

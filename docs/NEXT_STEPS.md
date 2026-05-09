@@ -611,6 +611,42 @@
       report dump witness for that propagation path. Focused kept rechecks
       after this closure are `make test-value-ssa-machine` PASS and
       `make test-value-ssa-regression` PASS.
+    - 2026-05-09 hidden/default runtime-global-init follow-up: one real
+      hidden-only compatibility seam is now materially narrowed across the
+      canonical-IR, lower-IR, and `lower_ir -> value_ssa` boundaries instead
+      of staying as a hidden probe only. `__global.init` is no longer
+      verifier-forced to stay single-block in canonical IR or lower IR, while
+      `__program.init` keeps the older strict one-block startup-helper
+      contract; runtime global-init finalization now also seals any remaining
+      unterminated helper block with `ret 0` after branchy/logical initializer
+      lowering; and lower-IR live-in analysis now counts `load_indirect` /
+      `store_indirect` temp uses so join temps that are only consumed through
+      indirect memory still receive the needed Value-SSA phi. Focused kept
+      rechecks after this closure are:
+      `make test-ir-regression` PASS,
+      `make test-ir-verifier` PASS,
+      `make test-lower-ir-regression` PASS,
+      `make test-lower-ir-verifier` PASS,
+      `make test-value-ssa-regression` PASS,
+      plus repository-local runtime-global-init probes under
+      `/tmp/runtime_init_probes` now pass `4/4` through the full
+      `build/compiler -> clang -> qemu-riscv32-static` path. Current
+      authority is therefore that branchy top-level initializer shapes are no
+      longer blocked by the older single-block helper assumption or by the
+      indirect-memory live-in hole, and the remaining hidden `RE` line has
+      narrowed back toward other still-unreproduced families.
+    - 2026-05-09 hidden/default machine-select follow-up: one further
+      downstream liveness hole is now also closed on the branch-shaping side.
+      `machine_select_lower_control` had been deciding whether a materialized
+      boolean / compare result was live out of the source block without
+      counting later `load_indirect` / `store_indirect` uses in successor
+      blocks, so branch lowering could incorrectly fold away a compare result
+      that was still consumed through indirect memory. The live tree now
+      counts those indirect-memory uses in the machine-IR live-out probe, and
+      the machine-select regression suite now locks a focused
+      compare-branch-live-out-via-`store_indirect` witness. Focused kept
+      rechecks after this closure are `make test-machine-select` PASS plus the
+      earlier hidden-ish array/short-circuit probe bundles remaining green.
     - 2026-05-08 ordered machine malformed-bank reread follow-up: one small
       but real crash-proofing hole is now also closed on the machine register-
       bank query surface itself. `value_ssa_machine_register_bank_get_summary(...)`

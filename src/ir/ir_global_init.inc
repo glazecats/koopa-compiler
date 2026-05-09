@@ -917,6 +917,28 @@ static int ir_prepend_startup_runtime_init_call(IrFunction *function,
     return 1;
 }
 
+static int ir_finalize_runtime_init_function_returns_zero(IrFunction *function,
+    IrError *error) {
+    size_t block_index;
+
+    if (!function || !function->has_body || function->block_count == 0u || !function->blocks) {
+        return 0;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        IrBasicBlock *block = &function->blocks[block_index];
+
+        if (block->has_terminator) {
+            continue;
+        }
+        if (!ir_block_set_return(block, ir_value_immediate(0), error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int ir_lower_global_declaration(IrProgram *program,
     const AstProgram *ast_program,
     const AstExternal *external,
@@ -1443,15 +1465,15 @@ int ir_lower_program(const AstProgram *ast_program,
     }
 
     if (runtime_init_function) {
-        IrBasicBlock *runtime_entry = ir_function_get_block_mut(runtime_init_function, 0);
         IrFunction *main_function = ir_program_find_function_mut(out_program, "main");
 
-        if (!runtime_entry) {
+        if (!runtime_init_function->has_body ||
+            runtime_init_function->block_count == 0u ||
+            !runtime_init_function->blocks) {
             ir_set_error(error, 0, 0, "IR-INT-069: runtime initializer helper entry block missing");
             return 0;
         }
-        if (!runtime_entry->has_terminator &&
-            !ir_block_set_return(runtime_entry, ir_value_immediate(0), error)) {
+        if (!ir_finalize_runtime_init_function_returns_zero(runtime_init_function, error)) {
             return 0;
         }
 

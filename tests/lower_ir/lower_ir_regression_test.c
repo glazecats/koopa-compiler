@@ -110,6 +110,21 @@ static int lower_source_to_lower_ir_text(const char *source, char **out_text) {
     return 1;
 }
 
+static int expect_lower_ir_lower_succeeds(const char *case_id, const char *source) {
+    char *actual_text = NULL;
+
+    if (!case_id || !source) {
+        return 0;
+    }
+    if (!lower_source_to_lower_ir_text(source, &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    free(actual_text);
+    return 1;
+}
+
 static int build_sample_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrBasicBlock *block = NULL;
@@ -2792,6 +2807,14 @@ static int test_lower_ir_lowers_program_initializer_fallback(void) {
         "}\n");
 }
 
+static int test_lower_ir_lowers_runtime_global_array_initializer_with_short_circuit_and_calls(void) {
+    return expect_lower_ir_lower_succeeds("LOWER-IR-RUNTIME-GLOBAL-ARRAY-INIT-LOGICAL-CALLS",
+        "int seed=2;\n"
+        "int next(){seed=seed+3; return seed;}\n"
+        "int arr[8]={1, next(), seed+10, 0&&next(), 1||next(), next(), {seed}, {}};\n"
+        "int main(){return arr[0]+arr[1]+arr[2]+arr[3]+arr[4]+arr[5]+arr[6]+arr[7];}\n");
+}
+
 int main(void) {
     int ok = 1;
 
@@ -2850,6 +2873,7 @@ int main(void) {
     ok &= test_lower_ir_lowers_runtime_global_initializer_startup_flow();
     ok &= test_lower_ir_lowers_runtime_global_startup_with_branchy_main();
     ok &= test_lower_ir_lowers_program_initializer_fallback();
+    ok &= test_lower_ir_lowers_runtime_global_array_initializer_with_short_circuit_and_calls();
 
     if (!ok) {
         return 1;

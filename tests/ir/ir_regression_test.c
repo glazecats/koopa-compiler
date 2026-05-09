@@ -600,6 +600,14 @@ static int test_ir_accepts_runtime_global_initializer_when_logical_or_constant_t
         "int b;\nint f(){return 1 || b;}\nint a=f();\nint b=7;\nint main(){return a+b;}\n");
 }
 
+static int test_ir_accepts_runtime_global_array_initializer_with_short_circuit_and_calls(void) {
+    return expect_ir_lower_succeeds("IR-GLOBAL-RUNTIME-ARRAY-INIT-LOGICAL-CALLS",
+        "int seed=2;\n"
+        "int next(){seed=seed+3; return seed;}\n"
+        "int arr[8]={1, next(), seed+10, 0&&next(), 1||next(), next(), {seed}, {}};\n"
+        "int main(){return arr[0]+arr[1]+arr[2]+arr[3]+arr[4]+arr[5]+arr[6]+arr[7];}\n");
+}
+
 static int test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub(void) {
     return expect_ir_dump("IR-GLOBAL-INIT-NEG-LLONG-MIN",
         "int a=-(~9223372036854775807);\nint main(){return 0;}\n",
@@ -1875,6 +1883,7 @@ int main(void) {
     ok &= test_ir_accepts_runtime_global_initializer_when_ternary_constant_false_makes_then_read_unreachable();
     ok &= test_ir_accepts_runtime_global_initializer_when_logical_and_constant_false_makes_rhs_read_unreachable();
     ok &= test_ir_accepts_runtime_global_initializer_when_logical_or_constant_true_makes_rhs_read_unreachable();
+    ok &= test_ir_accepts_runtime_global_array_initializer_with_short_circuit_and_calls();
     ok &= test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub();
     ok &= test_ir_lowers_add_overflow_initializer_without_host_ub();
     ok &= test_ir_rejects_division_by_zero_in_top_level_constant_initializer();

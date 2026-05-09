@@ -3762,6 +3762,121 @@ static int test_machine_select_keeps_compare_result_when_live_out_of_block(void)
     return ok;
 }
 
+static int test_machine_select_keeps_compare_result_when_live_out_via_store_indirect(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 3;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(3, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    machine_program.register_bank.registers[2].register_id = 2;
+    machine_program.register_bank.registers[2].name = dup_text("r2");
+    machine_program.register_bank.registers[2].allocatable = 1u;
+
+    if (!machine_ir_program_append_global(&machine_program, "g", NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: live-out-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2);
+    instruction.as.addr_slot = machine_ir_slot_global(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: live-out-indirect addr setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: live-out-indirect load setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.binary.op = MACHINE_IR_BINARY_LT;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(1), 1, 2, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: live-out-indirect branch setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_register(2);
+    instruction.as.store_indirect.value = machine_ir_operand_register(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[1], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: live-out-indirect lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.2 = addr_global global.0\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.1 = cmpi.12 reg.0, 4\n"
+        "    br reg.1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    store_indirect reg.2, reg.1\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_cleanup_removes_dead_load_before_folded_branch(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -7162,6 +7277,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_keeps_compare_result_when_live_out_of_block()) {
+        return 1;
+    }
+    if (!test_machine_select_keeps_compare_result_when_live_out_via_store_indirect()) {
         return 1;
     }
     if (!test_machine_select_cleanup_removes_dead_load_before_folded_branch()) {

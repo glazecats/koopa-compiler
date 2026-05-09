@@ -761,3 +761,24 @@
 - Retry's blocker side is now also starting to behave like a first-class policy surface instead of an afterthought. When two same-tier retry-eviction candidates would otherwise fall back to scalar candidate-local ties, the allocator now prefers the recovery that sacrifices the lighter blocker family first rather than always letting candidate-local spill cost/id dominate. In other words, late retry is now beginning to optimize both sides of the trade: preserve the more entangled candidate family, and among candidate-local ties prefer to pay with the less entangled blocker family.
 - The family-pressure surface consumed by main select and late retry now also includes current active family member count, not only move-work class and external pressure. When the earlier family-pressure lanes tie, main select now prefers spilling the blocker from the family with fewer still-active members, and late retry now prefers recovering the candidate from the family with more still-active members. So the allocator is beginning to treat "how much live family mass is still in play right now" as part of the same preservation heuristic, rather than leaving member count hidden only inside queue-priority math.
 - The allocator's family-pressure policy is now also starting to share one actual comparison surface across layers instead of being recopied piecemeal. Planner spill ordering, main-select blocker-family preference, and late-retry candidate-family preference now all bottom out in the same ordered family-pressure lanes (`move_work_class`, external affinity weight, external neighbor count, active family member count), and the move engine's spill-phase family queue tie-break now also uses the spill-phase move-work ranking rather than the simplify-phase one. This is still not a full move-worklist allocator mainline, but it materially reduces the risk that adjacent allocator stages drift into subtly different ideas of which family is "lighter" or "heavier".
+- Runtime global-initializer memory: `__global.init` is no longer assumed to
+  be a one-block helper. Branchy/logical top-level initializer lowering may
+  legitimately create multi-block `__global.init` control flow, so canonical
+  IR and lower-IR verifier policy now only keeps the strict single-block rule
+  for `__program.init`, while `__global.init` instead requires zero
+  parameters/locals plus `ret 0` on every explicit return site. The runtime
+  global-init finalization path now also seals any still-unterminated helper
+  block with `ret 0` after lowering finishes.
+- Lower-IR temp-live-in memory: indirect memory ops are part of the real temp
+  use surface for phi/liveness pruning. `load_indirect addr` and both
+  `store_indirect addr/value` operands must be treated the same way as other
+  temp uses during lower-IR live-in analysis; otherwise join temps that are
+  only observed through indirect memory can be pruned out of the phi set and
+  later fail strict `lower_ir -> value_ssa` conversion.
+- Machine-select branch-liveness memory: when deciding whether a
+  machine-IR compare/materialized-boolean result is still live out of the
+  source block, successor uses through indirect memory count too.
+  `load_indirect addr` and both `store_indirect addr/value` operands belong
+  to the machine-IR result-use surface for that live-out query; otherwise
+  branch shaping can incorrectly fold away a compare result that is still
+  consumed in successor blocks through indirect memory.

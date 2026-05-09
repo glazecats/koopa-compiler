@@ -61,6 +61,11 @@ static int machine_select_machine_ir_instruction_uses_result(const MachineIrInst
         case MACHINE_IR_INSTR_STORE_LOCAL:
         case MACHINE_IR_INSTR_STORE_GLOBAL:
             return machine_select_machine_ir_operand_matches_result(instruction->as.store.value, result);
+        case MACHINE_IR_INSTR_LOAD_INDIRECT:
+            return machine_select_machine_ir_operand_matches_result(instruction->as.load_indirect_addr, result);
+        case MACHINE_IR_INSTR_STORE_INDIRECT:
+            return machine_select_machine_ir_operand_matches_result(instruction->as.store_indirect.addr, result) ||
+                machine_select_machine_ir_operand_matches_result(instruction->as.store_indirect.value, result);
         default:
             return 0;
     }
