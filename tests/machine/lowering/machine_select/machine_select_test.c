@@ -8541,6 +8541,126 @@ static int test_machine_select_forwards_same_block_indirect_load_across_non_alia
     return ok;
 }
 
+static int test_machine_select_does_not_forward_indirect_load_across_aliasing_sibling_local_store(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "arr0", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "arr1", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    function->spill_slot_count = 2u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(0u);
+    instruction.as.addr_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(1u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_spill_slot(0u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(1u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(1u);
+    instruction.as.store.value = machine_ir_operand_immediate(9);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(1u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: aliasing indirect-load-forward lowering failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=2 spills=2\n"
+        "  bb.0:\n"
+        "    spill.0 = addr_local local.0\n"
+        "    spill.1 = alui.0 spill.0, 4\n"
+        "    reg.0 = load_indirect spill.1\n"
+        "    store_locali local.1, 9\n"
+        "    reg.0 = load_indirect spill.1\n"
+        "    ret reg.0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 int main(void) {
     if (!test_machine_select_lower_machine_ir_smoke()) {
         return 1;
@@ -8786,6 +8906,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_forwards_same_block_indirect_load_across_non_alias_store()) {
+        return 1;
+    }
+    if (!test_machine_select_does_not_forward_indirect_load_across_aliasing_sibling_local_store()) {
         return 1;
     }
     if (!test_machine_select_reuses_repeated_spill_pure_expr()) {

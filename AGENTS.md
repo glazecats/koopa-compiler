@@ -5,6 +5,11 @@
 - Before starting work, read `AGENTS.md`.
 - Then read `docs/ir-conventions.md`.
 - Then read `docs/NEXT_STEPS.md`.
+- If the active target in this thread is the still-open hidden runtime
+  **RE/segmentation-fault** line, then also read
+  `docs/RUNTIME_RE_SEGFAULT_PLAN.md` before making changes. Treat that file
+  as the compact active-plan authority for this specific line when
+  `docs/NEXT_STEPS.md` has grown too large for efficient continuation.
 - If the task touches lower IR / downstream IR planning or implementation, then also read `docs/ir/LOWER_IR_DESIGN.md` before making changes.
 - If the task touches SSA / allocator / machine-register-model planning or implementation, then also read the relevant authority under `docs/ssa/`:
   - `VALUE_SSA_DESIGN.md`
@@ -53,6 +58,10 @@
   1. `AGENTS.md`
   2. `docs/ir-conventions.md`
   3. `docs/NEXT_STEPS.md`
+- If the active line is the hidden runtime-RE / generated-program segfault
+  hunt, then read `docs/RUNTIME_RE_SEGFAULT_PLAN.md` immediately after
+  `docs/NEXT_STEPS.md` and use it as the compact continuation file for that
+  line.
 - If the user explicitly asks for a fresh whole-project reread / restart from
   the beginning, treat that as a **sequential source audit mode** and restart
   from the front of the implementation pipeline instead of jumping only to the
@@ -101,6 +110,9 @@
 - `AGENTS.md` defines agent roles, startup rules, and scope boundaries.
 - `docs/ir-conventions.md` is working memory for current engineering facts and safety/convention notes.
 - `docs/NEXT_STEPS.md` is the roadmap, execution log, and current-plan authority.
+- `docs/RUNTIME_RE_SEGFAULT_PLAN.md` is the compact active-plan authority for
+  the current hidden runtime-RE / generated-program segfault investigation
+  line. Keep it in sync with `docs/NEXT_STEPS.md` when this line is active.
 - `docs/ir/LOWER_IR_DESIGN.md` is the current design authority for lower-memory / downstream IR planning unless and until `docs/NEXT_STEPS.md` supersedes part of it.
 - `docs/ssa/` holds the current SSA-side design authorities:
   - `VALUE_SSA_DESIGN.md` for the next planned post-lower-IR step

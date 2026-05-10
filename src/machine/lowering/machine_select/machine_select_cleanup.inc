@@ -254,6 +254,7 @@ typedef enum {
 typedef struct {
     MachineSelectAddressRootKind kind;
     size_t id;
+    int exact_slot_address;
 } MachineSelectAddressRoot;
 
 static int machine_select_defs_compute_same_address_root(const MachineSelectBasicBlock *lhs_block,
@@ -306,22 +307,26 @@ static int machine_select_cleanup_extract_address_root_from_def(const MachineSel
 
     out_root->kind = MACHINE_SELECT_ADDR_ROOT_UNKNOWN;
     out_root->id = 0u;
+    out_root->exact_slot_address = 0;
     op = &block->ops[def_index];
 
     switch (op->kind) {
         case MACHINE_SELECT_OP_ADDR_LOCAL:
             out_root->kind = MACHINE_SELECT_ADDR_ROOT_LOCAL_SLOT;
             out_root->id = op->as.addr_slot.id;
+            out_root->exact_slot_address = 1;
             return 1;
         case MACHINE_SELECT_OP_ADDR_GLOBAL:
             out_root->kind = MACHINE_SELECT_ADDR_ROOT_GLOBAL_SLOT;
             out_root->id = op->as.addr_slot.id;
+            out_root->exact_slot_address = 1;
             return 1;
         case MACHINE_SELECT_OP_LOAD_LOCAL:
             if (op->as.load_slot.id < function->local_count &&
                 function->locals[op->as.load_slot.id].is_parameter) {
                 out_root->kind = MACHINE_SELECT_ADDR_ROOT_PARAMETER_POINTER;
                 out_root->id = op->as.load_slot.id;
+                out_root->exact_slot_address = 0;
                 return 1;
             }
             return 0;
@@ -348,6 +353,7 @@ static int machine_select_cleanup_extract_address_root_from_def(const MachineSel
                 return 0;
             }
             *out_root = has_lhs_root ? lhs_root : rhs_root;
+            out_root->exact_slot_address = 0;
             return 1;
         }
         default:
@@ -369,6 +375,7 @@ static int machine_select_cleanup_extract_address_root_operand(const MachineSele
 
     out_root->kind = MACHINE_SELECT_ADDR_ROOT_UNKNOWN;
     out_root->id = 0u;
+    out_root->exact_slot_address = 0;
     if (!function || !block || depth > 8u ||
         (operand.kind != MACHINE_SELECT_OPERAND_REGISTER &&
             operand.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT)) {
@@ -426,12 +433,16 @@ static int machine_select_cleanup_store_cannot_alias_loaded_address(const Machin
                 return 0;
             }
             if (load_root->kind == MACHINE_SELECT_ADDR_ROOT_LOCAL_SLOT) {
+                if (!load_root->exact_slot_address) {
+                    return 0;
+                }
                 return op->as.store.slot.id != load_root->id;
             }
             return load_root->kind != MACHINE_SELECT_ADDR_ROOT_PARAMETER_POINTER;
         case MACHINE_SELECT_OP_STORE_GLOBAL:
         case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
-            if (load_root->kind == MACHINE_SELECT_ADDR_ROOT_GLOBAL_SLOT) {
+            if (load_root->kind == MACHINE_SELECT_ADDR_ROOT_GLOBAL_SLOT &&
+                load_root->exact_slot_address) {
                 return op->as.store.slot.id != load_root->id;
             }
             return load_root->kind == MACHINE_SELECT_ADDR_ROOT_LOCAL_SLOT;
