@@ -101,6 +101,9 @@ static int machine_ir_value_ssa_program_needs_all_spill_lowering(const ValueSsaP
     if (!program) {
         return 0;
     }
+    if (!machine_ir_aggressive_opt_mode_enabled()) {
+        return 1;
+    }
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         const ValueSsaFunction *function = &program->functions[function_index];

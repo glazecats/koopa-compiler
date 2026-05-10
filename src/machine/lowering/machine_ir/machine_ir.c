@@ -31,6 +31,12 @@ static int machine_ir_trace_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_ir_aggressive_opt_mode_enabled(void) {
+    const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static void machine_ir_trace_timing(const char *stage, double elapsed_s) {
     if (!stage || !machine_ir_trace_enabled()) {
         return;
