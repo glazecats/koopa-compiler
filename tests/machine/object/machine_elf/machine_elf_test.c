@@ -3907,6 +3907,111 @@ static int test_machine_elf_report_dedicated_section_helpers(void) {
     return ok;
 }
 
+static int test_machine_elf_file_dedicated_section_helpers_and_all_local_partition(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    const MachineElfSection *section = NULL;
+    size_t section_index = 0u;
+    size_t first_global_symbol_index = 0u;
+    size_t main_symbol_index = 0u;
+    const MachineElfSymbol *symbol = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+
+    machine_report.program.register_bank.register_count = 1;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: file-dedicated setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: file-dedicated setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_EQ;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 2, 1, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), &machine_error)) {
+        fprintf(stderr, "[machine-elf] FAIL: file-dedicated setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
+        !machine_elf_file_get_text_section(&elf_file, &section_index, &section) || !section ||
+        section_index != 1u || section->type != MACHINE_ELF_SECTION_PROGBITS ||
+        !machine_elf_file_get_strtab_section(&elf_file, &section_index, &section) || !section ||
+        section_index != 2u || section->type != MACHINE_ELF_SECTION_STRTAB ||
+        !machine_elf_file_get_symtab_section(&elf_file, &section_index, &section) || !section ||
+        section_index != 3u || section->link != 2u ||
+        !machine_elf_file_get_rel_text_section(&elf_file, &section_index, &section) || !section ||
+        section_index != 4u || section->link != 3u ||
+        !machine_elf_file_get_shstrtab_section(&elf_file, &section_index, &section) || !section ||
+        section_index != 5u || section->type != MACHINE_ELF_SECTION_STRTAB ||
+        !machine_elf_file_get_first_global_symbol_index(&elf_file, &first_global_symbol_index) ||
+        first_global_symbol_index != 4u ||
+        !machine_elf_file_find_symbol_by_name(&elf_file, "main", &main_symbol_index, &symbol) || !symbol ||
+        main_symbol_index != 4u) {
+        fprintf(stderr, "[machine-elf] FAIL: file-dedicated helper mismatch: %s\n", elf_error.message);
+        ok = 0;
+    }
+
+    if (ok) {
+        elf_file.symbols[main_symbol_index].binding = MACHINE_ELF_SYMBOL_LOCAL;
+        elf_file.sections[elf_file.symtab_section_index].info = (uint32_t)elf_file.symbol_count;
+        if (!machine_elf_refresh_bytes(&elf_file, &elf_error) ||
+            !machine_elf_file_get_first_global_symbol_index(&elf_file, &first_global_symbol_index) ||
+            first_global_symbol_index != elf_file.symbol_count) {
+            fprintf(stderr, "[machine-elf] FAIL: all-local first-global partition mismatch: %s\n", elf_error.message);
+            ok = 0;
+        }
+    }
+
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
+    return ok;
+}
+
 static int test_machine_elf_target_policy_summary_helpers(void) {
     MachineIrAllocateRewriteReport machine_report;
     MachineIrFunction *function = NULL;
@@ -4182,6 +4287,26 @@ static int test_machine_elf_build_bytes_helpers(void) {
     return ok;
 }
 
+static int test_machine_elf_empty_file_copy_bytes_contract(void) {
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    unsigned char *bytes = NULL;
+    size_t byte_count = 1u;
+
+    memset(&elf_error, 0, sizeof(elf_error));
+    machine_elf_file_init(&elf_file);
+
+    if (!machine_elf_file_copy_bytes(&elf_file, &bytes, &byte_count, &elf_error) ||
+        bytes != NULL || byte_count != 0u) {
+        fprintf(stderr, "[machine-elf] FAIL: empty elf byte-copy contract mismatch: %s\n", elf_error.message);
+        machine_elf_file_free(&elf_file);
+        return 0;
+    }
+
+    machine_elf_file_free(&elf_file);
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -4212,8 +4337,10 @@ int main(void) {
     ok &= test_machine_elf_report_summary_and_dump_helpers();
     ok &= test_machine_elf_profile_helpers_from_file_and_machine_ir();
     ok &= test_machine_elf_report_dedicated_section_helpers();
+    ok &= test_machine_elf_file_dedicated_section_helpers_and_all_local_partition();
     ok &= test_machine_elf_target_policy_summary_helpers();
     ok &= test_machine_elf_build_bytes_helpers();
+    ok &= test_machine_elf_empty_file_copy_bytes_contract();
 
     if (!ok) {
         return 1;

@@ -424,7 +424,8 @@ int machine_journal_file_get_journal_summary(const MachineJournalFile *journal_f
     out_summary->log_kind = log_summary.log_kind;
     out_summary->is_exact_journal =
         journal_file->resolution_kind == MACHINE_JOURNAL_RESOLUTION_EXACT_JOURNAL;
-    out_summary->is_single_record_journal = journal_file->journal_record_count == 1u;
+    out_summary->is_single_record_journal =
+        journal_file->journal_record_count == 1u && journal_file->journal_record_index == 0u;
     out_summary->journal_record_count = journal_file->journal_record_count;
     out_summary->journal_record_index = journal_file->journal_record_index;
     out_summary->log_summary = log_summary;
@@ -495,7 +496,7 @@ int machine_journal_clone_file(const MachineJournalFile *source,
     if (!machine_journal_verify_file(source, error)) {
         return 0;
     }
-    machine_journal_file_init(out_clone);
+    machine_journal_file_free(out_clone);
     if (!machine_log_clone_file(&source->log_file, &out_clone->log_file, &log_error)) {
         machine_journal_set_error_from_log_error(
             error, &log_error, "MACHINE-JOURNAL-107: failed to clone machine-log file");
@@ -756,6 +757,10 @@ int machine_journal_report_refresh(MachineJournalReport *report,
     MachineJournalReport refreshed_report;
     int ok;
 
+    if (!report) {
+        machine_journal_set_error(error, 0, 0, "MACHINE-JOURNAL-121: invalid report refresh contract");
+        return 0;
+    }
     machine_journal_report_init(&refreshed_report);
     ok = machine_journal_build_report_from_file(&report->file, &refreshed_report, error);
     if (ok) {

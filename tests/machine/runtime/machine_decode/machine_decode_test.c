@@ -34,6 +34,32 @@ static int expect_text(const char *label, const char *actual_text, const char *e
     return 1;
 }
 
+static int overwrite_step_tag_byte(MachineStepFile *step_file, unsigned char tag_byte) {
+    MachineRuntimeFile *runtime_file = NULL;
+    MachineLoadFile *load_file = NULL;
+    MachineImageFile *image_file = NULL;
+
+    if (!step_file) {
+        return 0;
+    }
+    runtime_file = &step_file->launch_file.runtime_file;
+    load_file = &runtime_file->load_file;
+    image_file = &load_file->exec_file.image_file;
+    if (runtime_file->segment_count == 0u || !runtime_file->segments ||
+        load_file->segment_count == 0u || !load_file->segments ||
+        image_file->byte_count < 1u || !image_file->bytes ||
+        runtime_file->segments[0].byte_count < 1u ||
+        load_file->segments[0].memory_byte_count < 1u) {
+        return 0;
+    }
+
+    step_file->current_byte = tag_byte;
+    runtime_file->segments[0].bytes[0] = tag_byte;
+    load_file->segments[0].bytes[0] = tag_byte;
+    image_file->bytes[0] = tag_byte;
+    return 1;
+}
+
 static int build_resolved_machine_ir_report(
     MachineIrAllocateRewriteReport *report,
     MachineIrError *error) {
@@ -519,10 +545,65 @@ cleanup:
     return ok;
 }
 
+static int test_machine_decode_recognizes_indirect_memory_op_tags(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineIrError ir_error;
+    MachineStepFile step_file;
+    MachineDecodeFile decode_file;
+    MachineDecodeTagSummary tag_summary;
+    MachineDecodeError decode_error;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    memset(&ir_error, 0, sizeof(ir_error));
+    machine_step_file_init(&step_file);
+    machine_decode_file_init(&decode_file);
+    memset(&tag_summary, 0, sizeof(tag_summary));
+    memset(&decode_error, 0, sizeof(decode_error));
+
+    if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_step_build_from_machine_ir_report(&ir_report, &step_file, NULL) ||
+        !overwrite_step_tag_byte(&step_file, (unsigned char)(0x10u + MACHINE_SELECT_OP_LOAD_INDIRECT)) ||
+        !machine_decode_build_from_machine_step_file(&step_file, &decode_file, &decode_error) ||
+        !machine_decode_file_get_tag_summary(&decode_file, &tag_summary) ||
+        tag_summary.tag_class != MACHINE_DECODE_TAG_OP ||
+        tag_summary.tag_value != (unsigned char)MACHINE_SELECT_OP_LOAD_INDIRECT ||
+        !tag_summary.is_known ||
+        !tag_summary.tag_name || strcmp(tag_summary.tag_name, "load-indirect") != 0) {
+        fprintf(stderr,
+            "[machine-decode] FAIL: load-indirect tag recognition mismatch: ir=%s decode=%s\n",
+            ir_error.message,
+            decode_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    machine_decode_file_free(&decode_file);
+    if (!overwrite_step_tag_byte(&step_file, (unsigned char)(0x10u + MACHINE_SELECT_OP_STORE_INDIRECT)) ||
+        !machine_decode_build_from_machine_step_file(&step_file, &decode_file, &decode_error) ||
+        !machine_decode_file_get_tag_summary(&decode_file, &tag_summary) ||
+        tag_summary.tag_class != MACHINE_DECODE_TAG_OP ||
+        tag_summary.tag_value != (unsigned char)MACHINE_SELECT_OP_STORE_INDIRECT ||
+        !tag_summary.is_known ||
+        !tag_summary.tag_name || strcmp(tag_summary.tag_name, "store-indirect") != 0) {
+        fprintf(stderr,
+            "[machine-decode] FAIL: store-indirect tag recognition mismatch: %s\n",
+            decode_error.message);
+        ok = 0;
+    }
+
+cleanup:
+    machine_decode_file_free(&decode_file);
+    machine_step_file_free(&step_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_decode_mainline();
     ok &= test_machine_decode_ir_bridge_and_profile();
+    ok &= test_machine_decode_recognizes_indirect_memory_op_tags();
     return ok ? 0 : 1;
 }

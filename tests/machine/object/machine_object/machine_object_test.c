@@ -875,18 +875,23 @@ static int test_machine_object_surfaces_global_data_fixups(void) {
     machine_bytes_program_init(&bytes_program);
     machine_object_file_init(&object_file);
 
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
     emit_program.global_count = 2u;
     emit_program.global_capacity = 2u;
     emit_program.globals = (MachineEmitGlobal *)calloc(2u, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1u;
     emit_program.function_capacity = 1u;
     emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
-    if (!emit_program.globals || !emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.globals || !emit_program.functions) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         machine_object_file_free(&object_file);
         return 0;
     }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
 
     emit_program.globals[0].id = 0u;
     emit_program.globals[0].name = dup_text("g");
@@ -900,7 +905,8 @@ static int test_machine_object_surfaces_global_data_fixups(void) {
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
-    if (!emit_program.globals[0].name || !emit_program.globals[1].name ||
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.globals[0].name || !emit_program.globals[1].name ||
         !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
@@ -1084,6 +1090,139 @@ static int test_machine_object_preserves_global_object_byte_sizes(void) {
     return ok;
 }
 
+static int test_machine_object_allows_empty_section_subqueries(void) {
+    MachineObjectFile object_file;
+    const MachineObjectSymbol *section_symbols = NULL;
+    const MachineObjectFixup *section_fixups = NULL;
+    size_t symbol_count = 0u;
+    size_t fixup_count = 0u;
+
+    machine_object_file_init(&object_file);
+    object_file.sections = (MachineObjectSection *)calloc(1u, sizeof(MachineObjectSection));
+    if (!object_file.sections) {
+        return 0;
+    }
+    object_file.section_count = 1u;
+    object_file.section_capacity = 1u;
+    object_file.sections[0].name = dup_text(".empty");
+    if (!object_file.sections[0].name) {
+        machine_object_file_free(&object_file);
+        return 0;
+    }
+
+    if (!machine_object_file_get_section_symbols(&object_file, 0u, &symbol_count, &section_symbols) ||
+        symbol_count != 0u || section_symbols != NULL ||
+        !machine_object_file_get_section_fixups(&object_file, 0u, &fixup_count, &section_fixups) ||
+        fixup_count != 0u || section_fixups != NULL) {
+        fprintf(stderr, "[machine-object] FAIL: empty section subquery contract mismatch\n");
+        machine_object_file_free(&object_file);
+        return 0;
+    }
+
+    machine_object_file_free(&object_file);
+    return 1;
+}
+
+static int test_machine_object_report_query_dump_rejects_missing_tables(void) {
+    MachineObjectFile object_file;
+    MachineObjectReport report;
+    MachineObjectError object_error;
+    const MachineObjectSectionSummary *section_summary = NULL;
+    const MachineObjectSymbolSummary *symbol_summary = NULL;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&object_error, 0, sizeof(object_error));
+    machine_object_file_init(&object_file);
+    machine_object_report_init(&report);
+
+    object_file.sections = (MachineObjectSection *)calloc(1u, sizeof(MachineObjectSection));
+    object_file.symbols = (MachineObjectSymbol *)calloc(1u, sizeof(MachineObjectSymbol));
+    if (!object_file.sections || !object_file.symbols) {
+        machine_object_file_free(&object_file);
+        machine_object_report_free(&report);
+        return 0;
+    }
+    object_file.section_count = 1u;
+    object_file.section_capacity = 1u;
+    object_file.symbol_count = 1u;
+    object_file.symbol_capacity = 1u;
+    object_file.sections[0].name = dup_text(".text");
+    object_file.symbols[0].name = dup_text("sym");
+    if (!object_file.sections[0].name || !object_file.symbols[0].name ||
+        !machine_object_build_report_from_file(&object_file, &report, &object_error)) {
+        fprintf(stderr, "[machine-object] FAIL: malformed report setup failed: %s\n", object_error.message);
+        machine_object_file_free(&object_file);
+        machine_object_report_free(&report);
+        return 0;
+    }
+
+    free(report.section_summaries);
+    report.section_summaries = NULL;
+    memset(&object_error, 0, sizeof(object_error));
+    if (machine_object_report_find_section_summary_by_name(&report, ".text", NULL, &section_summary) ||
+        machine_object_dump_report(&report, &actual_text, &object_error)) {
+        fprintf(stderr, "[machine-object] FAIL: malformed object report section query/dump should fail\n");
+        ok = 0;
+    }
+    free(actual_text);
+    actual_text = NULL;
+
+    report.section_summaries = (MachineObjectSectionSummary *)calloc(1u, sizeof(MachineObjectSectionSummary));
+    if (!report.section_summaries) {
+        machine_object_file_free(&object_file);
+        machine_object_report_free(&report);
+        return 0;
+    }
+    report.section_summary_count = 1u;
+    report.section_summaries[0].name = ".text";
+    free(report.symbol_summaries);
+    report.symbol_summaries = NULL;
+    memset(&object_error, 0, sizeof(object_error));
+    if (machine_object_report_find_symbol_summary_by_name(&report, "sym", NULL, &symbol_summary)) {
+        fprintf(stderr, "[machine-object] FAIL: malformed object report symbol query should fail\n");
+        ok = 0;
+    }
+
+    machine_object_file_free(&object_file);
+    machine_object_report_free(&report);
+    return ok;
+}
+
+static int test_machine_object_copy_section_bytes_rejects_missing_bytes(void) {
+    MachineObjectFile object_file;
+    MachineObjectError object_error;
+    unsigned char *bytes = NULL;
+    size_t byte_count = 0u;
+
+    memset(&object_error, 0, sizeof(object_error));
+    machine_object_file_init(&object_file);
+    object_file.sections = (MachineObjectSection *)calloc(1u, sizeof(MachineObjectSection));
+    if (!object_file.sections) {
+        return 0;
+    }
+    object_file.section_count = 1u;
+    object_file.section_capacity = 1u;
+    object_file.sections[0].name = dup_text(".text");
+    object_file.sections[0].byte_count = 4u;
+    if (!object_file.sections[0].name) {
+        machine_object_file_free(&object_file);
+        return 0;
+    }
+
+    if (machine_object_file_copy_section_bytes(&object_file, 0u, &bytes, &byte_count, &object_error) ||
+        strstr(object_error.message, "MACHINE-OBJECT-103") == NULL) {
+        fprintf(stderr, "[machine-object] FAIL: missing section bytes were not rejected: %s\n", object_error.message);
+        machine_object_file_free(&object_file);
+        free(bytes);
+        return 0;
+    }
+
+    machine_object_file_free(&object_file);
+    free(bytes);
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1096,6 +1235,9 @@ int main(void) {
     ok &= test_machine_object_surfaces_global_object_sections();
     ok &= test_machine_object_preserves_global_object_byte_sizes();
     ok &= test_machine_object_surfaces_global_data_fixups();
+    ok &= test_machine_object_allows_empty_section_subqueries();
+    ok &= test_machine_object_report_query_dump_rejects_missing_tables();
+    ok &= test_machine_object_copy_section_bytes_rejects_missing_bytes();
 
     if (!ok) {
         return 1;

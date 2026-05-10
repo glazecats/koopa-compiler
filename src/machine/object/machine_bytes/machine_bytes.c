@@ -25,6 +25,26 @@ static int machine_bytes_op_has_call_payload(MachineSelectOpKind kind);
 static unsigned char machine_bytes_encode_op_kind(MachineSelectOpKind kind);
 static unsigned char machine_bytes_encode_terminator_kind(MachineLayoutTerminatorKind kind);
 static unsigned char machine_bytes_truncate_u4(size_t value);
+static int machine_bytes_bytecode_u8_target_fits(size_t value);
+static int machine_bytes_bytecode_u4_target_fits(size_t value);
+static int machine_bytes_bytecode_u8_immediate_fits(long long value);
+static int machine_bytes_bytecode_u4_immediate_fits(long long value);
+static int machine_bytes_bytecode_operand_descriptor_fits(const MachineEmitOperand *operand);
+static int machine_bytes_bytecode_slot_imm_payload_fits(
+    const MachineEmitSlotRef *slot,
+    const MachineEmitOperand *operand);
+static int machine_bytes_verify_op_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitOp *op,
+    MachineBytesError *error);
+static int machine_bytes_verify_control_target_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitTerminator *terminator,
+    MachineBytesError *error);
+static int machine_bytes_verify_terminator_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitTerminator *terminator,
+    MachineBytesError *error);
 static unsigned char machine_bytes_encode_operand_descriptor(const MachineEmitOperand *operand);
 static unsigned char machine_bytes_encode_slot_imm_payload(
     const MachineEmitSlotRef *slot,
@@ -480,6 +500,271 @@ static unsigned char machine_bytes_encode_terminator_kind(MachineLayoutTerminato
 
 static unsigned char machine_bytes_truncate_u4(size_t value) {
     return (unsigned char)(value > 0x0Fu ? 0x0Fu : value);
+}
+
+static int machine_bytes_bytecode_u8_target_fits(size_t value) {
+    return value <= 0xFFu;
+}
+
+static int machine_bytes_bytecode_u4_target_fits(size_t value) {
+    return value <= 0x0Fu;
+}
+
+static int machine_bytes_bytecode_u8_immediate_fits(long long value) {
+    return value >= 0 && value <= 0xFFll;
+}
+
+static int machine_bytes_bytecode_u4_immediate_fits(long long value) {
+    return value >= 0 && value <= 0x0Fll;
+}
+
+static int machine_bytes_bytecode_operand_descriptor_fits(const MachineEmitOperand *operand) {
+    if (!operand) {
+        return 1;
+    }
+    switch (operand->kind) {
+        case MACHINE_SELECT_OPERAND_NONE:
+            return 1;
+        case MACHINE_SELECT_OPERAND_IMMEDIATE:
+            return machine_bytes_bytecode_u4_immediate_fits(operand->immediate);
+        case MACHINE_SELECT_OPERAND_REGISTER:
+            return machine_bytes_bytecode_u4_target_fits(operand->machine_register_id);
+        case MACHINE_SELECT_OPERAND_SPILL_SLOT:
+            return machine_bytes_bytecode_u4_target_fits(operand->spill_slot);
+    }
+    return 0;
+}
+
+static int machine_bytes_bytecode_slot_imm_payload_fits(
+    const MachineEmitSlotRef *slot,
+    const MachineEmitOperand *operand) {
+    if (slot && !machine_bytes_bytecode_u4_target_fits(slot->id)) {
+        return 0;
+    }
+    if (!operand) {
+        return 1;
+    }
+    return operand->kind == MACHINE_SELECT_OPERAND_IMMEDIATE &&
+        machine_bytes_bytecode_u4_immediate_fits(operand->immediate);
+}
+
+static int machine_bytes_verify_op_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitOp *op,
+    MachineBytesError *error) {
+    size_t arg_index;
+
+    if (!op) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-143: missing op for encoding check");
+        return 0;
+    }
+    if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
+        return 1;
+    }
+
+    switch (op->kind) {
+        case MACHINE_SELECT_OP_MATERIALIZE_IMM:
+            if (!machine_bytes_bytecode_u8_immediate_fits(op->as.copy_value.immediate)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-144: bytecode materialize immediate exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_SELECT_OP_ALU_IMM:
+        case MACHINE_SELECT_OP_CMP_IMM:
+            if (!machine_bytes_bytecode_u8_immediate_fits(op->as.binary.rhs.immediate)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-145: bytecode binary immediate exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
+        case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
+            if (!machine_bytes_bytecode_slot_imm_payload_fits(&op->as.store.slot, &op->as.store.value)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-146: bytecode store-immediate payload exceeds 4-bit slot/immediate encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_SELECT_OP_CALL:
+        case MACHINE_SELECT_OP_CALL_IMM:
+        case MACHINE_SELECT_OP_CALL_SPILL:
+        case MACHINE_SELECT_OP_CALL_IMM_SPILL:
+        case MACHINE_SELECT_OP_CALL_VOID:
+        case MACHINE_SELECT_OP_CALL_VOID_IMM:
+            if (op->as.call.arg_count > 0xFFu) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-147: bytecode call arg-count exceeds 8-bit encoding");
+                return 0;
+            }
+            for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+                if (!machine_bytes_bytecode_operand_descriptor_fits(&op->as.call.args[arg_index])) {
+                    machine_bytes_set_error(
+                        error, 0, 0, "MACHINE-BYTES-148: bytecode call argument exceeds 4-bit operand encoding");
+                    return 0;
+                }
+            }
+            return 1;
+        default:
+            return 1;
+    }
+}
+
+static int machine_bytes_verify_control_target_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitTerminator *terminator,
+    MachineBytesError *error) {
+    if (!terminator) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-136: missing control terminator for encoding check");
+        return 0;
+    }
+    if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
+        return 1;
+    }
+
+    switch (terminator->kind) {
+        case MACHINE_LAYOUT_TERM_FALLTHROUGH:
+            if (!machine_bytes_bytecode_u8_target_fits(terminator->as.fallthrough_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-137: bytecode fallthrough target exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_JUMP:
+            if (!machine_bytes_bytecode_u8_target_fits(terminator->as.jump_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-138: bytecode jump target exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_BRANCH:
+            if (!machine_bytes_bytecode_u4_target_fits(terminator->as.branch.then_target) ||
+                !machine_bytes_bytecode_u4_target_fits(terminator->as.branch.else_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-139: bytecode branch target exceeds 4-bit paired encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
+            if (!machine_bytes_bytecode_u4_target_fits(terminator->as.branch_fallthrough.taken_target) ||
+                !machine_bytes_bytecode_u4_target_fits(terminator->as.branch_fallthrough.fallthrough_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-140: bytecode branch-fallthrough target exceeds 4-bit paired encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH:
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM:
+            if (!machine_bytes_bytecode_u4_target_fits(terminator->as.compare_branch.then_target) ||
+                !machine_bytes_bytecode_u4_target_fits(terminator->as.compare_branch.else_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-141: bytecode compare-branch target exceeds 4-bit paired encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
+            if (!machine_bytes_bytecode_u4_target_fits(terminator->as.compare_branch_fallthrough.taken_target) ||
+                !machine_bytes_bytecode_u4_target_fits(
+                    terminator->as.compare_branch_fallthrough.fallthrough_target)) {
+                machine_bytes_set_error(
+                    error,
+                    0,
+                    0,
+                    "MACHINE-BYTES-142: bytecode compare-branch-fallthrough target exceeds 4-bit paired encoding");
+                return 0;
+            }
+            return 1;
+        default:
+            return 1;
+    }
+}
+
+static int machine_bytes_verify_terminator_encoding_for_profile(
+    MachineBytesTargetProfile profile,
+    const MachineEmitTerminator *terminator,
+    MachineBytesError *error) {
+    if (!terminator) {
+        machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-149: missing terminator for encoding check");
+        return 0;
+    }
+    if (profile == MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW) {
+        return 1;
+    }
+    if (!machine_bytes_verify_control_target_encoding_for_profile(profile, terminator, error)) {
+        return 0;
+    }
+
+    switch (terminator->kind) {
+        case MACHINE_LAYOUT_TERM_RETURN_IMM:
+        case MACHINE_LAYOUT_TERM_RETURN_SPILL:
+            if (!machine_bytes_bytecode_operand_descriptor_fits(&terminator->as.return_value)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-150: bytecode return operand exceeds 4-bit descriptor encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_BRANCH:
+            if (!machine_bytes_bytecode_operand_descriptor_fits(&terminator->as.branch.condition)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-151: bytecode branch condition exceeds 4-bit descriptor encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
+            if (!machine_bytes_bytecode_operand_descriptor_fits(&terminator->as.branch_fallthrough.condition)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-152: bytecode branch-fallthrough condition exceeds 4-bit descriptor encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH:
+            if (!machine_bytes_bytecode_operand_descriptor_fits(&terminator->as.compare_branch.rhs)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-153: bytecode compare-branch rhs exceeds 4-bit descriptor encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM:
+            if (!machine_bytes_bytecode_u8_immediate_fits(terminator->as.compare_branch.rhs.immediate)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-154: bytecode compare-branch immediate exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
+            if (!machine_bytes_bytecode_operand_descriptor_fits(&terminator->as.compare_branch_fallthrough.rhs)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-155: bytecode compare-branch-fallthrough rhs exceeds 4-bit descriptor encoding");
+                return 0;
+            }
+            return 1;
+        case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
+            if (!machine_bytes_bytecode_u8_immediate_fits(
+                    terminator->as.compare_branch_fallthrough.rhs.immediate)) {
+                machine_bytes_set_error(
+                    error, 0, 0, "MACHINE-BYTES-156: bytecode compare-branch-fallthrough immediate exceeds 8-bit encoding");
+                return 0;
+            }
+            return 1;
+        default:
+            return 1;
+    }
 }
 
 static unsigned char machine_bytes_encode_operand_descriptor(const MachineEmitOperand *operand) {

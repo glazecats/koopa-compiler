@@ -34,6 +34,7 @@ int machine_load_verify_file(const MachineLoadFile *load_file,
         const MachineImageSegment *image_segment =
             &load_file->exec_file.image_file.segments[exec_segment->image_segment_index];
         size_t zero_fill_index;
+        size_t segment_end = 0u;
 
         if (!segment->name ||
             segment->exec_segment_index != segment_index ||
@@ -43,7 +44,8 @@ int machine_load_verify_file(const MachineLoadFile *load_file,
             segment->readable != exec_segment->readable ||
             segment->writable != exec_segment->writable ||
             segment->executable != exec_segment->executable ||
-            (segment->file_byte_count > 0u && !segment->bytes) ||
+            !machine_load_try_add_size(segment->virtual_address, segment->memory_byte_count, &segment_end) ||
+            (segment->memory_byte_count > 0u && !segment->bytes) ||
             (segment->file_byte_count > 0u &&
                 memcmp(segment->bytes,
                     load_file->exec_file.image_file.bytes + image_segment->image_offset,
@@ -58,6 +60,10 @@ int machine_load_verify_file(const MachineLoadFile *load_file,
                 machine_load_set_error(error, 0, 0, "MACHINE-LOAD-130: invalid zero-fill tail");
                 return 0;
             }
+        }
+        if (total_memory_byte_count > ((size_t)-1) - segment->memory_byte_count) {
+            machine_load_set_error(error, 0, 0, "MACHINE-LOAD-131: invalid load memory-byte accounting");
+            return 0;
         }
         total_memory_byte_count += segment->memory_byte_count;
     }
@@ -125,6 +131,14 @@ int machine_load_dump_file(const MachineLoadFile *load_file,
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {
         const MachineLoadSegment *segment = &load_file->segments[segment_index];
+        size_t zero_fill_byte_count = 0u;
+
+        if (segment->memory_byte_count < segment->file_byte_count) {
+            free(builder.data);
+            machine_load_set_error(error, 0, 0, "MACHINE-LOAD-139: invalid load dump zero-fill accounting");
+            return 0;
+        }
+        zero_fill_byte_count = segment->memory_byte_count - segment->file_byte_count;
 
         if (!machine_load_append_format(
                 &builder,
@@ -135,7 +149,7 @@ int machine_load_dump_file(const MachineLoadFile *load_file,
                 segment->virtual_address,
                 segment->file_byte_count,
                 segment->memory_byte_count,
-                segment->memory_byte_count - segment->file_byte_count,
+                zero_fill_byte_count,
                 segment_alignment,
                 segment->readable ? 'r' : '-',
                 segment->writable ? 'w' : '-',

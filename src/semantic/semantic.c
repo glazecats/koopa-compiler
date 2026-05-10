@@ -1,6 +1,7 @@
 #include "semantic.h"
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,7 @@ static void semantic_set_error(SemanticError *error,
     int line,
     int column,
     const char *message);
+static long long semantic_normalize_sysy_int_value(long long value);
 static const SemanticBuiltinFunctionInfo *semantic_find_builtin_function(const char *name);
 static const AstExternal *semantic_find_visible_function_external(const AstProgram *program,
     size_t func_index,
@@ -116,6 +118,11 @@ static int semantic_check_function_return_shape_rules(const AstExternal *func,
 static int semantic_compute_function_returns_all_paths(const AstExternal *func,
     int *out_returns_all_paths,
     SemanticError *error);
+
+static long long semantic_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
 
 #define SEMANTIC_SPLIT_AGGREGATOR 1
 #include "semantic_core_flow.inc"

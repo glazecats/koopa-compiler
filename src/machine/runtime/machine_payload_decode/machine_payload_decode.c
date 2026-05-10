@@ -73,6 +73,17 @@ static int machine_payload_decode_append_format(MachinePayloadDecodeStringBuilde
     return 1;
 }
 
+static int machine_payload_decode_try_add_size(size_t base, size_t delta, size_t *out_sum) {
+    if (!out_sum) {
+        return 0;
+    }
+    if (delta > ((size_t)-1) - base) {
+        return 0;
+    }
+    *out_sum = base + delta;
+    return 1;
+}
+
 void machine_payload_decode_file_init(MachinePayloadDecodeFile *decode_file) {
     if (!decode_file) {
         return;
@@ -154,9 +165,12 @@ int machine_payload_decode_verify_file(const MachinePayloadDecodeFile *decode_fi
     MachinePayloadDecodeError *error) {
     MachineDecodeTagSummary tag_summary;
     MachineStepFetchSummary fetch_summary;
+    MachineRuntimeMemorySummary runtime_memory_summary;
+    size_t payload_memory_offset = 0u;
 
     memset(&tag_summary, 0, sizeof(tag_summary));
     memset(&fetch_summary, 0, sizeof(fetch_summary));
+    memset(&runtime_memory_summary, 0, sizeof(runtime_memory_summary));
     if (!decode_file) {
         machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-100: invalid payload decode file");
         return 0;
@@ -166,7 +180,10 @@ int machine_payload_decode_verify_file(const MachinePayloadDecodeFile *decode_fi
         return 0;
     }
     if (!machine_decode_file_get_tag_summary(&decode_file->decode_file, &tag_summary) ||
-        !machine_decode_file_get_fetch_summary(&decode_file->decode_file, &fetch_summary)) {
+        !machine_decode_file_get_fetch_summary(&decode_file->decode_file, &fetch_summary) ||
+        !machine_runtime_file_get_memory_summary(
+            &decode_file->decode_file.step_file.launch_file.runtime_file,
+            &runtime_memory_summary)) {
         machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-102: failed deriving decode facts");
         return 0;
     }
@@ -180,10 +197,34 @@ int machine_payload_decode_verify_file(const MachinePayloadDecodeFile *decode_fi
         machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-104: invalid payload byte counts");
         return 0;
     }
+    if (!machine_payload_decode_try_add_size(
+            fetch_summary.byte_memory_offset,
+            decode_file->total_byte_count,
+            &payload_memory_offset) ||
+        payload_memory_offset > runtime_memory_summary.span_byte_count) {
+        machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-110: payload decode would read past mapped memory");
+        return 0;
+    }
     if (decode_file->decode_file.raw_byte != fetch_summary.byte_value ||
         decode_file->decode_file.raw_byte != tag_summary.raw_byte) {
         machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-105: payload decode must match current fetch byte");
         return 0;
+    }
+    if (decode_file->payload_byte_count > 0u) {
+        size_t index;
+
+        for (index = 0u; index < decode_file->payload_byte_count; ++index) {
+            unsigned char payload_byte = 0u;
+
+            if (!machine_runtime_file_get_memory_byte_at_offset(
+                    &decode_file->decode_file.step_file.launch_file.runtime_file,
+                    fetch_summary.byte_memory_offset + 1u + index,
+                    &payload_byte) ||
+                payload_byte != decode_file->payload_bytes[index]) {
+                machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-111: payload decode payload byte mismatch");
+                return 0;
+            }
+        }
     }
     return 1;
 }
@@ -351,6 +392,11 @@ int machine_payload_decode_build_from_machine_decode_file(const MachineDecodeFil
                 payload_byte_count = 1u;
                 is_known = 1;
                 break;
+            case MACHINE_SELECT_OP_LOAD_INDIRECT:
+            case MACHINE_SELECT_OP_STORE_INDIRECT:
+                payload_byte_count = 0u;
+                is_known = 1;
+                break;
             case MACHINE_SELECT_OP_CALL:
             case MACHINE_SELECT_OP_CALL_IMM:
             case MACHINE_SELECT_OP_CALL_SPILL:
@@ -395,15 +441,32 @@ int machine_payload_decode_build_from_machine_decode_file(const MachineDecodeFil
     }
 
     total_byte_count = 1u + payload_byte_count;
-    if (fetch_summary.byte_memory_offset + total_byte_count > runtime_memory_summary.span_byte_count) {
-        machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-110: payload decode would read past mapped memory");
-        return 0;
+    {
+        size_t end_memory_offset = 0u;
+
+        if (!machine_payload_decode_try_add_size(
+                fetch_summary.byte_memory_offset,
+                total_byte_count,
+                &end_memory_offset) ||
+            end_memory_offset > runtime_memory_summary.span_byte_count) {
+            machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-110: payload decode would read past mapped memory");
+            return 0;
+        }
     }
 
     for (index = 0u; index < payload_byte_count; ++index) {
+        size_t payload_memory_offset = 0u;
+
+        if (!machine_payload_decode_try_add_size(
+                fetch_summary.byte_memory_offset,
+                1u + index,
+                &payload_memory_offset)) {
+            machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-111: failed reading payload byte");
+            return 0;
+        }
         if (!machine_runtime_file_get_memory_byte_at_offset(
                 &decode_file->step_file.launch_file.runtime_file,
-                fetch_summary.byte_memory_offset + 1u + index,
+                payload_memory_offset,
                 &payload_bytes[index])) {
             machine_payload_decode_set_error(error, 0, 0, "MACHINE-PAYLOAD-DECODE-111: failed reading payload byte");
             return 0;

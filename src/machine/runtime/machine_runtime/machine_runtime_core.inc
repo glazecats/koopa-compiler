@@ -156,6 +156,17 @@ static const char *machine_runtime_segment_filter_kind_name(MachineRuntimeReport
     return "unknown";
 }
 
+static int machine_runtime_try_add_size(size_t base, size_t delta, size_t *out_sum) {
+    if (!out_sum) {
+        return 0;
+    }
+    if (delta > ((size_t)-1) - base) {
+        return 0;
+    }
+    *out_sum = base + delta;
+    return 1;
+}
+
 static int machine_runtime_file_compute_bounds(const MachineRuntimeFile *runtime_file,
     size_t *out_base_virtual_address,
     size_t *out_end_virtual_address) {
@@ -168,10 +179,19 @@ static int machine_runtime_file_compute_bounds(const MachineRuntimeFile *runtime
     }
 
     base_virtual_address = runtime_file->segments[0].virtual_address;
-    end_virtual_address = runtime_file->segments[0].virtual_address + runtime_file->segments[0].byte_count;
+    if (!machine_runtime_try_add_size(
+            runtime_file->segments[0].virtual_address,
+            runtime_file->segments[0].byte_count,
+            &end_virtual_address)) {
+        return 0;
+    }
     for (segment_index = 1u; segment_index < runtime_file->segment_count; ++segment_index) {
         const MachineRuntimeSegment *segment = &runtime_file->segments[segment_index];
-        size_t segment_end = segment->virtual_address + segment->byte_count;
+        size_t segment_end = 0u;
+
+        if (!machine_runtime_try_add_size(segment->virtual_address, segment->byte_count, &segment_end)) {
+            return 0;
+        }
 
         if (segment->virtual_address < base_virtual_address) {
             base_virtual_address = segment->virtual_address;
@@ -307,6 +327,7 @@ int machine_runtime_verify_file(const MachineRuntimeFile *runtime_file,
 
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
         const MachineRuntimeSegment *segment = &runtime_file->segments[segment_index];
+        size_t segment_end = 0u;
 
         if (!segment->name) {
             machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-105: runtime segment missing name");
@@ -314,6 +335,10 @@ int machine_runtime_verify_file(const MachineRuntimeFile *runtime_file,
         }
         if (segment->byte_count > 0u && !segment->bytes) {
             machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-106: runtime segment missing bytes");
+            return 0;
+        }
+        if (!machine_runtime_try_add_size(segment->virtual_address, segment->byte_count, &segment_end)) {
+            machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-111: overlapping runtime segments");
             return 0;
         }
         if (segment->kind == MACHINE_RUNTIME_SEGMENT_KIND_LOAD) {
@@ -347,8 +372,12 @@ int machine_runtime_verify_file(const MachineRuntimeFile *runtime_file,
 
         for (other_index = segment_index + 1u; other_index < runtime_file->segment_count; ++other_index) {
             const MachineRuntimeSegment *other = &runtime_file->segments[other_index];
-            size_t segment_end = segment->virtual_address + segment->byte_count;
-            size_t other_end = other->virtual_address + other->byte_count;
+            size_t other_end = 0u;
+
+            if (!machine_runtime_try_add_size(other->virtual_address, other->byte_count, &other_end)) {
+                machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-111: overlapping runtime segments");
+                return 0;
+            }
 
             if (segment->virtual_address < other_end && other->virtual_address < segment_end) {
                 machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-111: overlapping runtime segments");
@@ -356,6 +385,10 @@ int machine_runtime_verify_file(const MachineRuntimeFile *runtime_file,
             }
         }
 
+        if (total_mapped_byte_count > ((size_t)-1) - segment->byte_count) {
+            machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-112: runtime mapped-byte count mismatch");
+            return 0;
+        }
         total_mapped_byte_count += segment->byte_count;
     }
 
@@ -370,9 +403,16 @@ int machine_runtime_verify_file(const MachineRuntimeFile *runtime_file,
         return 0;
     }
     stack_segment = &runtime_file->segments[runtime_file->stack_segment_index];
-    if (!stack_segment || runtime_file->initial_stack_pointer != stack_segment->virtual_address + stack_segment->byte_count) {
-        machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-114: runtime stack pointer must target stack top");
-        return 0;
+    {
+        size_t stack_end = 0u;
+
+        if (!stack_segment ||
+            !machine_runtime_try_add_size(
+                stack_segment->virtual_address, stack_segment->byte_count, &stack_end) ||
+            runtime_file->initial_stack_pointer != stack_end) {
+            machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-114: runtime stack pointer must target stack top");
+            return 0;
+        }
     }
     if (!machine_runtime_file_get_entry_segment(runtime_file, NULL, NULL)) {
         machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-115: runtime entry must land inside an executable segment");

@@ -410,6 +410,24 @@ int machine_layout_dump_report(const MachineLayoutReport *report,
         machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-201: invalid report dump contract");
         return 0;
     }
+    if (report->function_summary_count != report->program.function_count) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-203: report function-summary count drift");
+        return 0;
+    }
+    if (report->program.function_count > 0 &&
+        (!report->program.functions || !report->function_summaries || !report->function_block_summary_offsets)) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-204: report function tables missing");
+        return 0;
+    }
+    if (report->total_block_summary_count > 0 && !report->block_summaries) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-205: report block summary table missing");
+        return 0;
+    }
+    if ((report->functions_with_fallthrough_count > 0 && !report->function_indices_with_fallthrough) ||
+        (report->functions_with_branches_count > 0 && !report->function_indices_with_branches)) {
+        machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-206: report filter tables missing");
+        return 0;
+    }
 
     memset(&builder, 0, sizeof(builder));
     if (!machine_layout_append_format(
@@ -464,6 +482,12 @@ int machine_layout_dump_report(const MachineLayoutReport *report,
             ? report->function_block_summary_offsets[function_index + 1u]
             : report->total_block_summary_count;
         size_t block_summary_index;
+
+        if (next_block_offset < block_offset || next_block_offset > report->total_block_summary_count) {
+            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-207: report block summary offsets drift");
+            free(builder.data);
+            return 0;
+        }
 
         if (!machine_layout_append_format(
                 &builder,

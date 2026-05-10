@@ -2,6 +2,7 @@
 
 #include "machine/elf.h"
 #include "machine/ir.h"
+#include "machine/runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +85,121 @@ static char *dup_text(const char *text) {
     }
     memcpy(copy, text, length + 1u);
     return copy;
+}
+
+static int build_manual_load_file_with_zero_length_aux_segment(MachineLoadFile *load_file) {
+    if (!load_file) {
+        return 0;
+    }
+
+    machine_load_file_init(load_file);
+
+    load_file->exec_file.image_file.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.target_profile =
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.origin_profile =
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.relocation_semantics =
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS;
+    load_file->exec_file.image_file.base_virtual_address = 0x1000u;
+    load_file->exec_file.image_file.has_entry = 1;
+    load_file->exec_file.image_file.entry_symbol_index = 0u;
+    load_file->exec_file.image_file.entry_virtual_address = 0x1000u;
+    load_file->exec_file.image_file.segment_count = 2u;
+    load_file->exec_file.image_file.segment_capacity = 2u;
+    load_file->exec_file.image_file.segments = (MachineImageSegment *)calloc(2u, sizeof(MachineImageSegment));
+    load_file->exec_file.image_file.symbol_count = 1u;
+    load_file->exec_file.image_file.symbol_capacity = 1u;
+    load_file->exec_file.image_file.symbols = (MachineImageSymbol *)calloc(1u, sizeof(MachineImageSymbol));
+    load_file->exec_file.image_file.byte_count = 1u;
+    load_file->exec_file.image_file.bytes = (unsigned char *)malloc(1u);
+    load_file->exec_file.segment_count = 2u;
+    load_file->exec_file.segment_capacity = 2u;
+    load_file->exec_file.segments = (MachineExecSegment *)calloc(2u, sizeof(MachineExecSegment));
+    load_file->segment_count = 2u;
+    load_file->segment_capacity = 2u;
+    load_file->segments = (MachineLoadSegment *)calloc(2u, sizeof(MachineLoadSegment));
+    if (!load_file->exec_file.image_file.segments ||
+        !load_file->exec_file.image_file.symbols ||
+        !load_file->exec_file.image_file.bytes ||
+        !load_file->exec_file.segments ||
+        !load_file->segments) {
+        machine_load_file_free(load_file);
+        return 0;
+    }
+
+    load_file->exec_file.image_file.bytes[0] = 0x7fu;
+
+    load_file->exec_file.image_file.segments[0].name = dup_text(".text");
+    load_file->exec_file.image_file.segments[0].image_offset = 0u;
+    load_file->exec_file.image_file.segments[0].virtual_address = 0x1000u;
+    load_file->exec_file.image_file.segments[0].byte_count = 1u;
+    load_file->exec_file.image_file.segments[0].align = 4096u;
+    load_file->exec_file.image_file.segments[1].name = dup_text(".bss");
+    load_file->exec_file.image_file.segments[1].image_offset = 1u;
+    load_file->exec_file.image_file.segments[1].virtual_address = 0x1001u;
+    load_file->exec_file.image_file.segments[1].byte_count = 0u;
+    load_file->exec_file.image_file.segments[1].align = 4096u;
+
+    load_file->exec_file.image_file.symbols[0].name = dup_text("main");
+    load_file->exec_file.image_file.symbols[0].binding = MACHINE_ELF_SYMBOL_GLOBAL;
+    load_file->exec_file.image_file.symbols[0].type = MACHINE_ELF_SYMBOL_FUNC;
+    load_file->exec_file.image_file.symbols[0].is_defined = 1;
+    load_file->exec_file.image_file.symbols[0].segment_index = 0u;
+    load_file->exec_file.image_file.symbols[0].value_offset = 0u;
+    load_file->exec_file.image_file.symbols[0].virtual_address = 0x1000u;
+
+    load_file->exec_file.entry_virtual_address = 0x1000u;
+    load_file->exec_file.segments[0].name = dup_text(".text");
+    load_file->exec_file.segments[0].image_segment_index = 0u;
+    load_file->exec_file.segments[0].virtual_address = 0x1000u;
+    load_file->exec_file.segments[0].byte_count = 1u;
+    load_file->exec_file.segments[0].readable = 1u;
+    load_file->exec_file.segments[0].writable = 0u;
+    load_file->exec_file.segments[0].executable = 1u;
+    load_file->exec_file.segments[1].name = dup_text(".bss");
+    load_file->exec_file.segments[1].image_segment_index = 1u;
+    load_file->exec_file.segments[1].virtual_address = 0x1001u;
+    load_file->exec_file.segments[1].byte_count = 0u;
+    load_file->exec_file.segments[1].readable = 1u;
+    load_file->exec_file.segments[1].writable = 1u;
+    load_file->exec_file.segments[1].executable = 0u;
+
+    load_file->entry_virtual_address = 0x1000u;
+    load_file->total_memory_byte_count = 1u;
+    load_file->segments[0].name = dup_text(".text");
+    load_file->segments[0].exec_segment_index = 0u;
+    load_file->segments[0].virtual_address = 0x1000u;
+    load_file->segments[0].file_byte_count = 1u;
+    load_file->segments[0].memory_byte_count = 1u;
+    load_file->segments[0].bytes = (unsigned char *)malloc(1u);
+    load_file->segments[0].readable = 1u;
+    load_file->segments[0].writable = 0u;
+    load_file->segments[0].executable = 1u;
+    load_file->segments[1].name = dup_text(".bss");
+    load_file->segments[1].exec_segment_index = 1u;
+    load_file->segments[1].virtual_address = 0x1001u;
+    load_file->segments[1].file_byte_count = 0u;
+    load_file->segments[1].memory_byte_count = 0u;
+    load_file->segments[1].bytes = NULL;
+    load_file->segments[1].readable = 1u;
+    load_file->segments[1].writable = 1u;
+    load_file->segments[1].executable = 0u;
+
+    if (!load_file->exec_file.image_file.segments[0].name ||
+        !load_file->exec_file.image_file.segments[1].name ||
+        !load_file->exec_file.image_file.symbols[0].name ||
+        !load_file->exec_file.segments[0].name ||
+        !load_file->exec_file.segments[1].name ||
+        !load_file->segments[0].name ||
+        !load_file->segments[1].name ||
+        !load_file->segments[0].bytes) {
+        machine_load_file_free(load_file);
+        return 0;
+    }
+    load_file->segments[0].bytes[0] = 0x7fu;
+
+    return 1;
 }
 
 static int expect_text(const char *label, const char *actual_text, const char *expected_text) {
@@ -728,12 +844,232 @@ cleanup:
     return ok;
 }
 
+static int test_machine_load_and_runtime_copy_zero_length_aux_segment(void) {
+    MachineLoadFile load_file;
+    MachineRuntimeFile runtime_file;
+    MachineLoadError load_error;
+    MachineRuntimeError runtime_error;
+    unsigned char *bytes = NULL;
+    size_t byte_count = 0u;
+    size_t base_virtual_address = 0u;
+    int ok = 1;
+
+    machine_load_file_init(&load_file);
+    machine_runtime_file_init(&runtime_file);
+    memset(&load_error, 0, sizeof(load_error));
+    memset(&runtime_error, 0, sizeof(runtime_error));
+
+    if (!build_manual_load_file_with_zero_length_aux_segment(&load_file) ||
+        !machine_load_verify_file(&load_file, &load_error) ||
+        !machine_load_file_copy_flat_memory_image(
+            &load_file, &bytes, &byte_count, &base_virtual_address, &load_error) ||
+        !bytes || byte_count != 1u || base_virtual_address != 0x1000u || bytes[0] != 0x7fu) {
+        fprintf(stderr,
+            "[machine-load] FAIL: zero-length load-segment copy mismatch: %s\n",
+            load_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    free(bytes);
+    bytes = NULL;
+
+    if (!machine_runtime_build_from_machine_load_file(&load_file, &runtime_file, &runtime_error) ||
+        !machine_runtime_file_copy_flat_memory_image(
+            &runtime_file, &bytes, &byte_count, &base_virtual_address, &runtime_error) ||
+        !bytes || byte_count < 1u || base_virtual_address != 0x1000u || bytes[0] != 0x7fu) {
+        fprintf(stderr,
+            "[machine-load] FAIL: zero-length runtime-segment copy mismatch: %s\n",
+            runtime_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+cleanup:
+    free(bytes);
+    machine_runtime_file_free(&runtime_file);
+    machine_load_file_free(&load_file);
+    return ok;
+}
+
+static int test_machine_load_rejects_zero_fill_only_null_bytes_and_wrapped_segment_spans(void) {
+    MachineLoadFile load_file;
+    MachineLoadError load_error;
+    size_t high_virtual_address = ((size_t)-1) - 31u;
+    int ok = 1;
+
+    machine_load_file_init(&load_file);
+    memset(&load_error, 0, sizeof(load_error));
+
+    if (!build_manual_load_file_with_zero_length_aux_segment(&load_file)) {
+        fprintf(stderr, "[machine-load] FAIL: malformed-load setup failed\n");
+        machine_load_file_free(&load_file);
+        return 0;
+    }
+
+    load_file.segments[1].memory_byte_count = 16u;
+    load_file.total_memory_byte_count = 17u;
+    if (machine_load_verify_file(&load_file, &load_error) ||
+        strstr(load_error.message, "invalid load segment") == NULL) {
+        fprintf(stderr,
+            "[machine-load] FAIL: zero-fill-only null-bytes rejection mismatch: %s\n",
+            load_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    free(load_file.segments[0].bytes);
+    load_file.segments[0].bytes = (unsigned char *)calloc(64u, 1u);
+    if (!load_file.segments[0].bytes) {
+        fprintf(stderr, "[machine-load] FAIL: wrapped-span setup allocation failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+    load_file.segments[0].bytes[0] = 0x7fu;
+    load_file.segments[0].virtual_address = high_virtual_address;
+    load_file.segments[0].memory_byte_count = 64u;
+    load_file.segments[1].virtual_address = high_virtual_address + 64u;
+    load_file.total_memory_byte_count = 64u;
+
+    load_file.entry_virtual_address = high_virtual_address;
+    load_file.exec_file.entry_virtual_address = high_virtual_address;
+    load_file.exec_file.image_file.base_virtual_address = high_virtual_address;
+    load_file.exec_file.image_file.entry_virtual_address = high_virtual_address;
+    load_file.exec_file.image_file.segments[0].virtual_address = high_virtual_address;
+    load_file.exec_file.image_file.segments[1].virtual_address = high_virtual_address + 64u;
+    load_file.exec_file.image_file.symbols[0].virtual_address = high_virtual_address;
+    load_file.exec_file.segments[0].virtual_address = high_virtual_address;
+    load_file.exec_file.segments[1].virtual_address = high_virtual_address + 64u;
+
+    memset(&load_error, 0, sizeof(load_error));
+    if (machine_load_verify_file(&load_file, &load_error) ||
+        strstr(load_error.message, "invalid load segment") == NULL) {
+        fprintf(stderr,
+            "[machine-load] FAIL: wrapped-span rejection mismatch: %s\n",
+            load_error.message);
+        ok = 0;
+    }
+
+cleanup:
+    machine_load_file_free(&load_file);
+    return ok;
+}
+
+static int test_machine_load_query_helpers_reject_malformed_segment_tables(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineLoadFile load_file;
+    MachineLoadReport load_report;
+    MachineLoadError load_error;
+    MachineLoadSegment *saved_file_segments = NULL;
+    MachineLoadSegment *saved_report_file_segments = NULL;
+    MachineLoadSegmentSummary *saved_report_segment_summaries = NULL;
+    size_t *saved_executable_indices = NULL;
+    size_t *saved_non_executable_indices = NULL;
+    const MachineLoadSegment *segment = NULL;
+    const MachineLoadSegmentSummary *segment_summary = NULL;
+    MachineLoadReportSegmentArtifact segment_artifact;
+    MachineLoadMemorySummary memory_summary;
+    size_t segment_index = 0u;
+    size_t count = 0u;
+    size_t base_virtual_address = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_load_file_init(&load_file);
+    machine_load_report_init(&load_report);
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&load_error, 0, sizeof(load_error));
+    memset(&segment_artifact, 0, sizeof(segment_artifact));
+    memset(&memory_summary, 0, sizeof(memory_summary));
+
+    if (!build_resolved_machine_ir_report(&machine_report, &machine_error) ||
+        !machine_load_build_from_machine_ir_report(&machine_report, &load_file, &load_error) ||
+        !machine_load_build_report_from_machine_ir_report(&machine_report, &load_report, &load_error)) {
+        fprintf(stderr,
+            "[machine-load] FAIL: malformed-load-query setup failed: machine=%s load=%s\n",
+            machine_error.message,
+            load_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    base_virtual_address = load_file.segments[0].virtual_address;
+    saved_file_segments = load_file.segments;
+    load_file.segments = NULL;
+    if (machine_load_file_get_summary(&load_file, &count, NULL, NULL, NULL) ||
+        machine_load_file_get_memory_summary(&load_file, &memory_summary) ||
+        machine_load_file_get_segment(&load_file, 0u, &segment) ||
+        machine_load_file_find_segment_by_name(&load_file, ".text", &segment_index, &segment) ||
+        machine_load_file_find_segment_covering_virtual_address(
+            &load_file, base_virtual_address, &segment_index, &segment) ||
+        machine_load_file_get_entry_segment(&load_file, &segment_index, &segment) ||
+        machine_load_file_get_executable_segment_count(&load_file, &count) ||
+        machine_load_file_get_executable_segment_by_index(&load_file, 0u, &segment_index, &segment)) {
+        fprintf(stderr, "[machine-load] FAIL: malformed load-file query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    load_file.segments = saved_file_segments;
+
+    saved_report_file_segments = load_report.file.segments;
+    saved_report_segment_summaries = load_report.segment_summaries;
+    saved_executable_indices = load_report.executable_segment_indices;
+    saved_non_executable_indices = load_report.non_executable_segment_indices;
+    load_report.file.segments = NULL;
+    load_report.segment_summaries = NULL;
+    load_report.executable_segment_indices = NULL;
+    load_report.non_executable_segment_indices = NULL;
+    if (machine_load_report_get_summary(&load_report, &count, NULL, NULL, NULL) ||
+        machine_load_report_get_entry_segment_summary_artifact(
+            &load_report, &segment_index, &segment_summary) ||
+        machine_load_report_get_segment_summary(&load_report, 0u, &segment_summary) ||
+        machine_load_report_get_segment_artifact(&load_report, 0u, &segment_artifact) ||
+        machine_load_report_find_segment_summary_by_name(
+            &load_report, ".text", &segment_index, &segment_summary) ||
+        machine_load_report_find_segment_summary_covering_virtual_address(
+            &load_report, base_virtual_address, &segment_index, &segment_summary) ||
+        machine_load_report_get_segment_filter_count(
+            &load_report, MACHINE_LOAD_SEGMENT_FILTER_EXECUTABLE, &count) ||
+        machine_load_report_get_segment_summary_by_filter_index(
+            &load_report,
+            MACHINE_LOAD_SEGMENT_FILTER_EXECUTABLE,
+            0u,
+            &segment_index,
+            &segment_summary) ||
+        machine_load_report_get_executable_segment_count(&load_report, &count) ||
+        machine_load_report_get_executable_segment_summary_by_index(
+            &load_report, 0u, &segment_index, &segment_summary)) {
+        fprintf(stderr, "[machine-load] FAIL: malformed load-report query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    load_report.file.segments = saved_report_file_segments;
+    load_report.segment_summaries = saved_report_segment_summaries;
+    load_report.executable_segment_indices = saved_executable_indices;
+    load_report.non_executable_segment_indices = saved_non_executable_indices;
+
+cleanup:
+    load_report.file.segments = saved_report_file_segments ? saved_report_file_segments : load_report.file.segments;
+    load_report.segment_summaries =
+        saved_report_segment_summaries ? saved_report_segment_summaries : load_report.segment_summaries;
+    load_report.executable_segment_indices =
+        saved_executable_indices ? saved_executable_indices : load_report.executable_segment_indices;
+    load_report.non_executable_segment_indices =
+        saved_non_executable_indices ? saved_non_executable_indices : load_report.non_executable_segment_indices;
+    load_file.segments = saved_file_segments ? saved_file_segments : load_file.segments;
+    machine_load_report_free(&load_report);
+    machine_load_file_free(&load_file);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_load_builds_from_machine_ir_and_upstream_artifacts();
     ok &= test_machine_load_elf_bridge_helpers();
     ok &= test_machine_load_rejects_non_executable_entry_segment();
+    ok &= test_machine_load_and_runtime_copy_zero_length_aux_segment();
+    ok &= test_machine_load_rejects_zero_fill_only_null_bytes_and_wrapped_segment_spans();
+    ok &= test_machine_load_query_helpers_reject_malformed_segment_tables();
 
     if (!ok) {
         return 1;

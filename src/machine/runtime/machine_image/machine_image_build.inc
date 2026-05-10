@@ -12,8 +12,19 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
     MachineElfTargetProfile profile;
     size_t text_section_index = 0u;
     const MachineElfSection *text_section = NULL;
+    const MachineElfSection *sbss_section = NULL;
+    const MachineElfSection *sdata_section = NULL;
+    size_t sbss_section_index = 0u;
+    size_t sdata_section_index = 0u;
+    size_t image_segment_count = 1u;
+    size_t image_byte_count = 0u;
+    size_t image_cursor = 0u;
+    size_t segment_alignment = 0u;
+    size_t sbss_image_offset = 0u;
+    size_t sdata_image_offset = 0u;
     size_t symbol_index;
     size_t relocation_index;
+    size_t section_index;
     int entry_found = 0;
 
     memset(&elf_error, 0, sizeof(elf_error));
@@ -35,14 +46,53 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
         return 0;
     }
     text_section_index = elf_file->text_section_index;
+    for (section_index = 0u; section_index < elf_file->section_count; ++section_index) {
+        const MachineElfSection *section = &elf_file->sections[section_index];
+
+        if (!section->name || section->name[0] == '\0') {
+            continue;
+        }
+        if (strcmp(section->name, ".sbss") == 0) {
+            sbss_section = section;
+            sbss_section_index = section_index;
+            ++image_segment_count;
+        } else if (strcmp(section->name, ".sdata") == 0) {
+            sdata_section = section;
+            sdata_section_index = section_index;
+            ++image_segment_count;
+        }
+    }
 
     machine_image_file_free(out_image_file);
     out_image_file->target_profile = profile;
     out_image_file->source_elf_artifact_summary = artifact_summary;
     out_image_file->base_virtual_address = machine_image_base_virtual_address(profile);
-    out_image_file->segment_count = 1u;
-    out_image_file->segment_capacity = 1u;
-    out_image_file->segments = (MachineImageSegment *)calloc(1u, sizeof(MachineImageSegment));
+    segment_alignment = machine_image_segment_alignment(profile);
+    image_cursor = text_section->byte_count;
+    if (sbss_section) {
+        if (segment_alignment > 0u) {
+            size_t remainder = image_cursor % segment_alignment;
+            if (remainder != 0u) {
+                image_cursor += segment_alignment - remainder;
+            }
+        }
+        sbss_image_offset = image_cursor;
+        image_cursor += sbss_section->byte_count;
+    }
+    if (sdata_section) {
+        if (segment_alignment > 0u) {
+            size_t remainder = image_cursor % segment_alignment;
+            if (remainder != 0u) {
+                image_cursor += segment_alignment - remainder;
+            }
+        }
+        sdata_image_offset = image_cursor;
+        image_cursor += sdata_section->byte_count;
+    }
+    image_byte_count = image_cursor;
+    out_image_file->segment_count = image_segment_count;
+    out_image_file->segment_capacity = image_segment_count;
+    out_image_file->segments = (MachineImageSegment *)calloc(image_segment_count, sizeof(MachineImageSegment));
     out_image_file->symbol_count = elf_file->symbol_count;
     out_image_file->symbol_capacity = elf_file->symbol_count;
     out_image_file->symbols = elf_file->symbol_count > 0u
@@ -53,9 +103,9 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
     out_image_file->relocations = elf_file->relocation_count > 0u
         ? (MachineImageRelocation *)calloc(elf_file->relocation_count, sizeof(MachineImageRelocation))
         : NULL;
-    out_image_file->byte_count = text_section->byte_count;
-    out_image_file->bytes = text_section->byte_count > 0u
-        ? (unsigned char *)malloc(text_section->byte_count)
+    out_image_file->byte_count = image_byte_count;
+    out_image_file->bytes = image_byte_count > 0u
+        ? (unsigned char *)calloc(image_byte_count, 1u)
         : NULL;
 
     if (!out_image_file->segments ||
@@ -67,7 +117,9 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
         return 0;
     }
 
-    memcpy(out_image_file->bytes, elf_file->bytes + text_section->file_offset, text_section->byte_count);
+    if (text_section->byte_count > 0u) {
+        memcpy(out_image_file->bytes, elf_file->bytes + text_section->file_offset, text_section->byte_count);
+    }
     out_image_file->segments[0].name = machine_image_strdup(".text");
     out_image_file->segments[0].image_offset = 0u;
     out_image_file->segments[0].virtual_address = out_image_file->base_virtual_address;
@@ -77,6 +129,38 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
         machine_image_file_free(out_image_file);
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-110: out of memory naming image segment");
         return 0;
+    }
+    if (sbss_section) {
+        out_image_file->segments[1u].name = machine_image_strdup(".sbss");
+        out_image_file->segments[1u].image_offset = sbss_image_offset;
+        out_image_file->segments[1u].virtual_address = out_image_file->base_virtual_address + sbss_image_offset;
+        out_image_file->segments[1u].byte_count = sbss_section->byte_count;
+        out_image_file->segments[1u].align = machine_image_segment_alignment(profile);
+        if (!out_image_file->segments[1u].name) {
+            machine_image_file_free(out_image_file);
+            machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-110: out of memory naming image segment");
+            return 0;
+        }
+    }
+    if (sdata_section) {
+        size_t segment_index = 1u + (sbss_section ? 1u : 0u);
+
+        out_image_file->segments[segment_index].name = machine_image_strdup(".sdata");
+        out_image_file->segments[segment_index].image_offset = sdata_image_offset;
+        out_image_file->segments[segment_index].virtual_address = out_image_file->base_virtual_address + sdata_image_offset;
+        out_image_file->segments[segment_index].byte_count = sdata_section->byte_count;
+        out_image_file->segments[segment_index].align = machine_image_segment_alignment(profile);
+        if (!out_image_file->segments[segment_index].name) {
+            machine_image_file_free(out_image_file);
+            machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-110: out of memory naming image segment");
+            return 0;
+        }
+        if (sdata_section->byte_count > 0u) {
+            memcpy(
+                out_image_file->bytes + sdata_image_offset,
+                elf_file->bytes + sdata_section->file_offset,
+                sdata_section->byte_count);
+        }
     }
 
     for (symbol_index = 0u; symbol_index < elf_file->symbol_count; ++symbol_index) {
@@ -100,6 +184,18 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
             image_symbol->segment_index = 0u;
             image_symbol->value_offset = elf_symbol->value;
             image_symbol->virtual_address = out_image_file->base_virtual_address + (size_t)elf_symbol->value;
+        } else if (sbss_section && elf_symbol->is_defined && elf_symbol->section_index == sbss_section_index) {
+            image_symbol->is_defined = 1;
+            image_symbol->segment_index = 1u;
+            image_symbol->value_offset = elf_symbol->value;
+            image_symbol->virtual_address =
+                out_image_file->base_virtual_address + sbss_image_offset + (size_t)elf_symbol->value;
+        } else if (sdata_section && elf_symbol->is_defined && elf_symbol->section_index == sdata_section_index) {
+            image_symbol->is_defined = 1;
+            image_symbol->segment_index = 1u + (sbss_section ? 1u : 0u);
+            image_symbol->value_offset = elf_symbol->value;
+            image_symbol->virtual_address =
+                out_image_file->base_virtual_address + sdata_image_offset + (size_t)elf_symbol->value;
         }
         if (!entry_found &&
             image_symbol->is_defined &&
@@ -145,7 +241,7 @@ int machine_image_build_from_machine_elf_file(const MachineElfFile *elf_file,
         image_relocation->segment_index = 0u;
         image_relocation->segment_offset = elf_relocation->offset;
         image_relocation->site_virtual_address = out_image_file->base_virtual_address + (size_t)elf_relocation->offset;
-        image_relocation->is_resolved = target_symbol->is_defined && target_symbol->segment_index == 0u;
+        image_relocation->is_resolved = target_symbol->is_defined && target_symbol->segment_index != (size_t)-1;
         image_relocation->target_virtual_address =
             image_relocation->is_resolved ? target_symbol->virtual_address : 0u;
         image_relocation->type = elf_relocation->type;

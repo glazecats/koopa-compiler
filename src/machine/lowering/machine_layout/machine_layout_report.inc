@@ -35,6 +35,9 @@ int machine_layout_report_refresh(MachineLayoutReport *report, MachineLayoutErro
         machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-400: invalid report refresh contract");
         return 0;
     }
+    if (!machine_layout_verify_program(&report->program, error)) {
+        return 0;
+    }
 
     machine_layout_report_clear_shape(report);
     if (!machine_layout_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
@@ -199,6 +202,12 @@ int machine_layout_report_get_function_by_name(const MachineLayoutReport *report
     const char *function_name,
     size_t *out_function_index,
     const MachineLayoutFunction **out_function) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
     if (!report) {
         return 0;
     }
@@ -223,6 +232,7 @@ int machine_layout_report_get_block_summary(const MachineLayoutReport *report,
     size_t next_offset;
 
     if (!report || !out_summary || function_index >= report->program.function_count ||
+        function_index >= report->function_summary_count ||
         !report->function_block_summary_offsets || !report->block_summaries) {
         return 0;
     }

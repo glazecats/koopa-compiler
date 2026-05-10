@@ -5,6 +5,10 @@
 
 #else
 
+static int machine_runtime_file_has_segment_table(const MachineRuntimeFile *runtime_file) {
+    return runtime_file && (runtime_file->segment_count == 0u || runtime_file->segments);
+}
+
 int machine_runtime_file_get_summary(const MachineRuntimeFile *runtime_file,
     size_t *out_segment_count,
     size_t *out_mapped_byte_count,
@@ -12,7 +16,7 @@ int machine_runtime_file_get_summary(const MachineRuntimeFile *runtime_file,
     size_t executable_segment_count = 0u;
     size_t segment_index;
 
-    if (!runtime_file) {
+    if (!machine_runtime_file_has_segment_table(runtime_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -85,9 +89,14 @@ int machine_runtime_file_get_stack_summary(const MachineRuntimeFile *runtime_fil
         !stack_segment) {
         return 0;
     }
+    if (!machine_runtime_try_add_size(
+            stack_segment->virtual_address,
+            stack_segment->byte_count,
+            &out_summary->end_virtual_address)) {
+        return 0;
+    }
     out_summary->stack_segment_index = stack_segment_index;
     out_summary->base_virtual_address = stack_segment->virtual_address;
-    out_summary->end_virtual_address = stack_segment->virtual_address + stack_segment->byte_count;
     out_summary->byte_count = stack_segment->byte_count;
     out_summary->initial_stack_pointer = runtime_file->initial_stack_pointer;
     out_summary->initial_stack_pointer_offset =
@@ -103,7 +112,9 @@ int machine_runtime_file_get_gap_summary(const MachineRuntimeFile *runtime_file,
     int found_non_stack = 0;
 
     memset(&stack_summary, 0, sizeof(stack_summary));
-    if (!runtime_file || !out_summary || !machine_runtime_file_get_stack_summary(runtime_file, &stack_summary)) {
+    if (!machine_runtime_file_has_segment_table(runtime_file) ||
+        !out_summary ||
+        !machine_runtime_file_get_stack_summary(runtime_file, &stack_summary)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -113,7 +124,9 @@ int machine_runtime_file_get_gap_summary(const MachineRuntimeFile *runtime_file,
         if (segment->kind == MACHINE_RUNTIME_SEGMENT_KIND_STACK) {
             continue;
         }
-        segment_end = segment->virtual_address + segment->byte_count;
+        if (!machine_runtime_try_add_size(segment->virtual_address, segment->byte_count, &segment_end)) {
+            return 0;
+        }
         if (!found_non_stack || segment_end > highest_non_stack_end) {
             highest_non_stack_end = segment_end;
             found_non_stack = 1;
@@ -184,7 +197,8 @@ int machine_runtime_file_get_initial_stack_summary(const MachineRuntimeFile *run
 int machine_runtime_file_get_segment(const MachineRuntimeFile *runtime_file,
     size_t segment_index,
     const MachineRuntimeSegment **out_segment) {
-    if (!runtime_file || segment_index >= runtime_file->segment_count) {
+    if (!machine_runtime_file_has_segment_table(runtime_file) ||
+        segment_index >= runtime_file->segment_count) {
         return 0;
     }
     if (out_segment) {
@@ -199,7 +213,7 @@ int machine_runtime_file_find_segment_by_name(const MachineRuntimeFile *runtime_
     const MachineRuntimeSegment **out_segment) {
     size_t segment_index;
 
-    if (!runtime_file || !segment_name) {
+    if (!machine_runtime_file_has_segment_table(runtime_file) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -223,7 +237,7 @@ int machine_runtime_file_find_segment_covering_virtual_address(const MachineRunt
     const MachineRuntimeSegment **out_segment) {
     size_t segment_index;
 
-    if (!runtime_file) {
+    if (!machine_runtime_file_has_segment_table(runtime_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -375,9 +389,9 @@ int machine_runtime_file_copy_memory_window(const MachineRuntimeFile *runtime_fi
         machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-124: invalid memory-window copy contract");
         return 0;
     }
-    actual_byte_count = requested_byte_count;
-    if (memory_offset + actual_byte_count > memory_summary.span_byte_count) {
-        actual_byte_count = memory_summary.span_byte_count - memory_offset;
+    actual_byte_count = memory_summary.span_byte_count - memory_offset;
+    if (requested_byte_count < actual_byte_count) {
+        actual_byte_count = requested_byte_count;
     }
     bytes = actual_byte_count > 0u ? (unsigned char *)calloc(actual_byte_count, 1u) : NULL;
     if (actual_byte_count > 0u && !bytes) {
@@ -454,9 +468,9 @@ int machine_runtime_file_copy_stack_window(const MachineRuntimeFile *runtime_fil
         machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-127: invalid stack-window copy contract");
         return 0;
     }
-    actual_byte_count = requested_byte_count;
-    if (stack_offset + actual_byte_count > stack_summary.byte_count) {
-        actual_byte_count = stack_summary.byte_count - stack_offset;
+    actual_byte_count = stack_summary.byte_count - stack_offset;
+    if (requested_byte_count < actual_byte_count) {
+        actual_byte_count = requested_byte_count;
     }
     bytes = actual_byte_count > 0u ? (unsigned char *)calloc(actual_byte_count, 1u) : NULL;
     if (actual_byte_count > 0u && !bytes) {
@@ -544,9 +558,9 @@ int machine_runtime_file_copy_gap_window(const MachineRuntimeFile *runtime_file,
         machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-131: invalid gap-window copy contract");
         return 0;
     }
-    actual_byte_count = requested_byte_count;
-    if (gap_offset + actual_byte_count > gap_summary.byte_count) {
-        actual_byte_count = gap_summary.byte_count - gap_offset;
+    actual_byte_count = gap_summary.byte_count - gap_offset;
+    if (requested_byte_count < actual_byte_count) {
+        actual_byte_count = requested_byte_count;
     }
     bytes = actual_byte_count > 0u ? (unsigned char *)calloc(actual_byte_count, 1u) : NULL;
     if (actual_byte_count > 0u && !bytes) {
@@ -585,7 +599,8 @@ int machine_runtime_file_get_entry_segment(const MachineRuntimeFile *runtime_fil
 int machine_runtime_file_get_stack_segment(const MachineRuntimeFile *runtime_file,
     size_t *out_segment_index,
     const MachineRuntimeSegment **out_segment) {
-    if (!runtime_file || !runtime_file->has_stack_segment ||
+    if (!machine_runtime_file_has_segment_table(runtime_file) ||
+        !runtime_file->has_stack_segment ||
         runtime_file->stack_segment_index >= runtime_file->segment_count ||
         runtime_file->segments[runtime_file->stack_segment_index].kind != MACHINE_RUNTIME_SEGMENT_KIND_STACK) {
         return 0;
@@ -604,7 +619,7 @@ int machine_runtime_file_get_executable_segment_count(const MachineRuntimeFile *
     size_t count = 0u;
     size_t segment_index;
 
-    if (!runtime_file || !out_count) {
+    if (!machine_runtime_file_has_segment_table(runtime_file) || !out_count) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -623,7 +638,7 @@ int machine_runtime_file_get_executable_segment_by_index(const MachineRuntimeFil
     size_t segment_index;
     size_t current_index = 0u;
 
-    if (!runtime_file) {
+    if (!machine_runtime_file_has_segment_table(runtime_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < runtime_file->segment_count; ++segment_index) {
@@ -646,10 +661,16 @@ int machine_runtime_file_get_executable_segment_by_index(const MachineRuntimeFil
 
 int machine_runtime_file_get_region_count(const MachineRuntimeFile *runtime_file,
     size_t *out_count) {
+    MachineRuntimeGapSummary gap_summary;
+
+    memset(&gap_summary, 0, sizeof(gap_summary));
     if (!runtime_file || !out_count) {
         return 0;
     }
-    *out_count = runtime_file->segment_count + 1u;
+    *out_count = runtime_file->segment_count;
+    if (machine_runtime_file_get_gap_summary(runtime_file, &gap_summary)) {
+        *out_count += 1u;
+    }
     return 1;
 }
 
@@ -659,11 +680,16 @@ int machine_runtime_file_get_region_summary(const MachineRuntimeFile *runtime_fi
     MachineRuntimeGapSummary gap_summary;
 
     memset(&gap_summary, 0, sizeof(gap_summary));
-    if (!runtime_file || !out_summary) {
+    if (!machine_runtime_file_has_segment_table(runtime_file) || !out_summary) {
         return 0;
     }
     if (region_index < runtime_file->segment_count) {
         const MachineRuntimeSegment *segment = &runtime_file->segments[region_index];
+        size_t segment_end = 0u;
+
+        if (!machine_runtime_try_add_size(segment->virtual_address, segment->byte_count, &segment_end)) {
+            return 0;
+        }
 
         out_summary->kind =
             segment->kind == MACHINE_RUNTIME_SEGMENT_KIND_STACK ? MACHINE_RUNTIME_REGION_STACK : MACHINE_RUNTIME_REGION_LOAD;
@@ -671,7 +697,7 @@ int machine_runtime_file_get_region_summary(const MachineRuntimeFile *runtime_fi
         out_summary->segment_index = region_index;
         out_summary->name = segment->name;
         out_summary->base_virtual_address = segment->virtual_address;
-        out_summary->end_virtual_address = segment->virtual_address + segment->byte_count;
+        out_summary->end_virtual_address = segment_end;
         out_summary->byte_count = segment->byte_count;
         out_summary->readable = segment->readable;
         out_summary->writable = segment->writable;

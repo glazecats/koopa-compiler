@@ -33,6 +33,10 @@ int machine_select_dump_program(const MachineSelectProgram *program,
         machine_select_set_error(error, 0, 0, "MACHINE-SELECT-200: invalid dump contract");
         return 0;
     }
+    if (program->function_count > 0 && !program->functions) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-203: function table missing during dump");
+        return 0;
+    }
 
     memset(&builder, 0, sizeof(builder));
     if (!machine_select_append_format(&builder, "machine_select\n")) {
@@ -43,6 +47,12 @@ int machine_select_dump_program(const MachineSelectProgram *program,
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         const MachineSelectFunction *function = &program->functions[function_index];
         size_t block_index;
+
+        if (function->block_count > 0 && !function->blocks) {
+            free(builder.data);
+            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-204: block table missing during dump");
+            return 0;
+        }
 
         if (!machine_select_append_format(
                 &builder,
@@ -58,6 +68,12 @@ int machine_select_dump_program(const MachineSelectProgram *program,
         for (block_index = 0; block_index < function->block_count; ++block_index) {
             const MachineSelectBasicBlock *block = &function->blocks[block_index];
             size_t op_index;
+
+            if (block->op_count > 0 && !block->ops) {
+                free(builder.data);
+                machine_select_set_error(error, 0, 0, "MACHINE-SELECT-205: op table missing during dump");
+                return 0;
+            }
 
             if (!machine_select_append_format(&builder, "  bb.%zu:\n", block->id)) {
                 free(builder.data);
@@ -138,6 +154,12 @@ int machine_select_dump_program(const MachineSelectProgram *program,
                     case MACHINE_SELECT_OP_CALL_VOID_IMM: {
                         size_t arg_index;
                         const char *opcode_name;
+
+                        if (op->as.call.arg_count > 0 && !op->as.call.args) {
+                            free(builder.data);
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-206: call args missing during dump");
+                            return 0;
+                        }
 
                         switch (op->kind) {
                             case MACHINE_SELECT_OP_CALL:

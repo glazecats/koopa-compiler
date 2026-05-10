@@ -35,6 +35,9 @@ int machine_encode_report_refresh(MachineEncodeReport *report, MachineEncodeErro
         machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-400: invalid report refresh contract");
         return 0;
     }
+    if (!machine_encode_verify_program(&report->program, error)) {
+        return 0;
+    }
 
     machine_encode_report_clear_shape(report);
     if (!machine_encode_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {
@@ -141,6 +144,12 @@ int machine_encode_report_get_function_by_name(const MachineEncodeReport *report
     const char *function_name,
     size_t *out_function_index,
     const MachineEncodeFunction **out_function) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
     if (!report || !function_name) {
         return 0;
     }
@@ -164,6 +173,12 @@ int machine_encode_report_find_block_summary_by_label(const MachineEncodeReport 
     const MachineEncodeBlockSummary **out_summary) {
     size_t function_index;
 
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_summary) {
+        *out_summary = NULL;
+    }
     if (!report || !label_name || !out_summary || !report->function_block_summary_offsets ||
         !report->block_summaries) {
         return 0;
@@ -198,6 +213,9 @@ int machine_encode_report_find_block_summary_covering_offset(const MachineEncode
     size_t next_block_offset;
     size_t block_summary_index;
 
+    if (out_summary) {
+        *out_summary = NULL;
+    }
     if (!report || !out_summary || function_index >= report->program.function_count ||
         !report->function_block_summary_offsets || !report->block_summaries) {
         return 0;
@@ -246,6 +264,9 @@ int machine_encode_report_get_block_summary(const MachineEncodeReport *report,
     size_t offset;
     size_t next_offset;
 
+    if (out_summary) {
+        *out_summary = NULL;
+    }
     if (!report || !out_summary || function_index >= report->program.function_count ||
         !report->function_block_summary_offsets || !report->block_summaries) {
         return 0;

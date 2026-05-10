@@ -35,6 +35,9 @@ int machine_emit_lower_report_refresh_shape(MachineEmitLowerReport *report, Mach
         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-500: invalid report refresh contract");
         return 0;
     }
+    if (!machine_emit_verify_program(&report->program, error)) {
+        return 0;
+    }
 
     machine_emit_lower_report_clear_shape(report);
     if (!machine_emit_program_get_target_policy_summary(&report->program, &report->target_policy_summary)) {

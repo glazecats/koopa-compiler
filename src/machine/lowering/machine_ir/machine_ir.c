@@ -1,5 +1,6 @@
 #include "machine/ir.h"
 
+#include <stdint.h>
 #include <sys/time.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -11,6 +12,11 @@ typedef struct {
     size_t length;
     size_t capacity;
 } MachineIrStringBuilder;
+
+static long long machine_ir_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
 
 static double machine_ir_now_s(void) {
     struct timeval tv;

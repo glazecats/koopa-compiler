@@ -69,6 +69,11 @@ static const ValueSsaFunction *value_ssa_interp_find_function(const ValueSsaProg
     return NULL;
 }
 
+static long long value_ssa_interp_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
+
 static int value_ssa_interp_eval_value(const ValueSsaInterpFrame *frame,
     ValueSsaValueRef value,
     long long *out_value,
@@ -80,7 +85,7 @@ static int value_ssa_interp_eval_value(const ValueSsaInterpFrame *frame,
 
     switch (value.kind) {
     case VALUE_SSA_VALUE_IMMEDIATE:
-        *out_value = value.immediate;
+        *out_value = value_ssa_interp_normalize_sysy_int_value(value.immediate);
         return 1;
     case VALUE_SSA_VALUE_ID:
         if (value.value_id >= frame->function->next_value_id || !frame->has_ssa_value[value.value_id]) {
@@ -106,23 +111,29 @@ static int value_ssa_interp_eval_binary(ValueSsaBinaryOp op,
     long long rhs,
     long long *out_value,
     ValueSsaInterpError *error) {
+    int32_t lhs32;
+    int32_t rhs32;
+
     if (!out_value) {
         value_ssa_interp_set_error(error, 0, 0, "VALUE-SSA-INTERP-004: invalid binary evaluation contract");
         return 0;
     }
 
+    lhs32 = (int32_t)value_ssa_interp_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)value_ssa_interp_normalize_sysy_int_value(rhs);
+
     switch (op) {
     case VALUE_SSA_BINARY_ADD:
-        *out_value = lhs + rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_SUB:
-        *out_value = lhs - rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_MUL:
-        *out_value = lhs * rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_DIV:
-        if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+        if (rhs32 == 0 || (lhs32 == INT32_MIN && rhs32 == -1)) {
             value_ssa_interp_set_error(error,
                 0,
                 0,
@@ -131,10 +142,10 @@ static int value_ssa_interp_eval_binary(ValueSsaBinaryOp op,
                 rhs);
             return 0;
         }
-        *out_value = lhs / rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 / rhs32));
         return 1;
     case VALUE_SSA_BINARY_MOD:
-        if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+        if (rhs32 == 0 || (lhs32 == INT32_MIN && rhs32 == -1)) {
             value_ssa_interp_set_error(error,
                 0,
                 0,
@@ -143,24 +154,24 @@ static int value_ssa_interp_eval_binary(ValueSsaBinaryOp op,
                 rhs);
             return 0;
         }
-        *out_value = lhs % rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 % rhs32));
         return 1;
     case VALUE_SSA_BINARY_BIT_AND:
-        *out_value = lhs & rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 & rhs32));
         return 1;
     case VALUE_SSA_BINARY_BIT_XOR:
-        *out_value = lhs ^ rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
         return 1;
     case VALUE_SSA_BINARY_BIT_OR:
-        *out_value = lhs | rhs;
+        *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 | rhs32));
         return 1;
     case VALUE_SSA_BINARY_SHIFT_LEFT:
     case VALUE_SSA_BINARY_SHIFT_RIGHT: {
-        unsigned long long lhs_bits;
-        unsigned long long shifted;
-        size_t bit_width = sizeof(unsigned long long) * CHAR_BIT;
+        uint32_t shifted;
+        size_t bit_width = sizeof(uint32_t) * CHAR_BIT;
 
-        if (rhs < 0 || (unsigned long long)rhs >= bit_width || lhs < 0) {
+        if (rhs32 < 0 || (uint32_t)rhs32 >= bit_width ||
+            (op == VALUE_SSA_BINARY_SHIFT_LEFT && lhs32 < 0)) {
             value_ssa_interp_set_error(error,
                 0,
                 0,
@@ -170,38 +181,31 @@ static int value_ssa_interp_eval_binary(ValueSsaBinaryOp op,
             return 0;
         }
 
-        lhs_bits = (unsigned long long)lhs;
-        shifted = op == VALUE_SSA_BINARY_SHIFT_LEFT ? (lhs_bits << rhs) : (lhs_bits >> rhs);
-        if (shifted > LLONG_MAX) {
-            value_ssa_interp_set_error(error,
-                0,
-                0,
-                "VALUE-SSA-INTERP-008: shift result overflow for operands %lld and %lld",
-                lhs,
-                rhs);
-            return 0;
+        if (op == VALUE_SSA_BINARY_SHIFT_LEFT) {
+            shifted = ((uint32_t)lhs32 << (uint32_t)rhs32);
+            *out_value = value_ssa_interp_normalize_sysy_int_value((long long)shifted);
+        } else {
+            *out_value = value_ssa_interp_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
         }
-
-        *out_value = (long long)shifted;
         return 1;
     }
     case VALUE_SSA_BINARY_EQ:
-        *out_value = lhs == rhs;
+        *out_value = lhs32 == rhs32;
         return 1;
     case VALUE_SSA_BINARY_NE:
-        *out_value = lhs != rhs;
+        *out_value = lhs32 != rhs32;
         return 1;
     case VALUE_SSA_BINARY_LT:
-        *out_value = lhs < rhs;
+        *out_value = lhs32 < rhs32;
         return 1;
     case VALUE_SSA_BINARY_LE:
-        *out_value = lhs <= rhs;
+        *out_value = lhs32 <= rhs32;
         return 1;
     case VALUE_SSA_BINARY_GT:
-        *out_value = lhs > rhs;
+        *out_value = lhs32 > rhs32;
         return 1;
     case VALUE_SSA_BINARY_GE:
-        *out_value = lhs >= rhs;
+        *out_value = lhs32 >= rhs32;
         return 1;
     default:
         value_ssa_interp_set_error(error, 0, 0, "VALUE-SSA-INTERP-009: unknown binary op %d", (int)op);

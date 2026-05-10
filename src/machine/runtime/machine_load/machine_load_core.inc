@@ -98,6 +98,17 @@ static size_t machine_load_align_up(size_t value, size_t alignment) {
     return value + (alignment - remainder);
 }
 
+static int machine_load_try_add_size(size_t base, size_t delta, size_t *out_sum) {
+    if (!out_sum) {
+        return 0;
+    }
+    if (delta > ((size_t)-1) - base) {
+        return 0;
+    }
+    *out_sum = base + delta;
+    return 1;
+}
+
 static int machine_load_segment_covers_virtual_address(const MachineLoadSegment *segment,
     size_t virtual_address) {
     size_t delta;

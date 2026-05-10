@@ -58,6 +58,140 @@ static int expect_report_dump(const MachineLayoutReport *report, const char *exp
     return ok;
 }
 
+static int build_machine_ir_layout_smoke_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 2u;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0u;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+    program->register_bank.registers[1].register_id = 1u;
+    program->register_bank.registers[1].name = dup_text("r1");
+    program->register_bank.registers[1].allocatable = 1u;
+
+    if (!machine_ir_program_append_global(program, "g", NULL, error) ||
+        !machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = machine_ir_slot_global(0u);
+    instruction.as.store.value = machine_ir_operand_register(1u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(1u), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_machine_ir_layout_call_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrOperand args[1];
+
+    machine_ir_program_init(program);
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+    function->spill_slot_count = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    memset(args, 0, sizeof(args));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(0u);
+    instruction.as.call.callee_name = "sink";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = args;
+    args[0] = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_machine_ir_layout_compare_branch_imm_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 1u;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0u;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_LT;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0u), 1u, 2u, error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int test_machine_layout_lowers_fallthrough_branch_from_machine_ir(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -207,6 +341,198 @@ static int test_machine_layout_lowers_void_return_from_machine_select(void) {
 
     machine_select_program_free(&select_program);
     machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_rejects_load_store_slot_kind_mismatch(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineLayoutProgram layout_program;
+    MachineLayoutProgram mutated_program;
+    MachineLayoutError layout_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_ir_program_init(&machine_program);
+    machine_layout_program_init(&layout_program);
+    machine_layout_program_init(&mutated_program);
+
+    if (!build_machine_ir_layout_smoke_program(&machine_program, &machine_error) ||
+        !machine_layout_lower_program_from_machine_ir(&machine_program, &layout_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: slot-kind mismatch setup failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    if (!machine_layout_clone_program(&layout_program, &mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: load-slot mismatch clone failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].ops[0].as.load_slot = machine_select_slot_global(0u);
+    memset(&layout_error, 0, sizeof(layout_error));
+    if (machine_layout_verify_program(&mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: verifier accepted load-local/global-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_layout_program_free(&mutated_program);
+    machine_layout_program_init(&mutated_program);
+    if (!machine_layout_clone_program(&layout_program, &mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: store-slot mismatch clone failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].ops[2].as.store.slot = machine_select_slot_local(0u);
+    memset(&layout_error, 0, sizeof(layout_error));
+    if (machine_layout_verify_program(&mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: verifier accepted store-global/local-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_layout_program_free(&mutated_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_rejects_call_result_family_mismatch(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineLayoutProgram layout_program;
+    MachineLayoutProgram mutated_program;
+    MachineLayoutError layout_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_ir_program_init(&machine_program);
+    machine_layout_program_init(&layout_program);
+    machine_layout_program_init(&mutated_program);
+
+    if (!build_machine_ir_layout_call_program(&machine_program, &machine_error) ||
+        !machine_layout_lower_program_from_machine_ir(&machine_program, &layout_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: call-result mismatch setup failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    if (!machine_layout_clone_program(&layout_program, &mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: call-result mismatch clone failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_IMM;
+    memset(&layout_error, 0, sizeof(layout_error));
+    if (machine_layout_verify_program(&mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: verifier accepted register-result call family mismatch\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_layout_program_free(&mutated_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_rejects_compare_branch_imm_shape_mismatch(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineLayoutProgram layout_program;
+    MachineLayoutProgram mutated_program;
+    MachineLayoutError layout_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_ir_program_init(&machine_program);
+    machine_layout_program_init(&layout_program);
+    machine_layout_program_init(&mutated_program);
+
+    if (!build_machine_ir_layout_compare_branch_imm_program(&machine_program, &machine_error) ||
+        !machine_layout_lower_program_from_machine_ir(&machine_program, &layout_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: cmpbri mismatch setup failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+
+    if (!machine_layout_clone_program(&layout_program, &mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: cmpbri mismatch clone failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&mutated_program);
+        machine_layout_program_free(&layout_program);
+        return 0;
+    }
+    if (mutated_program.functions[0].blocks[0].terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM) {
+        mutated_program.functions[0].blocks[0].terminator.as.compare_branch.rhs = machine_select_operand_register(0u);
+    } else {
+        mutated_program.functions[0].blocks[0].terminator.as.compare_branch_fallthrough.rhs =
+            machine_select_operand_register(0u);
+    }
+    memset(&layout_error, 0, sizeof(layout_error));
+    if (machine_layout_verify_program(&mutated_program, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: verifier accepted compare-branch-imm rhs non-immediate mismatch\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_layout_program_free(&mutated_program);
+    machine_layout_program_free(&layout_program);
+    return ok;
+}
+
+static int test_machine_layout_report_query_dump_rejects_missing_function_table(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineLayoutProgram layout_program;
+    MachineLayoutReport report;
+    MachineLayoutError layout_error;
+    const MachineLayoutFunction *function_view = NULL;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&layout_error, 0, sizeof(layout_error));
+    machine_ir_program_init(&machine_program);
+    machine_layout_program_init(&layout_program);
+    machine_layout_report_init(&report);
+
+    if (!build_machine_ir_layout_smoke_program(&machine_program, &machine_error) ||
+        !machine_layout_lower_program_from_machine_ir(&machine_program, &layout_program, &layout_error) ||
+        !machine_layout_build_report_from_program(&layout_program, &report, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: malformed report setup failed: %s\n", layout_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_layout_program_free(&layout_program);
+        machine_layout_report_free(&report);
+        return 0;
+    }
+
+    free(report.program.functions);
+    report.program.functions = NULL;
+    memset(&layout_error, 0, sizeof(layout_error));
+    if (machine_layout_report_get_function_by_name(&report, "main", NULL, &function_view) ||
+        machine_layout_dump_report(&report, &actual_text, &layout_error)) {
+        fprintf(stderr, "[machine-layout] FAIL: malformed report query/dump should fail on missing function table\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_ir_program_free(&machine_program);
+    machine_layout_program_free(&layout_program);
+    machine_layout_report_free(&report);
     return ok;
 }
 
@@ -5488,6 +5814,15 @@ int main(void) {
     if (!test_machine_layout_lowers_void_return_from_machine_select()) {
         return 1;
     }
+    if (!test_machine_layout_rejects_load_store_slot_kind_mismatch()) {
+        return 1;
+    }
+    if (!test_machine_layout_rejects_call_result_family_mismatch()) {
+        return 1;
+    }
+    if (!test_machine_layout_rejects_compare_branch_imm_shape_mismatch()) {
+        return 1;
+    }
     if (!test_machine_layout_bridge_respects_upstream_jump_canonicalization()) {
         return 1;
     }
@@ -5504,6 +5839,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_layout_report_surface()) {
+        return 1;
+    }
+    if (!test_machine_layout_report_query_dump_rejects_missing_function_table()) {
         return 1;
     }
     if (!test_machine_layout_rejects_riscv32_preview_incompatible_register_bank()) {

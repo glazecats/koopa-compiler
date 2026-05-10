@@ -5541,6 +5541,43 @@ static int build_machine_ir_value_identity_program(MachineIrProgram *program, Ma
     return 1;
 }
 
+static int build_machine_ir_overflow_value_fold_program(MachineIrProgram *program, MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 1;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!program->register_bank.registers) {
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_immediate(2147483647LL);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_machine_ir_value_fold_tail_chain_program(MachineIrProgram *program, MachineIrError *error) {
     MachineIrFunction *function = NULL;
     size_t entry_id;
@@ -5602,6 +5639,35 @@ static int test_machine_ir_cleanup_folds_machine_value_constants(void) {
     if (!strstr(actual_text, "bb.0:\n    ret 5\n")) {
         fprintf(stderr,
             "[machine-ir] FAIL: machine-value constant fold cleanup mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_ir_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_cleanup_wraps_machine_value_overflow_constants(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    machine_ir_program_init(&program);
+    if (!build_machine_ir_overflow_value_fold_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: machine-value overflow fold setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination_dump(&program, &actual_text, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: machine-value overflow fold dump failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!strstr(actual_text, "bb.0:\n    ret -2147483648\n")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: machine-value overflow fold cleanup mismatch\nactual:\n%s\n",
             actual_text);
         ok = 0;
     }
@@ -10237,6 +10303,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_cleanup_folds_machine_value_constants()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_wraps_machine_value_overflow_constants()) {
         return 1;
     }
     if (!test_machine_ir_cleanup_folds_machine_value_identities()) {

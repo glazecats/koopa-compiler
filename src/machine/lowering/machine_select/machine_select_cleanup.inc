@@ -220,6 +220,8 @@ static int machine_select_cleanup_fold_addr_copy_pairs_in_block(const MachineSel
     MachineSelectBasicBlock *block);
 static int machine_select_cleanup_reuse_internal_pure_calls_program(MachineSelectProgram *program,
     MachineSelectError *error);
+static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(MachineSelectProgram *program,
+    MachineSelectError *error);
 static int machine_select_cleanup_forward_same_block_indirect_loads_program(MachineSelectProgram *program);
 static int machine_select_cleanup_reuse_spill_pure_expr_program(MachineSelectProgram *program);
 static int machine_select_op_is_small_reusable_pure_expr(const MachineSelectOp *op);
@@ -227,6 +229,13 @@ static int machine_select_find_defining_op_in_block(const MachineSelectBasicBloc
     size_t use_index,
     MachineSelectOperand operand,
     size_t *out_def_index);
+static int machine_select_operands_compute_same_small_pure_value_in_block(const MachineSelectBasicBlock *lhs_block,
+    size_t lhs_use_index,
+    MachineSelectOperand lhs,
+    const MachineSelectBasicBlock *rhs_block,
+    size_t rhs_use_index,
+    MachineSelectOperand rhs,
+    unsigned depth);
 static int machine_select_ops_compute_same_small_reusable_pure_expr_in_block(
     const MachineSelectBasicBlock *lhs_block,
     size_t lhs_index,
@@ -449,6 +458,7 @@ typedef enum {
     MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_VALUE,
     MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS,
     MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS,
+    MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE,
     MACHINE_SELECT_CALL_ARG_DESC_LIVE_IN_OPERAND,
 } MachineSelectCallArgDescKind;
 
@@ -1993,6 +2003,10 @@ static int machine_select_describe_call_arg_source_in_block(const MachineSelectB
                 out_desc->kind = MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS;
                 out_desc->slot_id = op->as.addr_slot.id;
                 return 1;
+            case MACHINE_SELECT_OP_LOAD_INDIRECT:
+                out_desc->kind = MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE;
+                out_desc->operand = op->as.load_indirect_addr;
+                return 1;
             default:
                 return 0;
         }
@@ -2020,6 +2034,8 @@ static int machine_select_call_arg_descs_equal(const MachineSelectCallArgDesc *l
         case MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS:
         case MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS:
             return lhs->slot_id == rhs->slot_id;
+        case MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE:
+            return machine_select_operands_equal(lhs->operand, rhs->operand);
         case MACHINE_SELECT_CALL_ARG_DESC_LIVE_IN_OPERAND:
             return machine_select_operands_equal(lhs->operand, rhs->operand);
         default:
@@ -2027,20 +2043,57 @@ static int machine_select_call_arg_descs_equal(const MachineSelectCallArgDesc *l
     }
 }
 
-static int machine_select_call_arg_desc_matches_store(const MachineSelectCallArgDesc *desc,
+static int machine_select_call_arg_desc_matches_store(const MachineSelectBasicBlock *block,
+    size_t store_index,
+    const MachineSelectCallArgDesc *desc,
     const MachineSelectOp *op) {
-    if (!desc || !op) {
+    if (!block || !desc || !op) {
         return 0;
     }
     switch (op->kind) {
         case MACHINE_SELECT_OP_STORE_LOCAL:
         case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
+            if (desc->kind == MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE) {
+                return 1;
+            }
             return desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_VALUE &&
                 op->as.store.slot.id == desc->slot_id;
         case MACHINE_SELECT_OP_STORE_GLOBAL:
         case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
+            if (desc->kind == MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE) {
+                return 1;
+            }
             return desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_VALUE &&
                 op->as.store.slot.id == desc->slot_id;
+        case MACHINE_SELECT_OP_STORE_INDIRECT: {
+            MachineSelectCallArgDesc addr_desc;
+
+            memset(&addr_desc, 0, sizeof(addr_desc));
+            if (desc->kind == MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE) {
+                return 1;
+            }
+            if (!machine_select_describe_call_arg_source_in_block(
+                    block, store_index, op->as.store_indirect.addr, &addr_desc)) {
+                return desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_VALUE ||
+                    desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_VALUE ||
+                    desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS ||
+                    desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS;
+            }
+            if (addr_desc.kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS) {
+                return (desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_VALUE ||
+                        desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS) &&
+                    addr_desc.slot_id == desc->slot_id;
+            }
+            if (addr_desc.kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS) {
+                return (desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_VALUE ||
+                        desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS) &&
+                    addr_desc.slot_id == desc->slot_id;
+            }
+            return desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_VALUE ||
+                desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_VALUE ||
+                desc->kind == MACHINE_SELECT_CALL_ARG_DESC_LOCAL_ADDRESS ||
+                desc->kind == MACHINE_SELECT_CALL_ARG_DESC_GLOBAL_ADDRESS;
+        }
         default:
             return 0;
     }
@@ -2083,9 +2136,69 @@ static int machine_select_call_write_conflicts_with_summary(const MachineSelectC
                 }
             }
             return 0;
+        case MACHINE_SELECT_OP_STORE_INDIRECT:
+            return machine_select_call_reads_globals(summary, function_index);
         default:
             return 0;
     }
+}
+
+static int machine_select_cleanup_find_unique_predecessor_block(const MachineSelectFunction *function,
+    size_t block_id,
+    const size_t *predecessor_counts,
+    size_t *out_predecessor_block_id) {
+    size_t predecessor_block_id;
+
+    if (out_predecessor_block_id) {
+        *out_predecessor_block_id = (size_t)-1;
+    }
+    if (!function || !predecessor_counts || !out_predecessor_block_id ||
+        block_id >= function->block_count || predecessor_counts[block_id] != 1u) {
+        return 0;
+    }
+
+    for (predecessor_block_id = 0u; predecessor_block_id < function->block_count; ++predecessor_block_id) {
+        const MachineSelectBasicBlock *predecessor = &function->blocks[predecessor_block_id];
+        int reaches_target = 0;
+
+        switch (predecessor->terminator.kind) {
+            case MACHINE_SELECT_TERM_JUMP:
+                reaches_target = predecessor->terminator.as.jump_target == block_id;
+                break;
+            case MACHINE_SELECT_TERM_BRANCH:
+                reaches_target = predecessor->terminator.as.branch.then_target == block_id ||
+                    predecessor->terminator.as.branch.else_target == block_id;
+                break;
+            case MACHINE_SELECT_TERM_COMPARE_BRANCH:
+            case MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM:
+                reaches_target = predecessor->terminator.as.compare_branch.then_target == block_id ||
+                    predecessor->terminator.as.compare_branch.else_target == block_id;
+                break;
+            default:
+                break;
+        }
+        if (!reaches_target) {
+            continue;
+        }
+        *out_predecessor_block_id = predecessor_block_id;
+        return 1;
+    }
+
+    return 0;
+}
+
+static int machine_select_cleanup_call_arg_operands_equal(const MachineSelectOp *lhs, const MachineSelectOp *rhs) {
+    size_t arg_index;
+
+    if (!lhs || !rhs || lhs->as.call.arg_count != rhs->as.call.arg_count) {
+        return 0;
+    }
+    for (arg_index = 0u; arg_index < lhs->as.call.arg_count; ++arg_index) {
+        if (!machine_select_operands_equal(lhs->as.call.args[arg_index], rhs->as.call.args[arg_index])) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int machine_select_cleanup_reuse_internal_pure_calls_in_block(const MachineSelectProgram *program,
@@ -2168,11 +2281,12 @@ static int machine_select_cleanup_reuse_internal_pure_calls_in_block(const Machi
                     break;
                 }
                 for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
-                    if (machine_select_call_arg_desc_matches_store(&arg_descs[arg_index], scan)) {
+                    if (machine_select_call_arg_desc_matches_store(block, scan_index, &arg_descs[arg_index], scan)) {
                         invalidated = 1;
                         break;
                     }
-                    if (arg_descs[arg_index].kind == MACHINE_SELECT_CALL_ARG_DESC_LIVE_IN_OPERAND &&
+                    if ((arg_descs[arg_index].kind == MACHINE_SELECT_CALL_ARG_DESC_LIVE_IN_OPERAND ||
+                            arg_descs[arg_index].kind == MACHINE_SELECT_CALL_ARG_DESC_INDIRECT_VALUE) &&
                         (machine_select_op_redefines_result(scan, arg_descs[arg_index].operand) ||
                             machine_select_op_clobbers_operand_via_call(
                                 program, function, scan, arg_descs[arg_index].operand))) {
@@ -2189,44 +2303,175 @@ static int machine_select_cleanup_reuse_internal_pure_calls_in_block(const Machi
             }
 
             if (prev->result.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT) {
-                MachineSelectOp cache_copy;
                 MachineSelectOperand original_result = prev->result;
 
-                memset(&cache_copy, 0, sizeof(cache_copy));
                 prev->result = machine_select_operand_spill_slot(function->spill_slot_count);
                 function->spill_slot_count += 1u;
                 machine_select_cleanup_op_shape(prev);
-
-                cache_copy.kind = MACHINE_SELECT_OP_COPY;
-                cache_copy.has_result = 1;
-                cache_copy.result = original_result;
-                cache_copy.as.copy_value = prev->result;
-                if (!machine_select_insert_op_at(block, prev_index, &cache_copy, error)) {
-                    return -1;
-                }
+                machine_select_rewrite_visible_uses_in_block(
+                    program, function, block, prev_index - 1u, original_result, prev->result);
                 changed = 1;
-                if (prev_index <= op_index) {
-                    op_index += 1u;
-                }
             }
 
             {
                 op = &block->ops[op_index];
-                MachineSelectOperand current_result = op->result;
-
-                machine_select_op_free(op);
-                memset(op, 0, sizeof(*op));
-                op->kind = MACHINE_SELECT_OP_COPY;
-                op->has_result = 1;
-                op->result = current_result;
-                op->as.copy_value = prev->result;
-                machine_select_cleanup_op_shape(op);
+                machine_select_rewrite_visible_uses_in_block(
+                    program, function, block, op_index, op->result, prev->result);
+                machine_select_rewrite_term_operand(&block->terminator, op->result, prev->result);
+                machine_select_cleanup_terminator_shape(block);
+                machine_select_remove_op_at(block, op_index);
                 changed = 1;
                 break;
             }
         }
     }
 
+    return changed;
+}
+
+static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_in_function(
+    const MachineSelectProgram *program,
+    MachineSelectFunction *function,
+    const MachineSelectCallEffectSummary *summary,
+    MachineSelectError *error) {
+    size_t *predecessor_counts = NULL;
+    size_t block_index;
+    int changed = 0;
+
+    (void)error;
+
+    if (!program || !function || !summary) {
+        return 0;
+    }
+    if (!machine_select_cleanup_compute_predecessor_counts(function, &predecessor_counts, NULL)) {
+        return 0;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        MachineSelectBasicBlock *block = &function->blocks[block_index];
+        MachineSelectBasicBlock *predecessor_block = NULL;
+        size_t predecessor_block_id = (size_t)-1;
+        size_t op_index;
+
+        if (predecessor_counts[block_index] != 1u ||
+            !machine_select_cleanup_find_unique_predecessor_block(
+                function, block_index, predecessor_counts, &predecessor_block_id) ||
+            predecessor_block_id >= function->block_count) {
+            continue;
+        }
+        predecessor_block = &function->blocks[predecessor_block_id];
+
+        for (op_index = 0u; op_index < block->op_count; ++op_index) {
+            MachineSelectOp *op = &block->ops[op_index];
+            size_t callee_index;
+            size_t prev_index;
+
+            if (!machine_select_op_is_call(op) ||
+                !op->has_result) {
+                continue;
+            }
+
+            callee_index = machine_select_find_function_index_by_name(program, op->as.call.callee_name);
+            if (callee_index == (size_t)-1 || !summary->cacheable_pure[callee_index]) {
+                continue;
+            }
+
+            for (prev_index = predecessor_block->op_count; prev_index > 0u; --prev_index) {
+                MachineSelectOp *prev = &predecessor_block->ops[prev_index - 1u];
+                size_t scan_index;
+                int invalidated = 0;
+
+                if (!machine_select_op_is_call(prev) ||
+                    !prev->has_result ||
+                    prev->as.call.arg_count != op->as.call.arg_count ||
+                    !prev->as.call.callee_name ||
+                    strcmp(prev->as.call.callee_name, op->as.call.callee_name) != 0 ||
+                    !machine_select_cleanup_call_arg_operands_equal(prev, op)) {
+                    continue;
+                }
+
+                for (scan_index = prev_index; scan_index < predecessor_block->op_count; ++scan_index) {
+                    MachineSelectOp *scan = &predecessor_block->ops[scan_index];
+                    size_t arg_index;
+
+                    if (machine_select_op_is_call(scan) ||
+                        machine_select_call_write_conflicts_with_summary(summary, callee_index, scan)) {
+                        invalidated = 1;
+                        break;
+                    }
+                    if (machine_select_op_redefines_result(scan, prev->result) ||
+                        machine_select_op_clobbers_operand_via_call(program, function, scan, prev->result)) {
+                        invalidated = 1;
+                        break;
+                    }
+                    for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+                        MachineSelectOperand arg = op->as.call.args[arg_index];
+
+                        if (machine_select_op_redefines_result(scan, arg) ||
+                            machine_select_op_clobbers_operand_via_call(program, function, scan, arg)) {
+                            invalidated = 1;
+                            break;
+                        }
+                    }
+                    if (invalidated) {
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    continue;
+                }
+
+                for (scan_index = 0u; scan_index < op_index; ++scan_index) {
+                    MachineSelectOp *scan = &block->ops[scan_index];
+                    size_t arg_index;
+
+                    if (machine_select_op_is_call(scan) ||
+                        machine_select_call_write_conflicts_with_summary(summary, callee_index, scan)) {
+                        invalidated = 1;
+                        break;
+                    }
+                    if (machine_select_op_redefines_result(scan, prev->result) ||
+                        machine_select_op_clobbers_operand_via_call(program, function, scan, prev->result)) {
+                        invalidated = 1;
+                        break;
+                    }
+                    for (arg_index = 0u; arg_index < op->as.call.arg_count; ++arg_index) {
+                        MachineSelectOperand arg = op->as.call.args[arg_index];
+
+                        if (machine_select_op_redefines_result(scan, arg) ||
+                            machine_select_op_clobbers_operand_via_call(program, function, scan, arg)) {
+                            invalidated = 1;
+                            break;
+                        }
+                    }
+                    if (invalidated) {
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    continue;
+                }
+
+                if (machine_select_operands_equal(op->result, prev->result)) {
+                    machine_select_remove_op_at(block, op_index);
+                } else {
+                    MachineSelectOperand current_result = op->result;
+
+                    machine_select_op_free(op);
+                    memset(op, 0, sizeof(*op));
+                    op->kind = MACHINE_SELECT_OP_COPY;
+                    op->has_result = 1;
+                    op->result = current_result;
+                    op->as.copy_value = prev->result;
+                    machine_select_cleanup_op_shape(op);
+                }
+                changed = 1;
+                break;
+            }
+        }
+    }
+
+    free(predecessor_counts);
     return changed;
 }
 
@@ -2255,7 +2500,7 @@ static int machine_select_cleanup_reuse_internal_pure_calls_program(MachineSelec
 
             if (block_changed < 0) {
                 machine_select_call_effect_summary_free(&summary);
-                return 0;
+                return -1;
             }
             if (block_changed) {
                 changed = 1;
@@ -2264,6 +2509,147 @@ static int machine_select_cleanup_reuse_internal_pure_calls_program(MachineSelec
     }
 
     machine_select_call_effect_summary_free(&summary);
+    return changed;
+}
+
+static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(MachineSelectProgram *program,
+    MachineSelectError *error) {
+    MachineSelectCallEffectSummary summary;
+    size_t function_index;
+    int changed = 0;
+
+    if (!program) {
+        return 0;
+    }
+
+    machine_select_call_effect_summary_init(&summary);
+    if (!machine_select_call_effect_summary_compute(program, &summary, error)) {
+        return -1;
+    }
+
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        if (machine_select_cleanup_reuse_unique_predecessor_pure_calls_in_function(
+                program, &program->functions[function_index], &summary, error)) {
+            changed = 1;
+        }
+    }
+
+    machine_select_call_effect_summary_free(&summary);
+    return changed;
+}
+
+static int machine_select_cleanup_forward_same_block_indirect_loads_in_block(const MachineSelectProgram *program,
+    MachineSelectFunction *function,
+    MachineSelectBasicBlock *block) {
+    size_t op_index;
+    int changed = 0;
+
+    if (!program || !function || !block) {
+        return 0;
+    }
+
+    for (op_index = 1u; op_index < block->op_count; ++op_index) {
+        MachineSelectOp *op = &block->ops[op_index];
+        size_t prev_index;
+
+        if (!op->has_result || op->kind != MACHINE_SELECT_OP_LOAD_INDIRECT) {
+            continue;
+        }
+
+        for (prev_index = 0u; prev_index < op_index; ++prev_index) {
+            MachineSelectOp *prev = &block->ops[prev_index];
+            MachineSelectAddressRoot load_root;
+            int has_load_root = 0;
+            int invalidated = 0;
+            size_t scan_index;
+
+            if (!prev->has_result ||
+                prev->kind != MACHINE_SELECT_OP_LOAD_INDIRECT ||
+                !machine_select_operands_compute_same_small_pure_value_in_block(
+                    block,
+                    prev_index,
+                    prev->as.load_indirect_addr,
+                    block,
+                    op_index,
+                    op->as.load_indirect_addr,
+                    0u)) {
+                continue;
+            }
+
+            memset(&load_root, 0, sizeof(load_root));
+            has_load_root = machine_select_cleanup_extract_address_root_operand(
+                function, block, prev_index, prev->as.load_indirect_addr, &load_root, 0u);
+
+            for (scan_index = prev_index + 1u; scan_index < op_index; ++scan_index) {
+                MachineSelectOp *scan = &block->ops[scan_index];
+
+                if (machine_select_op_is_call(scan)) {
+                    invalidated = 1;
+                    break;
+                }
+                if (machine_select_cleanup_op_writes_memory(scan)) {
+                    if (!has_load_root ||
+                        !machine_select_cleanup_store_cannot_alias_loaded_address(
+                            function, block, &load_root, scan_index)) {
+                        invalidated = 1;
+                        break;
+                    }
+                }
+            }
+            if (invalidated) {
+                continue;
+            }
+
+            if (prev->result.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                MachineSelectOperand original_result = prev->result;
+
+                prev->result = machine_select_operand_spill_slot(function->spill_slot_count);
+                function->spill_slot_count += 1u;
+                machine_select_cleanup_op_shape(prev);
+                machine_select_rewrite_visible_uses_in_block(
+                    program, function, block, prev_index, original_result, prev->result);
+                changed = 1;
+            }
+
+            {
+                MachineSelectOperand current_result = op->result;
+
+                machine_select_op_free(op);
+                memset(op, 0, sizeof(*op));
+                op->kind = MACHINE_SELECT_OP_COPY;
+                op->has_result = 1;
+                op->result = current_result;
+                op->as.copy_value = prev->result;
+                machine_select_cleanup_op_shape(op);
+                changed = 1;
+                break;
+            }
+        }
+    }
+
+    return changed;
+}
+
+static int machine_select_cleanup_forward_same_block_indirect_loads_program(MachineSelectProgram *program) {
+    size_t function_index;
+    int changed = 0;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        MachineSelectFunction *function = &program->functions[function_index];
+        size_t block_index;
+
+        for (block_index = 0u; block_index < function->block_count; ++block_index) {
+            if (machine_select_cleanup_forward_same_block_indirect_loads_in_block(
+                    program, function, &function->blocks[block_index])) {
+                changed = 1;
+            }
+        }
+    }
+
     return changed;
 }
 
@@ -2813,7 +3199,8 @@ static int machine_select_cleanup_terminator_shape(MachineSelectBasicBlock *bloc
     if (block->terminator.kind == MACHINE_SELECT_TERM_BRANCH &&
         block->terminator.as.branch.condition.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
         block->terminator.kind = MACHINE_SELECT_TERM_JUMP;
-        block->terminator.as.jump_target = block->terminator.as.branch.condition.immediate != 0
+        block->terminator.as.jump_target =
+            machine_select_normalize_sysy_int_value(block->terminator.as.branch.condition.immediate) != 0
             ? block->terminator.as.branch.then_target
             : block->terminator.as.branch.else_target;
         return 1;
@@ -3161,7 +3548,7 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
 
             if (!machine_select_cleanup_compute_block_live_out(
                     program, function, resource_count, &live_out_sets, error)) {
-                return 0;
+                return -1;
             }
             if (trace_timing) {
                 t_live_out = machine_select_cleanup_now_s() - stage_start;

@@ -5,6 +5,10 @@
 
 #else
 
+static int machine_load_file_has_segment_table(const MachineLoadFile *load_file) {
+    return load_file && (load_file->segment_count == 0u || load_file->segments);
+}
+
 int machine_load_file_get_summary(const MachineLoadFile *load_file,
     size_t *out_segment_count,
     size_t *out_file_byte_count,
@@ -13,7 +17,7 @@ int machine_load_file_get_summary(const MachineLoadFile *load_file,
     size_t executable_segment_count = 0u;
     size_t segment_index;
 
-    if (!load_file) {
+    if (!machine_load_file_has_segment_table(load_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {
@@ -65,15 +69,25 @@ int machine_load_file_get_memory_summary(const MachineLoadFile *load_file,
     size_t base_virtual_address;
     size_t end_virtual_address;
 
-    if (!load_file || !out_summary || load_file->segment_count == 0u || !load_file->segments) {
+    if (!machine_load_file_has_segment_table(load_file) ||
+        !out_summary ||
+        load_file->segment_count == 0u) {
         return 0;
     }
     base_virtual_address = load_file->segments[0].virtual_address;
-    end_virtual_address =
-        load_file->segments[0].virtual_address + load_file->segments[0].memory_byte_count;
+    if (!machine_load_try_add_size(
+            load_file->segments[0].virtual_address,
+            load_file->segments[0].memory_byte_count,
+            &end_virtual_address)) {
+        return 0;
+    }
     for (segment_index = 1u; segment_index < load_file->segment_count; ++segment_index) {
         const MachineLoadSegment *segment = &load_file->segments[segment_index];
-        size_t segment_end = segment->virtual_address + segment->memory_byte_count;
+        size_t segment_end = 0u;
+
+        if (!machine_load_try_add_size(segment->virtual_address, segment->memory_byte_count, &segment_end)) {
+            return 0;
+        }
 
         if (segment->virtual_address < base_virtual_address) {
             base_virtual_address = segment->virtual_address;
@@ -92,7 +106,9 @@ int machine_load_file_get_memory_summary(const MachineLoadFile *load_file,
 int machine_load_file_get_segment(const MachineLoadFile *load_file,
     size_t segment_index,
     const MachineLoadSegment **out_segment) {
-    if (!load_file || !out_segment || !load_file->segments || segment_index >= load_file->segment_count) {
+    if (!machine_load_file_has_segment_table(load_file) ||
+        !out_segment ||
+        segment_index >= load_file->segment_count) {
         return 0;
     }
     *out_segment = &load_file->segments[segment_index];
@@ -105,7 +121,7 @@ int machine_load_file_find_segment_by_name(const MachineLoadFile *load_file,
     const MachineLoadSegment **out_segment) {
     size_t segment_index;
 
-    if (!load_file || !segment_name || !load_file->segments) {
+    if (!machine_load_file_has_segment_table(load_file) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {
@@ -129,7 +145,7 @@ int machine_load_file_find_segment_covering_virtual_address(const MachineLoadFil
     const MachineLoadSegment **out_segment) {
     size_t segment_index;
 
-    if (!load_file || !load_file->segments) {
+    if (!machine_load_file_has_segment_table(load_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {
@@ -202,7 +218,9 @@ int machine_load_file_copy_flat_memory_image(const MachineLoadFile *load_file,
         const MachineLoadSegment *segment = &load_file->segments[segment_index];
         size_t offset = segment->virtual_address - memory_summary.base_virtual_address;
 
-        memcpy(bytes + offset, segment->bytes, segment->memory_byte_count);
+        if (segment->memory_byte_count > 0u) {
+            memcpy(bytes + offset, segment->bytes, segment->memory_byte_count);
+        }
     }
     *out_bytes = bytes;
     *out_byte_count = memory_summary.memory_byte_count;
@@ -216,7 +234,7 @@ int machine_load_file_get_entry_segment(const MachineLoadFile *load_file,
     size_t segment_index = 0u;
     const MachineLoadSegment *segment = NULL;
 
-    if (!load_file) {
+    if (!machine_load_file_has_segment_table(load_file)) {
         return 0;
     }
     if (!machine_load_file_find_segment_covering_virtual_address(
@@ -242,7 +260,7 @@ int machine_load_file_get_executable_segment_count(const MachineLoadFile *load_f
     size_t count = 0u;
     size_t segment_index;
 
-    if (!load_file || !out_count) {
+    if (!machine_load_file_has_segment_table(load_file) || !out_count) {
         return 0;
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {
@@ -261,7 +279,7 @@ int machine_load_file_get_executable_segment_by_index(const MachineLoadFile *loa
     size_t segment_index;
     size_t current_index = 0u;
 
-    if (!load_file) {
+    if (!machine_load_file_has_segment_table(load_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < load_file->segment_count; ++segment_index) {

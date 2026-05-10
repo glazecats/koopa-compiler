@@ -12,6 +12,7 @@ int machine_runtime_build_from_machine_load_file(const MachineLoadFile *load_fil
     MachineRuntimeTargetPolicySummary target_policy_summary;
     size_t segment_index;
     size_t stack_base_virtual_address;
+    size_t stack_base_before_alignment;
 
     memset(&load_memory_summary, 0, sizeof(load_memory_summary));
     memset(&target_policy_summary, 0, sizeof(target_policy_summary));
@@ -70,15 +71,41 @@ int machine_runtime_build_from_machine_load_file(const MachineLoadFile *load_fil
         if (load_segment->memory_byte_count > 0u) {
             memcpy(runtime_segment->bytes, load_segment->bytes, load_segment->memory_byte_count);
         }
+        if (out_runtime_file->total_mapped_byte_count > ((size_t)-1) - runtime_segment->byte_count) {
+            machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-127: out of memory materializing runtime load segment");
+            machine_runtime_file_free(out_runtime_file);
+            return 0;
+        }
         out_runtime_file->total_mapped_byte_count += runtime_segment->byte_count;
     }
 
+    if (!machine_runtime_try_add_size(
+            load_memory_summary.end_virtual_address,
+            target_policy_summary.stack_gap_byte_count,
+            &stack_base_virtual_address)) {
+        machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-124: failed deriving runtime policy");
+        machine_runtime_file_free(out_runtime_file);
+        return 0;
+    }
+    stack_base_before_alignment = stack_base_virtual_address;
     stack_base_virtual_address = machine_runtime_align_up(
-        load_memory_summary.end_virtual_address + target_policy_summary.stack_gap_byte_count,
+        stack_base_virtual_address,
         target_policy_summary.stack_alignment);
+    if (stack_base_virtual_address < stack_base_before_alignment) {
+        machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-124: failed deriving runtime policy");
+        machine_runtime_file_free(out_runtime_file);
+        return 0;
+    }
     out_runtime_file->stack_segment_index = load_file->segment_count;
     out_runtime_file->has_stack_segment = 1;
-    out_runtime_file->initial_stack_pointer = stack_base_virtual_address + target_policy_summary.stack_byte_count;
+    if (!machine_runtime_try_add_size(
+            stack_base_virtual_address,
+            target_policy_summary.stack_byte_count,
+            &out_runtime_file->initial_stack_pointer)) {
+        machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-128: out of memory materializing runtime stack segment");
+        machine_runtime_file_free(out_runtime_file);
+        return 0;
+    }
     {
         MachineRuntimeSegment *stack_segment = &out_runtime_file->segments[out_runtime_file->stack_segment_index];
 
@@ -98,6 +125,11 @@ int machine_runtime_build_from_machine_load_file(const MachineLoadFile *load_fil
             machine_runtime_file_free(out_runtime_file);
             return 0;
         }
+    }
+    if (out_runtime_file->total_mapped_byte_count > ((size_t)-1) - target_policy_summary.stack_byte_count) {
+        machine_runtime_set_error(error, 0, 0, "MACHINE-RUNTIME-128: out of memory materializing runtime stack segment");
+        machine_runtime_file_free(out_runtime_file);
+        return 0;
     }
     out_runtime_file->total_mapped_byte_count += target_policy_summary.stack_byte_count;
 

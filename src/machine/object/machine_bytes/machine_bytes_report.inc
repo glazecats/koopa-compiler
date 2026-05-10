@@ -4,6 +4,24 @@
 #include "machine_bytes.c"
 #else
 
+static int machine_bytes_report_has_summary_shape(const MachineBytesReport *report) {
+    return report &&
+        (report->program.function_count == 0u ||
+            (report->function_summaries &&
+                report->function_byte_offsets &&
+                report->function_block_summary_offsets &&
+                report->function_reference_offsets &&
+                report->function_fixup_offsets &&
+                report->function_indices_with_calls &&
+                report->function_indices_with_fallthrough &&
+                report->function_indices_with_branches)) &&
+        (report->total_block_summary_count == 0u || report->block_summaries) &&
+        (report->total_reference_summary_count == 0u || report->reference_summaries) &&
+        (report->total_fixup_summary_count == 0u || report->fixup_summaries) &&
+        (report->total_symbol_summary_count == 0u || report->symbol_summaries) &&
+        (report->total_section_summary_count == 0u || report->section_summaries);
+}
+
 int machine_bytes_report_refresh(MachineBytesReport *report, MachineBytesError *error) {
     size_t total_block_summary_count = 0;
     size_t total_program_byte_count = 0;
@@ -224,7 +242,9 @@ int machine_bytes_report_get_function_by_name(const MachineBytesReport *report,
 int machine_bytes_report_get_function_summary_artifact(const MachineBytesReport *report,
     size_t function_index,
     const MachineBytesFunctionSummary **out_summary) {
-    if (!report || !out_summary || function_index >= report->program.function_count || !report->function_summaries) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        !out_summary ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     *out_summary = &report->function_summaries[function_index];
@@ -252,7 +272,7 @@ int machine_bytes_report_get_reference_summary_count(const MachineBytesReport *r
 int machine_bytes_report_get_reference_summary(const MachineBytesReport *report,
     size_t reference_index,
     const MachineBytesReferenceSummary **out_summary) {
-    if (!report || !out_summary || !report->reference_summaries ||
+    if (!machine_bytes_report_has_summary_shape(report) || !out_summary ||
         reference_index >= report->total_reference_summary_count) {
         return 0;
     }
@@ -273,13 +293,20 @@ int machine_bytes_report_get_function_reference_summaries(const MachineBytesRepo
     if (out_summaries) {
         *out_summaries = NULL;
     }
-    if (!report || function_index >= report->program.function_count || !report->function_reference_offsets) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     start = report->function_reference_offsets[function_index];
     end = function_index + 1 < report->program.function_count
         ? report->function_reference_offsets[function_index + 1]
         : report->total_reference_summary_count;
+    if (end < start || end > report->total_reference_summary_count) {
+        return 0;
+    }
+    if (end > start && !report->reference_summaries) {
+        return 0;
+    }
     if (out_count) {
         *out_count = end - start;
     }
@@ -301,7 +328,7 @@ int machine_bytes_report_get_fixup_summary_count(const MachineBytesReport *repor
 int machine_bytes_report_get_fixup_summary(const MachineBytesReport *report,
     size_t fixup_index,
     const MachineBytesFixupSummary **out_summary) {
-    if (!report || !out_summary || !report->fixup_summaries ||
+    if (!machine_bytes_report_has_summary_shape(report) || !out_summary ||
         fixup_index >= report->total_fixup_summary_count) {
         return 0;
     }
@@ -322,13 +349,20 @@ int machine_bytes_report_get_function_fixup_summaries(const MachineBytesReport *
     if (out_summaries) {
         *out_summaries = NULL;
     }
-    if (!report || function_index >= report->program.function_count || !report->function_fixup_offsets) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     start = report->function_fixup_offsets[function_index];
     end = function_index + 1 < report->program.function_count
         ? report->function_fixup_offsets[function_index + 1]
         : report->total_fixup_summary_count;
+    if (end < start || end > report->total_fixup_summary_count) {
+        return 0;
+    }
+    if (end > start && !report->fixup_summaries) {
+        return 0;
+    }
     if (out_count) {
         *out_count = end - start;
     }
@@ -429,6 +463,7 @@ int machine_bytes_report_get_section_symbol_summaries(const MachineBytesReport *
     size_t *out_count,
     const MachineBytesSymbolSummary **out_summaries) {
     const MachineBytesSectionSummary *section;
+    size_t end_index;
 
     if (out_count) {
         *out_count = 0;
@@ -436,14 +471,20 @@ int machine_bytes_report_get_section_symbol_summaries(const MachineBytesReport *
     if (out_summaries) {
         *out_summaries = NULL;
     }
-    if (!report || !report->symbol_summaries ||
-        !machine_bytes_report_get_section_summary(report, section_index, &section) || !section) {
+    if (!report || !machine_bytes_report_get_section_summary(report, section_index, &section) || !section) {
+        return 0;
+    }
+    end_index = section->symbol_start_index + section->symbol_count;
+    if (end_index < section->symbol_start_index || end_index > report->total_symbol_summary_count) {
+        return 0;
+    }
+    if (section->symbol_count > 0u && !report->symbol_summaries) {
         return 0;
     }
     if (out_count) {
         *out_count = section->symbol_count;
     }
-    if (out_summaries) {
+    if (out_summaries && section->symbol_count > 0u) {
         *out_summaries = report->symbol_summaries + section->symbol_start_index;
     }
     return 1;
@@ -454,6 +495,7 @@ int machine_bytes_report_get_section_fixup_summaries(const MachineBytesReport *r
     size_t *out_count,
     const MachineBytesFixupSummary **out_summaries) {
     const MachineBytesSectionSummary *section;
+    size_t end_index;
 
     if (out_count) {
         *out_count = 0;
@@ -461,14 +503,20 @@ int machine_bytes_report_get_section_fixup_summaries(const MachineBytesReport *r
     if (out_summaries) {
         *out_summaries = NULL;
     }
-    if (!report || !report->fixup_summaries ||
-        !machine_bytes_report_get_section_summary(report, section_index, &section) || !section) {
+    if (!report || !machine_bytes_report_get_section_summary(report, section_index, &section) || !section) {
+        return 0;
+    }
+    end_index = section->fixup_start_index + section->fixup_count;
+    if (end_index < section->fixup_start_index || end_index > report->total_fixup_summary_count) {
+        return 0;
+    }
+    if (section->fixup_count > 0u && !report->fixup_summaries) {
         return 0;
     }
     if (out_count) {
         *out_count = section->fixup_count;
     }
-    if (out_summaries) {
+    if (out_summaries && section->fixup_count > 0u) {
         *out_summaries = report->fixup_summaries + section->fixup_start_index;
     }
     return 1;
@@ -535,8 +583,8 @@ int machine_bytes_report_get_function_byte_span(const MachineBytesReport *report
     size_t start;
     size_t end;
 
-    if (!report || function_index >= report->program.function_count || !report->function_summaries ||
-        !report->function_byte_offsets) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     start = report->function_byte_offsets[function_index];
@@ -556,8 +604,7 @@ int machine_bytes_report_find_block_summary_by_label(const MachineBytesReport *r
     const MachineBytesBlockSummary **out_summary) {
     size_t function_index;
 
-    if (!report || !label_name || !out_summary || !report->function_block_summary_offsets ||
-        !report->block_summaries) {
+    if (!machine_bytes_report_has_summary_shape(report) || !label_name || !out_summary) {
         return 0;
     }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
@@ -566,6 +613,10 @@ int machine_bytes_report_find_block_summary_by_label(const MachineBytesReport *r
             ? report->function_block_summary_offsets[function_index + 1]
             : report->total_block_summary_count;
         size_t block_summary_index;
+
+        if (next_block_offset < block_offset || next_block_offset > report->total_block_summary_count) {
+            return 0;
+        }
 
         for (block_summary_index = block_offset; block_summary_index < next_block_offset; ++block_summary_index) {
             const MachineBytesBlockSummary *summary = &report->block_summaries[block_summary_index];
@@ -590,14 +641,18 @@ int machine_bytes_report_find_block_summary_covering_offset(const MachineBytesRe
     size_t next_block_offset;
     size_t block_summary_index;
 
-    if (!report || !out_summary || function_index >= report->program.function_count ||
-        !report->function_block_summary_offsets || !report->block_summaries) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        !out_summary ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     block_offset = report->function_block_summary_offsets[function_index];
     next_block_offset = function_index + 1 < report->program.function_count
         ? report->function_block_summary_offsets[function_index + 1]
         : report->total_block_summary_count;
+    if (next_block_offset < block_offset || next_block_offset > report->total_block_summary_count) {
+        return 0;
+    }
     for (block_summary_index = block_offset; block_summary_index < next_block_offset; ++block_summary_index) {
         const MachineBytesBlockSummary *summary = &report->block_summaries[block_summary_index];
         if (byte_offset >= summary->start_byte_offset && byte_offset < summary->end_byte_offset) {
@@ -636,7 +691,7 @@ int machine_bytes_report_find_block_summary_by_program_byte_offset(const Machine
     const MachineBytesBlockSummary **out_summary) {
     size_t function_index;
 
-    if (!report || !out_summary || !report->function_summaries || !report->function_byte_offsets) {
+    if (!machine_bytes_report_has_summary_shape(report) || !out_summary) {
         return 0;
     }
     for (function_index = 0; function_index < report->program.function_count; ++function_index) {
@@ -664,14 +719,18 @@ int machine_bytes_report_get_block_summary(const MachineBytesReport *report,
     size_t offset;
     size_t next_offset;
 
-    if (!report || !out_summary || function_index >= report->program.function_count ||
-        !report->function_block_summary_offsets || !report->block_summaries) {
+    if (!machine_bytes_report_has_summary_shape(report) ||
+        !out_summary ||
+        function_index >= report->program.function_count) {
         return 0;
     }
     offset = report->function_block_summary_offsets[function_index];
     next_offset = function_index + 1 < report->program.function_count
         ? report->function_block_summary_offsets[function_index + 1]
         : report->total_block_summary_count;
+    if (next_offset < offset || next_offset > report->total_block_summary_count) {
+        return 0;
+    }
     if (block_index >= next_offset - offset) {
         return 0;
     }
@@ -700,7 +759,7 @@ int machine_bytes_report_get_functions_with_calls(const MachineBytesReport *repo
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!machine_bytes_report_has_summary_shape(report)) {
         return 0;
     }
     if (out_count) {
@@ -721,7 +780,7 @@ int machine_bytes_report_get_functions_with_fallthrough(const MachineBytesReport
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!machine_bytes_report_has_summary_shape(report)) {
         return 0;
     }
     if (out_count) {
@@ -742,7 +801,7 @@ int machine_bytes_report_get_functions_with_branches(const MachineBytesReport *r
     if (out_function_indices) {
         *out_function_indices = NULL;
     }
-    if (!report) {
+    if (!machine_bytes_report_has_summary_shape(report)) {
         return 0;
     }
     if (out_count) {

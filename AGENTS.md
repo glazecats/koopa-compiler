@@ -53,6 +53,35 @@
   1. `AGENTS.md`
   2. `docs/ir-conventions.md`
   3. `docs/NEXT_STEPS.md`
+- If the user explicitly asks for a fresh whole-project reread / restart from
+  the beginning, treat that as a **sequential source audit mode** and restart
+  from the front of the implementation pipeline instead of jumping only to the
+  currently suspicious layer:
+  1. `src/lexer/lexer.c`
+  2. `src/parser/*`
+  3. `src/semantic/*`
+  4. `src/ir/*`
+  5. `src/ir_pass/*`
+  6. `src/lower_ir/*`
+  7. `src/value_ssa/*` and `src/value_ssa_pass/*`
+  8. `src/memory_ssa/*` and `src/memory_ssa_pass/*`
+  9. downstream `src/machine/*`
+- If the user says to read/check **all code**, **the whole repository**, or
+  says not to only inspect the main/framework path, then sequential source
+  audit mode must be interpreted strictly:
+  - read **all implementation files under `src/`**, not only the obvious
+    entrypoints or the currently suspicious mainline
+  - every pass-layer directory under `src/` is mandatory, including
+    `src/ir_pass/*`, `src/value_ssa_pass/*`, `src/memory_ssa_pass/*`, and
+    any other `*pass*` implementation sibling directories that exist in the
+    source tree
+  - do not stop at representative files such as only `*.c` aggregators or one
+    “core” `*.inc`; sweep the sibling implementation files too
+  - use the pipeline order only as the traversal spine; within each stage,
+    widen the audit to adjacent/support modules before declaring the stage
+    covered
+  - when reporting progress, distinguish between “mainline read” and
+    “whole-stage/all-files read” instead of treating them as the same thing
 - Then read only the authority that matches the task:
   - lower / downstream IR -> `docs/ir/LOWER_IR_DESIGN.md`
   - SSA / allocator -> relevant `docs/ssa/*`
@@ -64,6 +93,8 @@
   - the user gets active blocks plus rough percentages
   - long-running command state is explicitly recorded
   - correctness recheck cadence has not been silently skipped
+  - if sequential source audit mode is active, the latest audited file range /
+    stage boundary is written into `docs/NEXT_STEPS.md` as progress memory
 
 ## Shared Authority
 
@@ -78,6 +109,53 @@
   - `MEMORY_SSA_DESIGN.md` for memory-SSA work
 - `docs/backend/` holds the backend stage authorities from `MACHINE_IR_PLAN.md` through `MACHINE_JOURNAL_PLAN.md`; use the stage that matches the active machine layer the task touches.
 - `docs/` holds implementation-facing design notes and proposals; unless explicitly promoted by `NEXT_STEPS.md`, treat them as discussion/design authority rather than execution-log authority.
+
+## Runtime-RE Interpretation
+
+- In this thread, when the user says hidden/course **`RE`**, interpret it as:
+  **the generated program/runtime crashed or otherwise failed while running
+  the testcase on the judge**, not merely that the compiler process itself
+  crashed.
+- Therefore, when the active target is `RE`, the primary audit surface should
+  be wrong-code / runtime-risk causes such as:
+  - wrong control flow / wrong branch polarity / wrong jump target
+  - dead loops or unintended non-termination
+  - broken call/return lowering
+  - stack-frame / save-restore / calling-convention corruption
+  - bad address formation / invalid memory access in generated code
+  - unsafe backend or final-text peepholes that mutate correct code into
+    crashing code
+- Compiler self-crash, malformed internal metadata, or report/query helper
+  segfaults are still worth fixing as robustness issues, but they must **not**
+  be mistaken for the main hidden-`RE` explanation unless the user explicitly
+  changes the target error class.
+- Thread-specific runtime-RE memory:
+  - the **primary target** in this thread is runtime `RE` in the generated
+    testcase program, not compiler-process `RE`
+  - user reminder: do **not** collapse runtime `RE` to only one cause such as
+    dead loop; dead loop / non-termination is only one important subclass
+  - user reminder: runtime `RE` analysis should keep multiple active
+    hypotheses open, including control-flow corruption, bad return/call
+    lowering, stack/save-restore mistakes, broken address formation, and
+    invalid memory accesses in generated code
+  - thread memory from the user: the earlier generated-program **`RTLE`**
+    mainline is believed to be already fixed in a previous session, but this
+    should be treated as a working memory note rather than a proof that all
+    loop/control-flow risk is gone; runtime `RE` may still come from a dead
+    loop or adjacent wrong-code in the same family
+  - thread memory from the user: some testcase red points are already-known
+    preexisting `RUN_TIMEOUT` tails and may **not** be caused by the current
+    code edit. Before blaming a new patch, consult `docs/NEXT_STEPS.md` (and,
+    if needed, the prior session history) for the currently remembered
+    baseline timeout set
+  - currently remembered stable public timeout examples include at least
+    `03_sort2.sy -> RUN_TIMEOUT` and `shuffle2.sy -> RUN_TIMEOUT`; additional
+    external/private perf timeout clusters are tracked in `docs/NEXT_STEPS.md`
+    and should be treated as historical baseline pressure unless a new change
+    clearly broadens or shifts that set
+  - when restarting from scratch after any misunderstanding of `RE`,
+    reinterpret earlier compiler-crash fixes as useful robustness work, but
+    do not let them substitute for a fresh generated-program runtime audit
 
 ## Agent Roles
 
@@ -130,6 +208,15 @@
   stage plan under `docs/backend/` or `docs/ssa/`). Do not update only one of
   `Current Active Slice` or the referenced plan if both are being used as the
   active progress memory for the same workstream.
+- In sequential source audit mode, every substantial reread chunk should leave
+  a short log entry in `docs/NEXT_STEPS.md` recording:
+  - which source files/stage span were reread
+  - whether a concrete bug was found
+  - whether any long-running sweep is still in flight
+- In strict whole-code audit mode, the log should also say whether the chunk
+  covered only the stage spine or the full set of sibling implementation files
+  for that stage, so a later restart does not mistake partial coverage for a
+  full-module read.
 - When reporting implementation progress at the end of a work chunk, prefer locating the work inside the current roadmap/staging document rather than giving only a generic status line.
 - For staged workstreams such as Value-SSA allocator mainline, report progress in layered form when possible, for example:
   - which named stage/substage is complete
@@ -184,6 +271,25 @@
 - Recheck coverage should rotate rather than repeating one tiny comfort suite
   forever. Prefer varying the mix across rounds so the evidence surface keeps
   widening instead of clustering on the same few cases.
+- Thread-specific recheck memory from the user:
+  - avoid reusing the exact same tiny sample batch every round
+  - prefer **rotated** testcase picks from round to round
+  - prefer **broader** sampled batches by default; “a few” cases are usually
+    not enough evidence on this line
+  - thread memory from the user: the external testcase pool is on the order
+    of roughly **1000** cases, so a good default sampled recheck is to take
+    about **1/10 of the pool per round** rather than only a handful of
+    convenience cases
+  - when a bug fix targets runtime `RE`, prefer at least one rotated
+    course-facing surface and one rotated third-party surface before treating
+    the round as stable
+- When choosing recheck samples, avoid reusing the exact same tiny batch on
+  every round. Prefer rotating the concrete testcase set so repeated
+  validations keep exercising nearby families instead of becoming one
+  memorized witness list.
+- Prefer larger sample batches when doing third-party or course rechecks.
+  A few cases are not enough by default; choose a broader handful so the
+  sweep covers more nearby shapes before concluding the round.
 - The recurring recheck menu should be drawn from both course-facing and
   external surfaces when they are available locally. Typical examples include:
   - course baselines such as `lv8`, `lv9`, and relevant `-perf` / public perf

@@ -90,8 +90,8 @@ static int machine_select_try_eval_binary_immediate(MachineIrBinaryOp op,
     MachineIrOperand lhs,
     MachineIrOperand rhs,
     long long *out_value) {
-    long long lhs_value;
-    long long rhs_value;
+    int32_t lhs_value;
+    int32_t rhs_value;
 
     if (!out_value ||
         lhs.kind != MACHINE_IR_OPERAND_IMMEDIATE ||
@@ -99,50 +99,51 @@ static int machine_select_try_eval_binary_immediate(MachineIrBinaryOp op,
         return 0;
     }
 
-    lhs_value = lhs.immediate;
-    rhs_value = rhs.immediate;
+    lhs_value = (int32_t)machine_select_normalize_sysy_int_value(lhs.immediate);
+    rhs_value = (int32_t)machine_select_normalize_sysy_int_value(rhs.immediate);
     switch (op) {
         case MACHINE_IR_BINARY_ADD:
-            *out_value = lhs_value + rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value + (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_SUB:
-            *out_value = lhs_value - rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value - (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_MUL:
-            *out_value = lhs_value * rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value * (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_DIV:
             if (rhs_value == 0) {
                 return 0;
             }
-            *out_value = lhs_value / rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value / (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_MOD:
             if (rhs_value == 0) {
                 return 0;
             }
-            *out_value = lhs_value % rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value % (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_BIT_AND:
-            *out_value = lhs_value & rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)(lhs_value & rhs_value));
             return 1;
         case MACHINE_IR_BINARY_BIT_XOR:
-            *out_value = lhs_value ^ rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)(lhs_value ^ rhs_value));
             return 1;
         case MACHINE_IR_BINARY_BIT_OR:
-            *out_value = lhs_value | rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)(lhs_value | rhs_value));
             return 1;
         case MACHINE_IR_BINARY_SHIFT_LEFT:
-            if (rhs_value < 0 || rhs_value >= 63 || lhs_value < 0) {
+            if (rhs_value < 0 || rhs_value >= 32) {
                 return 0;
             }
-            *out_value = lhs_value << rhs_value;
+            *out_value =
+                machine_select_normalize_sysy_int_value((long long)((uint32_t)lhs_value << (uint32_t)rhs_value));
             return 1;
         case MACHINE_IR_BINARY_SHIFT_RIGHT:
-            if (rhs_value < 0 || rhs_value >= 63 || lhs_value < 0) {
+            if (rhs_value < 0 || rhs_value >= 32) {
                 return 0;
             }
-            *out_value = lhs_value >> rhs_value;
+            *out_value = machine_select_normalize_sysy_int_value((long long)(lhs_value >> rhs_value));
             return 1;
         case MACHINE_IR_BINARY_EQ:
             *out_value = lhs_value == rhs_value ? 1 : 0;
@@ -302,6 +303,9 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
 static int machine_select_cleanup_reuse_addr_roots_program(MachineSelectProgram *program);
 static int machine_select_cleanup_reuse_internal_pure_calls_program(MachineSelectProgram *program,
     MachineSelectError *error);
+static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(MachineSelectProgram *program,
+    MachineSelectError *error);
+static int machine_select_cleanup_forward_same_block_indirect_loads_program(MachineSelectProgram *program);
 static int machine_select_cleanup_reuse_spill_pure_expr_program(MachineSelectProgram *program);
 static int machine_select_cleanup_program(MachineSelectProgram *program, MachineSelectError *error);
 
@@ -348,6 +352,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
     size_t register_index;
     size_t global_index;
     size_t function_index;
+    int cleanup_changed = 0;
     int trace_timing = machine_select_trace_enabled();
     double total_start = trace_timing ? machine_select_now_s() : 0.0;
     double stage_start = total_start;
@@ -550,7 +555,12 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         stage_start = machine_select_now_s();
     }
     if (!machine_select_program_should_skip_cleanup_pure(out_program)) {
-        if (machine_select_cleanup_pure_program(out_program, error)) {
+        cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        if (cleanup_changed < 0) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (cleanup_changed > 0) {
             if (trace_timing) {
                 machine_select_trace_timing("cleanup-pure", machine_select_now_s() - stage_start);
                 stage_start = machine_select_now_s();
@@ -593,12 +603,18 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("cleanup-reuse-addr-roots-skipped", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
-    if (machine_select_cleanup_reuse_internal_pure_calls_program(out_program, error)) {
+    cleanup_changed = machine_select_cleanup_reuse_internal_pure_calls_program(out_program, error);
+    if (cleanup_changed < 0) {
+        machine_select_program_free(out_program);
+        return 0;
+    }
+    if (cleanup_changed > 0) {
         if (trace_timing) {
             machine_select_trace_timing("cleanup-reuse-internal-pure-calls", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
-        if (!machine_select_cleanup_pure_program(out_program, error)) {
+        cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
         }
@@ -618,13 +634,72 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("cleanup-reuse-internal-pure-calls", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
+    cleanup_changed = machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(out_program, error);
+    if (cleanup_changed < 0) {
+        machine_select_program_free(out_program);
+        return 0;
+    }
+    if (cleanup_changed > 0) {
+        if (trace_timing) {
+            machine_select_trace_timing("cleanup-reuse-unique-predecessor-pure-calls", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+        cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        if (cleanup_changed < 0) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (trace_timing) {
+            machine_select_trace_timing("cleanup-pure-after-reuse-unique-predecessor-pure-calls", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+        if (!machine_select_verify_program(out_program, error)) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (trace_timing) {
+            machine_select_trace_timing("verify-after-reuse-unique-predecessor-pure-calls", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+    } else if (trace_timing) {
+        machine_select_trace_timing("cleanup-reuse-unique-predecessor-pure-calls", machine_select_now_s() - stage_start);
+        stage_start = machine_select_now_s();
+    }
+    if (machine_select_program_uses_indirect_memory(out_program) &&
+        machine_select_cleanup_forward_same_block_indirect_loads_program(out_program)) {
+        if (trace_timing) {
+            machine_select_trace_timing("cleanup-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+        cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        if (cleanup_changed < 0) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (trace_timing) {
+            machine_select_trace_timing("cleanup-pure-after-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+        if (!machine_select_verify_program(out_program, error)) {
+            machine_select_program_free(out_program);
+            return 0;
+        }
+        if (trace_timing) {
+            machine_select_trace_timing("verify-after-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
+            stage_start = machine_select_now_s();
+        }
+    } else if (trace_timing) {
+        machine_select_trace_timing("cleanup-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
+        stage_start = machine_select_now_s();
+    }
     if (machine_select_program_uses_indirect_memory(out_program) &&
         machine_select_cleanup_reuse_spill_pure_expr_program(out_program)) {
         if (trace_timing) {
             machine_select_trace_timing("cleanup-reuse-spill-pure-expr", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
-        if (!machine_select_cleanup_pure_program(out_program, error)) {
+        cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
         }

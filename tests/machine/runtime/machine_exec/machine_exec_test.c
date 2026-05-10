@@ -78,6 +78,69 @@ static int build_expected_exec_report_dump_text(char *buffer, size_t buffer_size
                base_virtual_address) > 0;
 }
 
+static char *dup_text(const char *text);
+
+static int build_wrapped_machine_image_file(MachineImageFile *image_file) {
+    if (!image_file) {
+        return 0;
+    }
+
+    machine_image_file_init(image_file);
+    image_file->target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.origin_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.relocation_semantics =
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS;
+    image_file->base_virtual_address = ((size_t)-1) - 7u;
+    image_file->has_entry = 1u;
+    image_file->entry_symbol_index = 0u;
+    image_file->entry_virtual_address = image_file->base_virtual_address;
+    image_file->segment_count = 1u;
+    image_file->segment_capacity = 1u;
+    image_file->segments = (MachineImageSegment *)calloc(1u, sizeof(MachineImageSegment));
+    image_file->symbol_count = 1u;
+    image_file->symbol_capacity = 1u;
+    image_file->symbols = (MachineImageSymbol *)calloc(1u, sizeof(MachineImageSymbol));
+    image_file->relocation_count = 1u;
+    image_file->relocation_capacity = 1u;
+    image_file->relocations = (MachineImageRelocation *)calloc(1u, sizeof(MachineImageRelocation));
+    image_file->byte_count = 8u;
+    image_file->bytes = (unsigned char *)calloc(8u, sizeof(unsigned char));
+    if (!image_file->segments || !image_file->symbols || !image_file->relocations || !image_file->bytes) {
+        machine_image_file_free(image_file);
+        return 0;
+    }
+
+    image_file->segments[0].name = dup_text(".text");
+    image_file->segments[0].image_offset = 0u;
+    image_file->segments[0].virtual_address = image_file->base_virtual_address;
+    image_file->segments[0].byte_count = 8u;
+    image_file->segments[0].align = 4096u;
+
+    image_file->symbols[0].name = dup_text("main");
+    image_file->symbols[0].binding = MACHINE_ELF_SYMBOL_GLOBAL;
+    image_file->symbols[0].type = MACHINE_ELF_SYMBOL_FUNC;
+    image_file->symbols[0].is_defined = 1u;
+    image_file->symbols[0].segment_index = 0u;
+    image_file->symbols[0].value_offset = 4u;
+    image_file->symbols[0].virtual_address = 0u;
+
+    image_file->relocations[0].source_kind = MACHINE_BYTES_FIXUP_CONTROL_PRIMARY;
+    image_file->relocations[0].segment_index = 0u;
+    image_file->relocations[0].segment_offset = 1u;
+    image_file->relocations[0].site_virtual_address = image_file->base_virtual_address + 1u;
+    image_file->relocations[0].is_resolved = 1u;
+    image_file->relocations[0].target_virtual_address = image_file->base_virtual_address;
+    image_file->relocations[0].type = 2u;
+    image_file->relocations[0].symbol_index = 0u;
+    image_file->relocations[0].symbol_name = dup_text("main");
+    if (!image_file->segments[0].name || !image_file->symbols[0].name || !image_file->relocations[0].symbol_name) {
+        machine_image_file_free(image_file);
+        return 0;
+    }
+    return 1;
+}
+
 static int verify_exec_file_with_profile(const MachineExecFile *exec_file,
     const char *context,
     MachineElfTargetProfile profile,
@@ -192,6 +255,30 @@ static int build_resolved_machine_ir_report(
         !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), error)) {
         return 0;
     }
+
+    return 1;
+}
+
+static int build_global_object_machine_ir_report(
+    MachineIrAllocateRewriteReport *report,
+    MachineIrError *error) {
+    MachineIrGlobal *global = NULL;
+
+    if (!report || !error) {
+        return 0;
+    }
+
+    if (!build_resolved_machine_ir_report(report, error)) {
+        return 0;
+    }
+    if (!machine_ir_program_append_global(&report->program, "g", &global, error) ||
+        !global ||
+        !machine_ir_program_append_global(&report->program, "h", &global, error)) {
+        machine_ir_allocate_rewrite_report_free(report);
+        return 0;
+    }
+    report->program.globals[1].has_initializer = 1;
+    report->program.globals[1].initializer_value = 7;
 
     return 1;
 }
@@ -640,6 +727,105 @@ cleanup:
     return ok;
 }
 
+static int test_machine_exec_empty_report_has_no_entry_filter_rows(void) {
+    MachineExecReport report;
+    size_t count = 1u;
+    size_t segment_index = (size_t)-1;
+    const MachineExecSegmentSummary *segment_summary = (const MachineExecSegmentSummary *)1;
+    int ok = 1;
+
+    machine_exec_report_init(&report);
+    if (!machine_exec_report_get_segment_filter_count(
+            &report, MACHINE_EXEC_SEGMENT_FILTER_ENTRY, &count) ||
+        count != 0u ||
+        machine_exec_report_get_segment_summary_by_filter_index(
+            &report, MACHINE_EXEC_SEGMENT_FILTER_ENTRY, 0u, &segment_index, &segment_summary) ||
+        segment_summary != (const MachineExecSegmentSummary *)1) {
+        fprintf(stderr, "[machine-exec] FAIL: empty report entry filter should be empty\n");
+        ok = 0;
+    }
+    machine_exec_report_free(&report);
+    return ok;
+}
+
+static int test_machine_exec_marks_global_data_segments_writable(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineExecFile exec_file;
+    MachineExecReport exec_report;
+    MachineIrError machine_error;
+    MachineExecError exec_error;
+    const MachineExecSegment *text_segment = NULL;
+    const MachineExecSegment *sbss_segment = NULL;
+    const MachineExecSegment *sdata_segment = NULL;
+    const MachineExecSegmentSummary *segment_summary = NULL;
+    char *dump_text = NULL;
+    size_t segment_count = 0u;
+    size_t byte_count = 0u;
+    size_t executable_segment_count = 0u;
+    size_t non_executable_segment_count = 0u;
+    size_t segment_index = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_exec_file_init(&exec_file);
+    machine_exec_report_init(&exec_report);
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&exec_error, 0, sizeof(exec_error));
+
+    if (!build_global_object_machine_ir_report(&machine_report, &machine_error) ||
+        !machine_exec_build_from_machine_ir_report(&machine_report, &exec_file, &exec_error) ||
+        !machine_exec_build_report_from_machine_ir_report(&machine_report, &exec_report, &exec_error) ||
+        !machine_exec_file_get_summary(&exec_file, &segment_count, &byte_count, &executable_segment_count) ||
+        segment_count != 3u || byte_count < 12u || executable_segment_count != 1u ||
+        !machine_exec_file_find_segment_by_name(&exec_file, ".text", &segment_index, &text_segment) ||
+        !text_segment || segment_index != 0u ||
+        !machine_exec_file_find_segment_by_name(&exec_file, ".sbss", &segment_index, &sbss_segment) ||
+        !sbss_segment || segment_index != 1u ||
+        !machine_exec_file_find_segment_by_name(&exec_file, ".sdata", &segment_index, &sdata_segment) ||
+        !sdata_segment || segment_index != 2u ||
+        !text_segment->readable || text_segment->writable || !text_segment->executable ||
+        !sbss_segment->readable || !sbss_segment->writable || sbss_segment->executable ||
+        !sdata_segment->readable || !sdata_segment->writable || sdata_segment->executable ||
+        !machine_exec_report_get_segment_filter_count(
+            &exec_report, MACHINE_EXEC_SEGMENT_FILTER_NON_EXECUTABLE, &non_executable_segment_count) ||
+        non_executable_segment_count != 2u ||
+        !machine_exec_report_get_segment_summary_by_filter_index(
+            &exec_report,
+            MACHINE_EXEC_SEGMENT_FILTER_NON_EXECUTABLE,
+            0u,
+            &segment_index,
+            &segment_summary) ||
+        !segment_summary || segment_index != 1u || strcmp(segment_summary->name, ".sbss") != 0 ||
+        !segment_summary->writable ||
+        !machine_exec_report_get_segment_summary_by_filter_index(
+            &exec_report,
+            MACHINE_EXEC_SEGMENT_FILTER_NON_EXECUTABLE,
+            1u,
+            &segment_index,
+            &segment_summary) ||
+        !segment_summary || segment_index != 2u || strcmp(segment_summary->name, ".sdata") != 0 ||
+        !segment_summary->writable ||
+        !machine_exec_dump_file(&exec_file, &dump_text, &exec_error) ||
+        strstr(dump_text, "xseg.1 .sbss img-seg=1") == NULL ||
+        strstr(dump_text, "xseg.2 .sdata img-seg=2") == NULL ||
+        strstr(dump_text, ".sbss img-seg=1 vaddr=") == NULL ||
+        strstr(dump_text, ".sdata img-seg=2 vaddr=") == NULL ||
+        strstr(dump_text, ".sbss img-seg=1 vaddr=") == NULL ||
+        strstr(dump_text, "perms=rw-") == NULL) {
+        fprintf(stderr,
+            "[machine-exec] FAIL: global-data segment permission mismatch: ir=%s exec=%s\n",
+            machine_error.message,
+            exec_error.message);
+        ok = 0;
+    }
+
+    free(dump_text);
+    machine_exec_report_free(&exec_report);
+    machine_exec_file_free(&exec_file);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 static int test_machine_exec_rejects_unresolved_relocations(void) {
     MachineImageFile image_file;
     MachineExecFile exec_file;
@@ -674,6 +860,35 @@ static int test_machine_exec_rejects_unresolved_relocations(void) {
     return ok;
 }
 
+
+static int test_machine_exec_rejects_wrapped_image_spans(void) {
+    MachineImageFile image_file;
+    MachineExecFile exec_file;
+    MachineImageError image_error;
+    MachineExecError exec_error;
+    int ok = 1;
+
+    machine_image_file_init(&image_file);
+    machine_exec_file_init(&exec_file);
+    memset(&image_error, 0, sizeof(image_error));
+    memset(&exec_error, 0, sizeof(exec_error));
+
+    if (!build_wrapped_machine_image_file(&image_file)) {
+        return 0;
+    }
+
+    if (machine_exec_build_from_machine_image_file(&image_file, &exec_file, &exec_error) ||
+        strstr(exec_error.message, "invalid image input") == NULL) {
+        fprintf(stderr,
+            "[machine-exec] FAIL: wrapped image rejection mismatch: %s\n",
+            exec_error.message);
+        ok = 0;
+    }
+
+    machine_exec_file_free(&exec_file);
+    machine_image_file_free(&image_file);
+    return ok;
+}
 static int test_machine_exec_elf_bridge_helpers(void) {
     MachineIrAllocateRewriteReport machine_report;
     MachineIrError machine_error;
@@ -812,13 +1027,121 @@ cleanup:
     return ok;
 }
 
+static int test_machine_exec_query_helpers_reject_malformed_segment_tables(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineExecFile exec_file;
+    MachineExecReport exec_report;
+    MachineExecError exec_error;
+    MachineExecSegment *saved_file_segments = NULL;
+    MachineExecSegment *saved_report_file_segments = NULL;
+    MachineExecSegmentSummary *saved_report_segment_summaries = NULL;
+    size_t *saved_executable_indices = NULL;
+    size_t *saved_non_executable_indices = NULL;
+    const MachineExecSegment *segment = NULL;
+    const MachineExecSegmentSummary *segment_summary = NULL;
+    MachineExecReportSegmentArtifact segment_artifact;
+    size_t segment_index = 0u;
+    size_t count = 0u;
+    size_t base_virtual_address = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_exec_file_init(&exec_file);
+    machine_exec_report_init(&exec_report);
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&exec_error, 0, sizeof(exec_error));
+    memset(&segment_artifact, 0, sizeof(segment_artifact));
+
+    if (!build_resolved_machine_ir_report(&machine_report, &machine_error) ||
+        !machine_exec_build_from_machine_ir_report(&machine_report, &exec_file, &exec_error) ||
+        !machine_exec_build_report_from_machine_ir_report(&machine_report, &exec_report, &exec_error)) {
+        fprintf(stderr,
+            "[machine-exec] FAIL: malformed-exec-query setup failed: machine=%s exec=%s\n",
+            machine_error.message,
+            exec_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    base_virtual_address = exec_file.segments[0].virtual_address;
+    saved_file_segments = exec_file.segments;
+    exec_file.segments = NULL;
+    if (machine_exec_file_get_summary(&exec_file, &count, NULL, NULL) ||
+        machine_exec_file_get_segment(&exec_file, 0u, &segment) ||
+        machine_exec_file_find_segment_by_name(&exec_file, ".text", &segment_index, &segment) ||
+        machine_exec_file_find_segment_covering_virtual_address(
+            &exec_file, base_virtual_address, &segment_index, &segment) ||
+        machine_exec_file_get_entry_segment(&exec_file, &segment_index, &segment) ||
+        machine_exec_file_get_executable_segment_count(&exec_file, &count) ||
+        machine_exec_file_get_executable_segment_by_index(&exec_file, 0u, &segment_index, &segment)) {
+        fprintf(stderr, "[machine-exec] FAIL: malformed exec-file query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    exec_file.segments = saved_file_segments;
+
+    saved_report_file_segments = exec_report.file.segments;
+    saved_report_segment_summaries = exec_report.segment_summaries;
+    saved_executable_indices = exec_report.executable_segment_indices;
+    saved_non_executable_indices = exec_report.non_executable_segment_indices;
+    exec_report.file.segments = NULL;
+    exec_report.segment_summaries = NULL;
+    exec_report.executable_segment_indices = NULL;
+    exec_report.non_executable_segment_indices = NULL;
+    if (machine_exec_report_get_summary(&exec_report, &count, NULL, NULL) ||
+        machine_exec_report_get_entry_segment_summary_artifact(
+            &exec_report, &segment_index, &segment_summary) ||
+        machine_exec_report_get_segment_summary(&exec_report, 0u, &segment_summary) ||
+        machine_exec_report_get_segment_artifact(&exec_report, 0u, &segment_artifact) ||
+        machine_exec_report_find_segment_summary_by_name(
+            &exec_report, ".text", &segment_index, &segment_summary) ||
+        machine_exec_report_find_segment_summary_covering_virtual_address(
+            &exec_report, base_virtual_address, &segment_index, &segment_summary) ||
+        machine_exec_report_get_segment_filter_count(
+            &exec_report, MACHINE_EXEC_SEGMENT_FILTER_EXECUTABLE, &count) ||
+        machine_exec_report_get_segment_summary_by_filter_index(
+            &exec_report,
+            MACHINE_EXEC_SEGMENT_FILTER_EXECUTABLE,
+            0u,
+            &segment_index,
+            &segment_summary) ||
+        machine_exec_report_get_executable_segment_count(&exec_report, &count) ||
+        machine_exec_report_get_executable_segment_summary_by_index(
+            &exec_report, 0u, &segment_index, &segment_summary)) {
+        fprintf(stderr, "[machine-exec] FAIL: malformed exec-report query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    exec_report.file.segments = saved_report_file_segments;
+    exec_report.segment_summaries = saved_report_segment_summaries;
+    exec_report.executable_segment_indices = saved_executable_indices;
+    exec_report.non_executable_segment_indices = saved_non_executable_indices;
+
+cleanup:
+    exec_report.file.segments = saved_report_file_segments ? saved_report_file_segments : exec_report.file.segments;
+    exec_report.segment_summaries =
+        saved_report_segment_summaries ? saved_report_segment_summaries : exec_report.segment_summaries;
+    exec_report.executable_segment_indices =
+        saved_executable_indices ? saved_executable_indices : exec_report.executable_segment_indices;
+    exec_report.non_executable_segment_indices =
+        saved_non_executable_indices ? saved_non_executable_indices : exec_report.non_executable_segment_indices;
+    exec_file.segments = saved_file_segments ? saved_file_segments : exec_file.segments;
+    machine_exec_report_free(&exec_report);
+    machine_exec_file_free(&exec_file);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_exec_builds_from_machine_ir_and_image_artifacts();
     ok &= test_machine_exec_elf_bridge_helpers();
+    ok &= test_machine_exec_marks_global_data_segments_writable();
     ok &= test_machine_exec_rejects_unresolved_relocations();
+    ok &= test_machine_exec_rejects_wrapped_image_spans();
     ok &= test_machine_exec_rejects_entry_outside_executable_segment();
+    ok &= test_machine_exec_empty_report_has_no_entry_filter_rows();
+    ok &= test_machine_exec_query_helpers_reject_malformed_segment_tables();
 
     if (!ok) {
         return 1;

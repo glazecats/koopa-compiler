@@ -74,7 +74,8 @@ int machine_launch_file_get_runtime_memory_summary(const MachineLaunchFile *laun
 int machine_launch_file_get_register(const MachineLaunchFile *launch_file,
     size_t register_index,
     const MachineLaunchRegister **out_register) {
-    if (!launch_file || register_index >= launch_file->register_count) {
+    if (!launch_file || register_index >= launch_file->register_count ||
+        (launch_file->register_count > 0u && !launch_file->registers)) {
         return 0;
     }
     if (out_register) {
@@ -89,7 +90,8 @@ int machine_launch_file_find_register_by_name(const MachineLaunchFile *launch_fi
     const MachineLaunchRegister **out_register) {
     size_t register_index;
 
-    if (!launch_file || !register_name) {
+    if (!launch_file || !register_name ||
+        (launch_file->register_count > 0u && !launch_file->registers)) {
         return 0;
     }
     for (register_index = 0u; register_index < launch_file->register_count; ++register_index) {

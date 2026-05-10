@@ -5,11 +5,20 @@
 
 #else
 
+static int machine_exec_report_has_segment_tables(const MachineExecReport *report) {
+    return report &&
+        report->segment_summary_count == report->file.segment_count &&
+        (report->segment_summary_count == 0u || report->segment_summaries) &&
+        (report->file.segment_count == 0u || report->file.segments) &&
+        (report->executable_segment_count == 0u || report->executable_segment_indices) &&
+        (report->non_executable_segment_count == 0u || report->non_executable_segment_indices);
+}
+
 int machine_exec_report_get_summary(const MachineExecReport *report,
     size_t *out_segment_count,
     size_t *out_byte_count,
     size_t *out_executable_segment_count) {
-    if (!report) {
+    if (!machine_exec_report_has_segment_tables(report)) {
         return 0;
     }
     if (out_segment_count) {
@@ -72,7 +81,7 @@ int machine_exec_report_get_entry_segment_summary_artifact(const MachineExecRepo
     size_t segment_index = 0u;
     const MachineExecSegment *segment = NULL;
 
-    if (!report) {
+    if (!machine_exec_report_has_segment_tables(report)) {
         return 0;
     }
     if (!machine_exec_file_get_entry_segment(&report->file, &segment_index, &segment) || !segment) {
@@ -90,7 +99,9 @@ int machine_exec_report_get_entry_segment_summary_artifact(const MachineExecRepo
 int machine_exec_report_get_segment_summary(const MachineExecReport *report,
     size_t segment_index,
     const MachineExecSegmentSummary **out_summary) {
-    if (!report || !out_summary || !report->segment_summaries || segment_index >= report->segment_summary_count) {
+    if (!machine_exec_report_has_segment_tables(report) ||
+        !out_summary ||
+        segment_index >= report->segment_summary_count) {
         return 0;
     }
     *out_summary = &report->segment_summaries[segment_index];
@@ -103,7 +114,8 @@ int machine_exec_report_get_segment_artifact(const MachineExecReport *report,
     const MachineExecSegmentSummary *summary = NULL;
     size_t entry_segment_index = 0u;
 
-    if (!report || !out_artifact ||
+    if (!machine_exec_report_has_segment_tables(report) ||
+        !out_artifact ||
         !machine_exec_report_get_segment_summary(report, segment_index, &summary) ||
         !summary) {
         return 0;
@@ -125,7 +137,7 @@ int machine_exec_report_find_segment_summary_by_name(const MachineExecReport *re
     const MachineExecSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !segment_name || !report->segment_summaries) {
+    if (!machine_exec_report_has_segment_tables(report) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -166,7 +178,7 @@ int machine_exec_report_find_segment_summary_covering_virtual_address(const Mach
     const MachineExecSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !report->segment_summaries) {
+    if (!machine_exec_report_has_segment_tables(report)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -212,6 +224,9 @@ int machine_exec_report_find_segment_artifact_covering_virtual_address(const Mac
 int machine_exec_report_get_segment_filter_count(const MachineExecReport *report,
     MachineExecReportSegmentFilterKind filter_kind,
     size_t *out_count) {
+    if (!machine_exec_report_has_segment_tables(report)) {
+        return 0;
+    }
     return machine_exec_report_get_segment_filter_storage(report, filter_kind, NULL, out_count);
 }
 
@@ -224,7 +239,7 @@ int machine_exec_report_get_segment_summary_by_filter_index(const MachineExecRep
     size_t count = 0u;
     size_t segment_index = 0u;
 
-    if (!report) {
+    if (!machine_exec_report_has_segment_tables(report)) {
         return 0;
     }
     if (!machine_exec_report_get_segment_filter_storage(report, filter_kind, &indices, &count) ||
@@ -297,7 +312,7 @@ int machine_exec_report_overview_artifact_get_segment_artifact(
 
 int machine_exec_report_get_executable_segment_count(const MachineExecReport *report,
     size_t *out_count) {
-    if (!report || !out_count) {
+    if (!machine_exec_report_has_segment_tables(report) || !out_count) {
         return 0;
     }
     *out_count = report->executable_segment_count;
@@ -310,7 +325,8 @@ int machine_exec_report_get_executable_segment_summary_by_index(const MachineExe
     const MachineExecSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !report->executable_segment_indices ||
+    if (!machine_exec_report_has_segment_tables(report) ||
+        !report->executable_segment_indices ||
         executable_index >= report->executable_segment_count) {
         return 0;
     }

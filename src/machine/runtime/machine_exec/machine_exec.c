@@ -15,6 +15,7 @@ static void machine_exec_set_error(MachineExecError *error, int line, int column
 static char *machine_exec_strdup(const char *text);
 static int machine_exec_append_format(MachineExecStringBuilder *builder, const char *fmt, ...);
 static int machine_exec_is_executable_segment_name(const char *segment_name);
+static int machine_exec_is_writable_segment_name(const char *segment_name);
 static int machine_exec_segment_covers_virtual_address(const MachineExecSegment *segment,
     size_t virtual_address);
 static int machine_exec_report_get_segment_filter_storage(const MachineExecReport *report,

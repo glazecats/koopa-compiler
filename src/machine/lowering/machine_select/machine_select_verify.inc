@@ -33,7 +33,13 @@ static int machine_select_verify_operand(const MachineSelectProgram *program,
             }
             return 1;
         default:
-            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-103: %s uses invalid operand kind", context);
+            machine_select_set_error(
+                error,
+                0,
+                0,
+                "MACHINE-SELECT-103: %s uses invalid operand kind %d",
+                context,
+                (int)operand.kind);
             return 0;
     }
 }
@@ -124,8 +130,8 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
             machine_select_set_error(error, 0, 0, "MACHINE-SELECT-115: functions must have names");
             return 0;
         }
-        if (function->has_body && ((function->local_count > 0 && !function->locals) ||
-                (function->block_count > 0 && !function->blocks))) {
+        if ((function->local_count > 0 && !function->locals) ||
+            (function->block_count > 0 && !function->blocks)) {
             machine_select_set_error(error, 0, 0, "MACHINE-SELECT-116: malformed function body tables");
             return 0;
         }
@@ -147,6 +153,10 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
             }
             if (!block->has_terminator) {
                 machine_select_set_error(error, 0, 0, "MACHINE-SELECT-119: block is missing terminator");
+                return 0;
+            }
+            if (block->op_count > 0 && !block->ops) {
+                machine_select_set_error(error, 0, 0, "MACHINE-SELECT-120: block op table missing");
                 return 0;
             }
 
@@ -191,7 +201,7 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                         int has_immediate_arg = 0;
 
                         if (!op->as.call.callee_name || op->as.call.callee_name[0] == '\0') {
-                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-120: calls require callee name");
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-121: calls require callee name");
                             return 0;
                         }
                         if ((op->kind == MACHINE_SELECT_OP_CALL ||
@@ -199,16 +209,16 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                                 op->kind == MACHINE_SELECT_OP_CALL_SPILL ||
                                 op->kind == MACHINE_SELECT_OP_CALL_IMM_SPILL) &&
                             !op->has_result) {
-                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-127: value calls require result");
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-128: value calls require result");
                             return 0;
                         }
                         if ((op->kind == MACHINE_SELECT_OP_CALL_VOID || op->kind == MACHINE_SELECT_OP_CALL_VOID_IMM) &&
                             op->has_result) {
-                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-128: void calls must not have result");
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-129: void calls must not have result");
                             return 0;
                         }
                         if (op->as.call.arg_count > 0 && !op->as.call.args) {
-                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-121: call args missing");
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-122: call args missing");
                             return 0;
                         }
                         for (arg_index = 0; arg_index < op->as.call.arg_count; ++arg_index) {
@@ -225,7 +235,7 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                                 op->kind == MACHINE_SELECT_OP_CALL_VOID_IMM) &&
                             !has_immediate_arg) {
                             machine_select_set_error(
-                                error, 0, 0, "MACHINE-SELECT-130: immediate call family requires immediate arg");
+                                error, 0, 0, "MACHINE-SELECT-131: immediate call family requires immediate arg");
                             return 0;
                         }
                         if ((op->kind == MACHINE_SELECT_OP_CALL ||
@@ -233,21 +243,21 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                                 op->kind == MACHINE_SELECT_OP_CALL_VOID) &&
                             has_immediate_arg) {
                             machine_select_set_error(
-                                error, 0, 0, "MACHINE-SELECT-131: generic call family must not hide immediate arg");
+                                error, 0, 0, "MACHINE-SELECT-132: generic call family must not hide immediate arg");
                             return 0;
                         }
                         if ((op->kind == MACHINE_SELECT_OP_CALL_SPILL ||
                                 op->kind == MACHINE_SELECT_OP_CALL_IMM_SPILL) &&
                             op->result.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                             machine_select_set_error(
-                                error, 0, 0, "MACHINE-SELECT-132: spill-result call family requires spill result");
+                                error, 0, 0, "MACHINE-SELECT-133: spill-result call family requires spill result");
                             return 0;
                         }
                         if ((op->kind == MACHINE_SELECT_OP_CALL ||
                                 op->kind == MACHINE_SELECT_OP_CALL_IMM) &&
                             op->result.kind != MACHINE_SELECT_OPERAND_REGISTER) {
                             machine_select_set_error(
-                                error, 0, 0, "MACHINE-SELECT-133: register-result call family requires register result");
+                                error, 0, 0, "MACHINE-SELECT-134: register-result call family requires register result");
                             return 0;
                         }
                         break;
@@ -272,6 +282,13 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                             !machine_select_verify_slot_ref(program, function, op->as.load_slot, "load slot", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_LOAD_LOCAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            (op->kind == MACHINE_SELECT_OP_LOAD_GLOBAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-139: load op uses wrong slot kind");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_STORE_LOCAL:
                     case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
@@ -285,7 +302,16 @@ int machine_select_verify_program(const MachineSelectProgram *program, MachineSe
                                 op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) &&
                             op->as.store.value.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                             machine_select_set_error(
-                                error, 0, 0, "MACHINE-SELECT-129: immediate store family requires immediate value");
+                                error, 0, 0, "MACHINE-SELECT-130: immediate store family requires immediate value");
+                            return 0;
+                        }
+                        if (((op->kind == MACHINE_SELECT_OP_STORE_LOCAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_LOCAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            ((op->kind == MACHINE_SELECT_OP_STORE_GLOBAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-140: store op uses wrong slot kind");
                             return 0;
                         }
                         break;

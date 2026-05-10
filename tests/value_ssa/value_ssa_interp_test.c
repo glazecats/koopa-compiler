@@ -1,6 +1,8 @@
 #include "value_ssa.h"
 #include "value_ssa_interp.h"
 
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -305,6 +307,116 @@ static int build_invalid_uninitialized_local_load_program(ValueSsaProgram *progr
     return 1;
 }
 
+static int build_overflow_arithmetic_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.mov_value = value_ssa_value_immediate(INT32_MAX);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_shift_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+    size_t value2;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    value2 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1 || value2 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.mov_value = value_ssa_value_immediate(-4);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_RIGHT;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value2);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_LEFT;
+    instruction.as.binary.lhs = value_ssa_value_immediate(1);
+    instruction.as.binary.rhs = value_ssa_value_immediate(31);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int external_double(const ValueSsaProgram *program,
     const char *callee_name,
     const long long *args,
@@ -453,6 +565,52 @@ static int test_value_ssa_interp_rejects_uninitialized_local_load(void) {
     return ok;
 }
 
+static int test_value_ssa_interp_uses_sysy_wraparound_semantics(void) {
+    ValueSsaProgram program;
+    ValueSsaError build_error;
+    ValueSsaInterpResult result;
+    ValueSsaInterpError error;
+    int ok;
+
+    if (!build_overflow_arithmetic_program(&program, &build_error)) {
+        return 0;
+    }
+
+    value_ssa_interp_result_init(&result);
+    ok = value_ssa_interp_execute_main(&program, NULL, 0, NULL, &result, &error) &&
+        result.return_value == (long long)INT32_MIN;
+    if (!ok) {
+        fprintf(stderr, "[value-ssa-interp] FAIL: wraparound arithmetic failed: %s\n", error.message);
+    }
+
+    value_ssa_interp_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_interp_handles_negative_right_shift(void) {
+    ValueSsaProgram program;
+    ValueSsaError build_error;
+    ValueSsaInterpResult result;
+    ValueSsaInterpError error;
+    int ok;
+
+    if (!build_shift_program(&program, &build_error)) {
+        return 0;
+    }
+
+    value_ssa_interp_result_init(&result);
+    ok = value_ssa_interp_execute_main(&program, NULL, 0, NULL, &result, &error) &&
+        result.return_value == -2;
+    if (!ok) {
+        fprintf(stderr, "[value-ssa-interp] FAIL: shift semantics failed: %s\n", error.message);
+    }
+
+    value_ssa_interp_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -461,6 +619,8 @@ int main(void) {
     ok &= test_value_ssa_interp_executes_internal_call_program();
     ok &= test_value_ssa_interp_executes_external_call_program();
     ok &= test_value_ssa_interp_rejects_uninitialized_local_load();
+    ok &= test_value_ssa_interp_uses_sysy_wraparound_semantics();
+    ok &= test_value_ssa_interp_handles_negative_right_shift();
     if (!ok) {
         return 1;
     }

@@ -94,6 +94,26 @@ int machine_bytes_verify_program(const MachineBytesProgram *program, MachineByte
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-112: byte array length mismatch");
                 return 0;
             }
+            for (size_t op_index = 0u; op_index < block->block.op_count; ++op_index) {
+                if (!machine_bytes_verify_op_encoding_for_profile(
+                        program->target_profile,
+                        &block->block.ops[op_index],
+                        error)) {
+                    return 0;
+                }
+            }
+            if (!machine_bytes_verify_terminator_encoding_for_profile(
+                    program->target_profile,
+                    &block->block.terminator,
+                    error)) {
+                return 0;
+            }
+            if (!machine_bytes_verify_control_target_encoding_for_profile(
+                    program->target_profile,
+                    &block->block.terminator,
+                    error)) {
+                return 0;
+            }
             {
                 MachineBytesBlock expected_block = *block;
                 unsigned char *expected_bytes = NULL;

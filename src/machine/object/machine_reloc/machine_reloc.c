@@ -489,7 +489,13 @@ int machine_reloc_file_find_section_by_name(const MachineRelocFile *reloc_file,
     const MachineRelocSection **out_section) {
     size_t section_index;
 
-    if (!reloc_file || !section_name || !reloc_file->sections) {
+    if (out_section_index) {
+        *out_section_index = 0u;
+    }
+    if (out_section) {
+        *out_section = NULL;
+    }
+    if (!reloc_file || !section_name || (reloc_file->section_count > 0u && !reloc_file->sections)) {
         return 0;
     }
     for (section_index = 0; section_index < reloc_file->section_count; ++section_index) {
@@ -519,14 +525,16 @@ int machine_reloc_file_get_section_relocations(const MachineRelocFile *reloc_fil
     if (out_relocations) {
         *out_relocations = NULL;
     }
-    if (!reloc_file || !machine_reloc_file_get_section(reloc_file, section_index, &section) || !section ||
-        !reloc_file->relocations) {
+    if (!reloc_file || !machine_reloc_file_get_section(reloc_file, section_index, &section) || !section) {
+        return 0;
+    }
+    if (section->relocation_count > 0u && !reloc_file->relocations) {
         return 0;
     }
     if (out_count) {
         *out_count = section->relocation_count;
     }
-    if (out_relocations) {
+    if (out_relocations && section->relocation_count > 0u) {
         *out_relocations = reloc_file->relocations + section->relocation_start_index;
     }
     return 1;
@@ -981,7 +989,13 @@ int machine_reloc_report_find_section_summary_by_name(const MachineRelocReport *
     const MachineRelocSectionSummary **out_summary) {
     size_t section_index;
 
-    if (!report || !section_name || !report->section_summaries) {
+    if (out_section_index) {
+        *out_section_index = 0u;
+    }
+    if (out_summary) {
+        *out_summary = NULL;
+    }
+    if (!report || !section_name || (report->section_summary_count > 0u && !report->section_summaries)) {
         return 0;
     }
     for (section_index = 0u; section_index < report->section_summary_count; ++section_index) {
@@ -1013,14 +1027,16 @@ int machine_reloc_report_get_section_relocation_summaries(const MachineRelocRepo
     }
     if (!report ||
         !machine_reloc_file_get_section(&report->file, section_index, &section) ||
-        !section ||
-        !report->relocation_summaries) {
+        !section) {
+        return 0;
+    }
+    if (section->relocation_count > 0u && !report->relocation_summaries) {
         return 0;
     }
     if (out_count) {
         *out_count = section->relocation_count;
     }
-    if (out_summaries) {
+    if (out_summaries && section->relocation_count > 0u) {
         *out_summaries = report->relocation_summaries + section->relocation_start_index;
     }
     return 1;
@@ -1139,6 +1155,15 @@ int machine_reloc_dump_report(const MachineRelocReport *report,
     }
     if (!report || !out_text) {
         machine_reloc_set_error(error, 0, 0, "MACHINE-RELOC-141: invalid reloc report dump contract");
+        return 0;
+    }
+    if ((report->file.section_count > 0u && !report->file.sections) ||
+        (report->file.relocation_count > 0u && !report->file.relocations) ||
+        report->section_summary_count != report->file.section_count ||
+        report->relocation_summary_count != report->file.relocation_count ||
+        (report->section_summary_count > 0u && !report->section_summaries) ||
+        (report->relocation_summary_count > 0u && !report->relocation_summaries)) {
+        machine_reloc_set_error(error, 0, 0, "MACHINE-RELOC-142: malformed reloc report tables");
         return 0;
     }
     if (!machine_reloc_dump_file(&report->file, &file_dump, error)) {

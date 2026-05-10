@@ -335,6 +335,26 @@ int machine_select_dump_lower_report_artifact(const MachineSelectLowerReport *re
         machine_select_set_error(error, 0, 0, "MACHINE-SELECT-407: invalid lower-report dump contract");
         return 0;
     }
+    if (report->function_summary_count != report->program.function_count) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-430: report function-summary count drift");
+        return 0;
+    }
+    if (report->program.function_count > 0 &&
+        (!report->program.functions || !report->function_summaries || !report->function_block_summary_offsets)) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-431: report function tables missing");
+        return 0;
+    }
+    if (report->total_block_summary_count > 0 && !report->block_summaries) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-432: report block summary table missing");
+        return 0;
+    }
+    if ((report->functions_with_calls_count > 0 && !report->function_indices_with_calls) ||
+        (report->functions_with_spills_count > 0 && !report->function_indices_with_spills) ||
+        (report->functions_with_memory_ops_count > 0 && !report->function_indices_with_memory_ops) ||
+        (report->functions_with_branches_count > 0 && !report->function_indices_with_branches)) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-433: report filter tables missing");
+        return 0;
+    }
 
     memset(&builder, 0, sizeof(builder));
     if (!machine_select_append_format(&builder,
@@ -414,6 +434,12 @@ int machine_select_dump_lower_report_artifact(const MachineSelectLowerReport *re
             ? report->function_block_summary_offsets[function_index + 1]
             : report->total_block_summary_count;
         size_t block_summary_index;
+
+        if (next_block_offset < block_offset || next_block_offset > report->total_block_summary_count) {
+            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-434: report block summary offsets drift");
+            free(builder.data);
+            return 0;
+        }
 
         if (!machine_select_append_format(&builder,
                 "  fn.%zu %s blocks=%zu ops=%zu calls=%zu spills=%d load_local=%zu store_local=%zu store_locali=%zu load_global=%zu store_global=%zu store_globali=%zu ret=%zu reti=%zu retspill=%zu br=%zu cmpbr=%zu cmpbri=%zu blocks_with_calls=%zu blocks_with_memory_ops=%zu branch_blocks=%zu jump_blocks=%zu return_blocks=%zu\n",

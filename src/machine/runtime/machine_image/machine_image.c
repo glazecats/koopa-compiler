@@ -20,6 +20,8 @@ static const char *machine_image_relocation_kind_name(MachineRelocKind kind);
 static int machine_image_apply_profile(MachineImageFile *image_file,
     MachineElfTargetProfile profile,
     MachineImageError *error);
+static int machine_image_file_has_tables(const MachineImageFile *image_file);
+static int machine_image_report_has_tables(const MachineImageReport *report);
 static int machine_image_report_get_symbol_filter_storage(const MachineImageReport *report,
     MachineImageReportSymbolFilterKind filter_kind,
     const size_t **out_indices,
@@ -147,7 +149,7 @@ static int machine_image_report_get_symbol_filter_storage(const MachineImageRepo
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_indices || !out_count) {
+    if (!machine_image_report_has_tables(report) || !out_indices || !out_count) {
         return 0;
     }
     switch (filter_kind) {
@@ -190,7 +192,7 @@ static int machine_image_report_get_relocation_filter_storage(const MachineImage
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_indices || !out_count) {
+    if (!machine_image_report_has_tables(report) || !out_indices || !out_count) {
         return 0;
     }
     switch (filter_kind) {

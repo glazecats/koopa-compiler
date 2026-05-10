@@ -4,123 +4,60 @@
 #include "machine_ir.c"
 #else
 
-#include <limits.h>
-
-static int machine_ir_try_add_immediates(long long lhs,
-    long long rhs,
-    long long *out_value) {
-    if (!out_value) {
-        return 0;
-    }
-    if ((rhs > 0 && lhs > LLONG_MAX - rhs) ||
-        (rhs < 0 && lhs < LLONG_MIN - rhs)) {
-        return 0;
-    }
-    *out_value = lhs + rhs;
-    return 1;
-}
-
-static int machine_ir_try_sub_immediates(long long lhs,
-    long long rhs,
-    long long *out_value) {
-    if (!out_value) {
-        return 0;
-    }
-    if ((rhs < 0 && lhs > LLONG_MAX + rhs) ||
-        (rhs > 0 && lhs < LLONG_MIN + rhs)) {
-        return 0;
-    }
-    *out_value = lhs - rhs;
-    return 1;
-}
-
-static int machine_ir_try_mul_immediates(long long lhs,
-    long long rhs,
-    long long *out_value) {
-    if (!out_value) {
-        return 0;
-    }
-    if (lhs == 0 || rhs == 0) {
-        *out_value = 0;
-        return 1;
-    }
-    if (lhs == -1 && rhs == LLONG_MIN) {
-        return 0;
-    }
-    if (rhs == -1 && lhs == LLONG_MIN) {
-        return 0;
-    }
-    if (lhs > 0) {
-        if (rhs > 0) {
-            if (lhs > LLONG_MAX / rhs) {
-                return 0;
-            }
-        } else {
-            if (rhs < LLONG_MIN / lhs) {
-                return 0;
-            }
-        }
-    } else {
-        if (rhs > 0) {
-            if (lhs < LLONG_MIN / rhs) {
-                return 0;
-            }
-        } else {
-            if (lhs != 0 && rhs < LLONG_MAX / lhs) {
-                return 0;
-            }
-        }
-    }
-    *out_value = lhs * rhs;
-    return 1;
-}
-
 static int machine_ir_try_fold_binary_immediates(MachineIrBinaryOp op,
     long long lhs,
     long long rhs,
     long long *out_value) {
+    int32_t lhs32;
+    int32_t rhs32;
+
     if (!out_value) {
         return 0;
     }
 
+    lhs32 = (int32_t)machine_ir_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)machine_ir_normalize_sysy_int_value(rhs);
     switch (op) {
         case MACHINE_IR_BINARY_ADD:
-            return machine_ir_try_add_immediates(lhs, rhs, out_value);
+            *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
+            return 1;
         case MACHINE_IR_BINARY_SUB:
-            return machine_ir_try_sub_immediates(lhs, rhs, out_value);
+            *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
+            return 1;
         case MACHINE_IR_BINARY_MUL:
-            return machine_ir_try_mul_immediates(lhs, rhs, out_value);
+            *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
+            return 1;
         case MACHINE_IR_BINARY_DIV:
         case MACHINE_IR_BINARY_MOD:
         case MACHINE_IR_BINARY_SHIFT_LEFT:
         case MACHINE_IR_BINARY_SHIFT_RIGHT:
             return 0;
         case MACHINE_IR_BINARY_BIT_AND:
-            *out_value = lhs & rhs;
+            *out_value = machine_ir_normalize_sysy_int_value((long long)(lhs32 & rhs32));
             return 1;
         case MACHINE_IR_BINARY_BIT_XOR:
-            *out_value = lhs ^ rhs;
+            *out_value = machine_ir_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
             return 1;
         case MACHINE_IR_BINARY_BIT_OR:
-            *out_value = lhs | rhs;
+            *out_value = machine_ir_normalize_sysy_int_value((long long)(lhs32 | rhs32));
             return 1;
         case MACHINE_IR_BINARY_EQ:
-            *out_value = lhs == rhs ? 1 : 0;
+            *out_value = lhs32 == rhs32 ? 1 : 0;
             return 1;
         case MACHINE_IR_BINARY_NE:
-            *out_value = lhs != rhs ? 1 : 0;
+            *out_value = lhs32 != rhs32 ? 1 : 0;
             return 1;
         case MACHINE_IR_BINARY_LT:
-            *out_value = lhs < rhs ? 1 : 0;
+            *out_value = lhs32 < rhs32 ? 1 : 0;
             return 1;
         case MACHINE_IR_BINARY_LE:
-            *out_value = lhs <= rhs ? 1 : 0;
+            *out_value = lhs32 <= rhs32 ? 1 : 0;
             return 1;
         case MACHINE_IR_BINARY_GT:
-            *out_value = lhs > rhs ? 1 : 0;
+            *out_value = lhs32 > rhs32 ? 1 : 0;
             return 1;
         case MACHINE_IR_BINARY_GE:
-            *out_value = lhs >= rhs ? 1 : 0;
+            *out_value = lhs32 >= rhs32 ? 1 : 0;
             return 1;
         default:
             return 0;

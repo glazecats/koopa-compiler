@@ -2,6 +2,7 @@
 
 #include "machine/layout.h"
 
+#include <stdint.h>
 #include <sys/time.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -13,6 +14,11 @@ typedef struct {
     size_t length;
     size_t capacity;
 } MachineSelectStringBuilder;
+
+static long long machine_select_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
+}
 
 static double machine_select_now_s(void) {
     struct timeval tv;
@@ -256,8 +262,10 @@ static void machine_select_block_free(MachineSelectBasicBlock *block) {
     if (!block) {
         return;
     }
-    for (op_index = 0; op_index < block->op_count; ++op_index) {
-        machine_select_op_free(&block->ops[op_index]);
+    if (block->ops) {
+        for (op_index = 0; op_index < block->op_count; ++op_index) {
+            machine_select_op_free(&block->ops[op_index]);
+        }
     }
     free(block->ops);
     block->ops = NULL;
@@ -275,12 +283,16 @@ static void machine_select_function_free(MachineSelectFunction *function) {
     }
     free(function->name);
     function->name = NULL;
-    for (local_index = 0; local_index < function->local_count; ++local_index) {
-        free(function->locals[local_index].source_name);
-        function->locals[local_index].source_name = NULL;
+    if (function->locals) {
+        for (local_index = 0; local_index < function->local_count; ++local_index) {
+            free(function->locals[local_index].source_name);
+            function->locals[local_index].source_name = NULL;
+        }
     }
-    for (block_index = 0; block_index < function->block_count; ++block_index) {
-        machine_select_block_free(&function->blocks[block_index]);
+    if (function->blocks) {
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            machine_select_block_free(&function->blocks[block_index]);
+        }
     }
     free(function->locals);
     free(function->blocks);

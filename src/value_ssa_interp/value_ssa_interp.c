@@ -1,6 +1,7 @@
 #include "value_ssa_interp.h"
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ typedef struct {
 
 static void value_ssa_interp_set_error(ValueSsaInterpError *error, int line, int column, const char *fmt, ...);
 static const ValueSsaFunction *value_ssa_interp_find_function(const ValueSsaProgram *program, const char *name);
+static long long value_ssa_interp_normalize_sysy_int_value(long long value);
 static int value_ssa_interp_eval_value(const ValueSsaInterpFrame *frame,
     ValueSsaValueRef value,
     long long *out_value,

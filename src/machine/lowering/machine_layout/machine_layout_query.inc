@@ -39,7 +39,13 @@ int machine_layout_program_get_function_by_name(const MachineLayoutProgram *prog
     const MachineLayoutFunction **out_function) {
     size_t function_index;
 
-    if (!program || !function_name || !program->functions) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
+    if (!program || !function_name || (program->function_count > 0 && !program->functions)) {
         return 0;
     }
     for (function_index = 0; function_index < program->function_count; ++function_index) {

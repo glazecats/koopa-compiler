@@ -1954,6 +1954,7 @@ int main(void) {
     ok &= test_ir_merges_repeated_declarations_without_definition();
     ok &= test_ir_preserves_global_array_declaration_metadata();
     ok &= test_ir_lowers_unused_local_array_declarations();
+    ok &= test_ir_preserves_array_parameter_signature_metadata();
     ok &= test_ir_merges_unnamed_declaration_then_definition();
     ok &= test_ir_merges_declaration_with_parameter_name_drift();
     ok &= test_ir_lowers_declared_call_in_if_condition();

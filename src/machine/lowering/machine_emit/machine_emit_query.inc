@@ -66,7 +66,13 @@ int machine_emit_program_get_function_by_name(const MachineEmitProgram *program,
     const MachineEmitFunction **out_function) {
     size_t function_index;
 
-    if (!program || !function_name || !program->functions) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
+    if (!program || !function_name || (program->function_count > 0 && !program->functions)) {
         return 0;
     }
     for (function_index = 0; function_index < program->function_count; ++function_index) {
@@ -92,7 +98,16 @@ int machine_emit_program_find_block_by_label(const MachineEmitProgram *program,
     const MachineEmitBlock **out_block) {
     size_t function_index;
 
-    if (!program || !label_name || !program->functions) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
+    if (out_block) {
+        *out_block = NULL;
+    }
+    if (!program || !label_name || (program->function_count > 0 && !program->functions)) {
         return 0;
     }
     for (function_index = 0; function_index < program->function_count; ++function_index) {
@@ -162,6 +177,12 @@ int machine_emit_lower_report_get_function_by_name(const MachineEmitLowerReport 
     const char *function_name,
     size_t *out_function_index,
     const MachineEmitFunction **out_function) {
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
     if (!report) {
         return 0;
     }
@@ -175,6 +196,12 @@ int machine_emit_lower_report_find_block_shape_by_label(const MachineEmitLowerRe
     const MachineEmitBlockShapeSummary **out_summary) {
     size_t function_index;
 
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_summary) {
+        *out_summary = NULL;
+    }
     if (!report || !label_name || !out_summary || !report->function_block_summary_offsets ||
         !report->block_shape_summaries) {
         return 0;
@@ -346,7 +373,13 @@ int machine_emit_function_find_block_by_label(const MachineEmitFunction *functio
     const MachineEmitBlock **out_block) {
     size_t block_index;
 
-    if (!function || !label_name || !function->blocks) {
+    if (out_emit_index) {
+        *out_emit_index = 0;
+    }
+    if (out_block) {
+        *out_block = NULL;
+    }
+    if (!function || !label_name || (function->block_count > 0 && !function->blocks)) {
         return 0;
     }
     for (block_index = 0; block_index < function->block_count; ++block_index) {

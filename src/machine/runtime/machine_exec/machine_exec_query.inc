@@ -5,6 +5,10 @@
 
 #else
 
+static int machine_exec_file_has_segment_table(const MachineExecFile *exec_file) {
+    return exec_file && (exec_file->segment_count == 0u || exec_file->segments);
+}
+
 int machine_exec_file_get_summary(const MachineExecFile *exec_file,
     size_t *out_segment_count,
     size_t *out_byte_count,
@@ -12,7 +16,7 @@ int machine_exec_file_get_summary(const MachineExecFile *exec_file,
     size_t segment_index;
     size_t executable_segment_count = 0u;
 
-    if (!exec_file) {
+    if (!machine_exec_file_has_segment_table(exec_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < exec_file->segment_count; ++segment_index) {
@@ -48,7 +52,9 @@ int machine_exec_file_get_header_summary(const MachineExecFile *exec_file,
 int machine_exec_file_get_segment(const MachineExecFile *exec_file,
     size_t segment_index,
     const MachineExecSegment **out_segment) {
-    if (!exec_file || !out_segment || !exec_file->segments || segment_index >= exec_file->segment_count) {
+    if (!machine_exec_file_has_segment_table(exec_file) ||
+        !out_segment ||
+        segment_index >= exec_file->segment_count) {
         return 0;
     }
     *out_segment = &exec_file->segments[segment_index];
@@ -61,7 +67,7 @@ int machine_exec_file_find_segment_by_name(const MachineExecFile *exec_file,
     const MachineExecSegment **out_segment) {
     size_t segment_index;
 
-    if (!exec_file || !segment_name || !exec_file->segments) {
+    if (!machine_exec_file_has_segment_table(exec_file) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < exec_file->segment_count; ++segment_index) {
@@ -85,7 +91,7 @@ int machine_exec_file_find_segment_covering_virtual_address(const MachineExecFil
     const MachineExecSegment **out_segment) {
     size_t segment_index;
 
-    if (!exec_file || !exec_file->segments) {
+    if (!machine_exec_file_has_segment_table(exec_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < exec_file->segment_count; ++segment_index) {
@@ -111,7 +117,7 @@ int machine_exec_file_get_entry_segment(const MachineExecFile *exec_file,
     size_t segment_index = 0u;
     const MachineExecSegment *segment = NULL;
 
-    if (!exec_file) {
+    if (!machine_exec_file_has_segment_table(exec_file)) {
         return 0;
     }
     if (!machine_exec_file_find_segment_covering_virtual_address(
@@ -137,7 +143,7 @@ int machine_exec_file_get_executable_segment_count(const MachineExecFile *exec_f
     size_t segment_index;
     size_t count = 0u;
 
-    if (!exec_file || !out_count) {
+    if (!machine_exec_file_has_segment_table(exec_file) || !out_count) {
         return 0;
     }
     for (segment_index = 0u; segment_index < exec_file->segment_count; ++segment_index) {
@@ -156,7 +162,7 @@ int machine_exec_file_get_executable_segment_by_index(const MachineExecFile *exe
     size_t segment_index;
     size_t current_index = 0u;
 
-    if (!exec_file) {
+    if (!machine_exec_file_has_segment_table(exec_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < exec_file->segment_count; ++segment_index) {

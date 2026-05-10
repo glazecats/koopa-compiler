@@ -124,8 +124,10 @@ void machine_launch_file_free(MachineLaunchFile *launch_file) {
     if (!launch_file) {
         return;
     }
-    for (register_index = 0u; register_index < launch_file->register_count; ++register_index) {
-        free(launch_file->registers[register_index].name);
+    if (launch_file->registers) {
+        for (register_index = 0u; register_index < launch_file->register_count; ++register_index) {
+            free(launch_file->registers[register_index].name);
+        }
     }
     free(launch_file->registers);
     machine_runtime_file_free(&launch_file->runtime_file);

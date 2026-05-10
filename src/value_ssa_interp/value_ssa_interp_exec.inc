@@ -80,7 +80,7 @@ static int value_ssa_interp_execute_call(ValueSsaInterpContext *context,
     }
 
     if (instruction->has_result && instruction->result.kind == VALUE_SSA_VALUE_ID) {
-        frame->ssa_values[instruction->result.value_id] = result_value;
+        frame->ssa_values[instruction->result.value_id] = value_ssa_interp_normalize_sysy_int_value(result_value);
         frame->has_ssa_value[instruction->result.value_id] = 1;
     }
 
@@ -154,7 +154,7 @@ static int value_ssa_interp_execute_function_internal(ValueSsaInterpContext *con
     }
 
     for (local_index = 0; local_index < arg_count; ++local_index) {
-        frame.local_values[local_index] = args[local_index];
+        frame.local_values[local_index] = value_ssa_interp_normalize_sysy_int_value(args[local_index]);
         frame.has_local_value[local_index] = 1;
     }
 
@@ -268,7 +268,7 @@ static int value_ssa_interp_execute_function_internal(ValueSsaInterpContext *con
                     !value_ssa_interp_eval_value(&frame, instruction->as.store.value, &value, error)) {
                     goto cleanup;
                 }
-                frame.local_values[instruction->as.store.slot.id] = value;
+                frame.local_values[instruction->as.store.slot.id] = value_ssa_interp_normalize_sysy_int_value(value);
                 frame.has_local_value[instruction->as.store.slot.id] = 1;
                 break;
             case VALUE_SSA_INSTR_LOAD_GLOBAL:
@@ -291,7 +291,7 @@ static int value_ssa_interp_execute_function_internal(ValueSsaInterpContext *con
                     !value_ssa_interp_eval_value(&frame, instruction->as.store.value, &value, error)) {
                     goto cleanup;
                 }
-                context->global_values[instruction->as.store.slot.id] = value;
+                context->global_values[instruction->as.store.slot.id] = value_ssa_interp_normalize_sysy_int_value(value);
                 break;
             default:
                 value_ssa_interp_set_error(error,
@@ -310,6 +310,7 @@ static int value_ssa_interp_execute_function_internal(ValueSsaInterpContext *con
             if (!value_ssa_interp_eval_value(&frame, block->terminator.as.return_value, out_return_value, error)) {
                 goto cleanup;
             }
+            *out_return_value = value_ssa_interp_normalize_sysy_int_value(*out_return_value);
             ok = 1;
             goto cleanup;
         case VALUE_SSA_TERM_JUMP:
@@ -392,7 +393,8 @@ int value_ssa_interp_execute_function(const ValueSsaProgram *program,
 
     for (global_index = 0; global_index < program->global_count; ++global_index) {
         if (program->globals[global_index].has_initializer) {
-            context.global_values[global_index] = program->globals[global_index].initializer_value;
+            context.global_values[global_index] =
+                value_ssa_interp_normalize_sysy_int_value(program->globals[global_index].initializer_value);
         }
     }
 

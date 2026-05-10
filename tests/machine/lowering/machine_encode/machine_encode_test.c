@@ -41,6 +41,175 @@ static int expect_dump(const MachineEncodeProgram *program, const char *expected
     return ok;
 }
 
+static int build_emit_encode_smoke_program(MachineEmitProgram *program) {
+    machine_emit_program_init(program);
+    program->register_bank.register_count = 2u;
+    program->register_bank.registers = (MachineEmitRegisterDesc *)calloc(2u, sizeof(MachineEmitRegisterDesc));
+    program->global_count = 1u;
+    program->global_capacity = 1u;
+    program->globals = (MachineEmitGlobal *)calloc(1u, sizeof(MachineEmitGlobal));
+    program->function_count = 1u;
+    program->function_capacity = 1u;
+    program->functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!program->register_bank.registers || !program->globals || !program->functions) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0u;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+    program->register_bank.registers[1].register_id = 1u;
+    program->register_bank.registers[1].name = dup_text("r1");
+    program->register_bank.registers[1].allocatable = 1u;
+    program->globals[0].id = 0u;
+    program->globals[0].name = dup_text("g");
+    program->functions[0].name = dup_text("main");
+    program->functions[0].has_body = 1u;
+    program->functions[0].parameter_count = 1u;
+    program->functions[0].local_count = 1u;
+    program->functions[0].spill_slot_count = 0u;
+    program->functions[0].block_count = 1u;
+    program->functions[0].block_capacity = 1u;
+    program->functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!program->register_bank.registers[0].name || !program->register_bank.registers[1].name ||
+        !program->globals[0].name || !program->functions[0].name || !program->functions[0].blocks) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].emit_index = 0u;
+    program->functions[0].blocks[0].original_layout_index = 0u;
+    program->functions[0].blocks[0].original_block_id = 0u;
+    program->functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program->functions[0].blocks[0].op_count = 3u;
+    program->functions[0].blocks[0].op_capacity = 3u;
+    program->functions[0].blocks[0].ops = (MachineEmitOp *)calloc(3u, sizeof(MachineEmitOp));
+    if (!program->functions[0].blocks[0].label_name || !program->functions[0].blocks[0].ops) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_LOAD_LOCAL;
+    program->functions[0].blocks[0].ops[0].has_result = 1u;
+    program->functions[0].blocks[0].ops[0].result = machine_select_operand_register(0u);
+    program->functions[0].blocks[0].ops[0].as.load_slot = machine_select_slot_local(0u);
+    program->functions[0].blocks[0].ops[1].kind = MACHINE_SELECT_OP_ALU_IMM;
+    program->functions[0].blocks[0].ops[1].has_result = 1u;
+    program->functions[0].blocks[0].ops[1].result = machine_select_operand_register(1u);
+    program->functions[0].blocks[0].ops[1].as.binary.op = MACHINE_IR_BINARY_ADD;
+    program->functions[0].blocks[0].ops[1].as.binary.lhs = machine_select_operand_register(0u);
+    program->functions[0].blocks[0].ops[1].as.binary.rhs = machine_select_operand_immediate(1);
+    program->functions[0].blocks[0].ops[2].kind = MACHINE_SELECT_OP_STORE_GLOBAL;
+    program->functions[0].blocks[0].ops[2].as.store.slot = machine_select_slot_global(0u);
+    program->functions[0].blocks[0].ops[2].as.store.value = machine_select_operand_register(1u);
+    program->functions[0].blocks[0].has_terminator = 1u;
+    program->functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+    program->functions[0].blocks[0].terminator.as.return_value = machine_select_operand_register(1u);
+    return 1;
+}
+
+static int build_emit_encode_call_program(MachineEmitProgram *program) {
+    machine_emit_program_init(program);
+    program->function_count = 1u;
+    program->function_capacity = 1u;
+    program->functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!program->functions) {
+        return 0;
+    }
+    program->functions[0].name = dup_text("main");
+    program->functions[0].has_body = 1u;
+    program->functions[0].spill_slot_count = 1u;
+    program->functions[0].block_count = 1u;
+    program->functions[0].block_capacity = 1u;
+    program->functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!program->functions[0].name || !program->functions[0].blocks) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].emit_index = 0u;
+    program->functions[0].blocks[0].original_layout_index = 0u;
+    program->functions[0].blocks[0].original_block_id = 0u;
+    program->functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program->functions[0].blocks[0].op_count = 1u;
+    program->functions[0].blocks[0].op_capacity = 1u;
+    program->functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    if (!program->functions[0].blocks[0].label_name || !program->functions[0].blocks[0].ops) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_IMM_SPILL;
+    program->functions[0].blocks[0].ops[0].has_result = 1u;
+    program->functions[0].blocks[0].ops[0].result = machine_select_operand_spill_slot(0u);
+    program->functions[0].blocks[0].ops[0].as.call.callee_name = dup_text("sink");
+    program->functions[0].blocks[0].ops[0].as.call.arg_count = 1u;
+    program->functions[0].blocks[0].ops[0].as.call.args = (MachineEmitOperand *)calloc(1u, sizeof(MachineEmitOperand));
+    if (!program->functions[0].blocks[0].ops[0].as.call.callee_name ||
+        !program->functions[0].blocks[0].ops[0].as.call.args) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].ops[0].as.call.args[0] = machine_select_operand_immediate(7);
+    program->functions[0].blocks[0].has_terminator = 1u;
+    program->functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program->functions[0].blocks[0].terminator.as.return_value = machine_select_operand_immediate(0);
+    return 1;
+}
+
+static int build_emit_encode_cmpbri_program(MachineEmitProgram *program) {
+    machine_emit_program_init(program);
+    program->register_bank.register_count = 1u;
+    program->register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    program->function_count = 1u;
+    program->function_capacity = 1u;
+    program->functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!program->register_bank.registers || !program->functions) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0u;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+    program->functions[0].name = dup_text("main");
+    program->functions[0].has_body = 1u;
+    program->functions[0].block_count = 3u;
+    program->functions[0].block_capacity = 3u;
+    program->functions[0].blocks = (MachineEmitBlock *)calloc(3u, sizeof(MachineEmitBlock));
+    if (!program->register_bank.registers[0].name || !program->functions[0].name || !program->functions[0].blocks) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    program->functions[0].blocks[0].emit_index = 0u;
+    program->functions[0].blocks[0].original_layout_index = 0u;
+    program->functions[0].blocks[0].original_block_id = 0u;
+    program->functions[0].blocks[0].label_name = dup_text("F0.L0");
+    program->functions[0].blocks[0].has_terminator = 1u;
+    program->functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH;
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.branch_on_true = 1u;
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.op = MACHINE_IR_BINARY_LT;
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.lhs = machine_select_operand_register(0u);
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.rhs = machine_select_operand_immediate(4);
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.taken_target = 2u;
+    program->functions[0].blocks[0].terminator.as.compare_branch_fallthrough.fallthrough_target = 1u;
+    program->functions[0].blocks[1].emit_index = 1u;
+    program->functions[0].blocks[1].original_layout_index = 1u;
+    program->functions[0].blocks[1].original_block_id = 1u;
+    program->functions[0].blocks[1].label_name = dup_text("F0.L1");
+    program->functions[0].blocks[1].has_terminator = 1u;
+    program->functions[0].blocks[1].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program->functions[0].blocks[1].terminator.as.return_value = machine_select_operand_immediate(1);
+    program->functions[0].blocks[2].emit_index = 2u;
+    program->functions[0].blocks[2].original_layout_index = 2u;
+    program->functions[0].blocks[2].original_block_id = 2u;
+    program->functions[0].blocks[2].label_name = dup_text("F0.L2");
+    program->functions[0].blocks[2].has_terminator = 1u;
+    program->functions[0].blocks[2].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    program->functions[0].blocks[2].terminator.as.return_value = machine_select_operand_immediate(0);
+    if (!program->functions[0].blocks[0].label_name || !program->functions[0].blocks[1].label_name ||
+        !program->functions[0].blocks[2].label_name) {
+        machine_emit_program_free(program);
+        return 0;
+    }
+    return 1;
+}
+
 static int test_machine_encode_lowers_offsets_from_machine_emit(void) {
     MachineEmitProgram emit_program;
     MachineEncodeProgram encode_program;
@@ -56,18 +225,23 @@ static int test_machine_encode_lowers_offsets_from_machine_emit(void) {
     machine_emit_program_init(&emit_program);
     machine_encode_program_init(&encode_program);
 
+    emit_program.global_count = 1;
+    emit_program.global_capacity = 1;
+    emit_program.globals = (MachineEmitGlobal *)calloc(1, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.globals || !emit_program.functions) {
         return 0;
     }
+    emit_program.globals[0].id = 0;
+    emit_program.globals[0].name = dup_text("g");
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
     emit_program.functions[0].block_count = 2;
     emit_program.functions[0].block_capacity = 2;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(2, sizeof(MachineEmitBlock));
-    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+    if (!emit_program.globals[0].name || !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_encode_program_free(&encode_program);
         return 0;
@@ -81,6 +255,8 @@ static int test_machine_encode_lowers_offsets_from_machine_emit(void) {
     emit_program.functions[0].blocks[0].op_capacity = 1;
     emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1, sizeof(MachineEmitOp));
     emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_STORE_GLOBAL_IMM;
+    emit_program.functions[0].blocks[0].ops[0].as.store.slot = machine_select_slot_global(0u);
+    emit_program.functions[0].blocks[0].ops[0].as.store.value = machine_select_operand_immediate(9);
     emit_program.functions[0].blocks[0].has_terminator = 1;
     emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_FALLTHROUGH;
     emit_program.functions[0].blocks[0].terminator.as.fallthrough_target = 1;
@@ -262,6 +438,7 @@ static int test_machine_encode_structured_terminator_targets(void) {
     emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
     emit_program.functions[0].blocks[0].has_terminator = 1;
     emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_BRANCH;
+    emit_program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_immediate(1);
     emit_program.functions[0].blocks[0].terminator.as.branch.then_target = 1;
     emit_program.functions[0].blocks[0].terminator.as.branch.else_target = 2;
 
@@ -287,7 +464,24 @@ static int test_machine_encode_structured_terminator_targets(void) {
     emit_program.functions[0].blocks[2].has_terminator = 1;
     emit_program.functions[0].blocks[2].terminator.kind = MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM;
     emit_program.functions[0].blocks[2].terminator.as.compare_branch.op = MACHINE_IR_BINARY_EQ;
-    emit_program.functions[0].blocks[2].terminator.as.compare_branch.lhs = machine_select_operand_immediate(3);
+    emit_program.register_bank.register_count = 1;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1, sizeof(MachineEmitRegisterDesc));
+    if (!emit_program.register_bank.registers) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+    emit_program.register_bank.registers[0].register_id = 0;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
+    if (!emit_program.register_bank.registers[0].name) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+    emit_program.functions[0].blocks[2].terminator.as.compare_branch.lhs = machine_select_operand_register(0);
     emit_program.functions[0].blocks[2].terminator.as.compare_branch.rhs = machine_select_operand_immediate(4);
     emit_program.functions[0].blocks[2].terminator.as.compare_branch.then_target = 3;
     emit_program.functions[0].blocks[2].terminator.as.compare_branch.else_target = 4;
@@ -440,7 +634,15 @@ static int test_machine_encode_report_surface(void) {
     }
     emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_CALL_VOID_IMM;
     emit_program.functions[0].blocks[0].ops[0].as.call.callee_name = dup_text("helper");
-    emit_program.functions[0].blocks[0].ops[0].as.call.arg_count = 0;
+    emit_program.functions[0].blocks[0].ops[0].as.call.arg_count = 1;
+    emit_program.functions[0].blocks[0].ops[0].as.call.args = (MachineEmitOperand *)calloc(1, sizeof(MachineEmitOperand));
+    if (!emit_program.functions[0].blocks[0].ops[0].as.call.callee_name ||
+        !emit_program.functions[0].blocks[0].ops[0].as.call.args) {
+        machine_emit_program_free(&emit_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+    emit_program.functions[0].blocks[0].ops[0].as.call.args[0] = machine_select_operand_immediate(3);
     emit_program.functions[0].blocks[0].has_terminator = 1;
     emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_FALLTHROUGH;
     emit_program.functions[0].blocks[0].terminator.as.fallthrough_target = 0;
@@ -1196,6 +1398,183 @@ static int test_machine_encode_verifier_enforces_return_shapes(void) {
     return 1;
 }
 
+static int test_machine_encode_rejects_load_store_slot_kind_mismatch(void) {
+    MachineEmitProgram emit_program;
+    MachineEncodeProgram encode_program;
+    MachineEncodeProgram mutated_program;
+    MachineEncodeError encode_error;
+    int ok = 1;
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_emit_program_init(&emit_program);
+    machine_encode_program_init(&encode_program);
+    machine_encode_program_init(&mutated_program);
+
+    if (!build_emit_encode_smoke_program(&emit_program) ||
+        !machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: slot-kind mismatch setup failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    if (!machine_encode_clone_program(&encode_program, &mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: slot-kind mismatch clone failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].block.ops[0].as.load_slot = machine_select_slot_global(0u);
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_verify_program(&mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: verifier accepted load-local/global-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_encode_program_free(&mutated_program);
+    machine_encode_program_init(&mutated_program);
+    if (!machine_encode_clone_program(&encode_program, &mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: store-slot mismatch clone failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].block.ops[2].as.store.slot = machine_select_slot_local(0u);
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_verify_program(&mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: verifier accepted store-global/local-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_encode_program_free(&mutated_program);
+    machine_encode_program_free(&encode_program);
+    return ok;
+}
+
+static int test_machine_encode_rejects_call_result_family_mismatch(void) {
+    MachineEmitProgram emit_program;
+    MachineEncodeProgram encode_program;
+    MachineEncodeProgram mutated_program;
+    MachineEncodeError encode_error;
+    int ok = 1;
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_emit_program_init(&emit_program);
+    machine_encode_program_init(&encode_program);
+    machine_encode_program_init(&mutated_program);
+
+    if (!build_emit_encode_call_program(&emit_program) ||
+        !machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: call-result mismatch setup failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    if (!machine_encode_clone_program(&encode_program, &mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: call-result mismatch clone failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].block.ops[0].kind = MACHINE_SELECT_OP_CALL_IMM;
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_verify_program(&mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: verifier accepted register-result call family mismatch\n");
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_encode_program_free(&mutated_program);
+    machine_encode_program_free(&encode_program);
+    return ok;
+}
+
+static int test_machine_encode_rejects_compare_branch_imm_shape_mismatch(void) {
+    MachineEmitProgram emit_program;
+    MachineEncodeProgram encode_program;
+    MachineEncodeProgram mutated_program;
+    MachineEncodeError encode_error;
+    int ok = 1;
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_emit_program_init(&emit_program);
+    machine_encode_program_init(&encode_program);
+    machine_encode_program_init(&mutated_program);
+
+    if (!build_emit_encode_cmpbri_program(&emit_program) ||
+        !machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: cmpbri mismatch setup failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    if (!machine_encode_clone_program(&encode_program, &mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: cmpbri mismatch clone failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&mutated_program);
+        machine_encode_program_free(&encode_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].block.terminator.as.compare_branch_fallthrough.rhs =
+        machine_select_operand_register(0u);
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_verify_program(&mutated_program, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: verifier accepted compare-branch-imm rhs non-immediate mismatch\n");
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_encode_program_free(&mutated_program);
+    machine_encode_program_free(&encode_program);
+    return ok;
+}
+
+static int test_machine_encode_report_query_dump_rejects_missing_function_table(void) {
+    MachineEmitProgram emit_program;
+    MachineEncodeProgram encode_program;
+    MachineEncodeReport report;
+    MachineEncodeError encode_error;
+    const MachineEncodeFunction *function_view = NULL;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&encode_error, 0, sizeof(encode_error));
+    machine_emit_program_init(&emit_program);
+    machine_encode_program_init(&encode_program);
+    machine_encode_report_init(&report);
+
+    if (!build_emit_encode_smoke_program(&emit_program) ||
+        !machine_encode_lower_program_from_machine_emit(&emit_program, &encode_program, &encode_error) ||
+        !machine_encode_build_report_from_program(&encode_program, &report, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: malformed report setup failed: %s\n", encode_error.message);
+        machine_emit_program_free(&emit_program);
+        machine_encode_program_free(&encode_program);
+        machine_encode_report_free(&report);
+        return 0;
+    }
+
+    free(report.program.functions);
+    report.program.functions = NULL;
+    memset(&encode_error, 0, sizeof(encode_error));
+    if (machine_encode_report_get_function_by_name(&report, "main", NULL, &function_view) ||
+        machine_encode_dump_report(&report, &actual_text, &encode_error)) {
+        fprintf(stderr, "[machine-encode] FAIL: malformed report query/dump should fail on missing function table\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_emit_program_free(&emit_program);
+    machine_encode_program_free(&encode_program);
+    machine_encode_report_free(&report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1209,6 +1588,10 @@ int main(void) {
     ok &= test_machine_encode_verifier_rejects_bad_offsets();
     ok &= test_machine_encode_verifier_rejects_bad_targets();
     ok &= test_machine_encode_verifier_enforces_return_shapes();
+    ok &= test_machine_encode_rejects_load_store_slot_kind_mismatch();
+    ok &= test_machine_encode_rejects_call_result_family_mismatch();
+    ok &= test_machine_encode_rejects_compare_branch_imm_shape_mismatch();
+    ok &= test_machine_encode_report_query_dump_rejects_missing_function_table();
     ok &= test_machine_encode_rejects_riscv32_preview_incompatible_register_bank();
     ok &= test_machine_encode_rejects_riscv32_preview_bytes_incompatible_branch_range();
 

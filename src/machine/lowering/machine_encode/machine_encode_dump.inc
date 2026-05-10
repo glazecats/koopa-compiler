@@ -230,6 +230,21 @@ int machine_encode_dump_report(const MachineEncodeReport *report,
         machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-205: invalid report dump contract");
         return 0;
     }
+    if (report->program.function_count > 0 &&
+        (!report->program.functions || !report->function_summaries || !report->function_block_summary_offsets)) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-208: report function tables missing");
+        return 0;
+    }
+    if (report->total_block_summary_count > 0 && !report->block_summaries) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-209: report block summary table missing");
+        return 0;
+    }
+    if ((report->functions_with_calls_count > 0 && !report->function_indices_with_calls) ||
+        (report->functions_with_fallthrough_count > 0 && !report->function_indices_with_fallthrough) ||
+        (report->functions_with_branches_count > 0 && !report->function_indices_with_branches)) {
+        machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-210: report filter tables missing");
+        return 0;
+    }
 
     memset(&builder, 0, sizeof(builder));
     if (!machine_encode_append_format(
@@ -299,6 +314,11 @@ int machine_encode_dump_report(const MachineEncodeReport *report,
             ? report->function_block_summary_offsets[function_index + 1]
             : report->total_block_summary_count;
         size_t block_summary_index;
+
+        if (next_offset < block_offset || next_offset > report->total_block_summary_count) {
+            machine_encode_set_error(error, 0, 0, "MACHINE-ENCODE-211: report block summary offsets drift");
+            goto cleanup;
+        }
 
         if (!machine_encode_append_format(
                 &builder,

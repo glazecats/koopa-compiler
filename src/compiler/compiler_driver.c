@@ -139,6 +139,7 @@ static int compiler_optimize_riscv_preview_mul_by_four(char **io_text);
 static int compiler_optimize_riscv_preview_sub_by_one(char **io_text);
 static int compiler_riscv_preview_reg_is_call_clobbered(const char *reg_name);
 static int compiler_riscv_preview_line_is_call_like(const char *line);
+static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name);
 static int compiler_append_caller_save_sequence(
     CompilerStringBuilder *builder,
     size_t call_save_area_offset,
@@ -1328,6 +1329,99 @@ static int compiler_riscv_preview_two_line_is_sw_materialized_stack_slot(
     return 1;
 }
 
+static int compiler_riscv_preview_two_line_is_lw_materialized_stack_slot(
+    char **lines,
+    size_t line_index,
+    int *out_sp_offset) {
+    char addr_reg[32];
+    char load_reg[32];
+    char load_base[32];
+    int addr_imm = 0;
+    int load_offset = 0;
+
+    if (out_sp_offset) {
+        *out_sp_offset = 0;
+    }
+    if (!lines) {
+        return 0;
+    }
+    if (!((compiler_riscv_preview_line_is_addi_sp_imm(
+                lines[line_index],
+                addr_reg,
+                sizeof(addr_reg),
+                &addr_imm)) ||
+            (compiler_riscv_preview_line_is_mv_sp(
+                lines[line_index],
+                addr_reg,
+                sizeof(addr_reg)) && (addr_imm = 0, 1)))) {
+        return 0;
+    }
+    if (!compiler_riscv_preview_line_is_lw_reg_offset(
+            lines[line_index + 1u],
+            load_reg,
+            sizeof(load_reg),
+            &load_offset,
+            load_base,
+            sizeof(load_base))) {
+        return 0;
+    }
+    if (load_offset != 0 || strcmp(load_base, addr_reg) != 0) {
+        return 0;
+    }
+    if (out_sp_offset) {
+        *out_sp_offset = addr_imm;
+    }
+    return 1;
+}
+
+static int compiler_riscv_preview_stack_slot_is_loaded_later(
+    char **lines,
+    size_t line_count,
+    size_t start_index,
+    int stack_offset) {
+    size_t index;
+
+    if (!lines) {
+        return 0;
+    }
+    for (index = start_index; index < line_count; ++index) {
+        char reg_name[32];
+        int line_offset = 0;
+        int materialized_stack_offset = 0;
+
+        if (compiler_riscv_preview_line_defines_reg(lines[index], "sp")) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_is_sw_sp_reg(
+                lines[index], reg_name, sizeof(reg_name), &line_offset) &&
+            line_offset == stack_offset) {
+            return 0;
+        }
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_two_line_is_sw_materialized_stack_slot(
+                lines,
+                index,
+                &materialized_stack_offset) &&
+            materialized_stack_offset == stack_offset) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_is_lw_sp_reg(
+                lines[index], reg_name, sizeof(reg_name), &line_offset) &&
+            line_offset == stack_offset) {
+            return 1;
+        }
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_two_line_is_lw_materialized_stack_slot(
+                lines,
+                index,
+                &materialized_stack_offset) &&
+            materialized_stack_offset == stack_offset) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int compiler_riscv_preview_line_is_add_regs(
     const char *line,
     char *rd,
@@ -1720,11 +1814,14 @@ static int compiler_optimize_riscv_preview_tail_calls(char **io_text) {
         int sp_delta = 0;
 
         if (compiler_riscv_preview_line_is_jal_ra(lines[index], target_name, sizeof(target_name))) {
-            while (scan_index < line_count &&
-                compiler_riscv_preview_line_is_restore_from_s11(lines[scan_index])) {
-                ++scan_index;
-            }
             if (scan_index + 3u < line_count &&
+                /*
+                 * Do not fold across intervening `lw ..., off(s11)` restore rows.
+                 * Earlier retries skipped those lines and then dropped them from
+                 * the rebuilt tail-call sequence, which can corrupt callee-saved
+                 * state in the generated program.
+                 */
+                !compiler_riscv_preview_line_is_restore_from_s11(lines[scan_index]) &&
                 compiler_riscv_preview_line_is_restore_from_sp(lines[scan_index], "s11", &s11_offset) &&
                 compiler_riscv_preview_line_is_restore_from_sp(lines[scan_index + 1u], "ra", &ra_offset) &&
                 compiler_riscv_preview_line_is_addi_sp(lines[scan_index + 2u], &sp_delta) &&
@@ -1766,6 +1863,10 @@ cleanup:
     free(lines);
     free(copy);
     return ok;
+}
+
+int compiler_test_optimize_riscv_preview_tail_calls(char **io_text) {
+    return compiler_optimize_riscv_preview_tail_calls(io_text);
 }
 
 static int compiler_optimize_riscv_preview_zero_adds(char **io_text) {
@@ -2108,8 +2209,10 @@ static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
             for (scan_index = index + 2u; scan_index < line_count; ++scan_index) {
                 char load_reg[32];
                 int load_offset = 0;
+                int materialized_stack_offset = 0;
 
                 if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
+                    compiler_riscv_preview_line_is_call_like(lines[scan_index]) ||
                     compiler_riscv_preview_line_defines_reg(lines[scan_index], "sp")) {
                     end_index = scan_index;
                     break;
@@ -2120,6 +2223,15 @@ static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
                     end_index = scan_index;
                     break;
                 }
+                if (scan_index + 1u < line_count &&
+                    compiler_riscv_preview_two_line_is_sw_materialized_stack_slot(
+                        lines,
+                        scan_index,
+                        &materialized_stack_offset) &&
+                    materialized_stack_offset == store_offset) {
+                    end_index = scan_index;
+                    break;
+                }
                 if (compiler_riscv_preview_line_is_lw_sp_reg(
                         lines[scan_index], load_reg, sizeof(load_reg), &load_offset) &&
                     load_offset == store_offset) {
@@ -2127,7 +2239,9 @@ static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
                 }
             }
 
-            if (replaced_any) {
+            if (replaced_any &&
+                !compiler_riscv_preview_stack_slot_is_loaded_later(
+                    lines, line_count, end_index, store_offset)) {
                 for (scan_index = index + 2u; scan_index < end_index; ++scan_index) {
                     char load_reg[32];
                     int load_offset = 0;
@@ -2281,6 +2395,7 @@ static int compiler_optimize_riscv_preview_repeated_indexed_addr_triples(char **
 
                 for (check_index = index + 3u; check_index < scan_index; ++check_index) {
                     if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
+                        compiler_riscv_preview_line_is_call_like(lines[check_index]) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rd) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rs) ||
                         (compiler_riscv_preview_line_is_sw_sp_reg(
@@ -2477,8 +2592,10 @@ static int compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(char 
 
                 for (check_index = index + 3u; check_index < scan_index; ++check_index) {
                     if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
+                        compiler_riscv_preview_line_is_call_like(lines[check_index]) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rd) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rs) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_load_rd) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_load_base) ||
                         (compiler_riscv_preview_line_is_sw_reg_offset(
                                 lines[check_index],
@@ -2731,6 +2848,7 @@ static int compiler_optimize_riscv_preview_stack_staged_call_args(char **io_text
             strcmp(stage1_reg, store1_reg) == 0 &&
             strcmp(load0_reg, "a0") == 0 &&
             strcmp(load1_reg, "a1") == 0 &&
+            dst0_offset != dst1_offset &&
             load0_offset == dst0_offset &&
             load1_offset == dst1_offset &&
             strncmp(lines[index + 6u], "  call ", 7u) == 0) {
@@ -2761,6 +2879,10 @@ cleanup:
     free(lines);
     free(copy);
     return ok;
+}
+
+int compiler_test_optimize_riscv_preview_stack_staged_call_args(char **io_text) {
+    return compiler_optimize_riscv_preview_stack_staged_call_args(io_text);
 }
 
 static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_text) {
@@ -2863,6 +2985,7 @@ static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_
                         index_reg = add_rs1;
                     }
                     if (index_reg &&
+                        strcmp(index_reg, base_reg) != 0 &&
                         compiler_riscv_preview_line_is_lw_reg_offset(
                             lines[scan_index + 1u],
                             mem_reg,
@@ -2879,6 +3002,7 @@ static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_
                         continue;
                     }
                     if (index_reg &&
+                        strcmp(index_reg, base_reg) != 0 &&
                         compiler_riscv_preview_line_is_sw_reg_offset(
                             lines[scan_index + 1u],
                             mem_reg,
@@ -2923,6 +3047,7 @@ static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_
                     }
 
                     if (index_reg &&
+                        strcmp(index_reg, base_reg) != 0 &&
                         compiler_riscv_preview_line_is_lw_reg_offset(
                             lines[scan_index + 1u],
                             mem_reg,
@@ -2942,6 +3067,7 @@ static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_
                         continue;
                     }
                     if (index_reg &&
+                        strcmp(index_reg, base_reg) != 0 &&
                         compiler_riscv_preview_line_is_sw_reg_offset(
                             lines[scan_index + 1u],
                             mem_reg,

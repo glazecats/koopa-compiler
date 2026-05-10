@@ -94,47 +94,52 @@ static int memory_ssa_pass_fold_join_binary_immediates(ValueSsaBinaryOp op,
     long long rhs,
     int *out_has_value,
     long long *out_value) {
+    int32_t lhs32;
+    int32_t rhs32;
+
     if (!out_has_value || !out_value) {
         return 0;
     }
 
+    lhs32 = (int32_t)memory_ssa_pass_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)memory_ssa_pass_normalize_sysy_int_value(rhs);
     *out_has_value = 1;
     switch (op) {
     case VALUE_SSA_BINARY_ADD:
-        *out_value = lhs + rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_SUB:
-        *out_value = lhs - rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_MUL:
-        *out_value = lhs * rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
         return 1;
     case VALUE_SSA_BINARY_BIT_AND:
-        *out_value = lhs & rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)(lhs32 & rhs32));
         return 1;
     case VALUE_SSA_BINARY_BIT_XOR:
-        *out_value = lhs ^ rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
         return 1;
     case VALUE_SSA_BINARY_BIT_OR:
-        *out_value = lhs | rhs;
+        *out_value = memory_ssa_pass_normalize_sysy_int_value((long long)(lhs32 | rhs32));
         return 1;
     case VALUE_SSA_BINARY_EQ:
-        *out_value = lhs == rhs;
+        *out_value = lhs32 == rhs32 ? 1 : 0;
         return 1;
     case VALUE_SSA_BINARY_NE:
-        *out_value = lhs != rhs;
+        *out_value = lhs32 != rhs32 ? 1 : 0;
         return 1;
     case VALUE_SSA_BINARY_LT:
-        *out_value = lhs < rhs;
+        *out_value = lhs32 < rhs32 ? 1 : 0;
         return 1;
     case VALUE_SSA_BINARY_LE:
-        *out_value = lhs <= rhs;
+        *out_value = lhs32 <= rhs32 ? 1 : 0;
         return 1;
     case VALUE_SSA_BINARY_GT:
-        *out_value = lhs > rhs;
+        *out_value = lhs32 > rhs32 ? 1 : 0;
         return 1;
     case VALUE_SSA_BINARY_GE:
-        *out_value = lhs >= rhs;
+        *out_value = lhs32 >= rhs32 ? 1 : 0;
         return 1;
     default:
         *out_has_value = 0;
@@ -629,6 +634,15 @@ static int memory_ssa_pass_eliminate_redundant_join_binaries(ValueSsaProgram *pr
                 goto cleanup;
             }
         }
+        if (seen_count >= (size_t)MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS) {
+            free(current_text);
+            memory_ssa_pass_set_error(error,
+                0,
+                0,
+                "MEMORY-SSA-PASS-075: join-binary state tracking overflowed its %d-entry bound",
+                MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
+            goto cleanup;
+        }
         seen_states[seen_count++] = current_text;
 
         for (function_index = 0; function_index < program->function_count; ++function_index) {
@@ -911,6 +925,14 @@ static int memory_ssa_pass_run_value_cleanup_closure(ValueSsaProgram *program,
                 ok = 1;
                 goto cleanup;
             }
+        }
+        if (seen_count >= (size_t)MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS) {
+            memory_ssa_pass_set_error(error,
+                0,
+                0,
+                "MEMORY-SSA-PASS-085: value-cleanup state tracking overflowed its %d-entry bound",
+                MEMORY_SSA_PASS_MEMORY_BINARY_CSE_MAX_ITERATIONS);
+            goto cleanup;
         }
         seen_states[seen_count++] = before_text;
         before_text = NULL;

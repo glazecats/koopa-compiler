@@ -132,6 +132,8 @@ static int ir_lower_flow_state_eval_mutating_identifier_update(const IrLowerCont
     long long lhs = 0;
     long long rhs = 0;
     long long result = 0;
+    int32_t lhs32;
+    int32_t rhs32;
 
     (void)ctx;
 
@@ -149,13 +151,14 @@ static int ir_lower_flow_state_eval_mutating_identifier_update(const IrLowerCont
         return 0;
     }
     lhs = state->values[index - 1u];
+    lhs32 = (int32_t)ir_normalize_sysy_int_value(lhs);
 
     switch (op) {
     case TOKEN_PLUS_PLUS:
-        result = ir_normalize_sysy_int_value(lhs + 1);
+        result = ir_normalize_sysy_int_value((long long)lhs32 + 1ll);
         break;
     case TOKEN_MINUS_MINUS:
-        result = ir_normalize_sysy_int_value(lhs - 1);
+        result = ir_normalize_sysy_int_value((long long)lhs32 - 1ll);
         break;
     case TOKEN_PLUS_ASSIGN:
     case TOKEN_MINUS_ASSIGN:
@@ -171,52 +174,53 @@ static int ir_lower_flow_state_eval_mutating_identifier_update(const IrLowerCont
             state->known[index - 1u] = 0u;
             return 0;
         }
+        rhs32 = (int32_t)ir_normalize_sysy_int_value(rhs);
         switch (op) {
         case TOKEN_PLUS_ASSIGN:
-            result = ir_normalize_sysy_int_value(lhs + rhs);
+            result = ir_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
             break;
         case TOKEN_MINUS_ASSIGN:
-            result = ir_normalize_sysy_int_value(lhs - rhs);
+            result = ir_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
             break;
         case TOKEN_STAR_ASSIGN:
-            result = ir_normalize_sysy_int_value(lhs * rhs);
+            result = ir_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
             break;
         case TOKEN_SLASH_ASSIGN:
-            if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+            if (rhs32 == 0) {
                 state->known[index - 1u] = 0u;
                 return 0;
             }
-            result = ir_normalize_sysy_int_value(lhs / rhs);
+            result = ir_normalize_sysy_int_value((long long)lhs32 / (long long)rhs32);
             break;
         case TOKEN_PERCENT_ASSIGN:
-            if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+            if (rhs32 == 0) {
                 state->known[index - 1u] = 0u;
                 return 0;
             }
-            result = ir_normalize_sysy_int_value(lhs % rhs);
+            result = ir_normalize_sysy_int_value((long long)lhs32 % (long long)rhs32);
             break;
         case TOKEN_AMP_ASSIGN:
-            result = lhs & rhs;
+            result = ir_normalize_sysy_int_value((long long)(lhs32 & rhs32));
             break;
         case TOKEN_CARET_ASSIGN:
-            result = lhs ^ rhs;
+            result = ir_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
             break;
         case TOKEN_PIPE_ASSIGN:
-            result = lhs | rhs;
+            result = ir_normalize_sysy_int_value((long long)(lhs32 | rhs32));
             break;
         case TOKEN_SHIFT_LEFT_ASSIGN:
-            if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+            if (rhs32 < 0 || rhs32 >= 32) {
                 state->known[index - 1u] = 0u;
                 return 0;
             }
-            result = ir_normalize_sysy_int_value(lhs << rhs);
+            result = ir_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
             break;
         case TOKEN_SHIFT_RIGHT_ASSIGN:
-            if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+            if (rhs32 < 0 || rhs32 >= 32) {
                 state->known[index - 1u] = 0u;
                 return 0;
             }
-            result = ir_normalize_sysy_int_value(lhs >> rhs);
+            result = ir_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
             break;
         default:
             state->known[index - 1u] = 0u;
@@ -239,81 +243,86 @@ static int ir_lower_flow_state_eval_binary(const IrLowerContext *ctx,
     long long *out_value) {
     long long lhs = 0;
     long long rhs = 0;
+    int32_t lhs32;
+    int32_t rhs32;
 
     if (!ir_lower_flow_state_eval_expr(ctx, expr->as.binary.left, state, &lhs) ||
         !ir_lower_flow_state_eval_expr(ctx, expr->as.binary.right, state, &rhs)) {
         return 0;
     }
 
+    lhs32 = (int32_t)ir_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)ir_normalize_sysy_int_value(rhs);
+
     switch (expr->as.binary.op) {
     case TOKEN_COMMA:
-        *out_value = rhs;
+        *out_value = ir_normalize_sysy_int_value(rhs);
         return 1;
     case TOKEN_EQ:
-        *out_value = lhs == rhs ? 1 : 0;
+        *out_value = lhs32 == rhs32 ? 1 : 0;
         return 1;
     case TOKEN_NE:
-        *out_value = lhs != rhs ? 1 : 0;
+        *out_value = lhs32 != rhs32 ? 1 : 0;
         return 1;
     case TOKEN_LT:
-        *out_value = lhs < rhs ? 1 : 0;
+        *out_value = lhs32 < rhs32 ? 1 : 0;
         return 1;
     case TOKEN_LE:
-        *out_value = lhs <= rhs ? 1 : 0;
+        *out_value = lhs32 <= rhs32 ? 1 : 0;
         return 1;
     case TOKEN_GT:
-        *out_value = lhs > rhs ? 1 : 0;
+        *out_value = lhs32 > rhs32 ? 1 : 0;
         return 1;
     case TOKEN_GE:
-        *out_value = lhs >= rhs ? 1 : 0;
+        *out_value = lhs32 >= rhs32 ? 1 : 0;
         return 1;
     case TOKEN_AMP:
-        *out_value = lhs & rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 & rhs32));
         return 1;
     case TOKEN_CARET:
-        *out_value = lhs ^ rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 ^ rhs32));
         return 1;
     case TOKEN_PIPE:
-        *out_value = lhs | rhs;
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 | rhs32));
         return 1;
     case TOKEN_PLUS:
-        *out_value = ir_normalize_sysy_int_value(lhs + rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
         return 1;
     case TOKEN_MINUS:
-        *out_value = ir_normalize_sysy_int_value(lhs - rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
         return 1;
     case TOKEN_STAR:
-        *out_value = ir_normalize_sysy_int_value(lhs * rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
         return 1;
     case TOKEN_SLASH:
-        if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+        if (rhs32 == 0) {
             return 0;
         }
-        *out_value = ir_normalize_sysy_int_value(lhs / rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 / (long long)rhs32);
         return 1;
     case TOKEN_PERCENT:
-        if (rhs == 0 || (lhs == LLONG_MIN && rhs == -1)) {
+        if (rhs32 == 0) {
             return 0;
         }
-        *out_value = ir_normalize_sysy_int_value(lhs % rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)lhs32 % (long long)rhs32);
         return 1;
     case TOKEN_SHIFT_LEFT:
-        if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        *out_value = ir_normalize_sysy_int_value(lhs << rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
         return 1;
     case TOKEN_SHIFT_RIGHT:
-        if (rhs < 0 || rhs >= (long long)(sizeof(long long) * 8u)) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        *out_value = ir_normalize_sysy_int_value(lhs >> rhs);
+        *out_value = ir_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
         return 1;
     case TOKEN_AND_AND:
-        *out_value = (lhs != 0 && rhs != 0) ? 1 : 0;
+        *out_value = (lhs32 != 0 && rhs32 != 0) ? 1 : 0;
         return 1;
     case TOKEN_OR_OR:
-        *out_value = (lhs != 0 || rhs != 0) ? 1 : 0;
+        *out_value = (lhs32 != 0 || rhs32 != 0) ? 1 : 0;
         return 1;
     default:
         return 0;
@@ -372,19 +381,16 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
         }
         switch (base->as.unary.op) {
         case TOKEN_PLUS:
-            *out_value = operand;
+            *out_value = ir_normalize_sysy_int_value(operand);
             return 1;
         case TOKEN_MINUS:
-            if (operand == LLONG_MIN) {
-                return 0;
-            }
-            *out_value = -operand;
+            *out_value = ir_normalize_sysy_int_value(-(long long)(int32_t)ir_normalize_sysy_int_value(operand));
             return 1;
         case TOKEN_BANG:
             *out_value = operand == 0 ? 1 : 0;
             return 1;
         case TOKEN_TILDE:
-            *out_value = ~operand;
+            *out_value = ir_normalize_sysy_int_value((long long)(~(int32_t)ir_normalize_sysy_int_value(operand)));
             return 1;
         default:
             return 0;

@@ -16,6 +16,9 @@ int machine_emit_lower_program_from_machine_layout(const MachineLayoutProgram *s
         return 0;
     }
 
+    machine_emit_program_free(out_program);
+    machine_emit_program_init(out_program);
+
     if (source->register_bank.register_count > 0) {
         out_program->register_bank.registers =
             (MachineEmitRegisterDesc *)calloc(source->register_bank.register_count, sizeof(MachineEmitRegisterDesc));

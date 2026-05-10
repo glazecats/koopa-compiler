@@ -131,18 +131,24 @@ static int test_machine_bytes_lowers_from_machine_encode(void) {
     machine_encode_program_init(&encode_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.global_count = 1u;
+    emit_program.global_capacity = 1u;
+    emit_program.globals = (MachineEmitGlobal *)calloc(1u, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.globals || !emit_program.functions) {
         return 0;
     }
+    emit_program.globals[0].id = 0u;
+    emit_program.globals[0].name = dup_text("g");
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
     emit_program.functions[0].block_count = 2;
     emit_program.functions[0].block_capacity = 2;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(2, sizeof(MachineEmitBlock));
-    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+    if (!emit_program.globals[0].name ||
+        !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_encode_program_free(&encode_program);
         machine_bytes_program_free(&bytes_program);
@@ -245,11 +251,26 @@ static int test_machine_bytes_riscv32_preview_emits_void_return_word(void) {
     machine_bytes_program_init(&bytes_program);
     machine_bytes_report_init(&bytes_report);
 
+    emit_program.register_bank.register_count = 8u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(8u, sizeof(MachineEmitRegisterDesc));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
         return 0;
+    }
+    for (size_t reg_index = 0u; reg_index < 8u; ++reg_index) {
+        char name_buf[8];
+
+        snprintf(name_buf, sizeof(name_buf), "r%zu", reg_index);
+        emit_program.register_bank.registers[reg_index].register_id = reg_index;
+        emit_program.register_bank.registers[reg_index].name = dup_text(name_buf);
+        emit_program.register_bank.registers[reg_index].allocatable = 1u;
+        if (!emit_program.register_bank.registers[reg_index].name) {
+            machine_emit_program_free(&emit_program);
+            machine_bytes_program_free(&bytes_program);
+            return 0;
+        }
     }
 
     emit_program.functions[0].name = dup_text("main");
@@ -523,6 +544,148 @@ static int test_machine_bytes_report_and_bridges(void) {
     machine_ir_allocate_rewrite_report_free(&machine_report);
     machine_bytes_program_free(&bytes_program);
     machine_bytes_report_free(&bytes_report);
+    return ok;
+}
+
+static int test_machine_bytes_report_query_helpers_reject_malformed_summary_tables(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineBytesReport bytes_report;
+    MachineBytesError bytes_error;
+    MachineBytesReferenceSummary *saved_reference_summaries = NULL;
+    MachineBytesFixupSummary *saved_fixup_summaries = NULL;
+    MachineBytesBlockSummary *saved_block_summaries = NULL;
+    size_t *saved_function_byte_offsets = NULL;
+    const MachineBytesReferenceSummary *function_references = NULL;
+    const MachineBytesFixupSummary *function_fixups = NULL;
+    const MachineBytesBlockSummary *block_summary = NULL;
+    size_t count = 0u;
+    size_t function_index = 0u;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_bytes_report_init(&bytes_report);
+
+    machine_report.program.register_bank.register_count = 1;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed-report setup failed: %s\n", machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed-report setup failed: %s\n", machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_EQ;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 2, 1, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), &machine_error) ||
+        !machine_bytes_build_report_from_machine_ir_report(&machine_report, &bytes_report, &bytes_error)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed-report bridge failed: %s\n", bytes_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    saved_reference_summaries = bytes_report.reference_summaries;
+    bytes_report.reference_summaries = NULL;
+    if (machine_bytes_report_get_function_reference_summaries(
+            &bytes_report, 0u, &count, &function_references) ||
+        machine_bytes_report_get_reference_summary(&bytes_report, 0u, &function_references)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed reference-summary query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    bytes_report.reference_summaries = saved_reference_summaries;
+
+    saved_fixup_summaries = bytes_report.fixup_summaries;
+    bytes_report.fixup_summaries = NULL;
+    if (machine_bytes_report_get_function_fixup_summaries(&bytes_report, 0u, &count, &function_fixups) ||
+        machine_bytes_report_get_fixup_summary(&bytes_report, 0u, &function_fixups)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed fixup-summary query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    bytes_report.fixup_summaries = saved_fixup_summaries;
+
+    saved_function_byte_offsets = bytes_report.function_byte_offsets;
+    saved_block_summaries = bytes_report.block_summaries;
+    bytes_report.function_byte_offsets = NULL;
+    bytes_report.block_summaries = NULL;
+    if (machine_bytes_report_get_function_byte_span(&bytes_report, 0u, NULL, NULL) ||
+        machine_bytes_report_find_block_summary_by_program_byte_offset(
+            &bytes_report, 0u, &function_index, &block_summary) ||
+        machine_bytes_report_get_block_summary(&bytes_report, 0u, 0u, &block_summary)) {
+        fprintf(stderr, "[machine-bytes] FAIL: malformed block-summary query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    bytes_report.function_byte_offsets = saved_function_byte_offsets;
+    bytes_report.block_summaries = saved_block_summaries;
+
+    if (bytes_report.section_summaries) {
+        size_t saved_symbol_start = bytes_report.section_summaries[0].symbol_start_index;
+        size_t saved_symbol_count = bytes_report.section_summaries[0].symbol_count;
+        size_t saved_fixup_start = bytes_report.section_summaries[0].fixup_start_index;
+        size_t saved_fixup_count = bytes_report.section_summaries[0].fixup_count;
+
+        bytes_report.section_summaries[0].symbol_start_index = bytes_report.total_symbol_summary_count;
+        bytes_report.section_summaries[0].symbol_count = 1u;
+        if (machine_bytes_report_get_section_symbol_summaries(&bytes_report, 0u, &count, NULL)) {
+            fprintf(stderr, "[machine-bytes] FAIL: malformed section symbol slice unexpectedly succeeded\n");
+            ok = 0;
+        }
+        bytes_report.section_summaries[0].symbol_start_index = saved_symbol_start;
+        bytes_report.section_summaries[0].symbol_count = saved_symbol_count;
+
+        bytes_report.section_summaries[0].fixup_start_index = bytes_report.total_fixup_summary_count;
+        bytes_report.section_summaries[0].fixup_count = 1u;
+        if (machine_bytes_report_get_section_fixup_summaries(&bytes_report, 0u, &count, NULL)) {
+            fprintf(stderr, "[machine-bytes] FAIL: malformed section fixup slice unexpectedly succeeded\n");
+            ok = 0;
+        }
+        bytes_report.section_summaries[0].fixup_start_index = saved_fixup_start;
+        bytes_report.section_summaries[0].fixup_count = saved_fixup_count;
+    }
+
+cleanup:
+    bytes_report.reference_summaries =
+        saved_reference_summaries ? saved_reference_summaries : bytes_report.reference_summaries;
+    bytes_report.fixup_summaries = saved_fixup_summaries ? saved_fixup_summaries : bytes_report.fixup_summaries;
+    bytes_report.function_byte_offsets =
+        saved_function_byte_offsets ? saved_function_byte_offsets : bytes_report.function_byte_offsets;
+    bytes_report.block_summaries = saved_block_summaries ? saved_block_summaries : bytes_report.block_summaries;
+    machine_bytes_report_free(&bytes_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
     return ok;
 }
 
@@ -893,17 +1056,22 @@ static int test_machine_bytes_riscv32_preview_expands_large_immediates(void) {
     machine_emit_program_init(&emit_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
     emit_program.global_count = 1;
     emit_program.global_capacity = 1;
     emit_program.globals = (MachineEmitGlobal *)calloc(1, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.globals || !emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.globals || !emit_program.functions) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         return 0;
     }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
     emit_program.globals[0].id = 0u;
     emit_program.globals[0].name = dup_text("g");
     emit_program.functions[0].name = dup_text("main");
@@ -911,7 +1079,8 @@ static int test_machine_bytes_riscv32_preview_expands_large_immediates(void) {
     emit_program.functions[0].block_count = 1;
     emit_program.functions[0].block_capacity = 1;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1, sizeof(MachineEmitBlock));
-    if (!emit_program.globals[0].name || !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.globals[0].name || !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         return 0;
@@ -979,11 +1148,26 @@ static int test_machine_bytes_riscv32_preview_expands_nonzero_compare_branch_imm
     machine_emit_program_init(&emit_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.register_bank.register_count = 8u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(8u, sizeof(MachineEmitRegisterDesc));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
         return 0;
+    }
+    for (size_t reg_index = 0u; reg_index < 8u; ++reg_index) {
+        char name_buf[8];
+
+        snprintf(name_buf, sizeof(name_buf), "r%zu", reg_index);
+        emit_program.register_bank.registers[reg_index].register_id = reg_index;
+        emit_program.register_bank.registers[reg_index].name = dup_text(name_buf);
+        emit_program.register_bank.registers[reg_index].allocatable = 1u;
+        if (!emit_program.register_bank.registers[reg_index].name) {
+            machine_emit_program_free(&emit_program);
+            machine_bytes_program_free(&bytes_program);
+            return 0;
+        }
     }
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
@@ -1147,6 +1331,140 @@ static int test_machine_bytes_riscv32_preview_rejects_out_of_range_branch_target
             &bytes_error) ||
         strstr(bytes_error.message, "MACHINE-BYTES-344") == NULL) {
         fprintf(stderr, "[machine-bytes] FAIL: riscv preview out-of-range branch was not rejected: %s\n",
+            bytes_error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    return ok;
+}
+
+static int test_machine_bytes_rejects_generic_branch_targets_that_do_not_fit_bytecode(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineBytesError bytes_error;
+    char label[32];
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
+        return 0;
+    }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].block_count = 17u;
+    emit_program.functions[0].block_capacity = 17u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(17u, sizeof(MachineEmitBlock));
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    for (size_t block_index = 0u; block_index < 17u; ++block_index) {
+        snprintf(label, sizeof(label), "F0.L%zu", block_index);
+        emit_program.functions[0].blocks[block_index].emit_index = block_index;
+        emit_program.functions[0].blocks[block_index].original_layout_index = block_index;
+        emit_program.functions[0].blocks[block_index].original_block_id = block_index;
+        emit_program.functions[0].blocks[block_index].label_name = dup_text(label);
+        emit_program.functions[0].blocks[block_index].has_terminator = 1u;
+        emit_program.functions[0].blocks[block_index].terminator.kind = MACHINE_LAYOUT_TERM_RETURN;
+        if (!emit_program.functions[0].blocks[block_index].label_name) {
+            machine_emit_program_free(&emit_program);
+            machine_bytes_program_free(&bytes_program);
+            return 0;
+        }
+    }
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_BRANCH;
+    emit_program.functions[0].blocks[0].terminator.as.branch.condition = machine_select_operand_register(0u);
+    emit_program.functions[0].blocks[0].terminator.as.branch.then_target = 16u;
+    emit_program.functions[0].blocks[0].terminator.as.branch.else_target = 1u;
+
+    if (machine_bytes_lower_program_from_machine_emit(&emit_program, &bytes_program, &bytes_error) ||
+        strstr(bytes_error.message, "MACHINE-BYTES-139") == NULL) {
+        fprintf(stderr,
+            "[machine-bytes] FAIL: generic branch target width check mismatch: %s\n",
+            bytes_error.message);
+        ok = 0;
+    }
+
+    machine_emit_program_free(&emit_program);
+    machine_bytes_program_free(&bytes_program);
+    return ok;
+}
+
+static int test_machine_bytes_rejects_generic_immediates_that_do_not_fit_bytecode(void) {
+    MachineEmitProgram emit_program;
+    MachineBytesProgram bytes_program;
+    MachineBytesError bytes_error;
+    int ok = 1;
+
+    memset(&bytes_error, 0, sizeof(bytes_error));
+    machine_emit_program_init(&emit_program);
+    machine_bytes_program_init(&bytes_program);
+
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
+    emit_program.function_count = 1u;
+    emit_program.function_capacity = 1u;
+    emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
+        return 0;
+    }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
+    emit_program.functions[0].name = dup_text("main");
+    emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].local_count = 1u;
+    emit_program.functions[0].block_count = 1u;
+    emit_program.functions[0].block_capacity = 1u;
+    emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].emit_index = 0u;
+    emit_program.functions[0].blocks[0].original_layout_index = 0u;
+    emit_program.functions[0].blocks[0].original_block_id = 0u;
+    emit_program.functions[0].blocks[0].label_name = dup_text("F0.L0");
+    emit_program.functions[0].blocks[0].op_count = 1u;
+    emit_program.functions[0].blocks[0].op_capacity = 1u;
+    emit_program.functions[0].blocks[0].ops = (MachineEmitOp *)calloc(1u, sizeof(MachineEmitOp));
+    if (!emit_program.functions[0].blocks[0].label_name || !emit_program.functions[0].blocks[0].ops) {
+        machine_emit_program_free(&emit_program);
+        machine_bytes_program_free(&bytes_program);
+        return 0;
+    }
+
+    emit_program.functions[0].blocks[0].ops[0].kind = MACHINE_SELECT_OP_MATERIALIZE_IMM;
+    emit_program.functions[0].blocks[0].ops[0].has_result = 1u;
+    emit_program.functions[0].blocks[0].ops[0].result = machine_select_operand_register(0u);
+    emit_program.functions[0].blocks[0].ops[0].as.copy_value = machine_select_operand_immediate(300u);
+    emit_program.functions[0].blocks[0].has_terminator = 1u;
+    emit_program.functions[0].blocks[0].terminator.kind = MACHINE_LAYOUT_TERM_RETURN_IMM;
+    emit_program.functions[0].blocks[0].terminator.as.return_value = machine_select_operand_immediate(17u);
+
+    if (machine_bytes_lower_program_from_machine_emit(&emit_program, &bytes_program, &bytes_error) ||
+        strstr(bytes_error.message, "MACHINE-BYTES-144") == NULL) {
+        fprintf(stderr,
+            "[machine-bytes] FAIL: generic immediate width check mismatch: %s\n",
             bytes_error.message);
         ok = 0;
     }
@@ -1405,11 +1723,26 @@ static int test_machine_bytes_riscv32_preview_materializes_spill_backed_value_op
     machine_emit_program_init(&emit_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.register_bank.register_count = 8u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(8u, sizeof(MachineEmitRegisterDesc));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
         return 0;
+    }
+    for (size_t reg_index = 0u; reg_index < 8u; ++reg_index) {
+        char name_buf[8];
+
+        snprintf(name_buf, sizeof(name_buf), "r%zu", reg_index);
+        emit_program.register_bank.registers[reg_index].register_id = reg_index;
+        emit_program.register_bank.registers[reg_index].name = dup_text(name_buf);
+        emit_program.register_bank.registers[reg_index].allocatable = 1u;
+        if (!emit_program.register_bank.registers[reg_index].name) {
+            machine_emit_program_free(&emit_program);
+            machine_bytes_program_free(&bytes_program);
+            return 0;
+        }
     }
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
@@ -1714,17 +2047,22 @@ static int test_machine_bytes_riscv32_preview_materializes_large_slot_offsets(vo
     machine_emit_program_init(&emit_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
     emit_program.global_count = 1025u;
     emit_program.global_capacity = 1025u;
     emit_program.globals = (MachineEmitGlobal *)calloc(1025u, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1u;
     emit_program.function_capacity = 1u;
     emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
-    if (!emit_program.globals || !emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.globals || !emit_program.functions) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         return 0;
     }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
 
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
@@ -1733,7 +2071,8 @@ static int test_machine_bytes_riscv32_preview_materializes_large_slot_offsets(vo
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
-    if (!emit_program.functions[0].name || !emit_program.functions[0].blocks) {
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         return 0;
@@ -1830,11 +2169,26 @@ static int test_machine_bytes_riscv32_preview_emits_rv32m_alu_words(void) {
     machine_emit_program_init(&emit_program);
     machine_bytes_program_init(&bytes_program);
 
+    emit_program.register_bank.register_count = 8u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(8u, sizeof(MachineEmitRegisterDesc));
     emit_program.function_count = 1;
     emit_program.function_capacity = 1;
     emit_program.functions = (MachineEmitFunction *)calloc(1, sizeof(MachineEmitFunction));
-    if (!emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.functions) {
         return 0;
+    }
+    for (size_t reg_index = 0u; reg_index < 8u; ++reg_index) {
+        char name_buf[8];
+
+        snprintf(name_buf, sizeof(name_buf), "r%zu", reg_index);
+        emit_program.register_bank.registers[reg_index].register_id = reg_index;
+        emit_program.register_bank.registers[reg_index].name = dup_text(name_buf);
+        emit_program.register_bank.registers[reg_index].allocatable = 1u;
+        if (!emit_program.register_bank.registers[reg_index].name) {
+            machine_emit_program_free(&emit_program);
+            machine_bytes_program_free(&bytes_program);
+            return 0;
+        }
     }
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
@@ -1939,6 +2293,7 @@ static int test_machine_bytes_riscv32_preview_rejects_more_than_eight_logical_re
 
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].local_count = 1u;
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
@@ -2382,6 +2737,7 @@ static int test_machine_bytes_store_imm_zero_uses_zero_register(void) {
 
     emit_program.functions[0].name = dup_text("main");
     emit_program.functions[0].has_body = 1;
+    emit_program.functions[0].local_count = 1u;
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
@@ -2703,6 +3059,34 @@ static int test_machine_bytes_report_surfaces_global_object_sections(void) {
     return ok;
 }
 
+static int test_machine_bytes_report_allows_empty_section_subqueries(void) {
+    MachineBytesReport bytes_report;
+    const MachineBytesSymbolSummary *section_symbols = NULL;
+    const MachineBytesFixupSummary *section_fixups = NULL;
+    size_t symbol_count = 1u;
+    size_t fixup_count = 1u;
+
+    machine_bytes_report_init(&bytes_report);
+    bytes_report.section_summaries = (MachineBytesSectionSummary *)calloc(1u, sizeof(MachineBytesSectionSummary));
+    if (!bytes_report.section_summaries) {
+        return 0;
+    }
+    bytes_report.total_section_summary_count = 1u;
+    bytes_report.section_summaries[0].name = ".empty";
+
+    if (!machine_bytes_report_get_section_symbol_summaries(&bytes_report, 0u, &symbol_count, &section_symbols) ||
+        symbol_count != 0u || section_symbols != NULL ||
+        !machine_bytes_report_get_section_fixup_summaries(&bytes_report, 0u, &fixup_count, &section_fixups) ||
+        fixup_count != 0u || section_fixups != NULL) {
+        fprintf(stderr, "[machine-bytes] FAIL: empty section subquery contract mismatch\n");
+        machine_bytes_report_free(&bytes_report);
+        return 0;
+    }
+
+    machine_bytes_report_free(&bytes_report);
+    return 1;
+}
+
 static int test_machine_bytes_report_surfaces_global_data_references(void) {
     MachineEmitProgram emit_program;
     MachineBytesProgram bytes_program;
@@ -2717,18 +3101,23 @@ static int test_machine_bytes_report_surfaces_global_data_references(void) {
     machine_bytes_program_init(&bytes_program);
     machine_bytes_report_init(&bytes_report);
 
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
     emit_program.global_count = 2u;
     emit_program.global_capacity = 2u;
     emit_program.globals = (MachineEmitGlobal *)calloc(2u, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1u;
     emit_program.function_capacity = 1u;
     emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
-    if (!emit_program.globals || !emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.globals || !emit_program.functions) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         machine_bytes_report_free(&bytes_report);
         return 0;
     }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
 
     emit_program.globals[0].id = 0u;
     emit_program.globals[0].name = dup_text("g");
@@ -2742,7 +3131,8 @@ static int test_machine_bytes_report_surfaces_global_data_references(void) {
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
-    if (!emit_program.globals[0].name || !emit_program.globals[1].name ||
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.globals[0].name || !emit_program.globals[1].name ||
         !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
@@ -2840,11 +3230,14 @@ int main(void) {
     ok &= test_machine_bytes_lowers_from_machine_encode();
     ok &= test_machine_bytes_riscv32_preview_emits_void_return_word();
     ok &= test_machine_bytes_report_and_bridges();
+    ok &= test_machine_bytes_report_query_helpers_reject_malformed_summary_tables();
     ok &= test_machine_bytes_riscv32_preview_profile_changes_text_bytes();
     ok &= test_machine_bytes_riscv32_preview_patches_internal_call_targets();
     ok &= test_machine_bytes_riscv32_preview_uses_real_fallthrough_control();
     ok &= test_machine_bytes_riscv32_preview_expands_large_immediates();
     ok &= test_machine_bytes_riscv32_preview_expands_nonzero_compare_branch_immediates();
+    ok &= test_machine_bytes_rejects_generic_branch_targets_that_do_not_fit_bytecode();
+    ok &= test_machine_bytes_rejects_generic_immediates_that_do_not_fit_bytecode();
     ok &= test_machine_bytes_riscv32_preview_rejects_out_of_range_branch_targets();
     ok &= test_machine_bytes_riscv32_preview_materializes_call_args_and_spill_results();
     ok &= test_machine_bytes_riscv32_preview_materializes_spill_and_stack_call_args();
@@ -2859,6 +3252,7 @@ int main(void) {
     ok &= test_machine_bytes_store_imm_zero_uses_zero_register();
     ok &= test_machine_bytes_encodes_call_payloads();
     ok &= test_machine_bytes_report_surfaces_global_object_sections();
+    ok &= test_machine_bytes_report_allows_empty_section_subqueries();
     ok &= test_machine_bytes_report_surfaces_global_data_references();
     ok &= test_machine_bytes_program_level_offsets_and_byte_image();
 

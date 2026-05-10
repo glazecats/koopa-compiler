@@ -802,11 +802,48 @@ cleanup:
     return ok;
 }
 
+static int test_machine_launch_query_contract_rejects_missing_register_storage(void) {
+    MachineLaunchFile launch_file;
+    MachineLaunchReport launch_report;
+    const MachineLaunchRegister *reg = NULL;
+    const MachineLaunchRegisterSummary *reg_summary = NULL;
+    MachineLaunchReportOverviewArtifact overview_artifact;
+    size_t register_index = (size_t)-1;
+    int ok = 1;
+
+    machine_launch_file_init(&launch_file);
+    machine_launch_report_init(&launch_report);
+    memset(&overview_artifact, 0, sizeof(overview_artifact));
+
+    launch_file.register_count = 1u;
+    launch_file.register_capacity = 1u;
+    if (machine_launch_file_get_register(&launch_file, 0u, &reg) ||
+        machine_launch_file_find_register_by_name(&launch_file, "pc", &register_index, &reg)) {
+        fprintf(stderr, "[machine-launch] FAIL: malformed file register query should fail\n");
+        ok = 0;
+    }
+
+    launch_report.register_summary_count = 1u;
+    launch_report.program_counter_register_index = 0u;
+    launch_report.stack_pointer_register_index = 0u;
+    if (machine_launch_report_get_register_summary(&launch_report, 0u, &reg_summary) ||
+        machine_launch_report_find_register_summary_by_name(&launch_report, "pc", &register_index, &reg_summary) ||
+        machine_launch_report_get_overview_artifact(&launch_report, &overview_artifact)) {
+        fprintf(stderr, "[machine-launch] FAIL: malformed report register query should fail\n");
+        ok = 0;
+    }
+
+    machine_launch_report_free(&launch_report);
+    machine_launch_file_free(&launch_file);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_launch_mainline();
     ok &= test_machine_launch_ir_bridge_and_wrappers();
     ok &= test_machine_launch_profile_bridge();
+    ok &= test_machine_launch_query_contract_rejects_missing_register_storage();
     return ok ? 0 : 1;
 }

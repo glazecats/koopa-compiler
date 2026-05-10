@@ -540,11 +540,23 @@ cleanup:
     return ok;
 }
 
+static int test_machine_log_report_refresh_rejects_null_report(void) {
+    MachineLogError error;
+
+    memset(&error, 0, sizeof(error));
+    if (machine_log_report_refresh(NULL, &error)) {
+        fprintf(stderr, "[machine-log] FAIL: null refresh should fail\n");
+        return 0;
+    }
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_log_mainline();
     ok &= test_machine_log_custom_step_cases();
     ok &= test_machine_log_i386_bridge();
+    ok &= test_machine_log_report_refresh_rejects_null_report();
     return ok ? 0 : 1;
 }

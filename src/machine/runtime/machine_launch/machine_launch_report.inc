@@ -27,6 +27,7 @@ int machine_launch_report_get_summary(const MachineLaunchReport *report,
 int machine_launch_report_get_overview_artifact(const MachineLaunchReport *report,
     MachineLaunchReportOverviewArtifact *out_artifact) {
     if (!report || !out_artifact ||
+        (report->register_summary_count > 0u && !report->register_summaries) ||
         report->program_counter_register_index >= report->register_summary_count ||
         report->stack_pointer_register_index >= report->register_summary_count) {
         return 0;
@@ -122,7 +123,8 @@ int machine_launch_report_get_runtime_memory_summary_artifact(const MachineLaunc
 int machine_launch_report_get_register_summary(const MachineLaunchReport *report,
     size_t register_index,
     const MachineLaunchRegisterSummary **out_summary) {
-    if (!report || register_index >= report->register_summary_count) {
+    if (!report || register_index >= report->register_summary_count ||
+        (report->register_summary_count > 0u && !report->register_summaries)) {
         return 0;
     }
     if (out_summary) {
@@ -153,7 +155,8 @@ int machine_launch_report_find_register_summary_by_name(const MachineLaunchRepor
     const MachineLaunchRegisterSummary **out_summary) {
     size_t register_index;
 
-    if (!report || !register_name) {
+    if (!report || !register_name ||
+        (report->register_summary_count > 0u && !report->register_summaries)) {
         return 0;
     }
     for (register_index = 0u; register_index < report->register_summary_count; ++register_index) {

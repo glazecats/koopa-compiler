@@ -15894,6 +15894,91 @@ static int test_memory_ssa_pass_eliminates_redundant_memory_binaries(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_eliminate_redundant_memory_binaries_handles_seen_state_bound(void) {
+    ValueSsaProgram program;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaError error;
+    ValueSsaInstruction instruction;
+    char *actual = NULL;
+    size_t cond_id;
+    size_t sum_id;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    if (!value_ssa_program_append_function(&program, "main", 1, &function, &error) ||
+        !function ||
+        !value_ssa_function_append_local(function, "c", 1, NULL, &error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, &error) ||
+        !value_ssa_function_append_block(function, NULL, &then_block, &error) ||
+        !value_ssa_function_append_block(function, NULL, &else_block, &error) ||
+        !value_ssa_function_append_block(function, NULL, &join_block, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: seen-state bound setup failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    cond_id = value_ssa_function_allocate_value(function);
+    sum_id = value_ssa_function_allocate_value(function);
+    if (cond_id == (size_t)-1 || sum_id == (size_t)-1) {
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_id);
+    instruction.as.load_slot = value_ssa_slot_local(0);
+    if (!value_ssa_block_append_instruction(entry, &instruction, &error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_id(cond_id), 1, 2, &error) ||
+        !value_ssa_block_set_jump(then_block, 3, &error) ||
+        !value_ssa_block_set_jump(else_block, 3, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: seen-state bound control-flow setup failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_id);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_immediate(2147483647LL);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, &error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(sum_id), &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: seen-state bound join-binary setup failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_eliminate_redundant_memory_binaries(&program, &error)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: seen-state bound run failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&program, &actual)) {
+        fprintf(stderr, "[memory-ssa-pass] FAIL: seen-state bound dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(actual, "ret -2147483648") == NULL) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: join-binary overflow fold should normalize to 32-bit wraparound\nactual:\n%s\n",
+            actual);
+        ok = 0;
+    }
+
+    free(actual);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_eliminates_redundant_nested_join_memory_binaries(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -18699,6 +18784,7 @@ int main(void) {
     ok &= test_memory_ssa_pass_pipeline_partial_phi_global_ancestor_other_global_call();
     ok &= test_memory_ssa_pass_pipeline_partial_phi_global_multi_other_global_call();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries();
+    ok &= test_memory_ssa_pass_eliminate_redundant_memory_binaries_handles_seen_state_bound();
     ok &= test_memory_ssa_pass_eliminates_redundant_nested_join_memory_binaries();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_with_global_barrier();
     ok &= test_memory_ssa_pass_eliminates_redundant_memory_binaries_keeps_global_call_barrier();

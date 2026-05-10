@@ -26,14 +26,20 @@ void machine_select_program_free(MachineSelectProgram *program) {
     if (!program) {
         return;
     }
-    for (register_index = 0; register_index < program->register_bank.register_count; ++register_index) {
-        machine_select_register_desc_free(&program->register_bank.registers[register_index]);
+    if (program->register_bank.registers) {
+        for (register_index = 0; register_index < program->register_bank.register_count; ++register_index) {
+            machine_select_register_desc_free(&program->register_bank.registers[register_index]);
+        }
     }
-    for (global_index = 0; global_index < program->global_count; ++global_index) {
-        machine_select_global_free(&program->globals[global_index]);
+    if (program->globals) {
+        for (global_index = 0; global_index < program->global_count; ++global_index) {
+            machine_select_global_free(&program->globals[global_index]);
+        }
     }
-    for (function_index = 0; function_index < program->function_count; ++function_index) {
-        machine_select_function_free(&program->functions[function_index]);
+    if (program->functions) {
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            machine_select_function_free(&program->functions[function_index]);
+        }
     }
     free(program->register_bank.registers);
     free(program->globals);

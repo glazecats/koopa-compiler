@@ -3,6 +3,7 @@
 #include "memory_ssa.h"
 #include "value_ssa_pass.h"
 
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,11 @@ static void memory_ssa_pass_trace(const char *fmt, ...) {
     vfprintf(stderr, fmt, args);
     va_end(args);
     fputc('\n', stderr);
+}
+
+static long long memory_ssa_pass_normalize_sysy_int_value(long long value) {
+    uint32_t bits = (uint32_t)value;
+    return (long long)(int32_t)bits;
 }
 
 static void memory_ssa_pass_set_error(ValueSsaError *error, int line, int column, const char *fmt, ...);

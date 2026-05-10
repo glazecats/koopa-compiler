@@ -421,12 +421,16 @@ int machine_container_file_copy_bytes(const MachineContainerFile *container_file
     if (out_byte_count) {
         *out_byte_count = 0;
     }
-    if (!container_file || !out_bytes || !container_file->bytes) {
+    if (!container_file || !out_bytes) {
         machine_container_set_error(error, 0, 0, "MACHINE-CONTAINER-115: invalid container byte-copy contract");
         return 0;
     }
     if (container_file->byte_count == 0) {
         return 1;
+    }
+    if (!container_file->bytes) {
+        machine_container_set_error(error, 0, 0, "MACHINE-CONTAINER-115: invalid container byte-copy contract");
+        return 0;
     }
     copy = (unsigned char *)malloc(container_file->byte_count);
     if (!copy) {

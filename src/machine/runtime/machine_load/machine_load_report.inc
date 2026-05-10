@@ -5,12 +5,21 @@
 
 #else
 
+static int machine_load_report_has_segment_tables(const MachineLoadReport *report) {
+    return report &&
+        report->segment_summary_count == report->file.segment_count &&
+        (report->segment_summary_count == 0u || report->segment_summaries) &&
+        (report->file.segment_count == 0u || report->file.segments) &&
+        (report->executable_segment_count == 0u || report->executable_segment_indices) &&
+        (report->non_executable_segment_count == 0u || report->non_executable_segment_indices);
+}
+
 int machine_load_report_get_summary(const MachineLoadReport *report,
     size_t *out_segment_count,
     size_t *out_file_byte_count,
     size_t *out_memory_byte_count,
     size_t *out_executable_segment_count) {
-    if (!report) {
+    if (!machine_load_report_has_segment_tables(report)) {
         return 0;
     }
     if (out_segment_count) {
@@ -105,7 +114,7 @@ int machine_load_report_get_entry_segment_summary_artifact(const MachineLoadRepo
     size_t segment_index = 0u;
     const MachineLoadSegment *segment = NULL;
 
-    if (!report) {
+    if (!machine_load_report_has_segment_tables(report)) {
         return 0;
     }
     if (!machine_load_file_get_entry_segment(&report->file, &segment_index, &segment) || !segment) {
@@ -123,7 +132,9 @@ int machine_load_report_get_entry_segment_summary_artifact(const MachineLoadRepo
 int machine_load_report_get_segment_summary(const MachineLoadReport *report,
     size_t segment_index,
     const MachineLoadSegmentSummary **out_summary) {
-    if (!report || !out_summary || !report->segment_summaries || segment_index >= report->segment_summary_count) {
+    if (!machine_load_report_has_segment_tables(report) ||
+        !out_summary ||
+        segment_index >= report->segment_summary_count) {
         return 0;
     }
     *out_summary = &report->segment_summaries[segment_index];
@@ -136,7 +147,8 @@ int machine_load_report_get_segment_artifact(const MachineLoadReport *report,
     const MachineLoadSegmentSummary *summary = NULL;
     size_t entry_segment_index = 0u;
 
-    if (!report || !out_artifact ||
+    if (!machine_load_report_has_segment_tables(report) ||
+        !out_artifact ||
         !machine_load_report_get_segment_summary(report, segment_index, &summary) ||
         !summary) {
         return 0;
@@ -158,7 +170,7 @@ int machine_load_report_find_segment_summary_by_name(const MachineLoadReport *re
     const MachineLoadSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !segment_name || !report->segment_summaries) {
+    if (!machine_load_report_has_segment_tables(report) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -199,7 +211,7 @@ int machine_load_report_find_segment_summary_covering_virtual_address(const Mach
     const MachineLoadSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !report->segment_summaries) {
+    if (!machine_load_report_has_segment_tables(report)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -245,6 +257,9 @@ int machine_load_report_find_segment_artifact_covering_virtual_address(const Mac
 int machine_load_report_get_segment_filter_count(const MachineLoadReport *report,
     MachineLoadReportSegmentFilterKind filter_kind,
     size_t *out_count) {
+    if (!machine_load_report_has_segment_tables(report)) {
+        return 0;
+    }
     return machine_load_report_get_segment_filter_storage(report, filter_kind, NULL, out_count);
 }
 
@@ -257,7 +272,7 @@ int machine_load_report_get_segment_summary_by_filter_index(const MachineLoadRep
     size_t count = 0u;
     size_t segment_index = 0u;
 
-    if (!report) {
+    if (!machine_load_report_has_segment_tables(report)) {
         return 0;
     }
     if (!machine_load_report_get_segment_filter_storage(report, filter_kind, &indices, &count) ||
@@ -330,7 +345,7 @@ int machine_load_report_overview_artifact_get_segment_artifact(
 
 int machine_load_report_get_executable_segment_count(const MachineLoadReport *report,
     size_t *out_count) {
-    if (!report || !out_count) {
+    if (!machine_load_report_has_segment_tables(report) || !out_count) {
         return 0;
     }
     *out_count = report->executable_segment_count;
@@ -343,7 +358,8 @@ int machine_load_report_get_executable_segment_summary_by_index(const MachineLoa
     const MachineLoadSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !report->executable_segment_indices ||
+    if (!machine_load_report_has_segment_tables(report) ||
+        !report->executable_segment_indices ||
         executable_index >= report->executable_segment_count) {
         return 0;
     }

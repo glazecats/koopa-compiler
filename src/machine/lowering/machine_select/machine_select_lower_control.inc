@@ -17,7 +17,7 @@ static int machine_select_try_lower_constant_branch(const MachineIrBasicBlock *s
 
     condition_value = src_block->terminator.as.branch.condition.immediate;
     dest_block->terminator.kind = MACHINE_SELECT_TERM_JUMP;
-    dest_block->terminator.as.jump_target = condition_value != 0
+    dest_block->terminator.as.jump_target = machine_select_normalize_sysy_int_value(condition_value) != 0
         ? src_block->terminator.as.branch.then_target
         : src_block->terminator.as.branch.else_target;
     dest_block->has_terminator = 1;
@@ -234,7 +234,7 @@ static int machine_select_try_lower_materialized_boolean_branch(const MachineIrF
     }
 
     dest_block->terminator.kind = MACHINE_SELECT_TERM_JUMP;
-    dest_block->terminator.as.jump_target = condition_value != 0
+    dest_block->terminator.as.jump_target = machine_select_normalize_sysy_int_value(condition_value) != 0
         ? src_block->terminator.as.branch.then_target
         : src_block->terminator.as.branch.else_target;
     dest_block->has_terminator = 1;

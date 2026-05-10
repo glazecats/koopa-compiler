@@ -44,19 +44,22 @@ int machine_load_build_from_machine_exec_file(const MachineExecFile *exec_file,
         const MachineImageSegment *image_segment =
             &exec_file->image_file.segments[exec_segment->image_segment_index];
         MachineLoadSegment *load_segment = &out_load_file->segments[segment_index];
+        size_t aligned_memory_byte_count = machine_load_align_up(exec_segment->byte_count, segment_alignment);
 
         load_segment->name = machine_load_strdup(exec_segment->name ? exec_segment->name : "");
         load_segment->exec_segment_index = segment_index;
         load_segment->virtual_address = exec_segment->virtual_address;
         load_segment->file_byte_count = exec_segment->byte_count;
-        load_segment->memory_byte_count = machine_load_align_up(exec_segment->byte_count, segment_alignment);
+        load_segment->memory_byte_count = aligned_memory_byte_count;
         load_segment->readable = exec_segment->readable;
         load_segment->writable = exec_segment->writable;
         load_segment->executable = exec_segment->executable;
         load_segment->bytes = load_segment->memory_byte_count > 0u
             ? (unsigned char *)calloc(load_segment->memory_byte_count, 1u)
             : NULL;
-        if (!load_segment->name || (load_segment->memory_byte_count > 0u && !load_segment->bytes)) {
+        if (!load_segment->name ||
+            aligned_memory_byte_count < exec_segment->byte_count ||
+            (load_segment->memory_byte_count > 0u && !load_segment->bytes)) {
             machine_load_set_error(error, 0, 0, "MACHINE-LOAD-108: out of memory materializing load segment");
             machine_load_file_free(out_load_file);
             return 0;
@@ -65,6 +68,11 @@ int machine_load_build_from_machine_exec_file(const MachineExecFile *exec_file,
             memcpy(load_segment->bytes,
                 exec_file->image_file.bytes + image_segment->image_offset,
                 exec_segment->byte_count);
+        }
+        if (out_load_file->total_memory_byte_count > ((size_t)-1) - load_segment->memory_byte_count) {
+            machine_load_set_error(error, 0, 0, "MACHINE-LOAD-108: out of memory materializing load segment");
+            machine_load_file_free(out_load_file);
+            return 0;
         }
         out_load_file->total_memory_byte_count += load_segment->memory_byte_count;
     }

@@ -203,6 +203,140 @@
      again over course and external suites
   5. only then treat the current round as ready to end / checkpoint
 - Current progress snapshot for that ordered line:
+  - strict whole-repo runtime-RE audit:
+    **in progress / ~95%**
+    - current active reread boundary is the compiler-side
+      `src/compiler/compiler_driver.c` final-export/generated-code line after
+      the already reread full-sibling pass across
+      `machine_select -> machine_layout -> machine_emit -> machine_encode ->
+      machine_bytes -> machine_object -> machine_reloc -> machine_elf ->
+      machine_image -> machine_exec -> machine_load -> machine_runtime`
+    - current priority inside that audit remains **generated-program runtime
+      RE**, not compiler-process crashes: keep checking late preview-text
+      peepholes, final text/control-flow export, stack/call/address-formation
+      wrong-code risks, and adjacent handoff surfaces that can corrupt the
+      emitted program
+    - current compiler-side/final-export substage is now **~97%**:
+      caller-save / call-span rereads are complete as a no-new-bug slice, the
+      `machine_bytes -> compiler_driver` summary-handoff helpers are reclosed,
+      and the latest kept closures are the preview-text memory-dependent
+      reuse barriers (`stack_addr_reuse` materialized-slot overwrite plus the
+      call-like barrier refresh for `stack_addr_reuse` /
+      `repeated_indexed_addr_triples` /
+      `repeated_indexed_addr_sequences`, and the newer
+      `stack_addr_reuse` post-barrier later-reload guard); the active line is
+      now effectively a blend of “finish the tiny remaining final-export tail”
+      and “broaden direct generated-program runtime repro hunting,” because
+      that source-level compiler-driver detail is nearly exhausted and the
+      latest concrete closure came from a runtime repro that pointed back into
+      one final preview-text corner case
+    - broader generated-program runtime repro hunting is now **~99%**:
+      the latest widened runtime-facing subsets (`minic-test-cases-2021f`
+      `functional` full `100/100`, `minic-test-cases-2021s`
+      `functional` full `112/112`, `minic-test-cases-2021s` `array*` `6/6`,
+      `minic-test-cases-2021s` `global*` `1/1`,
+      `minic-test-cases-2021s/performance` full `18/18`,
+      `compiler2021/2021初赛所有用例/functional` full `103/103`,
+      `lava-test/cases` full `162/162`,
+      `compiler2021/2021初赛所有用例/h_functional` full `37/37`,
+      `lava-test/cases` `long*` `5/5`, `lava-test/cases` `nested*` `3/3`,
+      `lava-test/cases` `global*` `1/1`, `lava-test/cases` `short*` `3/3`,
+      `TrivialCompiler/custom_test` full `29/29`,
+      `TrivialCompiler/custom_test` `many*` `4/4`,
+      `compiler2021/function_test2020` `register*` `1/1`,
+      `compiler2021/function_test2020` full `111/111`,
+      `compiler2021/function_test2020` `many*` `3/3`,
+      `compiler2021/function_test2020` `matrix*` `4/4`,
+      `indigo/test_codes/functional_test` full `111/111`,
+      `lava-test/lava_test` is now also reclassified as runtime-green under
+      the wider heavy-case budget already tracked in thread memory: the
+      default sweep still shows exactly the known timeout-class pair
+      (`many_parameters10000.sy`, `register_alloc10000.sy`), but focused
+      reruns at `--case-timeout 60` bring both back to green (`1/1`, `1/1`),
+      `minic-test-cases-2021f/performance` currently behaves the same way for
+      the checked runtime-heavy tail: the full suite shows one heavy-case
+      timeout at the default budget (`19_brainfuck-calculator.c:
+      RUN_TIMEOUT`), but a focused rerun at `--case-timeout 60` brings that
+      case back to green (`1/1 PASS`),
+      `compiler2021/performance_test2021-public` also now looks more like a
+      timeout-budget classification surface than a fresh runtime-crash source:
+      the full suite still shows several default-budget red points, but the
+      newly checked neighboring cases `03_sort3.sy`, `conv1.sy`, `conv2.sy`,
+      `median2.sy`, and `shuffle1.sy` all come back green at
+      `--case-timeout 60`, which leaves the older `03_sort2.sy` /
+      `shuffle2.sy` pair as the clearest still-open public perf pressure
+      signal rather than proving a new RE family; both still time out even at
+      `--case-timeout 120`, so they remain true open perf witnesses rather
+      than mere default-budget artifacts,
+      `compiler2021/performance_test2021-private` and
+      `lava-test/performance_test2021` now also align with that same picture:
+      full sweeps mostly reduce to the already-tracked timeout cluster
+      (`brainfuck-mandelbrot-nerf`, `dead-code-elimination-2/3`, `floyd-2`,
+      `hoist-2/3`, `instruction-combining-2/3`,
+      `integer-divide-optimization-2/3`), while the private-only
+      `instruction-combining-1.sy` compile-time red point also clears under
+      `--case-timeout 60`; `brainfuck-mandelbrot-nerf.sy` now also clears at
+      `--case-timeout 120`, while `hoist-2.sy` remains a timeout even at the
+      wider budget and therefore stays a true open perf-pressure witness
+      rather than a fresh runtime-RE lead,
+      `compiler2021/performance_test2021-private` currently sits at `18/29`
+      under the default budget and `lava-test/performance_test2021` at
+      `19/29`, but both are dominated by that already-known timeout/perf
+      cluster rather than a new crash family,
+      local stage profiling on the three clearest still-open witnesses keeps
+      the same classification intact: `03_sort2.sy` and `shuffle2.sy` compile
+      in only a few milliseconds locally (so their red status still points at
+      generated-program/runtime performance, not compiler compile-time), while
+      `hoist-2.sy` remains compile-side and is still dominated by
+      `machine_ir_report` (`~3.1s` out of `~3.24s` total in the current local
+      profile probe),
+      one last narrow optimization follow-up is now also kept on the still-open
+      `03_sort2` line: `machine_select` same-block pure-call reuse now
+      recognizes repeated call arguments whose source is a same-block
+      `load_indirect(addr)` when the underlying address operand itself stays
+      identical and uninvalidated. That removes one surviving repeated
+      `getNumPos(...)` shape from the `radixSort` hot block in the
+      `machine_select` dump, but it does **not** yet close the public runtime
+      tail by itself (`03_sort2.sy` still times out under the current public
+      budget). A second neighboring `machine_select` cleanup is now also kept:
+      same-block repeated `load_indirect(addr)` can now forward across
+      intervening proven-non-alias local/global stores by reusing the earlier
+      load via a spill-backed copy. This trims one more layer from the open
+      `03_sort2` path (the current quick histogram first moved `call` down to
+      `11` from the earlier `12` in the final `.s` image). A third neighboring
+      `machine_select` cleanup is now also kept on top of that line:
+      repeated cacheable-pure internal calls may now reuse a same-callee
+      predecessor call across a **unique predecessor edge** when the raw arg
+      operands stay identical and uninvalidated across the edge. This removes
+      the still-visible `getNumPos(...)` recomputation on the
+      `radixSort bb.16 -> bb.17` path in `03_sort2`, and the rebuilt final
+      `.s` quick histogram now shows `call` down to `10`. It still does **not**
+      close the public tail outright, and the latest keep/revalidate round
+      reconfirmed that this remains a **perf-only** witness rather than a
+      fresh runtime-crash family: `make test` is green again, `autotest -riscv
+      -s lv9 /workspaces/compiler_lab` is green again (`22/22`), a rotated
+      external correctness slice
+      (`compiler2021/公开用例与运行时库/function_test2021 --limit 30`) is green
+      again (`30/30`), another rotated slice
+      (`indigo/test_codes/functional_test --limit 25`) is green again
+      (`25/25`), and focused public reruns at `--case-timeout 120` still leave
+      exactly the same open pair (`03_sort2.sy -> RUN_TIMEOUT`,
+      `shuffle2.sy -> RUN_TIMEOUT`).
+      `sysy-testsuit-collection/lvX` is now also reclassified as runtime-green
+      under the wider heavy-case budget already recorded in thread memory:
+      the default sweep still shows exactly the known timeout-class trio
+      (`many_parameters10000.c`, `matrix-1.c`, `register_alloc10000.c`), but
+      focused reruns at `--case-timeout 60` bring those back to green
+      (`1/1`, `2/2`, `1/1` respectively),
+      `lava-test/cases` `search*` `4/4`,
+      `TrivialCompiler/custom_test` `loop*` `5/5`,
+      the extra complex-algorithm spot checks
+      (`brainfk`, `dijkstra`, `max_flow`, `n_queens`), and the newer
+      algorithmic spot checks (`kmp`, `hanoi`, `backpack`, `substr`,
+      `percolation`, `calculator`, `color`, `exgcd`, `gcd`) are all green
+      after the `094_long_code.c` closure, so the next useful runtime-hunt
+      chunk should keep rotating to different external/runtime-heavy slices
+      instead of repeatedly rerunning the same long/array witnesses
   - post-allocator correctness checkpoint:
     **complete / 100%**
     - 2026-05-08 ordered source reread follow-up: the current hidden/default
@@ -258,6 +392,315 @@
       uninitialized, `value_ssa_block_set_void_return(...)` did not clear the
       stale `return_value` fields, and `value_ssa_compact_value_ids(...)`
       inside CFG simplification had been remapping `return_value` for every
+    - 2026-05-09 fresh runtime-RE restart follow-up: strict whole-code audit
+      has now advanced through the machine-side active submission path from
+      `src/machine/lowering/machine_ir/*` and
+      `src/machine/lowering/machine_select/*` into
+      `src/machine/object/machine_bytes/*`, and then through the final
+      compiler text-export path in `src/compiler/compiler_driver.c`.
+      Current conclusion for this reread chunk is:
+      - no new confirmed generated-program runtime-RE bug has been proven yet
+        in the reread `machine_ir` / `machine_select` / `machine_bytes` /
+        `compiler_driver` surfaces beyond the already-closed semantic
+        truthiness fixes and the already-closed tail-call text peephole fix
+      - one suspicious but currently unconfirmed/dead-looking compiler-driver
+        caller-save helper path was noted for later recheck, but it does not
+        currently look like the main active hidden-RE explanation because the
+        guard path is not on the live default text-export route
+      - current sequential audit boundary is now **machine runtime entry**:
+        `machine_exec` / `machine_load` / `machine_runtime` / adjacent runtime
+        build+query layers are being reread next before the remaining
+        `observe/*` tail
+      - kept local recheck after this reread chunk:
+        `make test-compiler-driver` PASS
+    - 2026-05-09 runtime/image reread follow-up: one concrete downstream
+      runtime bug is now closed in
+      `src/machine/runtime/machine_image/machine_image_build.inc`.
+      The image builder had still been importing only `.text` from ELF and
+      silently dropping `.sbss` / `.sdata`, which meant global-object data
+      preserved by the bytes/object/reloc/ELF pipeline could disappear before
+      `machine_exec` / `machine_load` / `machine_runtime`.
+      The live tree now preserves those data sections as image segments too,
+      keeps `.sbss` zero-filled instead of pretending it has file bytes, and
+      locks the image layer with a focused
+      `tests/machine/runtime/machine_image/machine_image_test.c` regression
+      that checks `.text/.sbss/.sdata` segment presence plus `g/h` symbol
+      placement and data bytes.
+      Current sequential audit boundary is now:
+      - runtime `image/load/exec/runtime/launch/step/decode/payload/interp`
+        plus observe `delta/trace/event/outcome/history/timeline/log/journal`
+        have all been reread
+      - no second confirmed generated-program runtime-RE bug has been proven
+        yet in the remaining runtime/observe wrapper layers after the image
+        fix
+      - kept local rechecks after this closure:
+        `make test-machine-image` PASS
+      - broader kept rechecks after the live patch:
+        - `make test-compiler-driver` PASS
+        - `make test` PASS
+        - `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+        - rotated third-party sweeps:
+          - `minic-test-cases-2021f/functional --limit 40` PASS (`40/40`)
+          - `sysy-testsuit-collection/lvX --limit 40` PASS (`40/40`)
+          - `lava-test/shortcircuit_test --limit 25` PASS (`1/1`; suite root only contains one case)
+    - 2026-05-09 machine-bytes follow-up: one more concrete generated-code
+      runtime-risk bug is now closed in `src/machine/object/machine_bytes/*`.
+      The generic bytecode bridge had been accepting control-flow targets that
+      do not fit the legacy encoding width and silently truncating them when
+      writing jump / branch payload bytes. That made the generic byte artifact
+      path capable of jumping to the wrong block when a function had more than
+      16 blocks, which is exactly the sort of combination-only wrong-code /
+      runtime-RE shape the user warned about. The live tree now rejects
+      control targets that do not fit the encoded byte-width before the byte
+      bridge is committed, and the regression suite now locks the generic
+      `branch`-width rejection witness in `tests/machine/object/machine_bytes/`.
+      Current kept rechecks after this closure are:
+      `make test-machine-bytes` PASS,
+      `make test` PASS,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+      `minic-test-cases-2021f/functional --limit 40` PASS (`40/40`), and
+      `sysy-testsuit-collection/lvX --limit 40` PASS (`40/40`).
+    - 2026-05-09 machine-bytes follow-up 2: the same generic bytecode
+      contract line is now also rejecting non-representable immediate /
+      descriptor payloads instead of silently truncating them. In the live
+      tree, generic `materialize-imm`, `alu-imm`, `cmp-imm`,
+      `store-*_imm`, `return-imm`, and call-argument descriptors must now fit
+      the legacy byte widths explicitly before the byte bridge is accepted.
+      That closes another combination-only runtime-risk class where a generic
+      payload could previously be rounded down and later decoded into the
+      wrong state or wrong control outcome. The regression suite now locks the
+      generic immediate-width rejection witness in
+      `tests/machine/object/machine_bytes/machine_bytes_test.c`.
+      Current kept rechecks after this closure are:
+      `make test-machine-bytes` PASS,
+      `make test` PASS,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+      `minic-test-cases-2021f/functional --limit 40` PASS (`40/40`), and
+      `sysy-testsuit-collection/lvX --limit 40` PASS (`40/40`).
+    - 2026-05-09 verification follow-up: the post-fix validation set for the
+      generic bytecode width hardening is now fully settled again after a
+      temporary external-sweep environment interruption. The live evidence
+      surface now includes:
+      - `make test` PASS
+      - `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`)
+      - `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+      - `minic-test-cases-2021s/functional --limit 40` PASS (`40/40`)
+      - `minic-test-cases-2021f/functional --limit 40` PASS (`40/40`)
+      - `indigo/test_codes/functional_test --limit 40` PASS (`40/40`)
+      - `sysy-testsuit-collection/lvX --limit 40` PASS (`40/40`)
+      The temporary `Permission denied` seen during one intermediate sweep was
+      an environment-side launch artifact; the direct `build/compiler` binary
+      remained executable and the rerun completed green.
+    - 2026-05-09 decode-chain follow-up: one more runtime-facing generic
+      opcode recognition gap is now closed. `machine_decode` had still been
+      stopping its generic op-tag range at `STORE_GLOBAL_IMM`, which meant the
+      later `LOAD_INDIRECT` / `STORE_INDIRECT` opcodes from `machine_select`
+      were silently treated as unknown in the runtime decode chain. The live
+      tree now recognizes those two op tags, and `machine_payload_decode`
+      now also treats them as known opcodes with zero payload bytes instead of
+      accidentally dropping them into the unknown/default path. Focused local
+      regressions now lock both indirect-memory tags in
+      `tests/machine/runtime/machine_decode/machine_decode_test.c` and
+      `tests/machine/runtime/machine_payload_decode/machine_payload_decode_test.c`.
+      Current kept rechecks after this closure are:
+      `make test-machine-decode` PASS,
+      `make test-machine-payload-decode` PASS,
+      `make test` PASS,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+      `minic-test-cases-2021s/functional --limit 20` PASS (`20/20`),
+      `TrivialCompiler/custom_test --limit 20` PASS (`20/20`),
+      `lava-test/cases --limit 20` PASS (`20/20`), and
+      `minic-test-cases-2021f/functional --limit 40` PASS (`40/40`).
+    - 2026-05-09 observe-tail reread follow-up: the strict whole-code audit
+      has now also reread the remaining observation/report siblings from
+      `machine_outcome` through `machine_journal` with the same
+      runtime-RE/combinational-risk lens. Current conclusion for this chunk is
+      still conservative: no new concrete generated-program runtime bug is
+      confirmed from the observe-side exact/preview/blocked classification
+      ladders, and the current blocked-control / blocked-unsupported /
+      control-halt / value/local/global/call families appear to propagate
+      consistently across `event -> outcome -> history -> timeline -> log ->
+      journal`. The active line is therefore now effectively in endgame /
+      maintenance-first audit mode rather than sitting on one obvious unread
+      downstream hotspot.
+    - 2026-05-09 maintenance-tail follow-up: a second pass through the
+      `machine_state -> machine_writeback -> machine_commit -> machine_apply`
+      bridge plus the detailed `machine_event/outcome/history/timeline/log/
+      journal` verify/build/classification paths still did not surface a new
+      concrete runtime-RE bug. Current authority for this tail chunk is:
+      - the recently fixed generic bytecode / decode-chain issues remain the
+        last confirmed downstream runtime-risk closures
+      - the later observe-side exact/preview/blocked ladders remain internally
+        consistent on the currently audited `call`, `value`, `local/global
+        update`, `control-halt`, `blocked-control`, and
+        `blocked-unsupported` families
+      - no new long-running sweep is left in flight from this chunk
+    - 2026-05-09 report/query reread follow-up: the strict audit has now also
+      revisited the report/query surfaces around
+      `machine_image_query_dump`, `machine_exec_report`, `machine_load_report`,
+      `machine_runtime_report`, and `machine_launch_report`, together with a
+      fresh pass over the connected `machine_observe/delta/trace` summaries.
+      Current conclusion for this chunk is still “no new concrete runtime bug
+      confirmed”: the entry/stack/filter/overview/report-artifact paths appear
+      consistent with the already-fixed lower-level contracts, and no new
+      enum-tail omission or report-side state-drop was proven from this reread.
+    - 2026-05-09 machine-select sibling-tail follow-up: the strict whole-code
+      audit has now also finished another full reread pass over the remaining
+      `machine_select` detail siblings, specifically
+      `machine_select_lower_control.inc`, `machine_select_query.inc`, and
+      `machine_select_report.inc`, with the same generated-program runtime-RE
+      lens plus malformed-artifact hardening checks. Two concrete closures are
+      now recorded from that pass:
+      - a real selected-control wrong-code bug is fixed: constant/materialized
+        branch folding in `machine_select` and the later selected cleanup fold
+        had still been deciding branch truthiness on raw host `long long`
+        immediates instead of normalized 32-bit SysY integer semantics, so a
+        value such as `4294967296` could be folded as true instead of the real
+        false/zero branch case after normalization
+      - the selected lower-report query/dump surface now also rejects missing
+        function/filter/block-summary tables and report count/offset drift
+        cleanly instead of trusting malformed backing tables during by-name
+        lookups or direct report dump assembly
+      - kept rechecks after this closure:
+        `make test-machine-select` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+        and `tools/sweep_sysy_suite.py --filter while third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`7/7`)
+      - command-state note: no long-running sweep remains in flight; one first
+        attempt to run the rotated third-party subset via `autotest --filter`
+        used the wrong CLI surface and was immediately corrected to
+        `tools/sweep_sysy_suite.py`, so it should not be treated as a compiler
+        regression signal
+    - 2026-05-09 machine-layout sibling follow-up: the strict whole-code audit
+      has now advanced one ordered stage further into the full
+      `src/machine/lowering/machine_layout/*` sibling set (`core/query/verify/
+      dump/report/lower`). This chunk closed one more downstream-contract bug
+      family plus the matching report trust gap:
+      - verifier authority now also locks layout-stage opcode-family shape
+        invariants that had still been drifting open: `load_local` /
+        `load_global` and store-local/store-global families now require the
+        matching slot kind, spill-result versus register-result call families
+        now require the matching result operand kind, and `_IMM` compare/binary
+        / compare-branch layout families now require rhs-immediate form rather
+        than silently accepting malformed non-immediate payloads
+      - report/query/dump hardening now also reaches the layout layer:
+        malformed layout reports with missing function/filter/block-summary
+        tables or count/offset drift now fail cleanly instead of being trusted
+        during by-name query or dump assembly
+      - kept rechecks after this closure:
+        `make test-machine-layout` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+        and `tools/sweep_sysy_suite.py --filter if_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`8/8`)
+      - current sequential audit boundary is now the next layout consumer
+        siblings, namely `src/machine/lowering/machine_emit/*`; the next
+        queued stage after that is `src/machine/lowering/machine_encode/*`
+      - long-running command state: none
+    - 2026-05-09 machine-emit sibling follow-up: the strict whole-code audit
+      has now also covered the full `src/machine/lowering/machine_emit/*`
+      sibling set (`core/query/verify/dump/report/lower`) instead of only the
+      stage spine. This chunk closed three linked contract holes:
+      - verifier authority now also locks emit-stage opcode-family invariants
+        that downstream `machine_encode` / `machine_bytes` implicitly depend
+        on: `_IMM` binary/compare families require rhs-immediate form;
+        spill-result versus register-result call families require the matching
+        result operand kind; and load/store local/global families require the
+        matching slot kind
+      - emit lower itself now frees/reinitializes the destination program
+        before repopulating it, so lowering into a previously used
+        `MachineEmitProgram` no longer risks stale state / leaked old blocks
+      - emit report/query/dump now also reject malformed backing-table shapes
+        or block-summary-offset drift instead of trusting them during by-name
+        lookup or report dump assembly
+      - kept rechecks after this closure:
+        `make test-machine-emit` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+        and `tools/sweep_sysy_suite.py --filter short third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`2/2`)
+      - current sequential audit boundary is now the next ordered consumer
+        stage `src/machine/lowering/machine_encode/*`
+      - long-running command state: none
+    - 2026-05-09 machine-encode sibling follow-up: the strict whole-code audit
+      has now also covered the full `src/machine/lowering/machine_encode/*`
+      sibling set (`core/query/verify/dump/report/lower`). This chunk closed
+      one more consumer-boundary contract cluster:
+      - verifier authority now also locks the embedded emitted-op and
+        terminator-family invariants that later bytes/object consumers rely on:
+        encoded blocks now reject missing op tables, wrong local/global slot
+        kinds, wrong spill-result/register-result call families, malformed
+        immediate-call families, and compare-branch-imm shapes that violate
+        rhs-immediate form
+      - report/query/dump hardening now also reaches the encode layer:
+        refresh re-verifies the owned encoded program first, by-name/block-label
+        query helpers now clear outputs more defensively, and report dump now
+        rejects missing function/filter/block-summary tables plus summary-offset
+        drift instead of trusting malformed report backing state
+      - kept rechecks after this closure:
+        `make test-machine-encode` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+        and `tools/sweep_sysy_suite.py --filter sort_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`7/7`)
+      - command-state note: one first rotated third-party attempt used
+        `--filter recursion`, which produced `NO_CASES` for this suite root and
+        was immediately replaced with the real `sort_test` slice; this is only
+        operator filtering noise, not a compiler regression
+      - current sequential audit boundary is now back at the already-reread
+        post-encode downstream consumers (`machine_bytes/object/...`), so the
+        remaining whole-repo work is mainly endgame maintenance-first reread /
+        cross-stage recheck rather than one obvious unread machine stage
+      - long-running command state: none
+    - 2026-05-10 post-encode downstream cross-stage follow-up: the endgame
+      maintenance-first reread is now back inside the `machine_bytes` consumer
+      surface plus its immediate object/reloc dependents. No new concrete
+      generated-program runtime-RE bug has been proven in `machine_bytes` code
+      itself from this chunk yet, but one real cross-stage maintenance drift
+      was exposed and reclosed: stricter `machine_encode` verifier contracts
+      made several downstream bytes/object/reloc fixtures invalid because those
+      tests had been building malformed emit/encode inputs (missing register
+      banks for register-bearing ops, missing local/global counts for slot
+      users, etc.) and expecting the later consumer to be the first layer to
+      notice. The live tree now re-legalizes those fixtures so downstream
+      tests measure the intended bytes/object/reloc behaviors rather than
+      tripping on already-illegal upstream metadata.
+      - kept rechecks after this closure:
+        `make test-machine-bytes` PASS,
+        `make test-machine-object` PASS,
+        `make test-machine-reloc` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+        and `tools/sweep_sysy_suite.py --filter matrix third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`4/4`)
+      - command-state note: no long-running sweep remains in flight
+      - next sequential reread boundary: continue the same post-encode
+        downstream cross-stage pass through `machine_object` / `machine_reloc`
+        / `machine_elf` implementation siblings, now with the refreshed
+        bytes/object/reloc tests green again
+    - 2026-05-10 object/reloc sibling follow-up: the same post-encode
+      downstream pass has now advanced into the implementation siblings
+      `src/machine/object/machine_object/*` and
+      `src/machine/object/machine_reloc/*`. This chunk closed one concrete
+      report/query robustness cluster plus one object-file byte-copy hole:
+      - `machine_object_file_copy_section_bytes(...)` now rejects non-empty
+        sections whose byte table is missing instead of blindly `memcpy(...)`
+        from a null pointer
+      - object/reloc by-name report queries now clear outputs more
+        defensively, and object/reloc report dumps now reject malformed report
+        table drift (missing section/symbol/fixup/relocation summary tables or
+        summary-count mismatches) instead of trusting those backing tables
+      - kept rechecks after this closure:
+        `make test-machine-object` PASS,
+        `make test-machine-reloc` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+        and `tools/sweep_sysy_suite.py --filter add third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`
+        PASS (`5/5`)
+      - current sequential audit boundary is now the next downstream sibling
+        stage `src/machine/object/machine_elf/*`
+      - long-running command state: none
       `RETURN` terminator even when `has_return_value == 0`. In practice the
       common zero-init path often hid this, but the contract was still wrong:
       stale payload bits from a void return must not participate in SSA
@@ -2500,6 +2943,579 @@
       than only adding redundant green rows.
   - hidden/default compatibility audit line:
     **in progress / roughly 99%**
+    - 2026-05-09 restart-mode note: by explicit user request, the active
+      hidden/default line has now reopened a **sequential source audit** from
+      the front of the compiler pipeline rather than only testcase-driven
+      chasing. Current ordered reread plan is:
+      `lexer -> parser -> semantic -> ir -> ir_pass -> lower_ir -> value_ssa/value_ssa_pass -> memory_ssa/memory_ssa_pass -> machine`.
+      Progress for this restart audit should be logged here chunk by chunk so a
+      later restart can resume from the last reread boundary instead of
+      guessing from chat history.
+    - 2026-05-09 sequential source audit log:
+      - restart note for the runtime-RE reframe: by explicit user request,
+        the current audit target is now again **generated-program runtime
+        RE**, not compiler self-crash. This pass is restarting from the
+        front of the repository implementation tree and must be treated as a
+        fresh whole-repo reread, not as a continuation of the earlier
+        compiler-robustness interpretation.
+      - fresh-restart progress note: the **current live restart boundary**
+        for this runtime-RE pass is back at the front of the pipeline.
+        Treat the earlier later-stage machine/backend coverage below as
+        historical evidence from the previous pass, not as proof that the
+        fresh restart has already re-covered those files. On the fresh
+        restart, current reread coverage is:
+        `src/lexer/lexer.c`, the full `src/parser/*` stage,
+        the full `src/semantic/*` stage, and the front of `src/ir/*`
+        (`ir.c`, `ir_core.inc`, `ir_dump.inc`), with the next boundary still
+        inside the remaining IR sibling files before moving on to
+        `src/ir_pass/*`.
+      - fresh-restart progress update 2: the fresh runtime-RE reread has now
+        pushed deeper into the IR stage and closed one concrete control-flow
+        correctness bug in `src/ir/ir_lower_stmt.inc`. The local
+        flow-state helper used by condition-truthiness pruning and
+        loop-stays-true proofs had still been evaluating some unary/binary/
+        compound-assignment expressions with host-width behavior instead of
+        the compiler's 32-bit SysY integer semantics. That could let
+        front-end lowering prove the wrong branch/loop truthiness and thus
+        mutate generated control flow before later backend stages even saw
+        the program. The live tree now normalizes those flow-state
+        evaluations through 32-bit SysY semantics, including the shift-width
+        boundary and wraparound-sensitive unary minus path. A focused
+        compiler-driver regression now locks the representative wraparound
+        loop-condition witness, and validation after the fix is:
+        `make test-compiler-driver` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        plus rotated third-party sweeps
+        `minic-test-cases-2021s/functional --limit 25` PASS and
+        `indigo/test_codes/functional_test --limit 20` PASS.
+      - fresh-restart progress update 3: the fresh runtime-RE reread has now
+        also covered the remaining `src/ir/*` sibling files plus the full
+        `src/ir_pass/*` stage, and it has moved into the front of the
+        downstream `src/lower_ir/*` and `src/value_ssa/*` stages. No second
+        concrete runtime-RE root cause is confirmed from this chunk yet: the
+        currently reread `ir_pass`, `lower_ir`, and `value_ssa` front paths
+        remain structurally consistent on branch/call/return lowering and on
+        verifier-side contracts. The next fresh-restart boundary is to keep
+        moving through the rest of `value_ssa/*`, then `value_ssa_pass/*`,
+        before descending into `memory_ssa/*` and later machine/backend
+        siblings.
+      - fresh-restart progress update 4: one more concrete runtime-RE risk
+        was confirmed and fixed in the shared front-end semantic flow helper
+        inside `src/semantic/semantic_core_flow.inc` together with the
+        matching `ir` helper path. The constant-fold/truthiness logic had been
+        using host-width `long long` arithmetic and `LLONG_MIN` guards for
+        shifts, division, modulus, and unary-minus paths, which could
+        disagree with 32-bit SysY wraparound semantics and therefore make the
+        frontend prove the wrong branch or loop condition before lowering.
+        The live tree now normalizes those flow helper evaluations through
+        32-bit SysY semantics. A focused driver regression now locks a
+        wraparound loop-condition witness, and validation after the fix is:
+        `make test-compiler-driver` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        plus rotated third-party sweeps
+        `TrivialCompiler/custom_test --limit 20` PASS and
+        `lava-test/cases --limit 20` PASS.
+      - fresh-restart progress update 5: the fresh whole-repo runtime-RE
+        reread has now also covered the currently relevant mid-stack sibling
+        directories beyond the earlier IR/lower-IR front:
+        `src/value_ssa/*`, the main `src/value_ssa_pass/*` optimization line,
+        `src/memory_ssa/*`, `src/memory_ssa_pass/*`,
+        `src/value_ssa_interp/*`, `src/value_ssa_alloc/*`, and
+        `src/value_ssa_machine/*`. No additional concrete runtime-RE root
+        cause was confirmed from this chunk: the current reread did not find a
+        second wrong-code bug in those allocator/memory-SSA/protection/report
+        siblings beyond the already-closed 32-bit flow-semantics drift.
+        The next fresh-restart boundary is now the actual machine backend tree
+        (`src/machine/lowering/*`, then `src/machine/object/*`, then
+        `src/machine/runtime/*`, then `src/machine/observe/*`) under the same
+        generated-program runtime-RE lens.
+      - strict whole-src sub-audit coverage inside this hidden/default line is
+        now roughly **68%** overall: front-half
+        (`lexer -> parser -> semantic -> ir -> ir_pass -> lower_ir ->
+        value_ssa/value_ssa_pass/value_ssa_interp`) is fully reread, the
+        `memory_ssa` / `memory_ssa_pass` / `value_ssa_machine` side is mostly
+        reread, and the downstream `src/machine/*` audit has now entered the
+        object/runtime/observe sibling groups but has **not** finished their
+        full `*.inc` detail files yet
+      - chunk 4 restart note: by explicit user request, the active audit is
+        now reset again into **strict whole-code audit mode**. Coverage target
+        is no longer “mainline plus nearby suspicious files”, but **all
+        implementation files under `src/`**, read in pipeline order while also
+        widening to sibling/support modules at each stage. Future progress
+        notes in this mode should say whether a chunk covered only the stage
+        spine or the full set of sibling implementation files.
+      - chunk 4 rule-tightening note: by explicit user reminder, this
+        whole-src audit must not skip any pass layer just because it is not
+        the most suspicious mainline. Required coverage explicitly includes
+        every pass directory under `src/`, including `src/ir_pass/*`,
+        `src/value_ssa_pass/*`, and `src/memory_ssa_pass/*`, alongside the
+        non-pass representation/lowering/runtime files.
+      - chunk 4 started: reread boundary reset to `src/lexer/lexer.c` and the
+        full `src/parser/*` stage as the first whole-code-audit segment
+      - chunk 4 progress update: strict whole-code audit has now restarted for
+        real at the front edge and is rereading the **full parser stage**
+        rather than only the parser spine; current coverage includes
+        `src/lexer/lexer.c`, `src/parser/parser.c`,
+        `src/parser/parser_ast_compat.inc`, and the fresh pass through the
+        parser expression/statement units is in progress
+      - chunk 4 progress update 2: the strict whole-code reread now also
+        covers the **full semantic stage**, including
+        `src/semantic/semantic.c`, `semantic_entry.inc`,
+        `semantic_callable_rules.inc`, `semantic_scope_rules.inc`, and the
+        full `semantic_core_flow.inc` rather than only its loop/mainline
+        excerpts
+      - chunk 4 findings: no new deterministic bug yet across the fully
+        reread parser+semantic stages; current whole-code audit still points
+        downstream of the front-end semantic gate for the hidden/default
+        residual risk
+      - chunk 4 progress update 3: strict whole-code audit is now inside the
+        **full IR stage** and has already reread more than the IR spine:
+        current coverage includes `src/ir/ir.c`, `ir_core.inc`,
+        `ir_dump.inc`, `ir_lower_expr.inc`, `ir_lower_scope.inc`,
+        `ir_global_init.inc`, and `ir_global_dep.inc`
+      - chunk 4 findings 2: no new deterministic bug yet in the currently
+        reread IR files; the fresh whole-code pass still has not surfaced a
+        front-half/root-cause defect before the later lower/backend layers,
+        but IR stage coverage is not complete yet because `ir_lower_stmt.inc`
+        and `ir_verify.inc` still need the same full-file treatment before the
+        stage can be called fully read
+      - chunk 4 correction note: the strict whole-code audit order previously
+        under-described the pass layer; by explicit user reminder,
+        `src/ir_pass/*` is now treated as a required sibling stage between
+        `src/ir/*` and `src/lower_ir/*`, not as optional background context
+      - chunk 4 progress update 3b: the full `src/ir_pass/*` sibling set has
+        now been reread too (`ir_pass.c`, `ir_pass_core.inc`,
+        `ir_pass_temp_analysis.inc`, `ir_pass_fold.inc`,
+        `ir_pass_const.inc`, `ir_pass_copy.inc`,
+        `ir_pass_cfg_analysis.inc`, `ir_pass_cfg.inc`,
+        `ir_pass_dce.inc`, `ir_pass_pipeline.inc`). No concrete new hidden-RE
+        bug has been closed from this pass-layer reread; current risk still
+        points further downstream toward allocator / machine / backend
+        combinations rather than canonical IR pass-local folding/copy/CFG
+        cleanup alone
+      - chunk 4 progress update 4: the strict whole-code audit has now also
+        completed the full `src/value_ssa/*` and `src/value_ssa_pass/*`
+        sibling sets, not just their spines. Current reread coverage now
+        includes `value_ssa.c`, `value_ssa_analysis.inc`,
+        `value_ssa_dump.inc`, `value_ssa_from_lower_ir.inc`,
+        `value_ssa_rename.inc`, `value_ssa_verify.inc`, plus the full
+        `value_ssa_pass.c` aggregator and all pass siblings from
+        `value_ssa_simplify.inc` through `value_ssa_pass_bridge.inc`. No new
+        concrete bug has been found in this chunk yet; the current audit is
+        still pushing downstream toward allocator / machine integration
+        hazards, with long-running sweep state still none
+      - chunk 4 progress update 5: the strict whole-code audit has now moved
+        past the pure Value-SSA passes and into the downstream allocator /
+        memory-SSA side. This chunk is **partial-stage coverage, not yet full
+        stage closure**: current reread coverage includes the high-risk
+        allocator rewrite/select/spill files
+        (`src/value_ssa_alloc/value_ssa_alloc.c`,
+        `value_ssa_alloc_color.inc`, `value_ssa_alloc_rewrite.inc`,
+        `value_ssa_alloc_select.inc`, `value_ssa_alloc_spill.inc`,
+        `value_ssa_alloc_move_engine.inc`) plus the front of
+        `src/value_ssa_machine/*` and `src/memory_ssa/*`
+        (`memory_ssa.c`, `memory_ssa_analysis.inc`,
+        `memory_ssa_from_value_ssa.inc`, `memory_ssa_verify.inc`,
+        `memory_ssa_dump.inc`). No concrete hidden-RE root cause is closed
+        yet from this partial downstream reread; current open suspicion stays
+        on allocator/machine/backend combination edges rather than the already
+        reread front-half pipeline
+      - chunk 4 dynamic evidence: rotated external rechecks during the strict
+        audit are still green on the live tree, including
+        `tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test --limit 3`
+        (`3/3 PASS`) and
+        `tools/sweep_sysy_suite.py third_party/sysy-suites/indigo/test_codes/functional_test --limit 10`
+        (`10/10 PASS`)
+      - chunk 4 follow-up fix: one real downstream semantic drift bug is now
+        closed in `src/value_ssa_interp/*`. The interpreter had been executing
+        binary arithmetic/bitwise/shift/global-init paths in host `long long`
+        space instead of the project’s 32-bit SysY integer semantics, so
+        oracle-style interpretation could disagree with the real compiler on
+        wraparound and signed-right-shift cases. The live tree now normalizes
+        immediates, args, globals, stores, call returns, and binary results
+        through 32-bit SysY semantics inside `value_ssa_interp`, and the
+        interpreter tests now also lock explicit overflow/shift witnesses.
+      - chunk 4 validation after fix:
+        `make test-value-ssa-interp` PASS,
+        `make test-value-ssa-regression` PASS,
+        `make test-value-ssa-oracle` PASS,
+        `autotest -riscv -s lv8 /workspaces/compiler_lab` (`12/12 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test --limit 8`
+        (`8/8 PASS`)
+      - chunk 4 progress update 6: strict whole-code audit has now also read
+        the full `src/value_ssa_interp/*` sibling set and most of
+        `src/memory_ssa_pass/*` plus `src/value_ssa_machine/*`. Current
+        remaining unread pressure inside the strict whole-src audit is mainly
+        the rest of `memory_ssa_pass` detail paths and the large downstream
+        `src/machine/*` tree.
+      - chunk 4 progress update 7: downstream machine-stage whole-code audit
+        is now underway for real rather than only spot-checking one suspicious
+        file. Current coverage already includes the front/core/query/verify
+        surfaces for `src/machine/lowering/machine_ir/*` and
+        `src/machine/lowering/machine_select/*`, plus the already-reread final
+        text exporter area in `src/compiler/compiler_driver.c`. No new
+        deterministic hidden-RE root cause is closed from this first machine
+        chunk yet; current remaining risk stays in later machine sibling
+        combinations and still-unfinished downstream stage coverage.
+      - chunk 4 progress update 8: the strict audit has now also covered the
+        full `src/value_ssa_interp/*` sibling set, the bulk of
+        `src/memory_ssa_pass/*` including `memory_ssa_pass_pipeline.inc`,
+        `memory_ssa_pass_load_forward.inc`,
+        `memory_ssa_pass_store_cleanup.inc`, and
+        `memory_ssa_pass_memory_cse.inc`, plus the large front/mid surfaces of
+        `src/value_ssa_machine/*` and the main lowering-stage siblings
+        `src/machine/lowering/machine_ir/*` and
+        `src/machine/lowering/machine_select/*`. No second concrete bug beyond
+        the interpreter semantic-drift fix is closed from this chunk yet; the
+        remaining uncertainty is still concentrated in later machine/backend
+        sibling combinations and the not-yet-finished downstream stage sweep.
+      - chunk 4 progress update 9: the strict reread has now also revisited
+        the remaining `memory_ssa_pass` closure path plus more downstream
+        machine object/runtime/observe fronts. Concrete new closure: a real
+        hidden-RE risk existed in
+        `src/memory_ssa_pass/memory_ssa_pass_memory_cse.inc`, where both
+        repeated-state trackers (`seen_states[seen_count++]`) could write past
+        their fixed `256`-entry buffers on the last iteration instead of
+        failing cleanly. The live tree now guards those bounds before writing,
+        so the memory-binary closure fails with an explicit diagnostic instead
+        of corrupting memory when a pathological convergence case reaches the
+        cap.
+      - chunk 4 follow-up fix 2: the same reread also closed one adjacent
+        constant-semantics drift family around that downstream area. The
+        join-binary immediate fold inside `memory_ssa_pass` and the selected
+        immediate fold inside `machine_select` had still been using host
+        `long long` arithmetic instead of normalized 32-bit SysY integer
+        semantics, which could mis-fold overflow/shift/compare combinations
+        only after several lowering/cleanup stages had already composed.
+        Those folds now normalize operands/results through 32-bit SysY
+        semantics; `machine_ir` kept its conservative `div/mod/shift`
+        no-fold policy while still normalizing the safe add/sub/mul/bitwise
+        immediate folds that remain enabled there.
+      - chunk 4 validation after fix 2:
+        `make test-machine-ir` PASS,
+        `make test-machine-select` PASS,
+        `make test-memory-ssa-pass` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/minic-test-cases-2021s/functional --limit 8`
+        (`8/8 PASS`)
+      - chunk 4 progress update 10: the downstream whole-src reread has now
+        also crossed the top-level object/runtime/observe implementation
+        fronts (`machine_bytes.c`, `machine_object.c`, `machine_reloc.c`,
+        `machine_container.c`, `machine_elf.c`,
+        `machine_transition.c`, `machine_state.c`, `machine_mutation.c`,
+        `machine_writeback.c`, `machine_commit.c`, `machine_apply.c`,
+        `machine_payload_decode.c`, `machine_interp.c`,
+        `machine_observe.c`, `machine_delta.c`, `machine_trace.c`,
+        `machine_event.c`, `machine_outcome.c`, `machine_history.c`,
+        `machine_timeline.c`, `machine_log.c`, `machine_journal.c`). No new
+        second-stage deterministic crash bug is confirmed from these files
+        yet; most are state/report glue and the current unread pressure is now
+        narrower: the remaining downstream audit debt is mainly the sibling
+        `*.inc` detail files under the machine object/runtime families plus
+        any still-unfinished query/report helpers that were only partially
+        sampled earlier.
+      - chunk 4 follow-up fix 3: one smaller but real machine-stage query
+        contract bug is now closed in
+        `src/machine/runtime/machine_exec/machine_exec_core.inc`.
+        `machine_exec_report_get_segment_filter_count(..., ENTRY, ...)` had
+        been returning `1` even on an empty freshly initialized report, which
+        made the filter-count surface inconsistent with the later filtered
+        lookup that correctly returned failure. The live tree now reports `0`
+        entry rows when the report has no segment summaries yet, and
+        `tests/machine/runtime/machine_exec/machine_exec_test.c` now locks
+        that empty-report boundary.
+      - chunk 4 validation after fix 3:
+        `make test-machine-exec` PASS
+      - chunk 4 progress update 11: the strict whole-src audit has now also
+        sampled the deeper runtime/object sibling detail files rather than
+        stopping at their aggregators, including the current passes through
+        `machine_exec_core/build/report/dump`, `machine_image_core/build/verify`,
+        `machine_load_core/build/query/report/dump`, and the first wider
+        `machine_runtime_query/build/report` surfaces. No further hidden-RE
+        root cause is confirmed from those files yet beyond the new
+        `machine_exec` query-count bug; the remaining unread machine debt is
+        now mostly the still-unfinished object/ELF detail helpers plus any
+        runtime/observe query/report siblings that have not yet been read end
+        to end.
+      - chunk 4 follow-up fix 4: one real zero-byte boundary cluster is now
+        closed across the machine image/load/runtime copy helpers. Fresh
+        rereads found that `machine_image_build_from_machine_elf_file(...)`,
+        `machine_load_file_copy_flat_memory_image(...)`, and the neighboring
+        runtime flat-copy path were still willing to route zero-length copies
+        through potentially `NULL` byte pointers. The live tree now skips those
+        `memcpy(...)` calls when the relevant byte count is `0`, instead of
+        relying on implementation-defined tolerance for `memcpy(NULL, ..., 0)`.
+        The new focused `machine_load` regression now hand-builds a valid load
+        artifact with one normal `.text` segment plus one zero-length
+        auxiliary segment, then exercises both the load-side flat-memory copy
+        and the downstream `machine_runtime_build_from_machine_load_file(...)`
+        plus runtime flat-memory copy path.
+      - chunk 4 validation after fix 4:
+        `make test-machine-load` PASS,
+        `make test-machine-image` PASS,
+        `make test-machine-runtime` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/minic-test-cases-2021s/functional --limit 4`
+        (`4/4 PASS`)
+      - chunk 4 progress update 12: strict whole-src downstream coverage is
+        now roughly **74%** overall. The audit has moved further through the
+        machine object/runtime detail helpers (`machine_bytes_*`,
+        `machine_exec_*`, `machine_image_*`, `machine_load_*`,
+        `machine_runtime_*`) and through the observe-side top-level modules,
+        but the remaining whole-stage debt still includes unfinished
+        `machine_elf_*` detail helpers plus some object/runtime/observe
+        sibling query/report files that have not yet been read end to end.
+      - chunk 4 follow-up fix 5: one more zero-byte copy boundary was
+        tightened in the object/runtime side after the later machine-object
+        rereads. `machine_image_build_from_machine_elf_file(...)`,
+        `machine_load_file_copy_flat_memory_image(...)`, and the analogous
+        runtime flat-copy helper now explicitly skip `memcpy(...)` when the
+        relevant byte span is zero, instead of depending on zero-length
+        copies against potentially `NULL` storage. The corresponding focused
+        `machine_load` regression exercises a valid load/runtime artifact
+        with one normal `.text` segment and one zero-length auxiliary
+        segment to ensure the behavior stays intentional.
+      - chunk 4 validation after fix 5:
+        `make test-machine-image` PASS,
+        `make test-machine-load` PASS,
+        `make test-machine-runtime` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/minic-test-cases-2021s/functional --limit 4`
+        (`4/4 PASS`)
+      - chunk 4 progress update 13: strict whole-src audit coverage is now
+        roughly **80%** overall. The machine object/runtime zero-length copy
+        boundary is now fixed and regression-locked, while the unread debt is
+        concentrated in the longer `machine_elf_*` detail helpers and the
+        remaining machine object/runtime/observe query/report helpers that
+        still need full end-to-end rereads before the whole-src sweep can be
+        called complete.
+      - chunk 4 progress update 14: the remaining machine object / ELF tail
+        was reread further and one more concrete empty-container contract bug
+        was found and fixed. `machine_object_file_get_section_symbols(...)`,
+        `machine_object_file_get_section_fixups(...)`,
+        `machine_reloc_file_get_section_relocations(...)`,
+        `machine_bytes_report_get_section_symbol_summaries(...)`,
+        `machine_bytes_report_get_section_fixup_summaries(...)`, and the
+        corresponding `machine_container_file_copy_bytes(...)` /
+        `machine_elf_file_copy_bytes(...)` helpers now treat zero-count
+        subqueries and zero-byte owned artifacts as valid empty contracts
+        instead of requiring a non-NULL backing array even when the count is
+        zero. Focused regressions were added for the empty-section / empty-file
+        boundaries across `machine_bytes`, `machine_object`, `machine_reloc`,
+        `machine_container`, and `machine_elf`.
+      - chunk 4 validation after fix 6:
+        `make test-machine-bytes` PASS,
+        `make test-machine-object` PASS,
+        `make test-machine-reloc` PASS,
+        `make test-machine-container` PASS,
+        `make test-machine-elf` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test --limit 6`
+        (`6/6 PASS`)
+      - chunk 4 progress update 15: the strict whole-src reread has now also
+        moved deeper through the runtime/observe side while keeping the
+        machine-object tail stable. One more real runtime contract mismatch
+        was closed in `src/machine/runtime/machine_runtime/machine_runtime_query.inc`
+        and `src/machine/runtime/machine_runtime/machine_runtime_report.inc`:
+        the region-count / gap-filter surfaces now key off the actual gap
+        summary instead of blindly assuming every runtime file has a concrete
+        non-overlapping gap row, so zero-gap runtime shapes continue to report
+        a consistent region surface instead of drifting between count and
+        lookup behavior. A focused regression in
+        `tests/machine/runtime/machine_runtime/machine_runtime_test.c` now
+        locks the zero-gap surface on the live tree.
+      - chunk 4 validation after fix 7:
+        `make test-machine-runtime` PASS,
+        `make test-machine-launch` PASS,
+        `make test` PASS,
+        `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22 PASS`),
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test --limit 4`
+        (`4/4 PASS`)
+      - chunk 4 progress update 16: one more hidden-RE crash path was closed
+        on the runtime/launch boundary. `machine_launch_file_free(...)` had
+        been assuming `register_count > 0` implied a real `registers` array
+        and could segfault when a half-built or malformed launch file was
+        torn down, so the free path now checks the backing pointer before
+        walking register names. The launch query/report helpers also now
+        reject malformed register-storage states explicitly instead of
+        dereferencing missing arrays. A focused regression in
+        `tests/machine/runtime/machine_launch/machine_launch_test.c` now locks
+        that malformed-register contract, and both `make test-machine-launch`
+        and the direct launch test binary are green again.
+      - chunk 4 progress update 17: the observe tail was reread further and a
+        matching null-refresh crash was closed as well. `machine_history`,
+        `machine_timeline`, `machine_log`, and `machine_journal` already
+        behaved conservatively on their main build/query paths, but the
+        `report_refresh(...)` helpers for `machine_timeline`, `machine_log`,
+        and `machine_journal` still dereferenced `report->file` before
+        checking whether `report` itself was null. Those refresh entrypoints
+        now fail fast on a null report instead of segfaulting, and focused
+        regressions in the corresponding observe tests lock the null-refresh
+        contract.
+      - chunk 4 validation after fix 8:
+        `make test-machine-timeline` PASS,
+        `make test-machine-log` PASS,
+        `make test-machine-journal` PASS,
+        `./build/machine_timeline/machine_timeline_test` PASS,
+        `./build/machine_log/machine_log_test` PASS,
+        `./build/machine_journal/machine_journal_test` PASS,
+        and `tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test --limit 4`
+        (`4/4 PASS`)
+      - chunk 4 progress update 18: the next observe-side audit slice also
+        closed a null-report refresh crash family. `machine_timeline`,
+        `machine_log`, and `machine_journal` all expose `report_refresh(...)`
+        helpers; the `timeline` / `log` sides are now explicitly regression-
+        locked on null-report rejection, and the `journal` side now also
+        fails fast with a real diagnostic instead of dereferencing
+        `report->file` on a null input. Focused observe regressions now lock
+        the null-refresh contract across timeline/log/journal, and the direct
+        observe test binaries plus the course `lv9` path remain green.
+      - chunk 4 progress update 19: the generated-code audit has now also
+        closed one concrete wrong-code bug in the final RISC-V text exporter
+        inside `src/compiler/compiler_driver.c`. The preview tail-call
+        peephole had been skipping over intervening `lw ..., off(s11)`
+        restore rows between `jal ra, ...` and the strict adjacent
+        `lw s11/ra; addi sp; ret` epilogue, which meant the rewritten tail
+        call could silently drop callee-saved restoration state. The live
+        tree now only folds the strict adjacent epilogue shape and leaves
+        separated restore rows untouched. Focused validation after the fix is
+        `make test-compiler-driver` PASS, `make test` PASS, `git diff --check`
+        PASS, plus rotated third-party sweeps
+        `third_party/sysy-suites/TrivialCompiler/custom_test --limit 18`
+        PASS and `third_party/sysy-suites/lava-test/cases --limit 15` PASS,
+        followed by `autotest -riscv -s lv9` PASS (`22/22`).
+      - recheck rotation note: keep rotating the concrete validation sample
+        set from round to round instead of reusing one tiny fixed batch every
+        time. The current default should be to keep the evidence surface
+        moving so nearby hidden-style families keep getting exercised rather
+        than becoming one memorized witness list.
+      - recheck breadth note: when using sampled validation, prefer a broader
+        sample than only a couple of cases. The default should be to take a
+        visibly wider slice so the recheck covers multiple nearby families
+        before treating the current round as stable.
+      - chunk 4 long-running command state: none; the course `lv9` run has
+        completed, and the remaining third-party sweep is no longer in flight
+      - next reread boundary: finish the remaining machine-stage sibling
+        detail files (`src/machine/object/*/*.inc`,
+        `src/machine/runtime/*/*.inc`, and any unread machine query/report
+        helpers), then close the strict whole-src audit boundary for the
+        machine tree
+      - chunk 4 long-running command state: none; the earlier local
+        `machine-ir`, `machine-select`, `memory-ssa-pass`, `lv9`, and
+        third-party functional sweeps have all completed and been harvested
+      - next reread boundary: finish the remaining machine-stage sibling
+        detail files (`src/machine/object/*/*.inc`,
+        `src/machine/runtime/*/*.inc`, and any unread machine query/report
+        helpers), then close the strict whole-src audit boundary for the
+        machine tree
+      - chunk 3 restart note: by explicit follow-up user request, the active
+        audit is now being restarted **again** from `tokenize` and should not
+        inherit the earlier downstream suspicion as its working conclusion;
+        dead-loop mislowering is now tracked as a co-equal hidden-RE risk
+        alongside plain crash/corruption
+      - chunk 3 started: reread boundary reset to `src/lexer/lexer.c` and a
+        fresh full-order pass through `src/parser/*`
+      - chunk 1 started: reread restart boundary reset to `src/lexer/lexer.c`
+        and `src/parser/*`
+      - long-running command state: none
+      - chunk 1 progress update: reread completed on
+        `src/lexer/lexer.c`, `src/parser/parser.c`, and the current
+        expression-core branch in `src/parser/parser_core_expr.inc`
+      - chunk 1 findings: no new deterministic bug yet; current restart audit
+        suspicion still stays downstream of tokenization/basic expression
+        parsing rather than at the lexer / parser-core front edge
+      - next reread boundary: `src/parser/parser_stmt_decl_tu.inc`
+      - chunk 2 progress update: reread completed on
+        `src/parser/parser_stmt_decl_tu.inc`, `src/semantic/*`, plus the
+        current canonical-IR front edge in `src/ir/ir.c`,
+        `src/ir/ir_lower_stmt.inc`, `src/ir/ir_global_init.inc`,
+        `src/ir/ir_global_dep.inc`, and `src/ir/ir_verify.inc`
+      - chunk 2 dynamic evidence:
+        `hidden_probe21`, `hidden_probe22`, and `hidden_probe24` were rerun
+        and their red cases are still the intentional over-initializer
+        negatives (`IR-LOWER-035` on legal-size mismatch probes), not a new
+        live compiler bug; `hidden_probe25b` (`80/80 PASS`) and
+        `hidden_probe5` (`45/45 PASS`) remain green on the rebuilt tree
+      - chunk 2 findings: no new deterministic hidden-RE root cause found in
+        parser / semantic / canonical-IR front-half reread; current suspicion
+        narrows further toward the default indirect-memory pipeline after
+        lower-IR, especially the direct `value_ssa` fast-cleanup lane and/or
+        later backend preview-text peepholes rather than front-end AST
+        assembly or early canonical-IR declaration/control-flow shaping
+      - next reread boundary: `src/lower_ir/*` then the default
+        `value_ssa` / `value_ssa_pass` indirect-memory fast path
+      - long-running command state: none
+      - chunk 3 progress update: fresh reread completed again on
+        `src/lexer/lexer.c`, `src/parser/parser.c`,
+        `src/parser/parser_core_expr.inc`, and the full
+        `src/parser/parser_stmt_decl_tu.inc`
+      - chunk 3 findings: no new deterministic bug yet at the tokenizer /
+        parser front edge; parser-side constant-true loop bookkeeping is still
+        clearly local-only and does not itself own semantic/control-flow
+        authority, so the current fresh pass still points downstream for the
+        dead-loop / hidden-RE risk
+      - chunk 3 progress update 2: fresh reread also covered the semantic
+        front gate and core flow helpers in `src/semantic/semantic.c`,
+        `semantic_entry.inc`, `semantic_callable_rules.inc`,
+        `semantic_scope_rules.inc`, and the loop/guard-state parts of
+        `semantic_core_flow.inc`
+      - chunk 3 findings 2: no new deterministic bug yet in semantic return /
+        loop analysis; the current tree still keeps the important boundary
+        explicit that `may_non_terminating` is only a loop-summary heuristic
+        and not itself final proof for rejecting all-path returns, so the
+        fresh dead-loop/RE suspicion remains downstream of semantic
+      - chunk 3 progress update 3: fresh reread also covered the current
+        canonical-IR / lower-IR loop-shaping front line in `src/ir/ir.c`,
+        `ir_lower_stmt.inc`, `ir_global_init.inc`, `ir_global_dep.inc`,
+        `ir_verify.inc`, plus the lower-IR front edge in
+        `src/lower_ir/lower_ir.c`, `lower_from_ir.inc`, and
+        `lower_ir_verify.inc`
+      - chunk 3 findings 3: no new deterministic bug yet in the current
+        `IR -> lower_ir` front line; the `while/for` exit-block choice,
+        loop-target bookkeeping, and lower-IR value/slot split still look
+        internally consistent on reread, so the fresh dead-loop/RE suspicion
+        keeps narrowing toward the later default `value_ssa` indirect-memory
+        fast-cleanup path and/or still-later backend preview-text peepholes
+      - chunk 3 progress update 4: fresh reread also covered the current
+        `src/value_ssa/*` conversion/verifier front edge, the direct-fast-path
+        entry in `src/value_ssa_pass/value_ssa_pass_bridge.inc`, the current
+        `src/memory_ssa*` / `src/memory_ssa_pass*` load-forward front edge,
+        plus downstream `src/machine/lowering/machine_ir/*`,
+        `src/machine/lowering/machine_select/*`, and the final preview-text
+        peephole section of `src/compiler/compiler_driver.c`
+      - chunk 3 dynamic evidence 2: focused downstream array/control-flow
+        witnesses remain green on the rebuilt tree:
+        `hidden_probe27` (`60/60 PASS`) and `hidden_probe28` (`12/12 PASS`);
+        the focused compiler-driver regression binary is also still green
+        (`make test-compiler-driver` PASS)
+      - chunk 3 findings 4: no new deterministic bug yet in the reread of
+        `value_ssa` / `memory_ssa` / `machine` mainline; current suspicion is
+        now narrower and more downstream-looking than before, with the fresh
+        pass not reproducing a new front-half error and the widened
+        array/control-flow probes still pushing uncertainty back toward hidden-
+        only residuals in the default indirect-memory fast path or later final
+        backend text/output details
+      - chunk 3 progress update 5: audit strategy widened again by explicit
+        user request; the current reread is no longer only the obvious
+        mainline modules. Fresh broad-sweep reads now also cover adjacent
+        support layers such as `src/ast/ast.c`, `src/ir_pass/*`,
+        `src/value_ssa_alloc/*` front entry, `src/value_ssa_machine/*` front
+        entry, and downstream object/runtime/observe front entries including
+        `machine_bytes`, `machine_object`, `machine_reloc`, `machine_elf`,
+        `machine_runtime`, and `machine_observe`
+      - chunk 3 findings 5: no new deterministic bug surfaced yet from that
+        broader adjacency sweep either; current widened-array/control-flow
+        downstream probes remain green (`hidden_probe27` `60/60 PASS`,
+        `hidden_probe28` `12/12 PASS`), so the remaining hidden/default risk
+        still looks more like a combination-only downstream contract hole than
+        a single obvious standalone front-half bug
+      - next reread boundary: continue fresh pass deeper through remaining
+        `src/value_ssa_pass/*`, `src/machine/*`, and keep searching for a
+        concrete hidden/default repro that survives the current green probe
+        surface
     - the earlier local nested-call corruption repro was closed at the real
       downstream boundary in `machine_ir`, but hidden-course status must stay
       **reopened** because the platform symptom for `22_nested_calls` is still
@@ -4922,6 +5938,65 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-05: Another two small but real allocator-tail trims are now landed on the same `family/worklist/plan` line, and this round finally restored a fully visible local staged timing point instead of another partial timeout. First, `rebuild_family_phase_entry_for_root(...)` no longer does a standalone family-member pass just to rediscover the queue-priority signal before immediately walking the same family again to rebuild candidates; the rebuild loop now computes each candidate's queue-priority signal and the family-level max in the same pass. Second, `value_ssa_compute_allocator_move_worklist(...)` no longer performs a `family_count x plan_item_count` scan just to recover per-family base priorities; it now pre-aggregates `coalesce_root_value_id -> max(plan.priority)` once and reuses that table for each work item. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again, and the current `tools/diag_allocator_stages.c` probe on `lava-test/performance_test2021/hoist-2.sy` now finishes inside the `30s` guard with roughly `move_family ~= 9.364s`, `move_worklist ~= 9.289s`, and `plan ~= 9.594s` instead of timing out before printing the late stages. Current authority is therefore that the allocator performance mainline is still open, but it has tightened again into a smaller duplicate-work tail rather than a broad "plan still opaque" hotspot.
 - 2026-05-06: The same allocator-tail line has now taken one more real step down, and this time the gain is clearly on the actual plan path rather than only on adjacent helper surfaces. The move-engine now carries a reusable `scratch_root_flags` surface and uses it in several hot root-dedup sites (`collect_unique_runtime_roots(...)`, the full active-effective-degree recomputation helper, and the per-root active-effective-degree refresh helper), so those loops no longer pay repeated linear membership scans over `scratch_roots` just to suppress duplicate runtime roots. Focused reruns keep `lv8` (`12/12`) and `lv9` (`22/22`) green again. More importantly, the hot `tools/diag_allocator_stages.c` probe on `lava-test/performance_test2021/hoist-2.sy` now drops again from the earlier `~9s` late-stage band to roughly `move_family ~= 2.187s`, `move_worklist ~= 2.160s`, and `plan ~= 2.096s`, and the real rebuilt CLI path now compiles `build/compiler -riscv hoist-2.sy -o ...` in about `10.8s` under a `30s` guard. Current authority is therefore that the allocator reopen is now no longer about "can the public hot repro finish locally at all"; that part is closed. The remaining decision is whether to take one more very small allocator-tail slice or to treat the allocator line as materially closed enough to begin the broader correctness-sweep checkpoint.
 - 2026-05-06: The next ordered checkpoint in `Current Active Slice` is now materially underway rather than still hypothetical. A new repository-local sweep harness, `tools/sweep_sysy_suite.py`, now drives the rebuilt `build/compiler -> clang -> ld.lld -> qemu-riscv32-static` path directly and applies the current normalized-oracle policy to third-party suites instead of relying on ad hoc one-off shell loops. In the current tree, focused reruns keep the course baselines green (`lv8` `12/12`, `lv9` `22/22`), and directly oracle-complete third-party functional trees now also come back green again under that same rule: `compiler2021/公开用例与运行时库/function_test2021` (`103/103`), `indigo/test_codes/functional_test` (`111/111`), `TrivialCompiler/custom_test` (`29/29`), and `lava-test/cases` (`162/162`). `sysy-testsuit-collection/lvX` also reclosed in two steps: the first full rerun came back `458/467` under a conservative `20s` per-case guard, then the residual `9` red points all collapsed under either widened `60s` case budgets on the genuine giant stress cases (`many_parameters10000`, `register_alloc10000`, `matrix-1`) or a slightly more complete normalized-oracle rule on the formatting-noise cases (`heap_sort`, `insert_sort`, `merge_sort_xunhuan`, `shell_sort`, `digui2`, `div_constant`). Current authority is therefore that the post-allocator correctness sweep has already covered most of the available oracle-complete external surface and is no longer discovering a live semantic/codegen regression there. The remaining caveat for the sweep checkpoint is environment completeness rather than compiler correctness: in the current local clones, `minic-test-cases-2021s` / `2021f` do not expose ready-to-consume co-located oracle/runtime assets in the same layout as the other suites, so this round preserves their earlier recorded green status instead of pretending this new harness revalidated them directly in the current filesystem state.
+- 2026-05-09: Strict whole-code runtime-RE audit maintenance tail advanced through the remaining runtime/observe helper surfaces again, this time rereading `src/machine/runtime/{machine_launch,machine_load,machine_runtime,machine_interp,machine_state,machine_transition,machine_mutation}/*` plus `src/machine/observe/{machine_event,machine_outcome,machine_history,machine_timeline,machine_log,machine_journal}.c` in full rather than only the stage spine. No new generated-program control-flow/runtime crash root cause was proven from the observe classification chain in this chunk, but one concrete runtime-helper bug was found and fixed in the live tree: `machine_runtime_file_copy_memory_window(...)`, `machine_runtime_file_copy_stack_window(...)`, and `machine_runtime_file_copy_gap_window(...)` had been clipping windows with raw `offset + requested_byte_count` arithmetic, which allowed silent `size_t` wraparound on huge requests and could send later byte-copy loops down impossible ranges instead of conservatively clamping to the remaining mapped bytes. The current tree now clamps via `remaining = total - offset; actual = min(requested, remaining)` so the helper never depends on wrapped unsigned sums, and `tests/machine/runtime/machine_runtime/machine_runtime_test.c` now locks that exact `SIZE_MAX`-request family on memory/stack/gap window copies. Kept rechecks after the fix are `make test-machine-runtime` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and a new rotated external sweep on `compiler2021/公开用例与运行时库/2021初赛所有用例/h_functional` for the `many_*` family (`6/6 PASS`). A prior concurrent `make test-machine-runtime` / `make test` attempt did hit one transient filesystem/build-race failure (`cp: cannot open './build/machine_runtime/machine_runtime_test'`), but that was immediately reclassified as environment contention rather than a semantic regression because the same target passed once rerun serially.
+- 2026-05-09: The same maintenance-first runtime tail produced one more concrete helper/API bug after rereading `src/machine/runtime/machine_runtime/machine_runtime_report.inc` together with the surrounding `apply/commit/writeback/observe/delta` verification chain. `machine_runtime_report_get_region_filter_count(...)` and `machine_runtime_report_get_region_summary_by_filter_index(...)` had been treating `MACHINE_RUNTIME_REGION_FILTER_LOAD` as “all regions except the last segment” instead of filtering by actual `MachineRuntimeSegmentKind`. That happened to work for the repository’s default builder because it currently appends `.stack` last, but it was still a real public-contract bug: verifier-legal `MachineRuntimeFile` values only require one stack segment plus a correct `stack_segment_index`; they do **not** require the stack segment to be the final segment slot. The current tree now computes load-region filters by scanning segment summaries for `kind == MACHINE_RUNTIME_SEGMENT_KIND_LOAD`, and `tests/machine/runtime/machine_runtime/machine_runtime_test.c` now locks a focused reorder regression where a valid runtime file swaps `.stack` ahead of `.text` yet the report-side load filter must still return `.text` rather than the reordered stack segment. Kept rechecks after this closure are `make test-machine-runtime` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `compiler2021/公开用例与运行时库/function_test2020` filtered to the `array` family (`6/6 PASS`).
+- 2026-05-09: The ordered machine-tail reread continued one layer further down the observe/report side across `src/machine/observe/{machine_event,machine_outcome,machine_history,machine_timeline,machine_log,machine_journal}.c` plus the matching runtime-side `apply/commit/writeback/observe/delta` contracts. No new generated-program runtime-RE root cause was proven from the event/outcome/timeline classification chain in this chunk, but one explicit implementation bug was closed in the live tree: `machine_journal_clone_file(...)` had been calling `machine_journal_file_init(out_clone)` instead of `machine_journal_file_free(out_clone)` before reusing the destination object, unlike the rest of the repository’s clone helpers. That meant re-cloning into a non-empty `MachineJournalFile` would silently leak the old embedded log/report resources even though the new clone looked functionally correct. The current tree now frees the destination first so journal clone semantics match the rest of the machine pipeline’s clone contract. Kept spot rechecks after this closure are `make test-machine-journal` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and a rotated external sweep on `third_party/sysy-suites/TrivialCompiler/custom_test` filtered to the `global` family (`4/4 PASS`).
+- 2026-05-09: The same journal-clone closure is now also regression-locked on the exact reuse path instead of relying only on the implementation diff plus one clean-target clone smoke. `tests/machine/observe/machine_journal/machine_journal_test.c` now explicitly re-clones the same populated `MachineJournalFile` into an already-populated destination object before continuing with the normal report-side checks, so future regressions cannot quietly slip back to “clone works only when the destination was freshly initialized”. Follow-up rechecks after landing that stronger regression are `make test-machine-journal` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a new rotated external sweep on `third_party/sysy-suites/lava-test/cases` filtered to the `array` family (`6/6 PASS`).
+- 2026-05-09: The same observe-tail sweep also closed a smaller but still real summary/verify contract drift inside `machine_journal`. `machine_journal_verify_file(...)` has always required the first journal slice shape `record_count == 1 && record_index == 0`, but `machine_journal_file_get_journal_summary(...)` had been exposing `is_single_record_journal = (record_count == 1)` without checking `record_index == 0`, which meant the helper summary could claim “single-record=yes” for a verifier-illegal slice. The current tree now keeps the summary bit aligned with the verifier (`count == 1 && index == 0`), and `tests/machine/observe/machine_journal/machine_journal_test.c` now mutates a valid cloned journal to `record_index = 1` to lock both sides at once: summary must flip to `single-record=no`, and verifier must still reject the malformed slice. Kept spot rechecks after this closure are `make test-machine-journal` PASS and a rotated external sweep on `compiler2021/公开用例与运行时库/2021初赛所有用例/h_functional` filtered to the `nested_` family (`3/3 PASS`).
+- 2026-05-09: The journal-side helper closures are now also explicitly revalidated against the full local regression surface instead of only the targeted observe tests. After landing both the destination-freeing `machine_journal_clone_file(...)` repair and the `is_single_record_journal` summary/verifier alignment fix, a fresh serial `make test` run completed with `EXIT:0`, while the already-rotated course/external witnesses stayed green (`lv9` `22/22`, `lava-test/cases` `array*` `6/6`, `compiler2021/.../nested_*` `3/3`). Current authority is therefore that these journal-side maintenance-tail fixes are fully checkpointed on the repository’s local evidence surface and did not reopen neighboring runtime/observe lines.
+- 2026-05-09: A further ordered reread chunk then covered the remaining observe-chain implementations and tests around `machine_event`, `machine_outcome`, `machine_history`, `machine_timeline`, and `machine_log` after the journal repairs. This chunk explicitly rechecked their clone paths, report-refresh paths, custom-step fixtures, and single-entry/tick/line summary flags against the corresponding verifier rules. No additional concrete bug was found in that span beyond the already-landed journal fixes, and the same current evidence surface remained green (`make test` already `EXIT:0`; `lv8`/`lv9` green; rotated external `nested_*` and `array*` samples green). Current authority is therefore that the observe-chain tail from `event -> log` has been reread end-to-end in maintenance-first mode and is not currently carrying another confirmed contract bug or runtime-RE lead.
+- 2026-05-09: The strict whole-code runtime-RE audit advanced one more full maintenance chunk through the `machine_load -> machine_runtime -> machine_launch` boundary, this time focusing on address-range arithmetic and zero-fill/mapped-span contracts rather than only clone/report helper symmetry. One real bug cluster was closed in the live tree:
+  `1)` `machine_load_verify_file(...)` had been treating `(file_byte_count > 0 && !bytes)` as the only missing-payload failure, which meant a verifier-illegal segment shape like `file_byte_count == 0 && memory_byte_count > 0 && bytes == NULL` could still fall through into the zero-fill loop and dereference `segment->bytes[zero_fill_index]` from a null pointer;
+  `2)` both `machine_load`/`machine_runtime` bounds and overlap logic were still doing raw `virtual_address + byte_count` arithmetic, so crafted high-address segments could silently wrap `size_t` and corrupt span/overlap/gap/launch reasoning instead of being rejected as malformed.
+  The current tree now requires backing bytes for any non-zero `memory_byte_count` load segment, rejects wrapped load/runtime segment ends through explicit checked-add helpers, protects mapped-byte accumulation from unsigned overflow, and rejects runtime stack-base / initial-SP derivations when the stack-gap or stack-size additions would wrap. The same safety line now also reaches the report/query side because the shared load/runtime memory-summary and region-summary helpers use the same checked-end arithmetic instead of open-coded wrapped sums. Focused regression coverage now locks both sides:
+  `tests/machine/runtime/machine_load/machine_load_test.c` rejects the zero-fill-only null-bytes shape and a wrapped high-address load segment, while `tests/machine/runtime/machine_runtime/machine_runtime_test.c` rejects a wrapped `load -> runtime` stack-placement derivation before launch state is materialized. Kept rechecks after this closure are `make test-machine-load` PASS, `make test-machine-runtime` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` filtered to the `var` family (`7/7 PASS`; plus the separate `return` filter `1/1 PASS`). Current authority is therefore that the ordered machine-tail reread has now also reclosed one genuine runtime-address-contract bug family in `machine_load` / `machine_runtime`, not only smaller maintenance-side helper drift.
+- 2026-05-09: The sequential runtime-RE audit then advanced one sibling layer further down into `machine_image` and `machine_exec`, again looking for the same class of address-span and verifier/query drift that can propagate into generated-program runtime crashes. One more concrete contract bug family was closed in the live tree: `machine_image_verify_file(...)`, `machine_image_file_find_segment_covering_virtual_address(...)`, `machine_image_segment_copy_bytes(...)`, and the corresponding report/query helpers were still using unchecked `base + size` / `offset + size` arithmetic, so a crafted high-address image segment, symbol, or relocation could silently wrap `size_t` and pollute image-span, coverage, or relocation-site reasoning instead of being rejected. The current tree now uses explicit checked-add helpers in `machine_image`, and `machine_image_verify_file(...)` now rejects wrapped segment/image-offset/symbol-address/relocation-site calculations directly. Focused regressions now lock both the image and exec sides: `tests/machine/runtime/machine_image/machine_image_test.c` rejects wrapped segment-span, symbol-address, relocation-address, and image-offset cases, while `tests/machine/runtime/machine_exec/machine_exec_test.c` rejects a wrapped image before exec materialization. Kept rechecks after this closure are `make test-machine-image` PASS, `make test-machine-exec` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` filtered to the `func` family (`12/12 PASS`). Current authority is therefore that the runtime-tail audit has now also reclosed the next downstream address-contract hole in `machine_image` / `machine_exec`, not just the earlier load/runtime span family.
+- 2026-05-09: The same sequential runtime-RE audit then stepped one more sibling layer downward into `machine_launch -> machine_step -> machine_decode -> machine_payload_decode`, with the same focus on address-window and fetch/payload consistency. One more real bug was confirmed and fixed in the live tree: `machine_payload_decode_build_from_machine_decode_file(...)` had already been rejecting wrapped or too-long payload windows, but `machine_payload_decode_verify_file(...)` did not enforce the same derived-memory contract, which meant a bad clone/manually mutated file could pass verifier even though its `current_byte_memory_offset` and payload shape would read past mapped memory. The current tree now uses checked-add window validation in payload decode verification too, so the verifier and builder agree on the same read window. Focused regressions now lock the whole lower tail slice with `tests/machine/runtime/machine_payload_decode/machine_payload_decode_test.c` rejecting a wrapped payload window, while the earlier `machine_launch` / `machine_step` / `machine_decode` helpers stayed green under the same local sweep. Kept rechecks after this closure are `make test-machine-launch` PASS, `make test-machine-step` PASS, `make test-machine-decode` PASS, `make test-machine-payload-decode` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and a rotated external sweep on `third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` filtered to the `const` family (`2/2 PASS`). Current authority is therefore that the runtime-tail audit has now closed another verifier/build drift in the `launch -> step -> decode -> payload` tail, and the next review chunk should continue further along the same ordered machine/observe tail rather than reopening the already-closed window-contract families.
+- 2026-05-09: The sequential audit then continued past the launch/step/decode/payload tail and into the observe chain, but in this chunk the main result was a no-bug continuation rather than a new patch. I re-read `machine_observe`, `machine_delta`, `machine_trace`, `machine_event`, `machine_outcome`, `machine_history`, `machine_timeline`, `machine_log`, and `machine_journal` at the source level together with their matching tests, and no new concrete runtime-RE root cause was proven in that span beyond the already-closed journal/observe maintenance items. The current state of the live tree remained green on the full local suite and the rotated validation surface already being tracked, so the current authority is that the observe-chain tail remains maintenance-first and should continue to be reread from the next file/stage boundary rather than revisiting the already-checked launch/decode/payload contracts. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-09: The same observe-tail restart has now also been completed as a **full sibling-file audit pass** rather than only a stage-spine reread. This follow-up explicitly reread all current `src/machine/observe/*` implementation siblings again (`machine_observe`, `machine_delta`, `machine_trace`, `machine_event`, `machine_outcome`, `machine_history`, `machine_timeline`, `machine_log`, `machine_journal`), then cross-checked the matching public headers under `include/machine/` and the matching observe tests under `tests/machine/observe/`. Current conclusion is still conservative: no additional concrete generated-program runtime-RE bug was proven in this full-source/full-test-tail pass beyond the already-closed runtime/image/decode/journal maintenance fixes, and no new verifier/build/report drift was confirmed in the remaining observe exact/preview/blocked ladders. Current sequential audit boundary for the machine tail is therefore now the **end of the current observe chain**, with this stage recorded as whole-stage/full-sibling covered rather than only partially read. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-09: The ordered machine-tail audit then advanced back into `machine_select`, this time finding and closing one concrete verifier hole rather than another no-bug pass. `machine_select_verify_program(...)` had been validating that `LOAD_LOCAL`/`LOAD_GLOBAL`/`STORE_LOCAL`/`STORE_GLOBAL` operands pointed at an in-range slot, but it was not checking that the slot kind actually matched the op family. That meant verifier-legal selected programs could still contain a semantically malformed `load_local` that pointed at a global slot, or a `store_global` that pointed at a local slot, and those bad shapes could survive into later lowering/bytes/runtime stages. The live tree now rejects those op/slot-kind mismatches explicitly, and `tests/machine/lowering/machine_select/machine_select_test.c` now mutates a valid selected program to lock both the load-mismatch and store-mismatch cases. Focused and kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` filtered to the `array` family (`6/6 PASS`). Current sequential audit boundary is now the `machine_select` verifier/cleanup line, with no long-running sweep left in flight at the end of this chunk.
+- 2026-05-09: The same machine-select line then moved one more layer down into the cleanup/reuse helpers and closed a second concrete wrong-code-enabling hole. The repeated internal pure-call reuse path had been treating only direct `store_global` / `store_global_imm` as a global write conflict, so a `store_indirect` to a global address could still sit between two identical pure calls and allow the second call to be incorrectly reused even though the first result should have been invalidated. The live tree now treats `store_indirect` as a conflict whenever the candidate pure call reads globals, and the machine-select regression suite now locks a focused cross-function repro where a helper reads a global and `main` writes the same global via `addr_global + store_indirect` between two identical helper calls. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `third_party/sysy-suites/TrivialCompiler/custom_test` filtered to the `global` family (`4/4 PASS`). Current sequential audit boundary is now the `machine_select` cleanup/reuse line, and no long-running sweep remained in flight at the end of this chunk.
+- 2026-05-09: The same cleanup/reuse reread then exposed one more alias hole in the repeated pure-call reuse logic. Even after the earlier global-write conflict fix, the call-argument invalidation path still only treated direct `store_local` / `store_global` as mutations of `LOCAL_VALUE` / `GLOBAL_VALUE` argument descriptors, so a repeated pure call whose argument came from `load_global g` could still be incorrectly reused across `addr_global g ; store_indirect ...` because the argument-desc invalidation step failed to connect the indirect store back to the same slot. The live tree now lets the call-argument/store matcher inspect `store_indirect` address roots too: if the address source proves to be the same `addr_local` / `addr_global` slot it invalidates precisely, and if the indirect address root cannot be proven it now invalidates conservatively for local/global value/address descriptors instead of silently assuming safety. The regression suite now locks a focused helper-reads-global repro where `main` performs `addr_global + store_indirect` between two otherwise identical helper calls, and the second call must stay materialized instead of being reused. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and a rotated external sweep on `third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` filtered to the `func` family (`111/111 PASS`). Current sequential audit boundary remains the deeper `machine_select` cleanup/reuse line, with no long-running sweep left in flight at the end of this chunk.
+- 2026-05-09: The same machine-select revisit also hardened two more structural contract edges that showed up while extending the cleanup regressions. First, `machine_select_verify_program(...)` had still been missing some crash-proof table checks: malformed selected programs with `local_count > 0 && locals == NULL` or `op_count > 0 && ops == NULL` could still reach raw table walks instead of being rejected cleanly. The verifier now rejects those malformed backing-table shapes directly, `machine_select_program_free(...)` / function/block free helpers are now null-safe enough to tear down such mutated regression objects without dereferencing the missing tables again, and the machine-select suite now locks focused malformed-local-table and malformed-op-table witnesses. Second, the lowerer itself had a real control-path bug around cleanup return semantics: `machine_select_cleanup_pure_program(...)` returns a “changed or not” signal, but `machine_select_lower_program_from_machine_ir(...)` had been treating `0` as hard failure in the post-reuse reruns, so a perfectly valid “cleanup succeeded but had nothing more to do” state after internal-pure-call or spill-pure-expression reuse could incorrectly abort lowering. The current tree now treats negative cleanup results as failure and plain `0` as success-without-extra-change, which re-stabilizes the existing `live-in spill-call` reuse coverage instead of turning it into a false lowering failure. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and a rotated external sweep on `third_party/sysy-suites/lava-test/cases` filtered to the `many_` family (`6/6 PASS`). Current sequential audit boundary remains inside the remaining `machine_select` sibling detail surface, and no long-running sweep remained in flight at the end of this chunk.
+- 2026-05-09: The same `machine_select` tail then closed the matching low-level query/dump crash-proof gap too. Several public helper surfaces were still trusting structural backing tables that the verifier had only just started rejecting: `machine_select_program_get_function_by_name(...)`, `machine_select_program_get_block_by_function_name_and_block_id(...)`, `machine_select_function_get_block(...)`, `machine_select_function_compute_summary(...)`, and `machine_select_dump_program(...)` could still dereference missing `functions` / `blocks` / `ops` tables, and the dump path could also still walk a call op with `arg_count > 0 && args == NULL` instead of failing cleanly. The live tree now treats those malformed selected-program shapes as query/dump failures rather than as raw pointer walks, and the machine-select regression suite now locks focused failure-path witnesses for missing function tables, missing block/op tables, and missing call-arg tables. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), plus rotated external sweeps on `third_party/sysy-suites/lava-test/cases` for `nested_calls` (`2/2 PASS`) and `register_alloc` (`1/1 PASS`). Current sequential audit boundary is still the remaining `machine_select` query/report/lower-control sibling surface, and no long-running sweep remained in flight at the end of this chunk.
+- 2026-05-09: The same `machine_select` sibling-tail reread has now also closed one more runtime-facing control-fold bug plus the matching remaining lower-report table-trust gap. On the generated-code side, `machine_select_try_lower_constant_branch(...)`, `machine_select_try_lower_materialized_boolean_branch(...)`, and the later selected cleanup branch-to-jump fold had still been deciding branch truthiness on raw host `long long` immediates instead of normalized 32-bit SysY integer semantics, so shapes like `br 4294967296, then, else` or `mov r0, 4294967296 ; br r0, then, else` could fold to the wrong jump target even though SysY semantics normalize that value to `0`. The live tree now normalizes those branch-fold immediates before choosing the taken edge, and the regression suite now locks three focused witnesses: direct constant-branch folding, materialized-boolean branch folding, and the later cleanup-driven copy/immediate propagation path that folds a branch only after selected cleanup composes the immediate into the terminator. On the structural-hardening side, the remaining lower-report query/dump helpers had still been trusting `report->program.functions` / `function_summaries` / `function_block_summary_offsets` / filter-index tables too eagerly during by-name lookups and report dump assembly. The live tree now routes report-side by-name function lookup through the already-hardened selected-program query surface, validates report count/table drift before dump assembly, and refuses malformed function/filter/block-summary table shapes instead of dereferencing them. The regression suite now also locks a focused malformed-report witness where a valid selected lower report has its function table cleared before by-name lookup / filter lookup / dump. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter while third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`7/7`). Current sequential audit boundary is now effectively at the end of the remaining `machine_select` query/report/lower-control sibling surface, with no long-running sweep left in flight at the end of this chunk. One first attempt to run that rotated external slice via `autotest --filter` used the wrong CLI surface and was immediately corrected to `tools/sweep_sysy_suite.py`; that command misuse is logged only as operator/tooling noise, not as a compiler failure signal.
+- 2026-05-09: The next ordered strict-audit stage has now also been reread across the full `machine_layout` sibling set, and this chunk closed one more real downstream-contract hole. `machine_layout_verify_program(...)` had still been accepting several malformed layout-family shapes that later layout consumers implicitly rely on as semantic contracts: `load_local`/`load_global` and store-local/store-global families were only checking in-range slot ids instead of matching slot kind; spill-result versus register-result call families were not enforcing the matching result operand kind; and `_IMM` binary / compare / compare-branch layout families were not enforcing rhs-immediate form. Those malformed layout programs could therefore stay verifier-legal and drift into `machine_emit` / `machine_encode` / `machine_bytes` with the wrong opcode-family meaning. The live tree now rejects those mismatches explicitly, and `tests/machine/lowering/machine_layout/machine_layout_test.c` now locks focused mutated-program witnesses for load/store slot-kind mismatch, call-result family mismatch, and compare-branch-imm rhs-shape mismatch. The same reread also hardened the remaining layout report/query/dump surface: report refresh now re-verifies the owned layout program before rebuilding summaries, by-name lookups now clear/guard outputs through the selected hardened program query path, block-summary queries now reject function-summary-count drift, and report dump now rejects missing function/filter/block-summary tables or block-summary offset drift instead of trusting malformed report backing state. The regression suite now also locks a focused malformed-layout-report witness where a valid report has its function table cleared before by-name query / dump. Kept rechecks after this closure are `make test-machine-layout` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter if_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`8/8`). Current sequential audit boundary is now the next layout consumers `src/machine/lowering/machine_emit/*` and then `src/machine/lowering/machine_encode/*`, with no long-running sweep left in flight at the end of this chunk.
+- 2026-05-09: The next ordered strict-audit stage has now also been reread across the full `machine_emit` sibling set, and this chunk closed another downstream-contract cluster before `machine_encode`. `machine_emit_verify_program(...)` had still been accepting several malformed emitted-program shapes that later encode/bytes stages interpret structurally: `_IMM` binary / compare families were not enforcing rhs-immediate form; spill-result versus register-result call families were not enforcing the matching result operand kind; and load/store local/global families were still only checking in-range slot ids instead of matching slot kind. Those malformed emit programs could therefore remain verifier-legal and drift further downstream with the wrong opcode-family meaning. The live tree now rejects those mismatches explicitly, and `tests/machine/lowering/machine_emit/machine_emit_test.c` now locks focused mutated-program witnesses for load/store slot-kind mismatch, call-result family mismatch, and compare-branch-imm rhs-shape mismatch. The same reread also found one public lifecycle bug in the lowerer itself: `machine_emit_lower_program_from_machine_layout(...)` had not been clearing the destination program before rebuilding it, so lowering into a reused `MachineEmitProgram` could leave stale state/leak old blocks instead of acting like the rest of the pipeline’s overwrite-style lowerers. The current tree now frees/reinitializes the destination first, and the regression suite now also locks a focused overwrite witness where a pre-populated stale emit program is reused as the destination and must end up containing only the fresh lowered output. Finally, the remaining emit report/query/dump surface is now hardened too: report refresh re-verifies the owned emit program before rebuilding summaries, by-name/block-label query outputs are cleared/guarded more consistently, and report dump now rejects missing function/filter/block-summary tables or block-summary offset drift instead of trusting malformed report backing state. The regression suite now also locks a focused malformed-emit-report witness where a valid report has its function table cleared before by-name query / dump. Kept rechecks after this closure are `make test-machine-emit` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter short third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current sequential audit boundary is now the next ordered consumer stage `src/machine/lowering/machine_encode/*`, with no long-running sweep left in flight at the end of this chunk.
+- 2026-05-09: The next ordered strict-audit stage has now also been reread across the full `machine_encode` sibling set, and this chunk closed the matching verifier/report drift at the next consumer boundary. `machine_encode_verify_program(...)` had still been treating encoded blocks mostly as offset containers and was not re-validating the embedded emitted-op / terminator-family contracts that later `machine_bytes` / object consumers interpret semantically. In that state, malformed encoded blocks with missing op tables, wrong local/global slot kinds, wrong spill-result/register-result call families, bad immediate-call families, or compare-branch-imm shapes that violate rhs-immediate form could remain verifier-legal and continue downstream with the wrong opcode-family meaning. The live tree now rechecks those embedded op/terminator invariants explicitly, and `tests/machine/lowering/machine_encode/machine_encode_test.c` now locks focused mutated-program witnesses for load/store slot-kind mismatch, call-result family mismatch, compare-branch-imm rhs-shape mismatch, and malformed encode-report query/dump on a cleared function table. The same reread also hardened the encode report/query/dump surface: report refresh now re-verifies the owned encoded program before rebuilding summaries, by-name/block-label query helpers now clear outputs more defensively, and report dump now rejects missing function/filter/block-summary tables or summary-offset drift instead of trusting malformed report backing state. Kept rechecks after this closure are `make test-machine-encode` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter sort_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`7/7`). One first rotated third-party attempt used `--filter recursion`, which produced `NO_CASES` for this suite root and was immediately replaced with the real `sort_test` slice; that is logged only as operator filtering noise, not as a compiler regression signal. Current sequential audit boundary is now back at the already-reread post-encode downstream consumers (`machine_bytes` / object / reloc / elf / runtime bridge), so the remaining strict whole-repo work is effectively endgame maintenance-first reread and cross-stage recheck rather than one obvious unread machine stage.
+- 2026-05-10: The post-encode downstream cross-stage pass has now stepped back through `machine_bytes` together with the immediate object/reloc consumer tests. This chunk did **not** yet prove a new `machine_bytes` implementation bug in the generated-program runtime-RE sense; instead it exposed a real cross-stage maintenance drift after the stricter `machine_encode` verifier closures. Several bytes/object/reloc regressions had been constructing malformed emit inputs (for example missing register banks for register-bearing ops, missing local/global counts for slot users, or similar upstream metadata holes) and then expecting the later bytes/object/reloc consumer to be the first rejecting layer. With `machine_encode` now checking those contracts earlier, the downstream tests were no longer measuring the intended bytes/object/reloc behavior. The live tree now re-legalizes those downstream fixtures in `tests/machine/object/machine_bytes/machine_bytes_test.c`, `tests/machine/object/machine_object/machine_object_test.c`, and `tests/machine/object/machine_reloc/machine_reloc_test.c` so they target the real bytes/object/reloc semantics again instead of tripping on already-illegal upstream shapes. Kept rechecks after this maintenance closure are `make test-machine-bytes` PASS, `make test-machine-object` PASS, `make test-machine-reloc` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter matrix third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`4/4`). Current sequential audit boundary remains in the same post-encode downstream consumer region, with the next implementation reread focus still on `machine_object` / `machine_reloc` / `machine_elf` sibling code rather than on reopening the already-closed encode-layer contract checks.
+- 2026-05-10: The same post-encode downstream pass then moved into `machine_object` and `machine_reloc` implementation rereads and closed a small but real report/query robustness cluster there. On the object side, `machine_object_file_copy_section_bytes(...)` had still been willing to copy from a non-empty section even if its `bytes` table was missing, which could turn a malformed object file into a null-source `memcpy(...)` instead of a clean failure. The current tree now rejects that shape directly. On both object and reloc report surfaces, by-name report queries now clear outputs more defensively and report dumps now reject malformed summary-table drift (missing section/symbol/fixup/relocation summary tables or summary-count mismatches) instead of trusting those backing tables. The regression suites now lock both the object-side missing-section-bytes case and malformed object/reloc report query/dump witnesses. Kept rechecks after this closure are `make test-machine-object` PASS, `make test-machine-reloc` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter add third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`5/5`). Current sequential audit boundary is now the next downstream sibling stage `src/machine/object/machine_elf/*`, with no long-running sweep left in flight at the end of this chunk.
+- 2026-05-10: The next strict post-encode reread chunk has now fully covered the `machine_elf` sibling stage (`machine_elf.c`, `machine_elf_build.inc`, `machine_elf_core.inc`, `machine_elf_dump.inc`, `machine_elf_parse.inc`, `machine_elf_query.inc`, `machine_elf_verify.inc`) together with `tests/machine/object/machine_elf/machine_elf_test.c`, and this one did close two real helper-surface bugs instead of ending as a no-op pass. First, the dedicated file-section helpers (`machine_elf_file_get_text_section(...)`, `...get_strtab_section(...)`, `...get_symtab_section(...)`, `...get_rel_text_section(...)`, `...get_shstrtab_section(...)`) had still been zeroing `out_section_index` but never writing back the actual canonical section index on success, so callers using the dedicated helper family could receive the right section pointer but the wrong index (`0`) at the same time. Second, `machine_elf_file_get_first_global_symbol_index(...)` had still been rejecting the verifier-legal all-local ELF partition where `symtab.sh_info == symbol_count`, even though the rest of `machine_elf` already treats that as the canonical “there is no first global symbol” boundary. The live tree now returns the real dedicated section index on success and accepts `sh_info == symbol_count` as a valid all-local partition. The ELF regression suite now locks both surfaces: one focused helper check requires the dedicated file-section helpers to return indices `1..5` on a real built file, and another mutates that same file into an all-local symtab then requires `machine_elf_refresh_bytes(...)` plus `machine_elf_file_get_first_global_symbol_index(...)` to preserve the valid `symbol_count` boundary. Kept rechecks after this closure are `make test-machine-elf` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter if_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`8/8`). Current sequential audit boundary is now past the whole post-encode object tail (`machine_bytes -> machine_object -> machine_reloc -> machine_elf` all reread in full-sibling mode), with no long-running sweep left in flight at the end of this chunk; if the runtime-RE hunt continues from here, the next maintenance-first bridge to reopen is the already-reread downstream runtime/image boundary rather than another unread object-stage file set.
+- 2026-05-10: The next maintenance-first runtime/image bridge follow-up has now reopened the query/report surface around `machine_runtime` while rereading the adjacent `machine_image` / `machine_exec` / `machine_load` helpers for the same class of malformed-table drift. This chunk did find one real robustness cluster in the live tree: several raw/report runtime helpers were still willing to walk `runtime_file->segments` or `report->segment_summaries` without first proving those backing tables existed and still matched the recorded counts. In that state, manually mutated or stale report/file objects could still turn helpers such as `machine_runtime_file_get_summary(...)`, `machine_runtime_file_get_gap_summary(...)`, `machine_runtime_file_get_segment(...)`, `machine_runtime_file_get_stack_segment(...)`, `machine_runtime_file_get_executable_segment_count(...)`, `machine_runtime_file_get_region_summary(...)`, and the corresponding report-side entry/by-name/by-address/filter helpers into null-table dereferences instead of clean failures. The current tree now rejects that malformed runtime table state consistently on both the raw and report surfaces, including segment-summary count drift and missing executable/non-executable filter tables. `tests/machine/runtime/machine_runtime/machine_runtime_test.c` now locks a focused malformed-runtime witness by building a valid runtime file/report, clearing the segment tables, and requiring the affected raw/report query helpers to fail cleanly instead of succeeding. Kept rechecks after this closure are `make test-machine-runtime` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter op_priority third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`5/5`). Current sequential audit boundary remains inside the same downstream runtime/image bridge rather than past it: `machine_runtime` query/report hardening is now reclosed, while the next maintenance-first reread should continue across the remaining `machine_image` / `machine_exec` / `machine_load` sibling helper surfaces before declaring the whole bridge fully rechecked again. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The same downstream runtime/image bridge reread has now advanced through the parallel `machine_load` / `machine_exec` helper surfaces and closed the matching malformed-table cluster there too. Both modules still had raw/report query helpers that would trust `file->segments`, `report->segment_summaries`, and report-side executable/non-executable filter index tables more than their public contracts justified. In that state, manually mutated or stale load/exec file/report objects could still leave helpers such as `machine_load_file_get_summary(...)`, `machine_load_file_get_memory_summary(...)`, `machine_load_file_get_segment(...)`, `machine_load_file_get_entry_segment(...)`, `machine_load_file_get_executable_segment_count(...)`, `machine_exec_file_get_summary(...)`, `machine_exec_file_get_segment(...)`, `machine_exec_file_get_entry_segment(...)`, and the corresponding report-side entry/by-name/by-address/filter helpers succeeding on drifted metadata instead of failing cleanly. The live tree now consistently rejects missing segment tables, segment-summary count drift, and missing executable/non-executable filter index tables on those helper surfaces too. Focused regressions now lock both layers: `tests/machine/runtime/machine_load/machine_load_test.c` and `tests/machine/runtime/machine_exec/machine_exec_test.c` each build a valid file/report, clear the backing segment/filter tables, and require the affected raw/report helpers to fail rather than dereference or silently return stale data. Kept rechecks after this closure are `make test-machine-load test-machine-exec` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter unary_op third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current sequential audit boundary is now narrowed again to the remaining `machine_image` helper surface inside the same downstream bridge: `machine_runtime`, `machine_load`, and `machine_exec` query/report maintenance are reclosed, while the next ordered reread chunk should finish `machine_image` before treating this whole bridge as maintenance-first complete again. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The final remaining `machine_image` helper reread inside that downstream runtime/image bridge is now also reclosed, and with it the bridge itself is back to maintenance-first complete. The remaining issue there matched the same structural family but at a denser report surface: many raw/report image helpers still accepted nonzero `segment/symbol/relocation` counts with missing backing tables or accepted report-side count drift without proving the cached summary/index arrays still existed. In that state, stale or hand-mutated image file/report objects could still let helpers such as `machine_image_file_get_summary(...)`, `machine_image_file_get_segment(...)`, `machine_image_file_get_symbol(...)`, `machine_image_file_get_relocation(...)`, the segment/symbol/relocation subset counters, and a broad swath of report-side overview/segment/symbol/relocation/filter/artifact helpers succeed on invalid backing state instead of failing cleanly. The live tree now has explicit raw/report table-presence guards in `machine_image`, including report-side summary-count drift and missing filter/subset index arrays. `tests/machine/runtime/machine_image/machine_image_test.c` now locks a focused malformed-image witness by building a valid image file/report, clearing the raw segment/symbol/relocation tables plus selected report summary/filter tables, and requiring the affected raw/report query helpers to fail rather than dereference or return stale data. Kept rechecks after this closure are `make test-machine-image` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter hex third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current authority is therefore that the whole downstream runtime/image bridge (`machine_image -> machine_exec -> machine_load -> machine_runtime`) has now been reread again in maintenance-first full-sibling mode and no longer contains a known open malformed-table/query-drift bug cluster. If the runtime-RE audit continues from here, the next useful mainline is no longer “finish unread bridge helpers”, but cross-stage generated-program runtime hunting or another broader downstream maintenance revisit rather than another missing file-family read. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next cross-stage generated-program runtime-RE revisit has now stepped back up from the bridge helpers into the final compiler-side RISC-V preview text peepholes, and this chunk closed one real wrong-code risk there. `compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(...)` had already been blocking reuse across label boundaries, base-memory stores, base-register redefinitions, and some call-like barriers, but it was still missing one direct invalidation edge: if the previously loaded base value register itself (`first_load_rd`) was redefined in between two otherwise identical indexed-address sequences, the optimizer could still delete the second `lw + add` rebuild and leave the later address computation using the stale redefined register value instead of reloading the real base pointer from memory. That is a genuine generated-code wrong-code/runtime-RE risk rather than only a report/query robustness issue. The live tree now treats redefinition of that loaded base register as an invalidation barrier for the repeated-indexed-address sequence fold. `tests/compiler/compiler_driver_test.c` now locks a focused repro where `t6` is incremented between two otherwise identical `slli ; lw t6, ... ; add ...` sequences, and the second sequence must stay materialized instead of being elided. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter hex third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current sequential audit boundary is therefore now the remaining compiler-side / final-export generated-code line around the other preview text peepholes and nearby `machine_bytes`/driver handoff, not the already-reclosed runtime/image bridge. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: A same-line follow-up on the compiler-side preview-text peepholes immediately corrected one small process slip and refreshed the rotated validation surface without changing the code again. The previous kept recheck for the repeated-indexed-address closure had accidentally reused the `hex` third-party slice from the immediately preceding chunk, which is not the intended rotation habit for this thread. A new rotated external sweep is therefore now recorded on `tools/sweep_sysy_suite.py --filter scope third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021`, and it stays green (`1/1 PASS`). Current authority is unchanged on the code side: the loaded-base-register invalidation fix remains the active compiler-side closure, and the next useful reread chunk should continue through the remaining preview-text peepholes / `machine_bytes -> compiler_driver` handoff instead of revisiting the now-closed runtime/image bridge.
+- 2026-05-10: The next compiler-side preview-text reread chunk has now advanced into the remaining `indexed_local_base_offsets` peephole and closed another real wrong-code risk there. That rewrite removes one temporary local-base materialization like `addi t6, sp, 24` and folds later `add addr, t6, idx ; lw/sw ..., 0(addr)` into `add addr, sp, idx ; lw/sw ..., 24(addr)`. The missed edge was that the implementation had been willing to do this even when the “index” operand was actually the **same register as the folded base register itself** (`add a0, t6, t6` after `addi t6, sp, 24`). In that shape the fold is not algebraically valid at all: deleting the `addi t6, sp, 24` line leaves the transformed code reading an undefined/stale `t6` while also moving the base offset to the final memory op. The live tree now explicitly rejects this fold when `index_reg == base_reg`. `tests/compiler/compiler_driver_test.c` now locks a focused repro where `t6` appears on both sides of the `add`, and the original three-line sequence must stay unchanged. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter assign_complex third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`1/1`). Current sequential audit boundary remains on the same compiler-side / final-export generated-code line, now past this second `indexed_*` peephole risk and moving next toward the remaining preview-text peepholes plus the `machine_bytes -> compiler_driver` handoff. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next same-line reread chunk then stepped back to the adjacent `stack_staged_call_args` peephole and closed one more real wrong-code risk there too. That rewrite recognized a staged stack-call-arg pattern of the form `lw tmp0, src0 ; sw tmp0, dst0 ; lw tmp1, src1 ; sw tmp1, dst1 ; lw a0, dst0 ; lw a1, dst1 ; call ...` and tried to collapse the trailing reloads into earlier `lw a0, src0 ; ... ; lw a1, src1 ; ... ; call ...`. The missing contract edge was when both final call-arg reloads read the **same destination stack slot** (`dst0 == dst1`). In that case the original code deliberately loads both `a0` and `a1` from the post-store final contents of one shared slot, but the transformed code would instead pass the two pre-store source values separately. The live tree now rejects the fold when `dst0_offset == dst1_offset`. `tests/compiler/compiler_driver_test.c` now locks a focused repro where two staged stores both target `0(sp)` before the final `lw a0, 0(sp)` / `lw a1, 0(sp)` pair, and the pattern must stay unchanged. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter comment third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current sequential audit boundary remains inside the same compiler-side / final-export generated-code line, now with both the repeated-indexed-address family and the staged-stack-call-arg family reclosed; the next useful reread chunk should continue through the remaining preview-text peepholes and then the `machine_bytes -> compiler_driver` handoff rather than revisiting these now-locked folds. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next compiler-side follow-up has now crossed the `machine_bytes -> compiler_driver` handoff and closed one matching malformed-summary robustness cluster at that boundary. Several `machine_bytes_report` helper surfaces were still willing to succeed on stale/mutated reports even when the corresponding cached summary tables or offset tables had been cleared: `machine_bytes_report_get_function_reference_summaries(...)`, `machine_bytes_report_get_function_fixup_summaries(...)`, `machine_bytes_report_get_function_byte_span(...)`, `machine_bytes_report_find_block_summary_by_program_byte_offset(...)`, and `machine_bytes_report_get_block_summary(...)` could still accept missing backing arrays or offset drift instead of failing cleanly. That matters for the current workstream because `compiler_driver` consults these report surfaces while deciding call/result preservation and while pretty-printing block labels and per-function byte spans; malformed success there can mislead the final text exporter even if the underlying byte program remains valid. The live tree now rejects missing summary/offset tables and basic offset-order drift on those report helpers, and the same summary-shape guard now also reaches the `functions_with_calls/fallthrough/branches` helper family. `tests/machine/object/machine_bytes/machine_bytes_test.c` now locks a focused malformed-report witness by building one valid bytes report, clearing the cached reference/fixup/block/offset tables, and requiring the affected report helpers to fail rather than return stale slices. Kept rechecks after this closure are `make test-machine-bytes` PASS, `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `tools/sweep_sysy_suite.py --filter comment third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`2/2`). Current sequential audit boundary therefore remains on the compiler-side / final-export line, but now the immediate `machine_bytes -> compiler_driver` summary-handoff helper cluster is also reclosed; the next useful reread chunk should move on to any remaining final-export/control-flow text transforms or broader generated-program runtime repro hunting rather than revisiting this already-hardened report bridge. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next sequential reread chunk stayed on the same compiler-side / final-export line and explicitly re-read the remaining caller-save / call-span sub-slice in `compiler_driver.c`, but this one ended as a **no-new-bug continuation** rather than a new patch. I rechecked the caller-save helpers (`compiler_append_caller_save_sequence(...)`, the `call_fixup`-driven save/restore hooks in the main text-emission loop, and the surrounding call-span integration) against the existing high-arity / nested-call / far-call tests and direct rebuilt-CLI output probes. Two concrete observations are now recorded as execution memory: `1)` the current live exporter does not actually enable the `save_caller_regs_around_call` path in the emitted-text mainline today, so that code is not the active explanation for the current generated-program runtime surface, and `2)` the existing nested-call / far-call output still matches the currently locked expectations after the recent final-export and bytes-report fixes. Current authority is therefore conservative: this specific caller-save/call-span sub-slice is now read and not currently carrying a newly proven runtime-RE root cause. The next useful reread chunk should move past it into any remaining final-export/control-flow text transforms or a broader generated-program runtime repro hunt instead of reopening this same sub-slice immediately again. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next sequential reread chunk stayed on the same compiler-side / final-export line but ended as a **no-new-bug continuation** rather than another patch. I reread the remaining caller-save / call-span / text-export path around `compiler_append_caller_save_sequence(...)`, the per-word pretty-printer path in `compiler_append_riscv_preview_instruction(...)`, and the main export loop in `compiler_emit_riscv_preview_text_from_report(...)`, then cross-checked the existing caller-save / nested-call / far-call tests in `tests/compiler/compiler_driver_test.c`. Current conclusion for this chunk is conservative: I did not prove another concrete generated-program runtime-RE bug in that specific caller-save/call-span slice after the newly landed preview-text and bytes-report fixes. The current live tree stays green on the already recorded local/course/external surfaces, and no long-running sweep remained in flight at the end of this chunk. Current sequential audit boundary therefore remains inside the same compiler-side / final-export line, with the next useful reread moving past this caller-save/call-span sub-slice into any remaining final-export/control-flow transforms or a broader generated-program runtime repro hunt rather than reopening the same now-read caller-save block immediately again.
+- 2026-05-10: The next same-line compiler-side reread chunk stayed inside `src/compiler/compiler_driver.c` and did find one more real generated-code wrong-code risk in the live preview-text peepholes. `compiler_optimize_riscv_preview_stack_addr_reuse(...)` had been reusing an earlier `addi tmp, sp, imm ; sw tmp, slot(sp)` materialized stack-address write to replace later `lw reg, slot(sp)` reloads with direct `addi reg, sp, imm`, but it was only treating direct `sw ..., slot(sp)` as an invalidation barrier. That missed the equivalent overwrite shape `addi t6, sp, slot ; sw x, 0(t6)`: after such a materialized-base store, the stack slot no longer necessarily contains the original saved address, so rematerializing `addi reg, sp, imm` is wrong and can feed bad pointers into later generated loads/stores/calls. The live tree now treats that two-line materialized stack-slot store as the same overwrite barrier for `stack_addr_reuse(...)` that the neighboring indexed-address peepholes already honor. Existing regression coverage in `tests/compiler/compiler_driver_test.c` now meaningfully locks the exact witness `addi t0, sp, 24 ; sw t0, 0(sp) ; addi t6, sp, 24 ; sw a1, 0(t6) ; lw a0, 0(sp)` by requiring the final reload **not** to collapse into `addi a0, sp, 24`. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`), and the rotated external sweep `python3 tools/sweep_sysy_suite.py --filter sort_test third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`7/7`). Current sequential audit boundary remains on the compiler-side / final-export generated-code line, now with the `stack_addr_reuse` overwrite barrier reclosed too; the next useful reread chunk should continue through the remaining final-export/control-flow transforms or shift into a broader generated-program runtime repro hunt if that late-export path no longer yields another concrete bug. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next same-line compiler-side reread chunk stayed in the same late preview-text reuse family and closed one broader call-barrier wrong-code cluster rather than another isolated syntax edge. Several memory-dependent final-text reuse peepholes had still been relying on register-clobber side effects to notice a call boundary: `compiler_optimize_riscv_preview_stack_addr_reuse(...)`, `compiler_optimize_riscv_preview_repeated_indexed_addr_triples(...)`, and `compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(...)` would all stop when a call clobbered one of their working temporaries, but they did **not** treat the call itself as a semantic barrier. That left a real generated-program runtime risk when the helper registers happened to be callee-saved (`s*`) instead of caller-clobbered (`a*`/`t*`): the optimizer could still remove a stack-slot address save/reload pair or a repeated base-pointer reload across `call foo` even though the callee may observe or mutate the same memory and the original pre-call store/load was still semantically relevant. The live tree now treats any call-like line as a barrier for those three memory-dependent preview-text folds instead of depending on accidental register-clobber patterns. `tests/compiler/compiler_driver_test.c` now locks three focused callee-saved witnesses: `stack_addr_reuse` must preserve `addi s1, sp, 24 ; sw s1, 0(sp) ; call foo ; lw s2, 0(sp)`, `repeated_indexed_addr_triples` must keep the second `slli s3, s4, 2 ; lw s2, 24(sp) ; add s3, s2, s3` after `call foo`, and `repeated_indexed_addr_sequences` must likewise keep the second `slli s3, s4, 2 ; lw s2, 0(s1) ; add s3, s2, s3` after the call. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external sweep `python3 tools/sweep_sysy_suite.py --filter matrix third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`4/4`). Current sequential audit boundary remains on the compiler-side / final-export generated-code line, but the memory-dependent reuse peephole family is now reclosed against both materialized-slot overwrites and call-like barriers; the next useful reread chunk should move on to the remaining final-export/control-flow transforms or broaden into generated-program runtime repro hunting if this late-export line stops yielding more concrete bugs. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next sequential reread chunk stayed on the same compiler-side / final-export generated-code line but ended as a **no-new-bug continuation** rather than another patch. I re-read the remaining non-peephole export helpers around `compiler_riscv_preview_cache_build(...)`, `compiler_lookup_block_label(...)`, `compiler_append_pretty_symbol_name(...)`, `compiler_emit_global_sections(...)`, the fixup/block-label cached lookup helpers, `compiler_append_stack_adjust(...)`, `compiler_append_stack_access(...)`, and the per-word pretty-printer path in `compiler_append_riscv_preview_instruction(...)`, then spot-checked the rebuilt CLI output on a simple backward-loop witness to confirm the current live path is still resolving local loop branches to emitted labels rather than falling back to malformed raw text. Current conclusion for this chunk is conservative: I did not prove another concrete generated-program runtime-RE bug in that helper/export span after the recently closed preview-text reuse barriers. The current live tree remains green on the already recorded local/course surfaces, and the rotated external sweep `python3 tools/sweep_sysy_suite.py --filter search third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` also stayed green (`2/2 PASS`). Current sequential audit boundary therefore remains inside the same compiler-side / final-export line, but it has now moved past the cache/global-section/pretty-printer helper span; the next useful reread chunk should continue into any remaining final-export/control-flow transform detail or broaden into direct generated-program runtime repro hunting rather than immediately reopening this now-read helper slice. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next sequential reread chunk stayed on the same `compiler_driver.c` tail but again ended as a **no-new-bug continuation** rather than a new patch. I re-read the remaining export/build boundary from `compiler_emit_riscv_preview_text_from_report(...)` down through `compiler_mode_from_flag(...)`, `compiler_compile_source_text_with_options(...)`, and the file/text wrapper entrypoints, then spot-checked the rebuilt CLI output on a simple 9-argument witness to confirm the current prologue/caller-stack handoff for `param_index >= 8` is still materially sane in live output (`pick(..., a8)` returns via the stack slot as expected). Current conclusion is still conservative: I did not prove another concrete generated-program runtime-RE bug in that remaining compiler-driver entry/export span after the already landed preview-text barrier fixes. The rotated external sweep `python3 tools/sweep_sysy_suite.py --filter jump third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` also stayed green (`1/1 PASS`). Current sequential audit boundary therefore remains at the far end of the compiler-side / final-export line, and the next useful chunk is likely to shift from source reread into broader generated-program runtime repro hunting unless a fresh suspicious final-export/control-flow edge appears. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next audit chunk intentionally started that broader generated-program runtime repro hunting instead of pretending there was still a large unread compiler-driver tail. I kept the source-level context on the now-nearly-exhausted `compiler_driver.c` final-export line, but the concrete work in this chunk was a wider rotated runtime-facing sweep on `third_party/sysy-suites/lava-test/cases` filtered to the array/long-array family (`python3 tools/sweep_sysy_suite.py --filter arr --limit 12 ...`). That sample is useful for the current hidden `RE` target because it exercises address formation, stack/local array layout, long-array/global data handling, and repeated indexed memory traffic, i.e. exactly the kinds of generated-program runtime surfaces that could still hide a crash even after the final-export peephole fixes. Current result is conservative but still valuable: the whole rotated subset stayed green (`11/11 PASS`, including `104_long_array.sy` and `105_long_array2.sy`), so this chunk did **not** reproduce a new runtime crash and did **not** justify another code patch. Current authority is therefore that the compiler-driver final-export reread is now effectively near-exhausted, and the next useful mainline should keep broadening the runtime repro hunt across different external/runtime-heavy subsets unless a fresh source-level suspicion appears. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-repro chunk finally did reproduce a real generated-program failure again, and this one looped back into the still-live compiler-side preview-text line rather than reopening the deeper SSA/backend core. A rotated sweep on `third_party/sysy-suites/minic-test-cases-2021f/functional --filter long` came back `3/4 PASS` with `094_long_code.c` failing as a **runtime crash** (`ACTUAL_EXIT -11`, empty stdout). I minimized that direction to the smaller local witness `copy(arr, result); touch(result);` with two local arrays, and the rebuilt compiler was emitting the bad shape `call copy ; lw a0, 16(sp) ; call touch` without preserving the earlier `spill.0 = addr_local local.2` definition that should have kept the saved array-address slot initialized. A direct machine-stage dump on the minimized witness showed the deeper pipeline was still sane (`machine_select` / `machine_layout` / `machine_emit` / `machine_bytes` all retained `spill.0 = addr_local local.2`), so the bug again traced back to the final text peephole layer: `compiler_optimize_riscv_preview_stack_addr_reuse(...)` was willing to rematerialize one pre-call stack-slot address reload and delete the original `addi tmp, sp, imm ; sw tmp, slot(sp)` definition even when a **later** reload after the barrier still needed that same saved slot. In other words, the helper had learned to stop rewriting *across* a call barrier, but it still forgot that deleting the original saved-slot definition can break later post-barrier loads that keep reading the stack slot. The live tree now scans for later direct/materialized reloads of that same stack slot before removing the original save definition, and therefore refuses this fold when the saved slot remains live past the local rewrite window. `tests/compiler/compiler_driver_test.c` now locks a focused direct-helper witness `addi t0, sp, 24 ; sw t0, 0(sp) ; lw a1, 0(sp) ; call foo ; lw a0, 0(sp)` that must stay unchanged because the later post-call reload still needs the saved slot, and the minimized live CLI witness now emits the preserved `addi t4, sp, 8 ; sw t4, 16(sp)` pair before `call copy` instead of dropping it. Kept rechecks after this closure are `make test-compiler-driver` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the widened external follow-up `python3 tools/sweep_sysy_suite.py --filter long third_party/sysy-suites/minic-test-cases-2021f/functional` PASS (`4/4`, including the formerly crashing `094_long_code.c`). Current authority is therefore stronger than the previous no-bug runtime-hunt chunk: the repro line is now materially productive, and the compiler-driver final-export audit still had one more real runtime-facing corner case left precisely in the stack-address-rematerialization family. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next runtime-hunt chunk broadened further without finding a new red point, so this one is recorded as a **no-new-bug continuation** rather than another patch. After the `094_long_code.c` closure, I widened the runtime-facing evidence surface instead of immediately tunneling into another source-level suspicion: `python3 tools/sweep_sysy_suite.py --filter func third_party/sysy-suites/minic-test-cases-2021f/functional` revalidated the whole `minic-test-cases-2021f/functional` tree in practice (`100/100 PASS`), `--filter putarray` on the same tree stayed green (`1/1 PASS`), `python3 tools/sweep_sysy_suite.py --filter array third_party/sysy-suites/minic-test-cases-2021s/functional` stayed green (`6/6 PASS`), `--filter global` on `minic-test-cases-2021s/functional` stayed green (`1/1 PASS`), and `python3 tools/sweep_sysy_suite.py --filter long third_party/sysy-suites/lava-test/cases` stayed green (`5/5 PASS`, including both `106_long_code.sy` and `107_long_code2.sy`). Current conclusion is conservative but useful: the broadened runtime-heavy external surface did **not** reproduce another generated-program crash immediately after the last fix, so the active mainline should keep rotating to different external/runtime-heavy slices rather than repeatedly hammering the same long/array family. One attempted rotated slice on `compiler2021/.../function_test2021 --filter global` returned `NO_CASES`; that was only filter-selection noise, not a compiler signal. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk continued that widened external rotation and again ended as a **no-new-bug continuation** rather than a new patch. I intentionally moved away from the already-green `long/array` witnesses and sampled different runtime-heavy stress families: `python3 tools/sweep_sysy_suite.py --filter nested third_party/sysy-suites/lava-test/cases` stayed green (`3/3 PASS` for `nested_calls*` and `nested_loops`), `python3 tools/sweep_sysy_suite.py --filter many third_party/sysy-suites/TrivialCompiler/custom_test` stayed green (`4/4 PASS` for the `many_globals*` / `many_params` line), and `python3 tools/sweep_sysy_suite.py --filter register third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` also stayed green (`1/1 PASS` for `99_register_realloc.sy`). Current conclusion is still conservative: this broader rotated runtime-facing surface did **not** reproduce another generated-program crash after the `094_long_code.c` fix, so the active repro-hunt line remains productive but not currently red on these neighboring nested/global/register stress families. The next useful chunk should keep rotating to a different external/runtime-heavy slice again instead of settling back into one comfort family. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk widened that rotation one more time and still ended as a **no-new-bug continuation** rather than another patch. I kept moving away from the already-revalidated long/array core and sampled a second ring of runtime-heavy neighbors: `python3 tools/sweep_sysy_suite.py --filter many third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` stayed green (`3/3 PASS`), `python3 tools/sweep_sysy_suite.py --filter search third_party/sysy-suites/lava-test/cases` stayed green (`4/4 PASS`), and `python3 tools/sweep_sysy_suite.py --filter loop third_party/sysy-suites/TrivialCompiler/custom_test` stayed green (`5/5 PASS`). I then also spot-checked several single-case complex-algorithm witnesses from `minic-test-cases-2021f/functional` that are useful for runtime-RE hunting because they stress deeper call/loop/memory behavior without being the same old array family: `071_brainfk.c`, `073_dijkstra.c`, `080_max_flow.c`, and `081_n_queens.c` all came back green (`1/1 PASS` each). Current conclusion remains conservative but useful: this additional rotated runtime-facing surface did **not** reproduce another generated-program crash after the last `stack_addr_reuse` closure, so the next useful runtime-hunt chunk should keep broadening sideways into other external heavy slices rather than circling back immediately to the same categories that are already green. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk continued the same widened external rotation and again ended as a **no-new-bug continuation** rather than another patch. I stayed on the runtime-facing mainline but rotated into a third ring of heavier algorithmic witnesses from `minic-test-cases-2021f/functional`: `python3 tools/sweep_sysy_suite.py --filter kmp ...` (`1/1 PASS`), `--filter hanoi ...` (`1/1 PASS`), `--filter backpack ...` (`1/1 PASS`), `--filter substr ...` (`1/1 PASS`), `--filter percol ...` (`1/1 PASS`), `--filter calc ...` (`1/1 PASS`), `--filter color ...` (`1/1 PASS`), and `--filter gcd ...` (`2/2 PASS` for `exgcd` + `gcd`). Current conclusion remains conservative but useful: even after broadening into these deeper algorithm/loop/call/memory cases, I still did **not** reproduce another generated-program crash after the `094_long_code.c` fix, so the runtime-RE hunt remains open but currently green on yet another nontrivial external slice. The next useful chunk should keep rotating to different heavy families again instead of returning to one already-green category by habit. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk widened from rotated spot checks back into one larger whole-suite revalidation and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/minic-test-cases-2021s/functional`, which came back fully green (`112/112 PASS`, including the `reserved/` tail plus the previously relevant `094_long_array.c`, `095_long_code.c`, `096_many_param_call.c`, `097_many_global_var.c`, `098_many_local_var.c`, and `099_register_realloc.c`). In the same chunk I also rotated two smaller neighboring runtime-heavy slices: `python3 tools/sweep_sysy_suite.py --filter global third_party/sysy-suites/lava-test/cases` stayed green (`1/1 PASS` for `111_many_globals.sy`), and `python3 tools/sweep_sysy_suite.py --filter matrix third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` stayed green (`4/4 PASS`). Current conclusion is therefore stronger than the recent spot-check-only chunks: after the `094_long_code.c` closure, one more entire external functional suite and several additional rotated heavy slices stayed green, so the remaining runtime-RE hunt is now less about “did the immediately adjacent family regress?” and more about continuing to search for a still-unseen hidden/runtime corner outside these already revalidated public surfaces. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk widened from “one more full suite” into “multiple whole-surface/public-heavy revalidations” and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020`, which came back fully green (`111/111 PASS`), and the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/TrivialCompiler/custom_test`, which also came back fully green (`29/29 PASS`). In the same chunk I rotated a neighboring short-circuit runtime-heavy slice on `lava-test/cases` (`python3 tools/sweep_sysy_suite.py --filter short ...` => `3/3 PASS`). Current conclusion is stronger again: after the `094_long_code.c` closure, several separate whole external functional surfaces now stay green end-to-end rather than only handpicked subsets, so the remaining runtime-RE hunt is increasingly about looking for a still-unseen hidden/runtime corner beyond these public suites rather than about repairing a regression already visible in common external trees. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk widened that whole-surface revalidation yet again and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/indigo/test_codes/functional_test`, which came back fully green (`111/111 PASS`), and the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/lava-test/cases`, which also came back fully green (`162/162 PASS`). In the same chunk I had already rotated the smaller `global` / `matrix` slices before those full-suite reruns; they stayed green too, so the larger reruns materially subsume and strengthen that evidence. Current conclusion is therefore stronger again: after the `094_long_code.c` closure, several more entire public external functional surfaces now stay green end-to-end, which pushes the remaining runtime-RE hunt even further away from “common public functional regressions” and more toward “find the hidden/runtime corner that these public suites still do not cover.” No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk pushed that “whole public surface” line one step farther and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/sysy-testsuit-collection/lvX`, which came back `464/467` under the default per-case budget, but the exact three red points were all timeout-class and matched the already-known heavy-case pattern rather than a fresh runtime crash: `many_parameters10000.c` (`COMPILE_TIMEOUT`), `matrix-1.c` (`RUN_TIMEOUT`), and `register_alloc10000.c` (`COMPILE_TIMEOUT`). I immediately reclassified that surface with the wider budget already tracked in thread memory by rerunning each of those names at `--case-timeout 60`; all of them came back green (`many_parameters10000.c 1/1 PASS`, `matrix-1.c + matrix-1_2.c 2/2 PASS`, `register_alloc10000.c 1/1 PASS`). In the same chunk I also had the full `compiler2021/function_test2021` green (`103/103 PASS`) from the still-running parallel full-suite revalidation. Current conclusion is therefore stronger again: after the `094_long_code.c` closure, even the broader `lvX` surface is now behaving like “known timeout budget artifacts, not fresh runtime crashes,” and the remaining runtime-RE hunt is increasingly about finding a hidden corner beyond what these now-revalidated public whole suites cover. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk widened those “whole public surface” reruns again and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/compiler2021/公开用例与运行时库/2021初赛所有用例/h_functional`, which came back fully green (`37/37 PASS`). I also ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/lava-test/lava_test`, which came back `19/21` under the default per-case budget, but the only two red points were the already-familiar timeout-class heavy cases `many_parameters10000.sy` and `register_alloc10000.sy`, not a new runtime crash. I immediately reclassified those with the wider budget already used elsewhere in this thread: `python3 tools/sweep_sysy_suite.py --case-timeout 60 --filter many_parameters10000 ...` came back green (`1/1 PASS`) and the same `--case-timeout 60` rerun for `register_alloc10000` also came back green (`1/1 PASS`). Current conclusion is therefore stronger again: after the `094_long_code.c` closure, yet another heavy public surface and another whole runtime-adjacent suite now reduce to “known timeout budget artifacts, not fresh REs,” so the remaining runtime-RE hunt is increasingly about searching beyond the currently available public-suite coverage rather than fixing a public regression that is already in front of us. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk pushed the same line one step farther and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `python3 tools/sweep_sysy_suite.py third_party/sysy-suites/compiler2021/公开用例与运行时库/2021初赛所有用例/functional`, which came back fully green (`103/103 PASS`). In parallel I also probed `third_party/sysy-suites/minic-test-cases-2021f/performance`; the full suite came back with exactly one red point at the default budget (`19_brainfuck-calculator.c: RUN_TIMEOUT`), but that too classified cleanly as a heavy-case budget artifact rather than a new runtime crash because a focused rerun at `--case-timeout 60` came back green (`1/1 PASS`). Current conclusion is therefore stronger again: after the `094_long_code.c` closure, yet another whole public functional surface is fully green, and another performance-side outlier collapses under the wider timeout budget instead of exposing a fresh RE, so the remaining runtime-RE hunt is now even more concentrated into whatever hidden/runtime corner still sits outside these already-revalidated public surfaces. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk deliberately pushed deeper into the performance-side classification line and still ended as a **no-new-bug continuation** rather than another patch. I ran the full `third_party/sysy-suites/minic-test-cases-2021s/performance` surface (`18/18 PASS`) and then both heavier 29-case performance trees: `third_party/sysy-suites/compiler2021/公开用例与运行时库/performance_test2021-private` came back `18/29` with timeout/compile-time pressure on `brainfuck-mandelbrot-nerf`, `dead-code-elimination-2/3`, `floyd-2`, `hoist-2/3`, `instruction-combining-1/2/3`, and `integer-divide-optimization-2/3`; `third_party/sysy-suites/lava-test/performance_test2021` came back `19/29` with the same runtime-timeout cluster except that `instruction-combining-1.sy` already stayed green there. I then immediately reclassified part of that surface with the wider budget already used elsewhere in this thread: `instruction-combining-1.sy` in the private tree cleared at `--case-timeout 60` (`1/1 PASS`), while `hoist-2.sy` in the private tree still timed out even at `--case-timeout 60` (`1/1 FAIL RUN_TIMEOUT`). Current conclusion is therefore sharper again: these heavier performance suites are still not giving me a fresh runtime-RE/crash family, but they do reconfirm that the true still-open public/perf pressure is concentrated in the older timeout witnesses (`03_sort2`, `shuffle2`, `hoist-2`, plus adjacent heavy optimizer/perf families), not in a newly reproduced generated-program crash. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk stayed on that same performance-classification line and again ended as a **no-new-bug continuation** rather than another patch. I used the wider `--case-timeout 120` budget to separate “true still-open perf tails” from “just too heavy for the default budget” on the remaining high-value public/private witnesses. On the public side, both `03_sort2.sy` and `shuffle2.sy` still timed out even at `120s`, so they remain true open perf witnesses rather than mere default-budget artifacts. On the private side, `hoist-2.sy` also still timed out even at `120s`, while `brainfuck-mandelbrot-nerf.sy` cleared under the same widened budget (`1/1 PASS`). Current conclusion is therefore sharper again: after the current runtime-RE closures, the remaining open public/private pressure is increasingly a small set of real performance tails (`03_sort2`, `shuffle2`, `hoist-2`, and nearby heavy optimizer cases), not a newly reproduced generated-program crash family. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk kept pushing that same “classify the remaining public/private perf surface” line and again ended as a **no-new-bug continuation** rather than another patch. I ran the full `third_party/sysy-suites/compiler2021/公开用例与运行时库/performance_test2021-private` and `third_party/sysy-suites/lava-test/performance_test2021` suites end-to-end instead of only targeted cases. The private tree came back `18/29` and the lava perf tree `19/29`; importantly, both failed almost entirely inside the already-known timeout/perf cluster rather than on a fresh runtime-crash family. The shared timeout set still centers on `dead-code-elimination-2/3`, `floyd-2`, `hoist-2/3`, `instruction-combining-2/3`, and `integer-divide-optimization-2/3`, while the private tree alone also showed `instruction-combining-1.sy` as a default-budget compile-time timeout. I immediately reclassified that one too: `instruction-combining-1.sy` clears at `--case-timeout 60` (`1/1 PASS`), so it joins the “budget artifact” side rather than the “true still-open pressure” side. Current conclusion is therefore even sharper: after the current runtime-RE fixes, the remaining red area in the heavier public/private performance suites is continuing to behave like the same older perf-pressure cluster, not like a new runtime-crash family. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk stayed on that same perf-classification line and again ended as a **no-new-bug continuation** rather than another patch. I did not reopen any implementation code in this chunk; instead I used the small local stage probes to refresh the still-open-witness classification. `tools/profile_compile_pipeline.py` confirmed that both `03_sort2.sy` and `shuffle2.sy` still compile in only a few milliseconds locally, and the deeper `tools/profile_compiler_stages.c` probe keeps the same story intact: `03_sort2.sy` spends only about `0.003s` in `machine_ir_report` and about `0.009s` total in the full local compile path, `shuffle2.sy` is similarly tiny, while `hoist-2.sy` remains compile-side and is still overwhelmingly dominated by `machine_ir_report` (`~3.128s` out of `~3.242s` total in the current local probe). Current conclusion therefore remains unchanged but more numerically grounded: the remaining open public witnesses are still separating cleanly into “runtime/program performance tails” (`03_sort2`, `shuffle2`) and “compiler compile-time/allocator-side pressure” (`hoist-2`), not into a newly reproduced generated-program runtime crash family. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
+- 2026-05-10: The next runtime-hunt chunk stayed on that same classification-heavy line and again ended as a **no-new-bug continuation** rather than another patch. I revalidated the full `third_party/sysy-suites/minic-test-cases-2021s/performance` surface (`18/18 PASS`) and then pushed one more public-perf classification step on `third_party/sysy-suites/compiler2021/公开用例与运行时库/performance_test2021-public`. The default sweep there still came back with several timeouts (`23/30` overall), but the new targeted reruns showed that several of those are budget artifacts rather than fresh runtime crashes: `03_sort3.sy` passed at `--case-timeout 60` (`1/1 PASS`), the `conv*` slice passed at `--case-timeout 60` (`3/3 PASS` including the previously red `conv1.sy` and `conv2.sy`), `median2.sy` passed at `--case-timeout 60` (`1/1 PASS`), and `shuffle1.sy` also passed at `--case-timeout 60` (`1/1 PASS`). Current conclusion is therefore sharper: on the current tree, that public performance surface is not proving a new runtime-RE family so much as separating into “known/open heavy perf tails” and “default-budget-only artifacts.” The clearest still-open public pressure signal remains the older `03_sort2.sy` / `shuffle2.sy` pair rather than the newly checked neighbors. No new bug was found in this chunk, and no long-running sweep remained in flight at the end of it.
 - 2026-05-06: That remaining environment-completeness caveat is now also materially closed for the current round. `tools/sweep_sysy_suite.py` can now fall back to the environment's native `/opt/lib/native/libsysy.a` to synthesize host-side oracles for `.c`-based suites when a local testcase tree lacks checked-out runtime sources or co-located `.out` files. With that fallback in place, the current rebuilt compiler now revalidates both `pku-minic` functional trees directly in the present filesystem state instead of relying on older notes: `minic-test-cases-2021f/functional` is green again (`100/100`), and `minic-test-cases-2021s/functional` is green again (`112/112`, including the `reserved/` tail). The same sweep harness was then rerun once more across the previously widened `sysy-testsuit-collection/lvX` surface under a `60s` per-case budget, and that second full pass now closes the bookkeeping loop completely: the suite is all-green end-to-end (`467/467`) rather than only "458/467 plus 9 targeted spot-check closures". Current authority is therefore that the post-allocator correctness checkpoint is no longer merely "mostly complete": for the currently available public oracle-bearing suites in this environment, it is materially complete and green.
 - 2026-05-06: The next stage after that correctness checkpoint has now at least been reopened enough to have fresh local baseline numbers instead of only inherited old suspicions. The rebuilt CLI still compiles the public allocator-heavy `lava-test/performance_test2021/hoist-2.sy` case quickly enough to stay well inside practical local guardrails (current direct `build/compiler -riscv ... -o ...` timing is about `12.0s`, still in the same post-allocator-improvement band as the earlier `~10.8s` reading), while the distinct public runtime-tail case `compiler2021/performance_test2021-public/03_sort2.sy` still reproduces as `RUN_TIMEOUT` under the current `60s` per-case sweep budget. Current authority is therefore that the project has now genuinely moved past the post-allocator correctness checkpoint and into the later performance-tuning reopen: the best remaining public pressure is no longer "broad functional suites still red", but the narrower compile-time/runtime-performance pair represented by `hoist-2` and `03_sort2`.
 - 2026-05-06: One first direct performance-reopen experiment has now been tried, measured, and deliberately backed out. I tested a very conservative default-path Value-SSA reopen around redundant pure-call elimination and then a `memory-value`-style fallback swap for indirect-memory programs, targeting the repeated `getNumPos(...)` structure inside `03_sort2.sy`. The result was not good enough to keep: the `03_sort2` runtime tail remained a `RUN_TIMEOUT`, one variant regressed the `lv9` course line into a `-11` wrong-answer symptom, and the safer variants still pulled the `hoist-2` compile baseline upward into roughly the `15s..17s` range instead of down. Current authority is therefore explicit: that "default-path call-CSE / indirect-memory canonicalization reopen" is now a recorded failed experiment, not an active checkpoint item. The mainline stays on the rolled-back stable state (`lv8` green, `lv9` green, `hoist-2` compile roughly `15s`, `03_sort2` still `RUN_TIMEOUT`), and the next performance move should change angle rather than retrying the same hook with slightly different wiring.
@@ -4937,6 +6012,15 @@ For detailed rationale and examples, read `docs/ir/LOWER_IR_DESIGN.md`.
 - 2026-05-06: One more lowering-side reconciliation is now also complete, and it matters because it closes the last obvious mismatch between the new local-state proof helper and the older canonical-IR CFG expectations. The helper originally still mis-modeled `for` loops in two ways: it checked for fixed-point convergence before applying the `for` step, and it could duplicate the same declaration-scoped loop variable when importing existing lowering scope plus the `for` declaration itself. That combination let `for(int a=3; a; a=a-1){}` look falsely no-exit even though the step clearly drives the guard toward zero. The repaired rule is now tighter and simpler: the helper trusts the live lowering scope as the single source of declaration-state truth, applies loop-step effects before fixed-point comparison, and only treats a loop as no-exit if the post-step state actually converges with the guard still provably true and with no reachable `break`. After that cleanup, the previously red `IR-FOR-INIT-STEP` regression is green again, `make test-ir-regression` is green again, `make test-compiler-driver` is green again, `entry_seed` still emits its real conditional backedge plus final `ret`, and `git diff --check` is clean. Current authority is therefore that the local-state proof line is no longer in “active firefight” mode: the next useful move is to resume broad legal-family hunting under strict mode rather than continuing to reopen the same known local-state lowering mechanics.
 - 2026-05-06: The next strict-hunting round has now actually broadened beyond repository-owned regressions instead of only promising to do so. I ran an external strict compile sweep across locally available third-party suites (`compiler2021`, both `minic-test-cases-2021*` trees, `indigo`, `TrivialCompiler`, `lava-test`, and `sysy-testsuit-collection`) and filtered for the control-flow/return-heavy filename cluster (`while`, `if`, `break`, `continue`, `short`, `loop`, `return`). That produced `198` externally sourced strict-mode compile probes, and the current rebuilt compiler passed all `198/198` under `--enforce-all-paths-return-check` with no reproduced `IR-LOWER-009`, `LOWER-IR-042`, or semantic strict false-positive surface. Current authority is therefore that the strict audit has now moved out of the “only in-repo cases are green” phase: both the repository’s known accept families and a first meaningful slice of third-party hidden-neighbor control-flow cases are aligned with the real compile pipeline. The remaining strict work should now focus on either broader non-keyword suite sweeps or genuinely new hidden-style families, not on re-litigating the already-green local-state loop cluster.
 - 2026-05-06: The mainline has now intentionally pivoted back to hidden/default compatibility hunting, and this round produced one concrete runtime-family reopen instead of only more “everything still compiles” evidence. A wider default-mode third-party compile sweep over `214` control-flow-adjacent filenames (`while`, `if`, `nested`, `long`, `short`, `array`, `global`, `init`, `call`) came back `214/214` green at compile time, and a follow-up compile+assemble sweep over the higher-risk `array/global/const/init/short` cluster also came back `147/147` green through assembly. That means the current hidden/default tail is increasingly *not* about easy compile-time `CTE/AE` reproduction. However, the first sampled compile+assemble+link+run sweep over `80` high-risk array/global/short-circuit cases did reproduce a real runtime cluster: several `array_traverse*` cases timed out under a conservative `10s` budget, and more importantly `lava-test/cases/104_long_array.sy` plus `minic-test-cases-2021f/functional/092_long_array.c` both crash under `qemu-riscv32-static` with `returncode=-11` / `EXIT=139`. I then minimized that direction enough to know where to continue next: the crash is reproducible locally through the normal CLI path, and the bad shape is already visible in canonical IR / lowering rather than only in final machine bytes. In the current bad dump, the outer `while(i < N)` in `long_array` still loses its exit/return path after passing through nested loops, so this is now a concrete “large local-array / nested-loop / long-frame lowering runtime” reopen, not a vague hidden suspicion. Current authority is therefore to treat `long_array`-class runtime recovery as the next active default-mode task, with likely spillover benefit to the earlier hidden `RE` cluster around large arrays / globals / access paths once that line is understood and fixed.
+- 2026-05-10: The next ordered reread/analysis chunk stepped back from broad suite-running into the still-open optimization source itself and ended as a **no-new-bug continuation** rather than another patch. I re-read `src/machine/lowering/machine_select/machine_select_cleanup.inc` around `machine_select_cleanup_reuse_internal_pure_calls_in_block(...)` and cross-checked it against a fresh `machine_select` dump of the still-open `03_sort2.sy` and `shuffle2.sy` public witnesses using `tools/dump_machine_stage.c` plus the local analysis helpers. Current concrete finding is not a correctness bug but a plausible still-open optimization boundary: in `03_sort2`'s `radixSort` hot block, one repeated `getNumPos(...)` call still survives because `machine_select_describe_call_arg_source_in_block(...)` only canonicalizes arguments rooted in `load_local`, `load_global`, `addr_local`, `addr_global`, copies/immediates, or plain live-in operands. It does **not** yet describe same-block arguments rooted in `load_indirect(addr)` as a reusable abstract source, so two equal pure calls whose repeated argument is itself a repeated indirect load currently fail the equality proof and remain materialized. That is logged here as execution-memory for the still-open perf tail, not as a landed code change: no new correctness bug was proven, and no source patch was kept in this chunk. Current authority is therefore that the remaining public runtime/perf tails may still have one more optimization avenue on the `machine_select` same-block pure-call line, but the present evidence does **not** justify calling it a runtime-RE root cause. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next continuation chunk stayed on that same source-analysis line and again ended as a **no-new-bug continuation** rather than another patch. I kept the focus on the still-open `03_sort2` / `shuffle2` line, spot-checked the companion load-reuse analyzer against the current `machine_select` dumps, and then rotated one more small external correctness witness on `compiler2021/function_test2020` filtered to the `index*` family (`40_index_complex_expr.sy`, `41_index_arithmetic_expr.sy`, `42_index_func_ret.sy`), which stayed green (`3/3 PASS`). The concrete outcome remains conservative: I did not prove a new runtime-RE bug, and the local analysis surface continues to suggest “optimization boundary” more than “correctness failure” on the surviving `machine_select` repeated-call/repeated-load tails. Current authority is therefore unchanged: the remaining `03_sort2` / `shuffle2` public witnesses still look like open perf/optimization pressure, not a newly reproduced crash family. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next chunk stayed on that same `machine_select` optimization-boundary line and this time **did** land one narrowly-scoped performance fix, though it still did not expose a new runtime-RE bug family. I extended `machine_select_describe_call_arg_source_in_block(...)` so the same-block internal pure-call reuse path can now classify an argument whose source is a same-block `load_indirect(addr)` by recording the underlying address operand, then compare and invalidate that source conservatively through the existing scan window. A focused new regression in `tests/machine/lowering/machine_select/machine_select_test.c` now locks the exact shape: two equal pure internal calls whose first arg is repeatedly loaded from the same `spill.0 = addr_local local.1` indirect address in one block must collapse to one `call_spill`, while the later dead duplicate call disappears. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external correctness sweep `python3 tools/sweep_sysy_suite.py --filter index third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` PASS (`3/3`). A fresh `machine_select` dump of `03_sort2.sy` now no longer reports the earlier repeated `getNumPos(local:1, local:0)` signature in `radixSort`, which confirms the new same-block pure-call reuse reaches that hot block. The public perf witness itself is **still** open (`03_sort2.sy -> RUN_TIMEOUT` under the current budget), so current authority is to treat this as one more small structural perf win on the open tail, not as a runtime-RE closure claim. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next continuation chunk stayed on that same `machine_select` source-analysis line and ended as a **no-new-bug continuation** rather than another patch. I re-read the neighboring indirect-load / address-root cleanup helpers in `src/machine/lowering/machine_select/machine_select_cleanup.inc`, cross-checked the current `03_sort2.sy` and `shuffle2.sy` `machine_select` dumps with the companion address/load analyzers, and then rotated one more small external correctness witness on `compiler2021/function_test2020` filtered to the `index*` family (`40_index_complex_expr.sy`, `41_index_arithmetic_expr.sy`, `42_index_func_ret.sy`), which stayed green (`3/3 PASS`). Current concrete finding is still conservative: I did **not** prove a new runtime-RE bug, and the local analysis surface still looks more like “further optimization boundary” than “correctness failure” on the surviving `machine_select` repeated-load/repeated-address tails. In particular, the current analyzers did not expose one new trivially reusable repeated indirect-load root in these two witnesses after the just-landed pure-call reuse extension, so no additional same-block indirect-load forwarding patch was justified in this chunk. Current authority is therefore unchanged: the remaining `03_sort2` / `shuffle2` public witnesses still look like open perf/optimization pressure, not a newly reproduced crash family. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next continuation chunk stayed on that same `machine_select` optimization-boundary line and again ended as a **no-new-bug continuation** rather than another patch. I explicitly re-read the still-declared-but-unimplemented `machine_select_cleanup_forward_same_block_indirect_loads_program(...)` neighborhood and the surrounding address-root helpers in `src/machine/lowering/machine_select/machine_select_cleanup.inc`, then rechecked the current `03_sort2.sy` / `shuffle2.sy` dumps with the companion indirect-load/address analyzers. Current concrete finding is still conservative: I did **not** prove a new runtime-RE bug, and the current local evidence still does not justify landing a fresh same-block indirect-load forwarding pass yet. The remaining hot patterns after the just-landed pure-call improvement still look more like “possible future optimization work needing a tighter alias/invalidaton proof” than a correctness failure or an obvious one-line reuse fold. The rotated external correctness witness `python3 tools/sweep_sysy_suite.py --filter index third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2020` stayed green (`3/3 PASS`) while doing this check. Current authority is therefore unchanged: the surviving `03_sort2` / `shuffle2` public witnesses still read as open perf/optimization pressure, not a newly reproduced crash family, and no long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next chunk stayed on that same `machine_select` optimization-boundary line and this time **did** land one more narrowly-scoped performance fix, again without exposing a new runtime-RE bug family. I implemented the previously only-declared same-block indirect-load forwarding cleanup so it now reuses a repeated `load_indirect(addr)` when the address expression is proven equal inside one block and any intervening memory writes are either absent or proven non-alias by the existing address-root helper (`machine_select_cleanup_store_cannot_alias_loaded_address(...)`). A focused regression in `tests/machine/lowering/machine_select/machine_select_test.c` now locks the exact safe shape: a second `load_indirect` from the same `spill.0 = addr_local local.0` address may be forwarded across an intervening `store_local local.1, ...`, collapsing to the earlier spill-backed load result. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, and `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`). A fresh `machine_select` dump of `03_sort2.sy` still shows no repeated pure-call signature, and the final `.s` quick histogram now also reflects one more small structural trim on that open tail (`call` count down to `11`). The public perf witness itself is **still** open (`03_sort2.sy -> RUN_TIMEOUT` under the current budget), so current authority is to treat this as another small structural perf win on the open tail, not as a runtime-RE closure claim. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: A follow-up keep/revalidate chunk has now closed the decision loop for that same-block indirect-load forwarding patch, and the conclusion is to **keep it** rather than roll it back. The practical reason is that the patch stays correctness-green across the expected post-edit surfaces while still matching the narrowed public-tail story instead of widening it: `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated external correctness slice `python3 tools/sweep_sysy_suite.py --limit 30 third_party/sysy-suites/compiler2021/公开用例与运行时库/function_test2021` PASS (`30/30`). I also rebuilt a fresh `machine_select` dump and final `.s` witness for `03_sort2.sy`; the current dump still has no repeated pure-call signature under `tools/analyze_machine_select_repeated_calls.py`, and the rebuilt final text still sits at `call=11` on that hot case. Focused public perf reruns at `--case-timeout 120` keep the same two open witnesses and no more (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), which keeps the current interpretation stable: this patch is a small structural perf win on the open timeout tail, not evidence of a new runtime-RE family and not a full public-tail closure. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: The next ordered machine-select reread/repair chunk found one more safe optimization boundary and kept it. After re-reading the neighboring selected-control / cleanup code with the still-open public timeout tail in mind, I noticed one missing reuse family: a repeated cacheable-pure internal call could still survive when it reappeared not in the same block, but immediately in a **unique-predecessor successor block** with the exact same raw arg operands carried live across the edge. The live `03_sort2.sy` `radixSort bb.16 -> bb.17` path had exactly that shape (`getNumPos(spill.6, spill.7)` was recomputed in the successor after the predecessor had already produced the same pure result in `reg.0`). The kept fix adds a narrow cross-block cleanup that reuses that predecessor result only when the successor has one predecessor, the callee is already inside the existing cacheable-pure summary, the raw arg operands match exactly, and neither the args nor the result are invalidated by intervening calls/clobbers/global-write conflicts along the edge prefix. A focused regression (`test_machine_select_reuses_repeated_internal_pure_call_from_unique_predecessor`) now locks the branch-edge shape. Kept rechecks after this closure are `make test-machine-select` PASS, `make test` PASS, `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`), and the rotated third-party slice `python3 tools/sweep_sysy_suite.py --limit 25 third_party/sysy-suites/indigo/test_codes/functional_test` PASS (`25/25`). A fresh selected dump confirms the redundant `bb.17` call disappears, and the rebuilt final `.s` quick histogram for `03_sort2.sy` now shows `call=10` instead of the earlier `11`. Focused public perf reruns at `--case-timeout 120` still keep the same two open witnesses (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), so current authority is to treat this as another small structural perf win on the open timeout tail, not as a runtime-RE closure claim. No long-running sweep remained in flight at the end of this chunk.
+- 2026-05-10: A later same-day stability-gate round was run specifically to answer whether the current whole worktree is stable enough to checkpoint/commit. The broader kept validation surface is now: `make test` PASS, full course `autotest -riscv /workspaces/compiler_lab` PASS (`130/130`), third-party full `compiler2021/公开用例与运行时库/function_test2021` PASS (`103/103`), third-party full `indigo/test_codes/functional_test` PASS (`111/111`), and third-party full `minic-test-cases-2021f/functional` PASS (`100/100`). One intermediate parallel sweep attempt did hit a temporary environment-side `PermissionError: /workspaces/compiler_lab/build/compiler` while `build/compiler` was being rebuilt concurrently by other regression commands; that was not treated as a compiler regression, and clean reruns after the build phase finished restored the full external greens above. Focused known-witness reruns still keep exactly the same open timeout pair at `--case-timeout 120` (`03_sort2.sy -> RUN_TIMEOUT`, `shuffle2.sy -> RUN_TIMEOUT`), with no newly widened correctness surface. Current authority is therefore that the present tree is stable enough for a checkpoint commit if the user wants to preserve the current line, while still honestly carrying those same older performance/open-timeout witnesses rather than claiming a fully all-green perf surface. No long-running sweep remained in flight at the end of this chunk.
 
 ## Historical Note
 

@@ -140,6 +140,13 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                                 op->as.binary.rhs, program, function->spill_slot_count, "binary rhs", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_ALU_IMM || op->kind == MACHINE_SELECT_OP_CMP_IMM) &&
+                            (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                                op->as.binary.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                            machine_layout_set_error(
+                                error, 0, 0, "MACHINE-LAYOUT-141: immediate binary families require rhs immediate only");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_CALL:
                     case MACHINE_SELECT_OP_CALL_IMM:
@@ -200,6 +207,20 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                                 error, 0, 0, "MACHINE-LAYOUT-122: generic call family must not hide immediate arg");
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_CALL_SPILL ||
+                                op->kind == MACHINE_SELECT_OP_CALL_IMM_SPILL) &&
+                            op->result.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                            machine_layout_set_error(
+                                error, 0, 0, "MACHINE-LAYOUT-142: spill-result call family requires spill result");
+                            return 0;
+                        }
+                        if ((op->kind == MACHINE_SELECT_OP_CALL ||
+                                op->kind == MACHINE_SELECT_OP_CALL_IMM) &&
+                            op->result.kind != MACHINE_SELECT_OPERAND_REGISTER) {
+                            machine_layout_set_error(
+                                error, 0, 0, "MACHINE-LAYOUT-143: register-result call family requires register result");
+                            return 0;
+                        }
                         break;
                     }
                     case MACHINE_SELECT_OP_ADDR_LOCAL:
@@ -222,6 +243,13 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                             !machine_layout_verify_slot_ref(program, function, op->as.load_slot, "load slot", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_LOAD_LOCAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            (op->kind == MACHINE_SELECT_OP_LOAD_GLOBAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-144: load op uses wrong slot kind");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_STORE_LOCAL:
                     case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
@@ -237,6 +265,15 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                             op->as.store.value.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                             machine_layout_set_error(
                                 error, 0, 0, "MACHINE-LAYOUT-123: immediate store family requires immediate value");
+                            return 0;
+                        }
+                        if (((op->kind == MACHINE_SELECT_OP_STORE_LOCAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_LOCAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            ((op->kind == MACHINE_SELECT_OP_STORE_GLOBAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-145: store op uses wrong slot kind");
                             return 0;
                         }
                         break;
@@ -343,6 +380,13 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                         machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-131: invalid compare-branch");
                         return 0;
                     }
+                    if (block->terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM &&
+                        (block->terminator.as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                            block->terminator.as.compare_branch.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                        machine_layout_set_error(
+                            error, 0, 0, "MACHINE-LAYOUT-146: compare-branch-imm requires rhs immediate only");
+                        return 0;
+                    }
                     break;
                 case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
                 case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
@@ -361,6 +405,13 @@ int machine_layout_verify_program(const MachineLayoutProgram *program, MachineLa
                         block->terminator.as.compare_branch_fallthrough.taken_target >= function->block_count ||
                         block->terminator.as.compare_branch_fallthrough.fallthrough_target >= function->block_count) {
                         machine_layout_set_error(error, 0, 0, "MACHINE-LAYOUT-132: invalid compare-branch-fallthrough");
+                        return 0;
+                    }
+                    if (block->terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH &&
+                        (block->terminator.as.compare_branch_fallthrough.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                            block->terminator.as.compare_branch_fallthrough.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                        machine_layout_set_error(
+                            error, 0, 0, "MACHINE-LAYOUT-147: compare-branch-imm-fallthrough requires rhs immediate only");
                         return 0;
                     }
                     break;

@@ -87,6 +87,14 @@ static int machine_exec_is_executable_segment_name(const char *segment_name) {
     return strcmp(segment_name, ".text") == 0 || strcmp(segment_name, ".cold") == 0;
 }
 
+static int machine_exec_is_writable_segment_name(const char *segment_name) {
+    if (!segment_name) {
+        return 0;
+    }
+    return strcmp(segment_name, ".data") == 0 || strcmp(segment_name, ".bss") == 0 ||
+        strcmp(segment_name, ".sdata") == 0 || strcmp(segment_name, ".sbss") == 0;
+}
+
 static int machine_exec_segment_covers_virtual_address(const MachineExecSegment *segment,
     size_t virtual_address) {
     size_t delta;
@@ -133,7 +141,7 @@ static int machine_exec_report_get_segment_filter_storage(const MachineExecRepor
                 *out_indices = report->segment_summary_count > 0u ? report->executable_segment_indices : NULL;
             }
             if (out_count) {
-                *out_count = 1u;
+                *out_count = report->segment_summary_count > 0u ? 1u : 0u;
             }
             return 1;
     }

@@ -61,7 +61,7 @@ int machine_exec_build_from_machine_image_file(const MachineImageFile *image_fil
         exec_segment->virtual_address = image_segment->virtual_address;
         exec_segment->byte_count = image_segment->byte_count;
         exec_segment->readable = 1u;
-        exec_segment->writable = 0u;
+        exec_segment->writable = (unsigned char)machine_exec_is_writable_segment_name(image_segment->name);
         exec_segment->executable = (unsigned char)machine_exec_is_executable_segment_name(image_segment->name);
         if (!exec_segment->name) {
             machine_exec_set_error(error, 0, 0, "MACHINE-EXEC-107: out of memory naming exec segment");

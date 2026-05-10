@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 static int build_expected_runtime_dump_text(char *buffer, size_t buffer_size,
     const char *profile_name,
@@ -117,6 +118,102 @@ static char *dup_text(const char *text) {
     }
     memcpy(copy, text, length + 1u);
     return copy;
+}
+
+static int build_manual_runtime_load_file_for_wrap_test(MachineLoadFile *load_file,
+    size_t virtual_address,
+    size_t memory_byte_count) {
+    if (!load_file) {
+        return 0;
+    }
+
+    machine_load_file_init(load_file);
+
+    load_file->exec_file.image_file.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.target_profile =
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.origin_profile =
+        MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    load_file->exec_file.image_file.source_elf_artifact_summary.relocation_semantics =
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS;
+    load_file->exec_file.image_file.base_virtual_address = virtual_address;
+    load_file->exec_file.image_file.has_entry = 1u;
+    load_file->exec_file.image_file.entry_symbol_index = 0u;
+    load_file->exec_file.image_file.entry_virtual_address = virtual_address;
+    load_file->exec_file.image_file.segment_count = 1u;
+    load_file->exec_file.image_file.segment_capacity = 1u;
+    load_file->exec_file.image_file.segments = (MachineImageSegment *)calloc(1u, sizeof(MachineImageSegment));
+    load_file->exec_file.image_file.symbol_count = 1u;
+    load_file->exec_file.image_file.symbol_capacity = 1u;
+    load_file->exec_file.image_file.symbols = (MachineImageSymbol *)calloc(1u, sizeof(MachineImageSymbol));
+    load_file->exec_file.image_file.byte_count = 1u;
+    load_file->exec_file.image_file.bytes = (unsigned char *)malloc(1u);
+    load_file->exec_file.segment_count = 1u;
+    load_file->exec_file.segment_capacity = 1u;
+    load_file->exec_file.segments = (MachineExecSegment *)calloc(1u, sizeof(MachineExecSegment));
+    load_file->segment_count = 1u;
+    load_file->segment_capacity = 1u;
+    load_file->segments = (MachineLoadSegment *)calloc(1u, sizeof(MachineLoadSegment));
+    if (!load_file->exec_file.image_file.segments ||
+        !load_file->exec_file.image_file.symbols ||
+        !load_file->exec_file.image_file.bytes ||
+        !load_file->exec_file.segments ||
+        !load_file->segments) {
+        machine_load_file_free(load_file);
+        return 0;
+    }
+
+    load_file->exec_file.image_file.bytes[0] = 0x7fu;
+
+    load_file->exec_file.image_file.segments[0].name = dup_text(".text");
+    load_file->exec_file.image_file.segments[0].image_offset = 0u;
+    load_file->exec_file.image_file.segments[0].virtual_address = virtual_address;
+    load_file->exec_file.image_file.segments[0].byte_count = 1u;
+    load_file->exec_file.image_file.segments[0].align = 4096u;
+
+    load_file->exec_file.image_file.symbols[0].name = dup_text("main");
+    load_file->exec_file.image_file.symbols[0].binding = MACHINE_ELF_SYMBOL_GLOBAL;
+    load_file->exec_file.image_file.symbols[0].type = MACHINE_ELF_SYMBOL_FUNC;
+    load_file->exec_file.image_file.symbols[0].is_defined = 1u;
+    load_file->exec_file.image_file.symbols[0].segment_index = 0u;
+    load_file->exec_file.image_file.symbols[0].value_offset = 0u;
+    load_file->exec_file.image_file.symbols[0].virtual_address = virtual_address;
+
+    load_file->exec_file.entry_virtual_address = virtual_address;
+    load_file->exec_file.segments[0].name = dup_text(".text");
+    load_file->exec_file.segments[0].image_segment_index = 0u;
+    load_file->exec_file.segments[0].virtual_address = virtual_address;
+    load_file->exec_file.segments[0].byte_count = 1u;
+    load_file->exec_file.segments[0].readable = 1u;
+    load_file->exec_file.segments[0].writable = 0u;
+    load_file->exec_file.segments[0].executable = 1u;
+
+    load_file->entry_virtual_address = virtual_address;
+    load_file->total_memory_byte_count = memory_byte_count;
+    load_file->segments[0].name = dup_text(".text");
+    load_file->segments[0].exec_segment_index = 0u;
+    load_file->segments[0].virtual_address = virtual_address;
+    load_file->segments[0].file_byte_count = 1u;
+    load_file->segments[0].memory_byte_count = memory_byte_count;
+    load_file->segments[0].bytes = memory_byte_count > 0u
+        ? (unsigned char *)calloc(memory_byte_count, 1u)
+        : NULL;
+    load_file->segments[0].readable = 1u;
+    load_file->segments[0].writable = 0u;
+    load_file->segments[0].executable = 1u;
+    if (!load_file->exec_file.image_file.segments[0].name ||
+        !load_file->exec_file.image_file.symbols[0].name ||
+        !load_file->exec_file.segments[0].name ||
+        !load_file->segments[0].name ||
+        (memory_byte_count > 0u && !load_file->segments[0].bytes)) {
+        machine_load_file_free(load_file);
+        return 0;
+    }
+    if (memory_byte_count > 0u) {
+        load_file->segments[0].bytes[0] = 0x7fu;
+    }
+
+    return 1;
 }
 
 static int expect_text(const char *label, const char *actual_text, const char *expected_text) {
@@ -251,6 +348,28 @@ static int build_resolved_machine_ir_report(
         return 0;
     }
 
+    return 1;
+}
+
+static int build_global_object_machine_ir_report(
+    MachineIrAllocateRewriteReport *report,
+    MachineIrError *error) {
+    MachineIrGlobal *global = NULL;
+
+    if (!report || !error) {
+        return 0;
+    }
+    if (!build_resolved_machine_ir_report(report, error)) {
+        return 0;
+    }
+    if (!machine_ir_program_append_global(&report->program, "g", &global, error) ||
+        !global ||
+        !machine_ir_program_append_global(&report->program, "h", &global, error)) {
+        machine_ir_allocate_rewrite_report_free(report);
+        return 0;
+    }
+    report->program.globals[1].has_initializer = 1;
+    report->program.globals[1].initializer_value = 7;
     return 1;
 }
 
@@ -1794,6 +1913,432 @@ cleanup:
     return ok;
 }
 
+static int test_machine_runtime_zero_gap_region_and_report_surface(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineIrError ir_error;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeReport runtime_report;
+    MachineRuntimeError runtime_error;
+    MachineRuntimeGapSummary gap_summary;
+    MachineRuntimeRegionSummary region_summary;
+    size_t region_count = 0u;
+    size_t filter_count = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    memset(&ir_error, 0, sizeof(ir_error));
+    machine_runtime_file_init(&runtime_file);
+    machine_runtime_report_init(&runtime_report);
+    memset(&runtime_error, 0, sizeof(runtime_error));
+    memset(&gap_summary, 0, sizeof(gap_summary));
+    memset(&region_summary, 0, sizeof(region_summary));
+
+    if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_runtime_build_from_machine_ir_report(&ir_report, &runtime_file, &runtime_error)) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: zero-gap setup failed: ir=%s runtime=%s\n",
+            ir_error.message,
+            runtime_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    runtime_file.segments[runtime_file.stack_segment_index].virtual_address =
+        runtime_file.segments[0].virtual_address + runtime_file.segments[0].byte_count;
+    runtime_file.initial_stack_pointer =
+        runtime_file.segments[runtime_file.stack_segment_index].virtual_address +
+        runtime_file.segments[runtime_file.stack_segment_index].byte_count;
+
+    if (!machine_runtime_verify_file(&runtime_file, &runtime_error) ||
+        !machine_runtime_file_get_gap_summary(&runtime_file, &gap_summary) ||
+        gap_summary.byte_count != 0u ||
+        !machine_runtime_file_get_region_count(&runtime_file, &region_count) ||
+        region_count != 3u ||
+        !machine_runtime_build_report_from_file(&runtime_file, &runtime_report, &runtime_error) ||
+        !machine_runtime_report_get_region_filter_count(&runtime_report, MACHINE_RUNTIME_REGION_FILTER_GAP, &filter_count) ||
+        filter_count != 1u ||
+        !machine_runtime_report_get_region_summary(&runtime_report, 2u, &region_summary) ||
+        region_summary.kind != MACHINE_RUNTIME_REGION_GAP ||
+        region_summary.byte_count != 0u) {
+        fprintf(stderr, "[machine-runtime] FAIL: zero-gap runtime surface mismatch: %s\n", runtime_error.message);
+        ok = 0;
+    }
+
+cleanup:
+    machine_runtime_report_free(&runtime_report);
+    machine_runtime_file_free(&runtime_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
+static int test_machine_runtime_region_load_filter_survives_segment_reorder(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineIrError ir_error;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeReport runtime_report;
+    MachineRuntimeError runtime_error;
+    MachineRuntimeSegment swapped_segment;
+    MachineRuntimeRegionSummary region_summary;
+    size_t filter_count = 0u;
+    size_t region_index = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    machine_runtime_file_init(&runtime_file);
+    machine_runtime_report_init(&runtime_report);
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&runtime_error, 0, sizeof(runtime_error));
+    memset(&swapped_segment, 0, sizeof(swapped_segment));
+    memset(&region_summary, 0, sizeof(region_summary));
+
+    if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_runtime_build_from_machine_ir_report(&ir_report, &runtime_file, &runtime_error)) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: region-reorder setup failed: ir=%s runtime=%s\n",
+            ir_error.message,
+            runtime_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    swapped_segment = runtime_file.segments[0];
+    runtime_file.segments[0] = runtime_file.segments[1];
+    runtime_file.segments[1] = swapped_segment;
+    runtime_file.stack_segment_index = 0u;
+
+    if (!machine_runtime_verify_file(&runtime_file, &runtime_error) ||
+        !machine_runtime_build_report_from_file(&runtime_file, &runtime_report, &runtime_error) ||
+        !machine_runtime_report_get_region_filter_count(
+            &runtime_report, MACHINE_RUNTIME_REGION_FILTER_LOAD, &filter_count) ||
+        filter_count != 1u ||
+        !machine_runtime_report_get_region_summary_by_filter_index(
+            &runtime_report,
+            MACHINE_RUNTIME_REGION_FILTER_LOAD,
+            0u,
+            &region_index,
+            &region_summary) ||
+        region_index != 1u ||
+        region_summary.kind != MACHINE_RUNTIME_REGION_LOAD ||
+        !region_summary.name ||
+        strcmp(region_summary.name, ".text") != 0) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: region-reorder load filter mismatch: %s\n",
+            runtime_error.message);
+        ok = 0;
+    }
+
+cleanup:
+    machine_runtime_report_free(&runtime_report);
+    machine_runtime_file_free(&runtime_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
+static int test_machine_runtime_window_copy_clamps_huge_lengths(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineIrError ir_error;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeError runtime_error;
+    unsigned char *window_bytes = NULL;
+    size_t window_byte_count = 0u;
+    size_t window_base_virtual_address = 0u;
+    size_t stack_base_virtual_address = 0u;
+    size_t stack_memory_offset = 0u;
+    size_t gap_base_virtual_address = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    machine_runtime_file_init(&runtime_file);
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&runtime_error, 0, sizeof(runtime_error));
+
+    if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_runtime_build_from_machine_ir_report(&ir_report, &runtime_file, &runtime_error)) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: overflow clamp setup failed: ir=%s runtime=%s\n",
+            ir_error.message,
+            runtime_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    gap_base_virtual_address =
+        runtime_file.segments[0].virtual_address + runtime_file.segments[0].byte_count;
+    stack_base_virtual_address =
+        runtime_file.segments[runtime_file.stack_segment_index].virtual_address;
+    stack_memory_offset = stack_base_virtual_address -
+        runtime_file.segments[0].virtual_address;
+
+    if (!machine_runtime_file_copy_memory_window(
+            &runtime_file,
+            stack_memory_offset + 32u,
+            SIZE_MAX,
+            &window_bytes,
+            &window_byte_count,
+            &window_base_virtual_address,
+            &runtime_error) ||
+        window_byte_count != 4064u ||
+        window_base_virtual_address != stack_base_virtual_address + 32u ||
+        (window_byte_count > 0u && window_bytes[window_byte_count - 1u] != 0u) ||
+        (free(window_bytes), window_bytes = NULL, 0) ||
+        !machine_runtime_file_copy_stack_window(
+            &runtime_file,
+            32u,
+            SIZE_MAX,
+            &window_bytes,
+            &window_byte_count,
+            &window_base_virtual_address,
+            &runtime_error) ||
+        window_byte_count != 4064u ||
+        window_base_virtual_address != stack_base_virtual_address + 32u ||
+        (window_byte_count > 0u && window_bytes[window_byte_count - 1u] != 0u) ||
+        (free(window_bytes), window_bytes = NULL, 0) ||
+        !machine_runtime_file_copy_gap_window(
+            &runtime_file,
+            32u,
+            SIZE_MAX,
+            &window_bytes,
+            &window_byte_count,
+            &window_base_virtual_address,
+            &runtime_error) ||
+        window_byte_count != 4064u ||
+        window_base_virtual_address != gap_base_virtual_address + 32u ||
+        (window_byte_count > 0u && window_bytes[window_byte_count - 1u] != 0u)) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: overflow clamp validation mismatch: %s\n",
+            runtime_error.message);
+        ok = 0;
+    }
+
+cleanup:
+    free(window_bytes);
+    machine_runtime_file_free(&runtime_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
+static int test_machine_runtime_preserves_global_data_segment_permissions(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeReport runtime_report;
+    MachineIrError ir_error;
+    MachineRuntimeError runtime_error;
+    const MachineRuntimeSegment *text_segment = NULL;
+    const MachineRuntimeSegment *sbss_segment = NULL;
+    const MachineRuntimeSegment *sdata_segment = NULL;
+    const MachineRuntimeSegment *stack_segment = NULL;
+    const MachineRuntimeSegmentSummary *segment_summary = NULL;
+    unsigned char *segment_bytes = NULL;
+    size_t segment_count = 0u;
+    size_t mapped_byte_count = 0u;
+    size_t executable_segment_count = 0u;
+    size_t non_executable_segment_count = 0u;
+    size_t segment_byte_count = 0u;
+    size_t segment_index = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    machine_runtime_file_init(&runtime_file);
+    machine_runtime_report_init(&runtime_report);
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&runtime_error, 0, sizeof(runtime_error));
+
+    if (!build_global_object_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_runtime_build_from_machine_ir_report(&ir_report, &runtime_file, &runtime_error) ||
+        !machine_runtime_build_report_from_machine_ir_report(&ir_report, &runtime_report, &runtime_error) ||
+        !machine_runtime_file_get_summary(
+            &runtime_file, &segment_count, &mapped_byte_count, &executable_segment_count) ||
+        segment_count != 4u || mapped_byte_count != 16384u || executable_segment_count != 1u ||
+        !machine_runtime_file_find_segment_by_name(&runtime_file, ".text", &segment_index, &text_segment) ||
+        !text_segment || segment_index != 0u ||
+        !machine_runtime_file_find_segment_by_name(&runtime_file, ".sbss", &segment_index, &sbss_segment) ||
+        !sbss_segment || segment_index != 1u ||
+        !machine_runtime_file_find_segment_by_name(&runtime_file, ".sdata", &segment_index, &sdata_segment) ||
+        !sdata_segment || segment_index != 2u ||
+        !machine_runtime_file_find_segment_by_name(&runtime_file, ".stack", &segment_index, &stack_segment) ||
+        !stack_segment || segment_index != runtime_file.stack_segment_index ||
+        !text_segment->readable || text_segment->writable || !text_segment->executable ||
+        !sbss_segment->readable || !sbss_segment->writable || sbss_segment->executable ||
+        !sdata_segment->readable || !sdata_segment->writable || sdata_segment->executable ||
+        !stack_segment->readable || !stack_segment->writable || stack_segment->executable ||
+        !machine_runtime_file_copy_segment_bytes(
+            &runtime_file, 1u, &segment_bytes, &segment_byte_count, &runtime_error) ||
+        !segment_bytes || segment_byte_count != 4096u ||
+        segment_bytes[0] != 0u || segment_bytes[1] != 0u ||
+        segment_bytes[2] != 0u || segment_bytes[3] != 0u ||
+        (free(segment_bytes), segment_bytes = NULL, segment_byte_count = 0u, 0) ||
+        !machine_runtime_file_copy_segment_bytes(
+            &runtime_file, 2u, &segment_bytes, &segment_byte_count, &runtime_error) ||
+        !segment_bytes || segment_byte_count != 4096u ||
+        segment_bytes[0] != 7u || segment_bytes[1] != 0u ||
+        segment_bytes[2] != 0u || segment_bytes[3] != 0u ||
+        !machine_runtime_report_get_segment_filter_count(
+            &runtime_report, MACHINE_RUNTIME_SEGMENT_FILTER_NON_EXECUTABLE, &non_executable_segment_count) ||
+        non_executable_segment_count != 3u ||
+        !machine_runtime_report_get_segment_summary_by_filter_index(
+            &runtime_report,
+            MACHINE_RUNTIME_SEGMENT_FILTER_NON_EXECUTABLE,
+            0u,
+            &segment_index,
+            &segment_summary) ||
+        !segment_summary || segment_index != 1u || strcmp(segment_summary->name, ".sbss") != 0 ||
+        !segment_summary->writable ||
+        !machine_runtime_report_get_segment_summary_by_filter_index(
+            &runtime_report,
+            MACHINE_RUNTIME_SEGMENT_FILTER_NON_EXECUTABLE,
+            1u,
+            &segment_index,
+            &segment_summary) ||
+        !segment_summary || segment_index != 2u || strcmp(segment_summary->name, ".sdata") != 0 ||
+        !segment_summary->writable) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: global-data runtime permission mismatch: ir=%s runtime=%s\n",
+            ir_error.message,
+            runtime_error.message);
+        ok = 0;
+    }
+
+    free(segment_bytes);
+    machine_runtime_report_free(&runtime_report);
+    machine_runtime_file_free(&runtime_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
+static int test_machine_runtime_query_helpers_reject_malformed_segment_tables(void) {
+    MachineIrAllocateRewriteReport ir_report;
+    MachineIrError ir_error;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeReport runtime_report;
+    MachineRuntimeError runtime_error;
+    MachineRuntimeSegment *saved_file_segments = NULL;
+    MachineRuntimeSegment *saved_report_file_segments = NULL;
+    MachineRuntimeSegmentSummary *saved_report_segment_summaries = NULL;
+    const MachineRuntimeSegment *segment = NULL;
+    const MachineRuntimeSegmentSummary *segment_summary = NULL;
+    MachineRuntimeReportSegmentArtifact segment_artifact;
+    MachineRuntimeRegionSummary region_summary;
+    size_t segment_index = 0u;
+    size_t count = 0u;
+    size_t base_virtual_address = 0u;
+    int ok = 1;
+
+    machine_ir_allocate_rewrite_report_init(&ir_report);
+    machine_runtime_file_init(&runtime_file);
+    machine_runtime_report_init(&runtime_report);
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&runtime_error, 0, sizeof(runtime_error));
+    memset(&segment_artifact, 0, sizeof(segment_artifact));
+    memset(&region_summary, 0, sizeof(region_summary));
+
+    if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
+        !machine_runtime_build_from_machine_ir_report(&ir_report, &runtime_file, &runtime_error) ||
+        !machine_runtime_build_report_from_machine_ir_report(&ir_report, &runtime_report, &runtime_error)) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: malformed-runtime setup failed: ir=%s runtime=%s\n",
+            ir_error.message,
+            runtime_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    base_virtual_address = runtime_file.segments[0].virtual_address;
+    saved_file_segments = runtime_file.segments;
+    runtime_file.segments = NULL;
+    if (machine_runtime_file_get_summary(&runtime_file, &count, NULL, NULL) ||
+        machine_runtime_file_get_gap_summary(&runtime_file, &runtime_report.gap_summary) ||
+        machine_runtime_file_get_segment(&runtime_file, 0u, &segment) ||
+        machine_runtime_file_find_segment_by_name(&runtime_file, ".text", &segment_index, &segment) ||
+        machine_runtime_file_find_segment_covering_virtual_address(
+            &runtime_file, base_virtual_address, &segment_index, &segment) ||
+        machine_runtime_file_get_stack_segment(&runtime_file, &segment_index, &segment) ||
+        machine_runtime_file_get_executable_segment_count(&runtime_file, &count) ||
+        machine_runtime_file_get_executable_segment_by_index(&runtime_file, 0u, &segment_index, &segment) ||
+        machine_runtime_file_get_region_summary(&runtime_file, 0u, &region_summary)) {
+        fprintf(stderr, "[machine-runtime] FAIL: malformed runtime-file query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    runtime_file.segments = saved_file_segments;
+
+    saved_report_file_segments = runtime_report.file.segments;
+    saved_report_segment_summaries = runtime_report.segment_summaries;
+    runtime_report.file.segments = NULL;
+    runtime_report.segment_summaries = NULL;
+    if (machine_runtime_report_get_entry_segment_summary_artifact(
+            &runtime_report, &segment_index, &segment_summary) ||
+        machine_runtime_report_get_stack_segment_summary_artifact(
+            &runtime_report, &segment_index, &segment_summary) ||
+        machine_runtime_report_get_segment_summary(&runtime_report, 0u, &segment_summary) ||
+        machine_runtime_report_get_segment_artifact(&runtime_report, 0u, &segment_artifact) ||
+        machine_runtime_report_find_segment_summary_by_name(
+            &runtime_report, ".text", &segment_index, &segment_summary) ||
+        machine_runtime_report_find_segment_summary_covering_virtual_address(
+            &runtime_report, base_virtual_address, &segment_index, &segment_summary) ||
+        machine_runtime_report_get_segment_filter_count(
+            &runtime_report, MACHINE_RUNTIME_SEGMENT_FILTER_EXECUTABLE, &count) ||
+        machine_runtime_report_get_segment_summary_by_filter_index(
+            &runtime_report,
+            MACHINE_RUNTIME_SEGMENT_FILTER_EXECUTABLE,
+            0u,
+            &segment_index,
+            &segment_summary) ||
+        machine_runtime_report_get_region_filter_count(
+            &runtime_report, MACHINE_RUNTIME_REGION_FILTER_LOAD, &count) ||
+        machine_runtime_report_get_region_summary_by_filter_index(
+            &runtime_report,
+            MACHINE_RUNTIME_REGION_FILTER_LOAD,
+            0u,
+            &segment_index,
+            &region_summary)) {
+        fprintf(stderr, "[machine-runtime] FAIL: malformed runtime-report query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    runtime_report.file.segments = saved_report_file_segments;
+    runtime_report.segment_summaries = saved_report_segment_summaries;
+
+cleanup:
+    runtime_report.file.segments = saved_report_file_segments ? saved_report_file_segments : runtime_report.file.segments;
+    runtime_report.segment_summaries =
+        saved_report_segment_summaries ? saved_report_segment_summaries : runtime_report.segment_summaries;
+    runtime_file.segments = saved_file_segments ? saved_file_segments : runtime_file.segments;
+    machine_runtime_report_free(&runtime_report);
+    machine_runtime_file_free(&runtime_file);
+    machine_ir_allocate_rewrite_report_free(&ir_report);
+    return ok;
+}
+
+static int test_machine_runtime_rejects_wrapped_address_ranges(void) {
+    MachineLoadFile load_file;
+    MachineRuntimeFile runtime_file;
+    MachineRuntimeError runtime_error;
+    int ok = 1;
+
+    machine_load_file_init(&load_file);
+    machine_runtime_file_init(&runtime_file);
+    memset(&runtime_error, 0, sizeof(runtime_error));
+
+    if (!build_manual_runtime_load_file_for_wrap_test(
+            &load_file,
+            ((size_t)-1) - 0x17FFu,
+            0x800u)) {
+        fprintf(stderr, "[machine-runtime] FAIL: wrapped-runtime setup failed\n");
+        machine_runtime_file_free(&runtime_file);
+        machine_load_file_free(&load_file);
+        return 0;
+    }
+
+    if (machine_runtime_build_from_machine_load_file(&load_file, &runtime_file, &runtime_error) ||
+        strstr(runtime_error.message, "failed deriving runtime policy") == NULL) {
+        fprintf(stderr,
+            "[machine-runtime] FAIL: wrapped-runtime build rejection mismatch: %s\n",
+            runtime_error.message);
+        ok = 0;
+    }
+    machine_runtime_file_free(&runtime_file);
+    machine_load_file_free(&load_file);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1802,5 +2347,11 @@ int main(void) {
     ok &= test_machine_runtime_dump_wrappers();
     ok &= test_machine_runtime_profile_bridge();
     ok &= test_machine_runtime_profiled_wrappers();
+    ok &= test_machine_runtime_zero_gap_region_and_report_surface();
+    ok &= test_machine_runtime_region_load_filter_survives_segment_reorder();
+    ok &= test_machine_runtime_window_copy_clamps_huge_lengths();
+    ok &= test_machine_runtime_preserves_global_data_segment_permissions();
+    ok &= test_machine_runtime_query_helpers_reject_malformed_segment_tables();
+    ok &= test_machine_runtime_rejects_wrapped_address_ranges();
     return ok ? 0 : 1;
 }

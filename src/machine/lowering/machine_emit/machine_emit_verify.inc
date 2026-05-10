@@ -161,6 +161,13 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                                 op->as.binary.rhs, program, function->spill_slot_count, "binary rhs", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_ALU_IMM || op->kind == MACHINE_SELECT_OP_CMP_IMM) &&
+                            (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                                op->as.binary.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                            machine_emit_set_error(
+                                error, 0, 0, "MACHINE-EMIT-142: immediate binary families require rhs immediate only");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_CALL:
                     case MACHINE_SELECT_OP_CALL_IMM:
@@ -221,6 +228,20 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                                 error, 0, 0, "MACHINE-EMIT-124: generic call family must not hide immediate arg");
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_CALL_SPILL ||
+                                op->kind == MACHINE_SELECT_OP_CALL_IMM_SPILL) &&
+                            op->result.kind != MACHINE_SELECT_OPERAND_SPILL_SLOT) {
+                            machine_emit_set_error(
+                                error, 0, 0, "MACHINE-EMIT-143: spill-result call family requires spill result");
+                            return 0;
+                        }
+                        if ((op->kind == MACHINE_SELECT_OP_CALL ||
+                                op->kind == MACHINE_SELECT_OP_CALL_IMM) &&
+                            op->result.kind != MACHINE_SELECT_OPERAND_REGISTER) {
+                            machine_emit_set_error(
+                                error, 0, 0, "MACHINE-EMIT-144: register-result call family requires register result");
+                            return 0;
+                        }
                         break;
                     }
                     case MACHINE_SELECT_OP_ADDR_LOCAL:
@@ -243,6 +264,13 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                             !machine_emit_verify_slot_ref(program, function, op->as.load_slot, "load slot", error)) {
                             return 0;
                         }
+                        if ((op->kind == MACHINE_SELECT_OP_LOAD_LOCAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            (op->kind == MACHINE_SELECT_OP_LOAD_GLOBAL &&
+                                op->as.load_slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-145: load op uses wrong slot kind");
+                            return 0;
+                        }
                         break;
                     case MACHINE_SELECT_OP_STORE_LOCAL:
                     case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
@@ -258,6 +286,15 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                             op->as.store.value.kind != MACHINE_SELECT_OPERAND_IMMEDIATE) {
                             machine_emit_set_error(
                                 error, 0, 0, "MACHINE-EMIT-125: immediate store family requires immediate value");
+                            return 0;
+                        }
+                        if (((op->kind == MACHINE_SELECT_OP_STORE_LOCAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_LOCAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_LOCAL) ||
+                            ((op->kind == MACHINE_SELECT_OP_STORE_GLOBAL ||
+                                    op->kind == MACHINE_SELECT_OP_STORE_GLOBAL_IMM) &&
+                                op->as.store.slot.kind != MACHINE_SELECT_SLOT_GLOBAL)) {
+                            machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-146: store op uses wrong slot kind");
                             return 0;
                         }
                         break;
@@ -364,6 +401,13 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-133: invalid compare-branch");
                         return 0;
                     }
+                    if (block->terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM &&
+                        (block->terminator.as.compare_branch.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                            block->terminator.as.compare_branch.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                        machine_emit_set_error(
+                            error, 0, 0, "MACHINE-EMIT-147: compare-branch-imm requires rhs immediate only");
+                        return 0;
+                    }
                     break;
                 case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
                 case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
@@ -382,6 +426,13 @@ int machine_emit_verify_program(const MachineEmitProgram *program, MachineEmitEr
                         block->terminator.as.compare_branch_fallthrough.taken_target >= function->block_count ||
                         block->terminator.as.compare_branch_fallthrough.fallthrough_target >= function->block_count) {
                         machine_emit_set_error(error, 0, 0, "MACHINE-EMIT-134: invalid compare-branch-fallthrough");
+                        return 0;
+                    }
+                    if (block->terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH &&
+                        (block->terminator.as.compare_branch_fallthrough.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+                            block->terminator.as.compare_branch_fallthrough.rhs.kind != MACHINE_SELECT_OPERAND_IMMEDIATE)) {
+                        machine_emit_set_error(
+                            error, 0, 0, "MACHINE-EMIT-148: compare-branch-imm-fallthrough requires rhs immediate only");
                         return 0;
                     }
                     break;

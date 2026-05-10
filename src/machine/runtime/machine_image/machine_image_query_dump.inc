@@ -192,7 +192,7 @@ int machine_image_report_get_summary(const MachineImageReport *report,
     size_t *out_symbol_count,
     size_t *out_relocation_count,
     size_t *out_byte_count) {
-    if (!report) {
+    if (!machine_image_report_has_tables(report)) {
         return 0;
     }
     if (out_segment_count) {
@@ -215,7 +215,7 @@ int machine_image_report_get_overview_artifact(const MachineImageReport *report,
     if (out_artifact) {
         memset(out_artifact, 0, sizeof(*out_artifact));
     }
-    if (!report || !out_artifact) {
+    if (!machine_image_report_has_tables(report) || !out_artifact) {
         return 0;
     }
     out_artifact->report = report;
@@ -236,7 +236,7 @@ int machine_image_report_get_overview_artifact(const MachineImageReport *report,
 
 int machine_image_report_get_file(const MachineImageReport *report,
     const MachineImageFile **out_file) {
-    if (!report || !out_file) {
+    if (!machine_image_report_has_tables(report) || !out_file) {
         return 0;
     }
     *out_file = &report->file;
@@ -245,7 +245,7 @@ int machine_image_report_get_file(const MachineImageReport *report,
 
 int machine_image_report_get_source_elf_artifact_summary_artifact(const MachineImageReport *report,
     const MachineElfArtifactSummary **out_summary) {
-    if (!report || !out_summary) {
+    if (!machine_image_report_has_tables(report) || !out_summary) {
         return 0;
     }
     *out_summary = &report->source_elf_artifact_summary;
@@ -254,7 +254,7 @@ int machine_image_report_get_source_elf_artifact_summary_artifact(const MachineI
 
 int machine_image_report_get_header_summary_artifact(const MachineImageReport *report,
     const MachineImageHeaderSummary **out_summary) {
-    if (!report || !out_summary) {
+    if (!machine_image_report_has_tables(report) || !out_summary) {
         return 0;
     }
     *out_summary = &report->header_summary;
@@ -263,7 +263,7 @@ int machine_image_report_get_header_summary_artifact(const MachineImageReport *r
 
 int machine_image_report_get_target_policy_summary_artifact(const MachineImageReport *report,
     const MachineImageTargetPolicySummary **out_summary) {
-    if (!report || !out_summary) {
+    if (!machine_image_report_has_tables(report) || !out_summary) {
         return 0;
     }
     *out_summary = &report->target_policy_summary;
@@ -272,7 +272,7 @@ int machine_image_report_get_target_policy_summary_artifact(const MachineImageRe
 
 int machine_image_report_get_entry_symbol_summary_artifact(const MachineImageReport *report,
     const MachineImageSymbolSummary **out_summary) {
-    if (!report || !out_summary || !report->has_entry_symbol_summary) {
+    if (!machine_image_report_has_tables(report) || !out_summary || !report->has_entry_symbol_summary) {
         return 0;
     }
     *out_summary = &report->entry_symbol_summary;
@@ -285,7 +285,7 @@ int machine_image_report_get_entry_symbol_artifact(const MachineImageReport *rep
     if (out_symbol_index) {
         *out_symbol_index = 0u;
     }
-    if (!report || !report->has_entry_symbol_summary || !out_artifact) {
+    if (!machine_image_report_has_tables(report) || !report->has_entry_symbol_summary || !out_artifact) {
         return 0;
     }
     if (!machine_image_report_get_symbol_artifact(report, report->file.entry_symbol_index, out_artifact)) {
@@ -300,7 +300,9 @@ int machine_image_report_get_entry_symbol_artifact(const MachineImageReport *rep
 int machine_image_report_get_segment_summary(const MachineImageReport *report,
     size_t segment_index,
     const MachineImageSegmentSummary **out_summary) {
-    if (!report || !out_summary || !report->segment_summaries || segment_index >= report->segment_summary_count) {
+    if (!machine_image_report_has_tables(report) ||
+        !out_summary ||
+        segment_index >= report->segment_summary_count) {
         return 0;
     }
     *out_summary = &report->segment_summaries[segment_index];
@@ -313,8 +315,9 @@ int machine_image_report_get_segment_artifact(const MachineImageReport *report,
     if (out_artifact) {
         memset(out_artifact, 0, sizeof(*out_artifact));
     }
-    if (!report || !out_artifact || segment_index >= report->segment_summary_count ||
-        !report->segment_summaries ||
+    if (!machine_image_report_has_tables(report) ||
+        !out_artifact ||
+        segment_index >= report->segment_summary_count ||
         !report->segment_symbol_start_indices || !report->segment_symbol_counts ||
         !report->segment_relocation_start_indices || !report->segment_relocation_counts ||
         !report->segment_resolved_relocation_start_indices || !report->segment_resolved_relocation_counts ||
@@ -352,7 +355,7 @@ int machine_image_report_find_segment_summary_by_name(const MachineImageReport *
     const MachineImageSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !segment_name || !report->segment_summaries) {
+    if (!machine_image_report_has_tables(report) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -379,7 +382,7 @@ int machine_image_report_find_segment_artifact_by_name(const MachineImageReport 
     if (out_segment_index) {
         *out_segment_index = 0u;
     }
-    if (!report || !segment_name || !out_artifact) {
+    if (!machine_image_report_has_tables(report) || !segment_name || !out_artifact) {
         return 0;
     }
     if (!machine_image_report_find_segment_summary_by_name(report, segment_name, &segment_index, NULL) ||
@@ -398,14 +401,19 @@ int machine_image_report_find_segment_summary_covering_virtual_address(const Mac
     const MachineImageSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !report->segment_summaries) {
+    if (!machine_image_report_has_tables(report)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
         const MachineImageSegmentSummary *summary = &report->segment_summaries[segment_index];
+        size_t segment_end = 0u;
+
+        if (!machine_image_try_add_size(summary->virtual_address, summary->byte_count, &segment_end)) {
+            return 0;
+        }
 
         if (virtual_address >= summary->virtual_address &&
-            virtual_address < summary->virtual_address + summary->byte_count) {
+            virtual_address < segment_end) {
             if (out_segment_index) {
                 *out_segment_index = segment_index;
             }
@@ -427,7 +435,7 @@ int machine_image_report_find_segment_artifact_covering_virtual_address(const Ma
     if (out_segment_index) {
         *out_segment_index = 0u;
     }
-    if (!report || !out_artifact) {
+    if (!machine_image_report_has_tables(report) || !out_artifact) {
         return 0;
     }
     if (!machine_image_report_find_segment_summary_covering_virtual_address(
@@ -450,7 +458,10 @@ int machine_image_report_get_segment_symbol_summary_count(const MachineImageRepo
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || segment_index >= report->segment_summary_count || !report->segment_symbol_counts) {
+    if (!machine_image_report_has_tables(report) ||
+        !out_count ||
+        segment_index >= report->segment_summary_count ||
+        !report->segment_symbol_counts) {
         return 0;
     }
     *out_count = report->segment_symbol_counts[segment_index];
@@ -484,7 +495,9 @@ int machine_image_report_segment_artifact_get_symbol_summary(const MachineImageR
 int machine_image_report_get_symbol_summary(const MachineImageReport *report,
     size_t symbol_index,
     const MachineImageSymbolSummary **out_summary) {
-    if (!report || !out_summary || !report->symbol_summaries || symbol_index >= report->symbol_summary_count) {
+    if (!machine_image_report_has_tables(report) ||
+        !out_summary ||
+        symbol_index >= report->symbol_summary_count) {
         return 0;
     }
     *out_summary = &report->symbol_summaries[symbol_index];
@@ -499,7 +512,7 @@ int machine_image_report_get_symbol_artifact(const MachineImageReport *report,
     if (out_artifact) {
         memset(out_artifact, 0, sizeof(*out_artifact));
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_get_symbol_summary(report, symbol_index, &summary) || !summary) {
         return 0;
     }
@@ -551,7 +564,10 @@ int machine_image_report_get_symbol_relocation_summary_count(const MachineImageR
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || symbol_index >= report->symbol_summary_count || !report->symbol_relocation_counts) {
+    if (!machine_image_report_has_tables(report) ||
+        !out_count ||
+        symbol_index >= report->symbol_summary_count ||
+        !report->symbol_relocation_counts) {
         return 0;
     }
     *out_count = report->symbol_relocation_counts[symbol_index];
@@ -564,7 +580,9 @@ int machine_image_report_get_symbol_resolved_relocation_summary_count(const Mach
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || symbol_index >= report->symbol_summary_count ||
+    if (!machine_image_report_has_tables(report) ||
+        !out_count ||
+        symbol_index >= report->symbol_summary_count ||
         !report->symbol_resolved_relocation_counts) {
         return 0;
     }
@@ -578,7 +596,9 @@ int machine_image_report_get_symbol_unresolved_relocation_summary_count(const Ma
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || symbol_index >= report->symbol_summary_count ||
+    if (!machine_image_report_has_tables(report) ||
+        !out_count ||
+        symbol_index >= report->symbol_summary_count ||
         !report->symbol_unresolved_relocation_counts) {
         return 0;
     }
@@ -673,7 +693,7 @@ int machine_image_report_get_symbol_relocation_summary_by_index(const MachineIma
     size_t count;
     size_t relocation_index;
 
-    if (!report || symbol_index >= report->symbol_summary_count ||
+    if (!machine_image_report_has_tables(report) || symbol_index >= report->symbol_summary_count ||
         !report->symbol_relocation_start_indices ||
         !report->symbol_relocation_counts ||
         !report->symbol_relocation_indices) {
@@ -704,7 +724,7 @@ int machine_image_report_get_symbol_resolved_relocation_summary_by_index(const M
     size_t count;
     size_t relocation_index;
 
-    if (!report || symbol_index >= report->symbol_summary_count ||
+    if (!machine_image_report_has_tables(report) || symbol_index >= report->symbol_summary_count ||
         !report->symbol_resolved_relocation_start_indices ||
         !report->symbol_resolved_relocation_counts ||
         !report->symbol_resolved_relocation_indices) {
@@ -735,7 +755,7 @@ int machine_image_report_get_symbol_unresolved_relocation_summary_by_index(const
     size_t count;
     size_t relocation_index;
 
-    if (!report || symbol_index >= report->symbol_summary_count ||
+    if (!machine_image_report_has_tables(report) || symbol_index >= report->symbol_summary_count ||
         !report->symbol_unresolved_relocation_start_indices ||
         !report->symbol_unresolved_relocation_counts ||
         !report->symbol_unresolved_relocation_indices) {
@@ -879,7 +899,7 @@ int machine_image_report_get_segment_symbol_summary_by_index(const MachineImageR
     size_t count;
     size_t symbol_index;
 
-    if (!report || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || segment_index >= report->segment_summary_count ||
         !report->segment_symbol_start_indices ||
         !report->segment_symbol_counts ||
         !report->segment_symbol_indices) {
@@ -906,7 +926,7 @@ int machine_image_report_find_symbol_summary_by_name(const MachineImageReport *r
     const MachineImageSymbolSummary **out_summary) {
     size_t symbol_index;
 
-    if (!report || !symbol_name || !report->symbol_summaries) {
+    if (!machine_image_report_has_tables(report) || !symbol_name) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < report->symbol_summary_count; ++symbol_index) {
@@ -933,7 +953,7 @@ int machine_image_report_find_symbol_artifact_by_name(const MachineImageReport *
     if (out_symbol_index) {
         *out_symbol_index = 0u;
     }
-    if (!report || !symbol_name || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !symbol_name || !out_artifact ||
         !machine_image_report_find_symbol_summary_by_name(report, symbol_name, &symbol_index, NULL) ||
         !machine_image_report_get_symbol_artifact(report, symbol_index, out_artifact)) {
         return 0;
@@ -950,7 +970,7 @@ int machine_image_report_find_symbol_summary_by_virtual_address(const MachineIma
     const MachineImageSymbolSummary **out_summary) {
     size_t symbol_index;
 
-    if (!report || !report->symbol_summaries) {
+    if (!machine_image_report_has_tables(report)) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < report->symbol_summary_count; ++symbol_index) {
@@ -978,7 +998,7 @@ int machine_image_report_find_symbol_artifact_by_virtual_address(const MachineIm
     if (out_symbol_index) {
         *out_symbol_index = 0u;
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_find_symbol_summary_by_virtual_address(report, virtual_address, &symbol_index, NULL) ||
         !machine_image_report_get_symbol_artifact(report, symbol_index, out_artifact)) {
         return 0;
@@ -992,7 +1012,7 @@ int machine_image_report_find_symbol_artifact_by_virtual_address(const MachineIm
 int machine_image_report_get_relocation_summary(const MachineImageReport *report,
     size_t relocation_index,
     const MachineImageRelocationSummary **out_summary) {
-    if (!report || !out_summary || !report->relocation_summaries ||
+    if (!machine_image_report_has_tables(report) || !out_summary ||
         relocation_index >= report->relocation_summary_count) {
         return 0;
     }
@@ -1008,7 +1028,7 @@ int machine_image_report_get_relocation_artifact(const MachineImageReport *repor
     if (out_artifact) {
         memset(out_artifact, 0, sizeof(*out_artifact));
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_get_relocation_summary(report, relocation_index, &summary) || !summary) {
         return 0;
     }
@@ -1049,7 +1069,7 @@ int machine_image_report_get_segment_relocation_summary_count(const MachineImage
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || !out_count || segment_index >= report->segment_summary_count ||
         !report->segment_relocation_counts) {
         return 0;
     }
@@ -1090,7 +1110,7 @@ int machine_image_report_get_segment_relocation_summary_by_index(const MachineIm
     size_t count;
     size_t relocation_index;
 
-    if (!report || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || segment_index >= report->segment_summary_count ||
         !report->segment_relocation_start_indices ||
         !report->segment_relocation_counts ||
         !report->segment_relocation_indices) {
@@ -1118,7 +1138,7 @@ int machine_image_report_get_segment_resolved_relocation_summary_count(const Mac
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || !out_count || segment_index >= report->segment_summary_count ||
         !report->segment_resolved_relocation_counts) {
         return 0;
     }
@@ -1132,7 +1152,7 @@ int machine_image_report_get_segment_unresolved_relocation_summary_count(const M
     if (out_count) {
         *out_count = 0u;
     }
-    if (!report || !out_count || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || !out_count || segment_index >= report->segment_summary_count ||
         !report->segment_unresolved_relocation_counts) {
         return 0;
     }
@@ -1201,7 +1221,7 @@ int machine_image_report_get_segment_resolved_relocation_summary_by_index(const 
     size_t count;
     size_t relocation_index;
 
-    if (!report || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || segment_index >= report->segment_summary_count ||
         !report->segment_resolved_relocation_start_indices ||
         !report->segment_resolved_relocation_counts ||
         !report->segment_resolved_relocation_indices) {
@@ -1232,7 +1252,7 @@ int machine_image_report_get_segment_unresolved_relocation_summary_by_index(cons
     size_t count;
     size_t relocation_index;
 
-    if (!report || segment_index >= report->segment_summary_count ||
+    if (!machine_image_report_has_tables(report) || segment_index >= report->segment_summary_count ||
         !report->segment_unresolved_relocation_start_indices ||
         !report->segment_unresolved_relocation_counts ||
         !report->segment_unresolved_relocation_indices) {
@@ -1261,7 +1281,7 @@ int machine_image_report_find_relocation_summary_by_site_virtual_address(const M
     const MachineImageRelocationSummary **out_summary) {
     size_t relocation_index;
 
-    if (!report || !report->relocation_summaries) {
+    if (!machine_image_report_has_tables(report)) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < report->relocation_summary_count; ++relocation_index) {
@@ -1289,7 +1309,7 @@ int machine_image_report_find_relocation_artifact_by_site_virtual_address(const 
     if (out_relocation_index) {
         *out_relocation_index = 0u;
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_find_relocation_summary_by_site_virtual_address(
             report,
             site_virtual_address,
@@ -1351,7 +1371,7 @@ int machine_image_report_get_relocation_artifact_by_filter_index(const MachineIm
 
 int machine_image_report_get_resolved_relocation_count(const MachineImageReport *report,
     size_t *out_count) {
-    if (!report || !out_count) {
+    if (!machine_image_report_has_tables(report) || !out_count) {
         return 0;
     }
     *out_count = report->resolved_relocation_count;
@@ -1361,7 +1381,7 @@ int machine_image_report_get_resolved_relocation_count(const MachineImageReport 
 int machine_image_report_get_resolved_relocation_index(const MachineImageReport *report,
     size_t resolved_index,
     size_t *out_relocation_index) {
-    if (!report || !out_relocation_index || !report->resolved_relocation_indices ||
+    if (!machine_image_report_has_tables(report) || !out_relocation_index || !report->resolved_relocation_indices ||
         resolved_index >= report->resolved_relocation_count) {
         return 0;
     }
@@ -1396,7 +1416,7 @@ int machine_image_report_get_resolved_relocation_artifact_by_index(const Machine
     if (out_relocation_index) {
         *out_relocation_index = 0u;
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_get_resolved_relocation_index(report, resolved_index, &relocation_index) ||
         !machine_image_report_get_relocation_artifact(report, relocation_index, out_artifact)) {
         return 0;
@@ -1409,7 +1429,7 @@ int machine_image_report_get_resolved_relocation_artifact_by_index(const Machine
 
 int machine_image_report_get_unresolved_relocation_count(const MachineImageReport *report,
     size_t *out_count) {
-    if (!report || !out_count) {
+    if (!machine_image_report_has_tables(report) || !out_count) {
         return 0;
     }
     *out_count = report->unresolved_relocation_count;
@@ -1419,7 +1439,7 @@ int machine_image_report_get_unresolved_relocation_count(const MachineImageRepor
 int machine_image_report_get_unresolved_relocation_index(const MachineImageReport *report,
     size_t unresolved_index,
     size_t *out_relocation_index) {
-    if (!report || !out_relocation_index || !report->unresolved_relocation_indices ||
+    if (!machine_image_report_has_tables(report) || !out_relocation_index || !report->unresolved_relocation_indices ||
         unresolved_index >= report->unresolved_relocation_count) {
         return 0;
     }
@@ -1454,7 +1474,7 @@ int machine_image_report_get_unresolved_relocation_artifact_by_index(const Machi
     if (out_relocation_index) {
         *out_relocation_index = 0u;
     }
-    if (!report || !out_artifact ||
+    if (!machine_image_report_has_tables(report) || !out_artifact ||
         !machine_image_report_get_unresolved_relocation_index(report, unresolved_index, &relocation_index) ||
         !machine_image_report_get_relocation_artifact(report, relocation_index, out_artifact)) {
         return 0;
@@ -1478,7 +1498,7 @@ int machine_image_dump_report(const MachineImageReport *report,
     if (out_text) {
         *out_text = NULL;
     }
-    if (!report || !out_text) {
+    if (!machine_image_report_has_tables(report) || !out_text) {
         machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-141: invalid image report dump contract");
         return 0;
     }

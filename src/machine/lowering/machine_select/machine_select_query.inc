@@ -29,7 +29,16 @@ int machine_select_program_get_function_by_name(const MachineSelectProgram *prog
     const MachineSelectFunction **out_function) {
     size_t function_index;
 
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
     if (!program || !function_name) {
+        return 0;
+    }
+    if (program->function_count > 0 && !program->functions) {
         return 0;
     }
 
@@ -164,6 +173,9 @@ int machine_select_program_get_block_by_function_name_and_block_id(const Machine
         return 0;
     }
     if (!machine_select_program_get_function_by_name(program, function_name, &function_index, &function) || !function) {
+        return 0;
+    }
+    if (function->block_count > 0 && !function->blocks) {
         return 0;
     }
     for (block_index = 0; block_index < function->block_count; ++block_index) {
@@ -397,7 +409,13 @@ int machine_select_function_get_block(const MachineSelectFunction *function,
     const MachineSelectBasicBlock **out_block) {
     size_t block_index;
 
+    if (out_block) {
+        *out_block = NULL;
+    }
     if (!function || !out_block) {
+        return 0;
+    }
+    if (function->block_count > 0 && !function->blocks) {
         return 0;
     }
 
@@ -418,6 +436,9 @@ int machine_select_function_compute_summary(const MachineSelectFunction *functio
     if (!function || !out_summary) {
         return 0;
     }
+    if (function->block_count > 0 && !function->blocks) {
+        return 0;
+    }
 
     memset(out_summary, 0, sizeof(*out_summary));
     out_summary->block_count = function->block_count;
@@ -429,6 +450,9 @@ int machine_select_function_compute_summary(const MachineSelectFunction *functio
         size_t block_call_count = 0;
         size_t block_memory_op_count = 0;
 
+        if (block->op_count > 0 && !block->ops) {
+            return 0;
+        }
         out_summary->op_count += block->op_count;
         for (op_index = 0; op_index < block->op_count; ++op_index) {
             const MachineSelectOp *op = &block->ops[op_index];
@@ -657,27 +681,16 @@ int machine_select_lower_report_get_function_by_name(const MachineSelectLowerRep
     const char *function_name,
     size_t *out_function_index,
     const MachineSelectFunction **out_function) {
-    size_t function_index;
-
+    if (out_function_index) {
+        *out_function_index = 0;
+    }
+    if (out_function) {
+        *out_function = NULL;
+    }
     if (!report || !function_name) {
         return 0;
     }
-
-    for (function_index = 0; function_index < report->program.function_count; ++function_index) {
-        const MachineSelectFunction *function = &report->program.functions[function_index];
-
-        if (function->name && strcmp(function->name, function_name) == 0) {
-            if (out_function_index) {
-                *out_function_index = function_index;
-            }
-            if (out_function) {
-                *out_function = function;
-            }
-            return 1;
-        }
-    }
-
-    return 0;
+    return machine_select_program_get_function_by_name(&report->program, function_name, out_function_index, out_function);
 }
 
 int machine_select_lower_report_get_function_artifact_by_name(const MachineSelectLowerReport *report,
@@ -758,6 +771,7 @@ int machine_select_lower_report_get_block_summary_artifact(const MachineSelectLo
     size_t next_offset;
 
     if (!report || !out_summary || function_index >= report->program.function_count ||
+        function_index >= report->function_summary_count ||
         !report->function_block_summary_offsets || !report->block_summaries) {
         return 0;
     }
@@ -790,6 +804,7 @@ int machine_select_lower_report_get_block_summary_artifact_by_id(const MachineSe
         *out_summary = NULL;
     }
     if (!report || !out_summary || function_index >= report->program.function_count ||
+        function_index >= report->function_summary_count ||
         !report->function_block_summary_offsets || !report->block_summaries) {
         return 0;
     }
@@ -1238,7 +1253,10 @@ int machine_select_lower_report_get_function_with_calls_by_name(const MachineSel
     }
     for (filtered_index = 0; filtered_index < report->functions_with_calls_count; ++filtered_index) {
         size_t function_index = report->function_indices_with_calls[filtered_index];
-        const MachineSelectFunction *function = &report->program.functions[function_index];
+        const MachineSelectFunction *function = NULL;
+        if (!machine_select_lower_report_get_function(report, function_index, &function) || !function) {
+            return 0;
+        }
         if (function->name && strcmp(function->name, function_name) == 0) {
             if (out_filtered_index) {
                 *out_filtered_index = filtered_index;
@@ -1318,7 +1336,10 @@ int machine_select_lower_report_get_function_with_spills_by_name(const MachineSe
     }
     for (filtered_index = 0; filtered_index < report->functions_with_spills_count; ++filtered_index) {
         size_t function_index = report->function_indices_with_spills[filtered_index];
-        const MachineSelectFunction *function = &report->program.functions[function_index];
+        const MachineSelectFunction *function = NULL;
+        if (!machine_select_lower_report_get_function(report, function_index, &function) || !function) {
+            return 0;
+        }
         if (function->name && strcmp(function->name, function_name) == 0) {
             if (out_filtered_index) {
                 *out_filtered_index = filtered_index;
@@ -1399,7 +1420,10 @@ int machine_select_lower_report_get_function_with_memory_ops_by_name(const Machi
     }
     for (filtered_index = 0; filtered_index < report->functions_with_memory_ops_count; ++filtered_index) {
         size_t function_index = report->function_indices_with_memory_ops[filtered_index];
-        const MachineSelectFunction *function = &report->program.functions[function_index];
+        const MachineSelectFunction *function = NULL;
+        if (!machine_select_lower_report_get_function(report, function_index, &function) || !function) {
+            return 0;
+        }
         if (function->name && strcmp(function->name, function_name) == 0) {
             if (out_filtered_index) {
                 *out_filtered_index = filtered_index;
@@ -1479,7 +1503,10 @@ int machine_select_lower_report_get_function_with_branches_by_name(const Machine
     }
     for (filtered_index = 0; filtered_index < report->functions_with_branches_count; ++filtered_index) {
         size_t function_index = report->function_indices_with_branches[filtered_index];
-        const MachineSelectFunction *function = &report->program.functions[function_index];
+        const MachineSelectFunction *function = NULL;
+        if (!machine_select_lower_report_get_function(report, function_index, &function) || !function) {
+            return 0;
+        }
         if (function->name && strcmp(function->name, function_name) == 0) {
             if (out_filtered_index) {
                 *out_filtered_index = filtered_index;

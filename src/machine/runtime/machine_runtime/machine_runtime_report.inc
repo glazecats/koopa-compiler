@@ -5,6 +5,13 @@
 
 #else
 
+static int machine_runtime_report_has_segment_tables(const MachineRuntimeReport *report) {
+    return report &&
+        report->segment_summary_count == report->file.segment_count &&
+        (report->segment_summary_count == 0u || report->segment_summaries) &&
+        (report->file.segment_count == 0u || report->file.segments);
+}
+
 int machine_runtime_report_get_summary(const MachineRuntimeReport *report,
     size_t *out_segment_count,
     size_t *out_mapped_byte_count,
@@ -251,7 +258,7 @@ int machine_runtime_report_get_entry_segment_summary_artifact(const MachineRunti
     const MachineRuntimeSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report) {
+    if (!machine_runtime_report_has_segment_tables(report)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -275,7 +282,9 @@ int machine_runtime_report_get_entry_segment_summary_artifact(const MachineRunti
 int machine_runtime_report_get_stack_segment_summary_artifact(const MachineRuntimeReport *report,
     size_t *out_segment_index,
     const MachineRuntimeSegmentSummary **out_summary) {
-    if (!report || !report->has_stack_segment || report->stack_segment_index >= report->segment_summary_count) {
+    if (!machine_runtime_report_has_segment_tables(report) ||
+        !report->has_stack_segment ||
+        report->stack_segment_index >= report->segment_summary_count) {
         return 0;
     }
     if (out_segment_index) {
@@ -290,7 +299,9 @@ int machine_runtime_report_get_stack_segment_summary_artifact(const MachineRunti
 int machine_runtime_report_get_segment_summary(const MachineRuntimeReport *report,
     size_t segment_index,
     const MachineRuntimeSegmentSummary **out_summary) {
-    if (!report || segment_index >= report->segment_summary_count || !out_summary) {
+    if (!machine_runtime_report_has_segment_tables(report) ||
+        segment_index >= report->segment_summary_count ||
+        !out_summary) {
         return 0;
     }
     *out_summary = &report->segment_summaries[segment_index];
@@ -303,7 +314,9 @@ int machine_runtime_report_get_segment_artifact(const MachineRuntimeReport *repo
     size_t entry_segment_index = 0u;
     size_t stack_segment_index = 0u;
 
-    if (!report || !out_artifact || segment_index >= report->segment_summary_count) {
+    if (!machine_runtime_report_has_segment_tables(report) ||
+        !out_artifact ||
+        segment_index >= report->segment_summary_count) {
         return 0;
     }
     memset(out_artifact, 0, sizeof(*out_artifact));
@@ -326,7 +339,7 @@ int machine_runtime_report_find_segment_summary_by_name(const MachineRuntimeRepo
     const MachineRuntimeSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report || !segment_name) {
+    if (!machine_runtime_report_has_segment_tables(report) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -365,7 +378,7 @@ int machine_runtime_report_find_segment_summary_covering_virtual_address(const M
     const MachineRuntimeSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report) {
+    if (!machine_runtime_report_has_segment_tables(report)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
@@ -483,7 +496,7 @@ int machine_runtime_report_find_region_artifact_covering_memory_offset(const Mac
 int machine_runtime_report_get_segment_filter_count(const MachineRuntimeReport *report,
     MachineRuntimeReportSegmentFilterKind filter_kind,
     size_t *out_count) {
-    if (!report || !out_count) {
+    if (!machine_runtime_report_has_segment_tables(report) || !out_count) {
         return 0;
     }
     switch (filter_kind) {
@@ -510,18 +523,20 @@ int machine_runtime_report_get_segment_summary_by_filter_index(const MachineRunt
     const MachineRuntimeSegmentSummary **out_summary) {
     size_t segment_index;
 
-    if (!report) {
+    if (!machine_runtime_report_has_segment_tables(report)) {
         return 0;
     }
     switch (filter_kind) {
         case MACHINE_RUNTIME_SEGMENT_FILTER_EXECUTABLE:
-            if (filtered_index >= report->executable_segment_count) {
+            if (filtered_index >= report->executable_segment_count ||
+                (report->executable_segment_count > 0u && !report->executable_segment_indices)) {
                 return 0;
             }
             segment_index = report->executable_segment_indices[filtered_index];
             break;
         case MACHINE_RUNTIME_SEGMENT_FILTER_NON_EXECUTABLE:
-            if (filtered_index >= report->non_executable_segment_count) {
+            if (filtered_index >= report->non_executable_segment_count ||
+                (report->non_executable_segment_count > 0u && !report->non_executable_segment_indices)) {
                 return 0;
             }
             segment_index = report->non_executable_segment_indices[filtered_index];
@@ -574,15 +589,25 @@ int machine_runtime_report_get_segment_artifact_by_filter_index(const MachineRun
 int machine_runtime_report_get_region_filter_count(const MachineRuntimeReport *report,
     MachineRuntimeRegionFilterKind filter_kind,
     size_t *out_count) {
-    if (!report || !out_count) {
+    MachineRuntimeGapSummary gap_summary;
+    size_t count = 0u;
+    size_t segment_index;
+
+    memset(&gap_summary, 0, sizeof(gap_summary));
+    if (!machine_runtime_report_has_segment_tables(report) || !out_count) {
         return 0;
     }
     switch (filter_kind) {
         case MACHINE_RUNTIME_REGION_FILTER_LOAD:
-            *out_count = report->segment_summary_count > 0u ? report->segment_summary_count - 1u : 0u;
+            for (segment_index = 0u; segment_index < report->segment_summary_count; ++segment_index) {
+                if (report->segment_summaries[segment_index].kind == MACHINE_RUNTIME_SEGMENT_KIND_LOAD) {
+                    ++count;
+                }
+            }
+            *out_count = count;
             return 1;
         case MACHINE_RUNTIME_REGION_FILTER_GAP:
-            *out_count = 1u;
+            *out_count = machine_runtime_file_get_gap_summary(&report->file, &gap_summary) ? 1u : 0u;
             return 1;
         case MACHINE_RUNTIME_REGION_FILTER_STACK:
             *out_count = report->has_stack_segment ? 1u : 0u;
@@ -597,19 +622,32 @@ int machine_runtime_report_get_region_summary_by_filter_index(const MachineRunti
     size_t *out_region_index,
     MachineRuntimeRegionSummary *out_summary) {
     size_t region_index;
+    size_t current_index;
+    MachineRuntimeGapSummary gap_summary;
 
-    if (!report) {
+    memset(&gap_summary, 0, sizeof(gap_summary));
+    if (!machine_runtime_report_has_segment_tables(report)) {
         return 0;
     }
     switch (filter_kind) {
         case MACHINE_RUNTIME_REGION_FILTER_LOAD:
-            if (report->segment_summary_count == 0u || filtered_index >= report->segment_summary_count - 1u) {
-                return 0;
+            current_index = 0u;
+            for (region_index = 0u; region_index < report->segment_summary_count; ++region_index) {
+                if (report->segment_summaries[region_index].kind != MACHINE_RUNTIME_SEGMENT_KIND_LOAD) {
+                    continue;
+                }
+                if (current_index == filtered_index) {
+                    if (out_region_index) {
+                        *out_region_index = region_index;
+                    }
+                    return !out_summary || machine_runtime_report_get_region_summary(report, region_index, out_summary);
+                }
+                ++current_index;
             }
-            region_index = filtered_index;
-            break;
+            return 0;
         case MACHINE_RUNTIME_REGION_FILTER_GAP:
-            if (filtered_index != 0u) {
+            if (filtered_index != 0u ||
+                !machine_runtime_file_get_gap_summary(&report->file, &gap_summary)) {
                 return 0;
             }
             region_index = report->segment_summary_count;

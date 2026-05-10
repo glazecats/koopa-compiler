@@ -520,7 +520,13 @@ int machine_object_file_find_section_by_name(const MachineObjectFile *object_fil
     const MachineObjectSection **out_section) {
     size_t section_index;
 
-    if (!object_file || !section_name || !object_file->sections) {
+    if (out_section_index) {
+        *out_section_index = 0u;
+    }
+    if (out_section) {
+        *out_section = NULL;
+    }
+    if (!object_file || !section_name || (object_file->section_count > 0u && !object_file->sections)) {
         return 0;
     }
     for (section_index = 0; section_index < object_file->section_count; ++section_index) {
@@ -559,6 +565,10 @@ int machine_object_file_copy_section_bytes(const MachineObjectFile *object_file,
     if (section->byte_count == 0) {
         return 1;
     }
+    if (!section->bytes) {
+        machine_object_set_error(error, 0, 0, "MACHINE-OBJECT-103: section byte table missing");
+        return 0;
+    }
     bytes = (unsigned char *)malloc(section->byte_count);
     if (!bytes) {
         machine_object_set_error(error, 0, 0, "MACHINE-OBJECT-101: out of memory copying section bytes");
@@ -584,14 +594,16 @@ int machine_object_file_get_section_symbols(const MachineObjectFile *object_file
     if (out_symbols) {
         *out_symbols = NULL;
     }
-    if (!object_file || !machine_object_file_get_section(object_file, section_index, &section) || !section ||
-        !object_file->symbols) {
+    if (!object_file || !machine_object_file_get_section(object_file, section_index, &section) || !section) {
+        return 0;
+    }
+    if (section->symbol_count > 0u && !object_file->symbols) {
         return 0;
     }
     if (out_count) {
         *out_count = section->symbol_count;
     }
-    if (out_symbols) {
+    if (out_symbols && section->symbol_count > 0u) {
         *out_symbols = object_file->symbols + section->symbol_start_index;
     }
     return 1;
@@ -609,14 +621,16 @@ int machine_object_file_get_section_fixups(const MachineObjectFile *object_file,
     if (out_fixups) {
         *out_fixups = NULL;
     }
-    if (!object_file || !machine_object_file_get_section(object_file, section_index, &section) || !section ||
-        !object_file->fixups) {
+    if (!object_file || !machine_object_file_get_section(object_file, section_index, &section) || !section) {
+        return 0;
+    }
+    if (section->fixup_count > 0u && !object_file->fixups) {
         return 0;
     }
     if (out_count) {
         *out_count = section->fixup_count;
     }
-    if (out_fixups) {
+    if (out_fixups && section->fixup_count > 0u) {
         *out_fixups = object_file->fixups + section->fixup_start_index;
     }
     return 1;
@@ -638,7 +652,13 @@ int machine_object_file_find_symbol_by_name(const MachineObjectFile *object_file
     const MachineObjectSymbol **out_symbol) {
     size_t symbol_index;
 
-    if (!object_file || !symbol_name || !object_file->symbols) {
+    if (out_symbol_index) {
+        *out_symbol_index = 0u;
+    }
+    if (out_symbol) {
+        *out_symbol = NULL;
+    }
+    if (!object_file || !symbol_name || (object_file->symbol_count > 0u && !object_file->symbols)) {
         return 0;
     }
     for (symbol_index = 0; symbol_index < object_file->symbol_count; ++symbol_index) {
@@ -1221,7 +1241,13 @@ int machine_object_report_find_section_summary_by_name(const MachineObjectReport
     const MachineObjectSectionSummary **out_summary) {
     size_t section_index;
 
-    if (!report || !section_name || !report->section_summaries) {
+    if (out_section_index) {
+        *out_section_index = 0u;
+    }
+    if (out_summary) {
+        *out_summary = NULL;
+    }
+    if (!report || !section_name || (report->section_summary_count > 0u && !report->section_summaries)) {
         return 0;
     }
     for (section_index = 0u; section_index < report->section_summary_count; ++section_index) {
@@ -1255,7 +1281,13 @@ int machine_object_report_find_symbol_summary_by_name(const MachineObjectReport 
     const MachineObjectSymbolSummary **out_summary) {
     size_t symbol_index;
 
-    if (!report || !symbol_name || !report->symbol_summaries) {
+    if (out_symbol_index) {
+        *out_symbol_index = 0u;
+    }
+    if (out_summary) {
+        *out_summary = NULL;
+    }
+    if (!report || !symbol_name || (report->symbol_summary_count > 0u && !report->symbol_summaries)) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < report->symbol_summary_count; ++symbol_index) {
@@ -1399,6 +1431,18 @@ int machine_object_dump_report(const MachineObjectReport *report,
     }
     if (!report || !out_text) {
         machine_object_set_error(error, 0, 0, "MACHINE-OBJECT-153: invalid object report dump contract");
+        return 0;
+    }
+    if ((report->file.section_count > 0u && !report->file.sections) ||
+        (report->file.symbol_count > 0u && !report->file.symbols) ||
+        (report->file.fixup_count > 0u && !report->file.fixups) ||
+        report->section_summary_count != report->file.section_count ||
+        report->symbol_summary_count != report->file.symbol_count ||
+        report->fixup_summary_count != report->file.fixup_count ||
+        (report->section_summary_count > 0u && !report->section_summaries) ||
+        (report->symbol_summary_count > 0u && !report->symbol_summaries) ||
+        (report->fixup_summary_count > 0u && !report->fixup_summaries)) {
+        machine_object_set_error(error, 0, 0, "MACHINE-OBJECT-154: malformed object report tables");
         return 0;
     }
     if (!machine_object_dump_file(&report->file, &file_dump, error)) {

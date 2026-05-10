@@ -1041,19 +1041,24 @@ static int test_machine_reloc_surfaces_global_data_relocations(void) {
     machine_object_file_init(&object_file);
     machine_reloc_file_init(&reloc_file);
 
+    emit_program.register_bank.register_count = 1u;
+    emit_program.register_bank.registers = (MachineEmitRegisterDesc *)calloc(1u, sizeof(MachineEmitRegisterDesc));
     emit_program.global_count = 2u;
     emit_program.global_capacity = 2u;
     emit_program.globals = (MachineEmitGlobal *)calloc(2u, sizeof(MachineEmitGlobal));
     emit_program.function_count = 1u;
     emit_program.function_capacity = 1u;
     emit_program.functions = (MachineEmitFunction *)calloc(1u, sizeof(MachineEmitFunction));
-    if (!emit_program.globals || !emit_program.functions) {
+    if (!emit_program.register_bank.registers || !emit_program.globals || !emit_program.functions) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
         machine_object_file_free(&object_file);
         machine_reloc_file_free(&reloc_file);
         return 0;
     }
+    emit_program.register_bank.registers[0].register_id = 0u;
+    emit_program.register_bank.registers[0].name = dup_text("r0");
+    emit_program.register_bank.registers[0].allocatable = 1u;
 
     emit_program.globals[0].id = 0u;
     emit_program.globals[0].name = dup_text("g");
@@ -1067,7 +1072,8 @@ static int test_machine_reloc_surfaces_global_data_relocations(void) {
     emit_program.functions[0].block_count = 1u;
     emit_program.functions[0].block_capacity = 1u;
     emit_program.functions[0].blocks = (MachineEmitBlock *)calloc(1u, sizeof(MachineEmitBlock));
-    if (!emit_program.globals[0].name || !emit_program.globals[1].name ||
+    if (!emit_program.register_bank.registers[0].name ||
+        !emit_program.globals[0].name || !emit_program.globals[1].name ||
         !emit_program.functions[0].name || !emit_program.functions[0].blocks) {
         machine_emit_program_free(&emit_program);
         machine_bytes_program_free(&bytes_program);
@@ -1258,6 +1264,120 @@ static int test_machine_reloc_preserves_global_object_byte_sizes(void) {
     return ok;
 }
 
+static int test_machine_reloc_allows_empty_section_subqueries(void) {
+    MachineRelocFile reloc_file;
+    MachineRelocReport report;
+    const MachineRelocation *section_relocations = NULL;
+    const MachineRelocationSummary *section_relocation_summaries = NULL;
+    size_t relocation_count = 0u;
+
+    machine_reloc_file_init(&reloc_file);
+    reloc_file.sections = (MachineRelocSection *)calloc(1u, sizeof(MachineRelocSection));
+    if (!reloc_file.sections) {
+        return 0;
+    }
+    reloc_file.section_count = 1u;
+    reloc_file.section_capacity = 1u;
+    reloc_file.sections[0].name = dup_text(".empty");
+    if (!reloc_file.sections[0].name) {
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    if (!machine_reloc_file_get_section_relocations(&reloc_file, 0u, &relocation_count, &section_relocations) ||
+        relocation_count != 0u || section_relocations != NULL) {
+        fprintf(stderr, "[machine-reloc] FAIL: empty section relocation query contract mismatch\n");
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    machine_reloc_report_init(&report);
+    report.file.sections = (MachineRelocSection *)calloc(1u, sizeof(MachineRelocSection));
+    report.section_summaries = (MachineRelocSectionSummary *)calloc(1u, sizeof(MachineRelocSectionSummary));
+    if (!report.file.sections || !report.section_summaries) {
+        machine_reloc_report_free(&report);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+    report.file.section_count = 1u;
+    report.file.section_capacity = 1u;
+    report.file.sections[0].name = dup_text(".empty");
+    report.section_summary_count = 1u;
+    report.section_summaries[0].name = ".empty";
+    if (!report.file.sections[0].name) {
+        machine_reloc_report_free(&report);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    if (!machine_reloc_report_get_section_relocation_summaries(
+            &report,
+            0u,
+            &relocation_count,
+            &section_relocation_summaries) ||
+        relocation_count != 0u || section_relocation_summaries != NULL) {
+        fprintf(stderr, "[machine-reloc] FAIL: empty section relocation summary contract mismatch\n");
+        machine_reloc_report_free(&report);
+        machine_reloc_file_free(&reloc_file);
+        return 0;
+    }
+
+    machine_reloc_report_free(&report);
+    machine_reloc_file_free(&reloc_file);
+    return 1;
+}
+
+static int test_machine_reloc_report_query_dump_rejects_missing_tables(void) {
+    MachineRelocFile reloc_file;
+    MachineRelocReport report;
+    MachineRelocError reloc_error;
+    const MachineRelocSectionSummary *section_summary = NULL;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&reloc_error, 0, sizeof(reloc_error));
+    machine_reloc_file_init(&reloc_file);
+    machine_reloc_report_init(&report);
+
+    reloc_file.object_file.sections = (MachineObjectSection *)calloc(1u, sizeof(MachineObjectSection));
+    reloc_file.sections = (MachineRelocSection *)calloc(1u, sizeof(MachineRelocSection));
+    if (!reloc_file.object_file.sections || !reloc_file.sections) {
+        machine_reloc_file_free(&reloc_file);
+        machine_reloc_report_free(&report);
+        return 0;
+    }
+    reloc_file.object_file.section_count = 1u;
+    reloc_file.object_file.section_capacity = 1u;
+    reloc_file.section_count = 1u;
+    reloc_file.section_capacity = 1u;
+    reloc_file.object_file.sections[0].name = dup_text(".text");
+    reloc_file.sections[0].name = dup_text(".text");
+    reloc_file.sections[0].object_section_index = 0u;
+    if (!reloc_file.object_file.sections[0].name ||
+        !reloc_file.sections[0].name ||
+        !machine_reloc_build_report_from_file(&reloc_file, &report, &reloc_error)) {
+        fprintf(stderr, "[machine-reloc] FAIL: malformed report setup failed: %s\n", reloc_error.message);
+        machine_reloc_file_free(&reloc_file);
+        machine_reloc_report_free(&report);
+        return 0;
+    }
+
+    free(report.section_summaries);
+    report.section_summaries = NULL;
+    report.section_summary_count = 0u;
+    memset(&reloc_error, 0, sizeof(reloc_error));
+    if (machine_reloc_report_find_section_summary_by_name(&report, ".text", NULL, &section_summary) ||
+        machine_reloc_dump_report(&report, &actual_text, &reloc_error)) {
+        fprintf(stderr, "[machine-reloc] FAIL: malformed reloc report section query/dump should fail\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_reloc_file_free(&reloc_file);
+    machine_reloc_report_free(&report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -1271,6 +1391,8 @@ int main(void) {
     ok &= test_machine_reloc_preserves_global_object_sections_without_fixups();
     ok &= test_machine_reloc_preserves_global_object_byte_sizes();
     ok &= test_machine_reloc_surfaces_global_data_relocations();
+    ok &= test_machine_reloc_allows_empty_section_subqueries();
+    ok &= test_machine_reloc_report_query_dump_rejects_missing_tables();
 
     if (!ok) {
         return 1;

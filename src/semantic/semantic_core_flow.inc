@@ -2071,51 +2071,49 @@ static int flow_try_eval_constant_arithmetic(TokenType op,
     long long lhs,
     long long rhs,
     long long *out_value) {
-    const int shift_width = (int)(sizeof(long long) * 8u);
+    int32_t lhs32;
+    int32_t rhs32;
 
     if (!out_value) {
         return 0;
     }
 
+    lhs32 = (int32_t)semantic_normalize_sysy_int_value(lhs);
+    rhs32 = (int32_t)semantic_normalize_sysy_int_value(rhs);
+
     switch (op) {
     case TOKEN_PLUS:
-        return !__builtin_add_overflow(lhs, rhs, out_value);
+        *out_value = semantic_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
+        return 1;
     case TOKEN_MINUS:
-        return !__builtin_sub_overflow(lhs, rhs, out_value);
+        *out_value = semantic_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
+        return 1;
     case TOKEN_STAR:
-        return !__builtin_mul_overflow(lhs, rhs, out_value);
+        *out_value = semantic_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
+        return 1;
     case TOKEN_SLASH:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            return 0;
-        }
-        *out_value = lhs / rhs;
+        *out_value = semantic_normalize_sysy_int_value((long long)lhs32 / (long long)rhs32);
         return 1;
     case TOKEN_PERCENT:
-        if (rhs == 0) {
+        if (rhs32 == 0) {
             return 0;
         }
-        if (lhs == LLONG_MIN && rhs == -1) {
-            return 0;
-        }
-        *out_value = lhs % rhs;
+        *out_value = semantic_normalize_sysy_int_value((long long)lhs32 % (long long)rhs32);
         return 1;
     case TOKEN_SHIFT_LEFT:
-        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        if ((unsigned long long)lhs > ((unsigned long long)LLONG_MAX >> (unsigned long long)rhs)) {
-            return 0;
-        }
-        *out_value = lhs << rhs;
+        *out_value = semantic_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
         return 1;
     case TOKEN_SHIFT_RIGHT:
-        if (rhs < 0 || rhs >= shift_width || lhs < 0) {
+        if (rhs32 < 0 || rhs32 >= 32) {
             return 0;
         }
-        *out_value = lhs >> rhs;
+        *out_value = semantic_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
         return 1;
     default:
         return 0;
@@ -2154,19 +2152,18 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
         }
         switch (expr->as.unary.op) {
         case TOKEN_PLUS:
-            *out_value = operand_value;
+            *out_value = semantic_normalize_sysy_int_value(operand_value);
             return 1;
         case TOKEN_MINUS:
-            if (operand_value == LLONG_MIN) {
-                return 0;
-            }
-            *out_value = -operand_value;
+            *out_value = semantic_normalize_sysy_int_value(
+                -(long long)(int32_t)semantic_normalize_sysy_int_value(operand_value));
             return 1;
         case TOKEN_BANG:
             *out_value = !operand_value;
             return 1;
         case TOKEN_TILDE:
-            *out_value = ~operand_value;
+            *out_value = semantic_normalize_sysy_int_value(
+                (long long)(~(int32_t)semantic_normalize_sysy_int_value(operand_value)));
             return 1;
         default:
             return 0;
@@ -2238,34 +2235,46 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
 
         switch (expr->as.binary.op) {
         case TOKEN_COMMA:
-            *out_value = rhs_value;
+            *out_value = semantic_normalize_sysy_int_value(rhs_value);
             return 1;
         case TOKEN_EQ:
-            *out_value = (lhs_value == rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) ==
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_NE:
-            *out_value = (lhs_value != rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) !=
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_LT:
-            *out_value = (lhs_value < rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) <
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_LE:
-            *out_value = (lhs_value <= rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) <=
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_GT:
-            *out_value = (lhs_value > rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) >
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_GE:
-            *out_value = (lhs_value >= rhs_value) ? 1 : 0;
+            *out_value = ((int32_t)semantic_normalize_sysy_int_value(lhs_value) >=
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)) ? 1 : 0;
             return 1;
         case TOKEN_AMP:
-            *out_value = lhs_value & rhs_value;
+            *out_value = semantic_normalize_sysy_int_value((long long)(
+                (int32_t)semantic_normalize_sysy_int_value(lhs_value) &
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)));
             return 1;
         case TOKEN_CARET:
-            *out_value = lhs_value ^ rhs_value;
+            *out_value = semantic_normalize_sysy_int_value((long long)(
+                (int32_t)semantic_normalize_sysy_int_value(lhs_value) ^
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)));
             return 1;
         case TOKEN_PIPE:
-            *out_value = lhs_value | rhs_value;
+            *out_value = semantic_normalize_sysy_int_value((long long)(
+                (int32_t)semantic_normalize_sysy_int_value(lhs_value) |
+                (int32_t)semantic_normalize_sysy_int_value(rhs_value)));
             return 1;
         case TOKEN_PLUS:
         case TOKEN_MINUS:

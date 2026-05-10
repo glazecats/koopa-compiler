@@ -265,6 +265,7 @@ static int test_machine_journal_mainline(void) {
     MachineJournalFile cloned_journal_file;
     MachineJournalReport journal_report;
     MachineJournalError journal_error;
+    MachineJournalSummary journal_summary;
     int ok = 1;
 
     machine_ir_allocate_rewrite_report_init(&ir_report);
@@ -273,6 +274,7 @@ static int test_machine_journal_mainline(void) {
     machine_journal_file_init(&cloned_journal_file);
     machine_journal_report_init(&journal_report);
     memset(&journal_error, 0, sizeof(journal_error));
+    memset(&journal_summary, 0, sizeof(journal_summary));
 
     if (!build_resolved_machine_ir_report(&ir_report, &ir_error) ||
         !machine_journal_build_from_machine_ir_report(&ir_report, &journal_file, &journal_error) ||
@@ -304,6 +306,20 @@ static int test_machine_journal_mainline(void) {
         ok = 0;
         goto cleanup;
     }
+    if (!machine_journal_clone_file(&journal_file, &cloned_journal_file, &journal_error)) {
+        fprintf(stderr, "[machine-journal] FAIL: reclone into populated target failed: %s\n", journal_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    cloned_journal_file.journal_record_index = 1u;
+    if (!machine_journal_file_get_journal_summary(&cloned_journal_file, &journal_summary) ||
+        journal_summary.is_single_record_journal ||
+        machine_journal_verify_file(&cloned_journal_file, &journal_error)) {
+        fprintf(stderr, "[machine-journal] FAIL: malformed single-record summary contract drifted\n");
+        ok = 0;
+        goto cleanup;
+    }
+    cloned_journal_file.journal_record_index = 0u;
 
     ok &= verify_journal_report(
         &journal_report,
@@ -552,11 +568,23 @@ cleanup:
     return ok;
 }
 
+static int test_machine_journal_report_refresh_rejects_null_report(void) {
+    MachineJournalError error;
+
+    memset(&error, 0, sizeof(error));
+    if (machine_journal_report_refresh(NULL, &error)) {
+        fprintf(stderr, "[machine-journal] FAIL: null refresh should fail\n");
+        return 0;
+    }
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_journal_mainline();
     ok &= test_machine_journal_custom_step_cases();
     ok &= test_machine_journal_i386_bridge();
+    ok &= test_machine_journal_report_refresh_rejects_null_report();
     return ok ? 0 : 1;
 }

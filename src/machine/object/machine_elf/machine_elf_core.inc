@@ -304,12 +304,16 @@ int machine_elf_file_copy_bytes(const MachineElfFile *elf_file,
     if (out_byte_count) {
         *out_byte_count = 0;
     }
-    if (!elf_file || !out_bytes || !elf_file->bytes) {
+    if (!elf_file || !out_bytes) {
         machine_elf_set_error(error, 0, 0, "MACHINE-ELF-100: invalid elf byte-copy contract");
         return 0;
     }
     if (elf_file->byte_count == 0u) {
         return 1;
+    }
+    if (!elf_file->bytes) {
+        machine_elf_set_error(error, 0, 0, "MACHINE-ELF-100: invalid elf byte-copy contract");
+        return 0;
     }
     copy = (unsigned char *)malloc(elf_file->byte_count);
     if (!copy) {
@@ -361,46 +365,76 @@ int machine_elf_file_find_section_by_name(const MachineElfFile *elf_file,
 int machine_elf_file_get_text_section(const MachineElfFile *elf_file,
     size_t *out_section_index,
     const MachineElfSection **out_section) {
+    int ok;
+
     if (out_section_index) {
         *out_section_index = 0u;
     }
-    return machine_elf_file_get_section(elf_file, elf_file ? elf_file->text_section_index : 0u, out_section);
+    ok = machine_elf_file_get_section(elf_file, elf_file ? elf_file->text_section_index : 0u, out_section);
+    if (ok && out_section_index && elf_file) {
+        *out_section_index = elf_file->text_section_index;
+    }
+    return ok;
 }
 
 int machine_elf_file_get_strtab_section(const MachineElfFile *elf_file,
     size_t *out_section_index,
     const MachineElfSection **out_section) {
+    int ok;
+
     if (out_section_index) {
         *out_section_index = 0u;
     }
-    return machine_elf_file_get_section(elf_file, elf_file ? elf_file->strtab_section_index : 0u, out_section);
+    ok = machine_elf_file_get_section(elf_file, elf_file ? elf_file->strtab_section_index : 0u, out_section);
+    if (ok && out_section_index && elf_file) {
+        *out_section_index = elf_file->strtab_section_index;
+    }
+    return ok;
 }
 
 int machine_elf_file_get_symtab_section(const MachineElfFile *elf_file,
     size_t *out_section_index,
     const MachineElfSection **out_section) {
+    int ok;
+
     if (out_section_index) {
         *out_section_index = 0u;
     }
-    return machine_elf_file_get_section(elf_file, elf_file ? elf_file->symtab_section_index : 0u, out_section);
+    ok = machine_elf_file_get_section(elf_file, elf_file ? elf_file->symtab_section_index : 0u, out_section);
+    if (ok && out_section_index && elf_file) {
+        *out_section_index = elf_file->symtab_section_index;
+    }
+    return ok;
 }
 
 int machine_elf_file_get_rel_text_section(const MachineElfFile *elf_file,
     size_t *out_section_index,
     const MachineElfSection **out_section) {
+    int ok;
+
     if (out_section_index) {
         *out_section_index = 0u;
     }
-    return machine_elf_file_get_section(elf_file, elf_file ? elf_file->rel_text_section_index : 0u, out_section);
+    ok = machine_elf_file_get_section(elf_file, elf_file ? elf_file->rel_text_section_index : 0u, out_section);
+    if (ok && out_section_index && elf_file) {
+        *out_section_index = elf_file->rel_text_section_index;
+    }
+    return ok;
 }
 
 int machine_elf_file_get_shstrtab_section(const MachineElfFile *elf_file,
     size_t *out_section_index,
     const MachineElfSection **out_section) {
+    int ok;
+
     if (out_section_index) {
         *out_section_index = 0u;
     }
-    return machine_elf_file_get_section(elf_file, elf_file ? elf_file->shstrtab_section_index : 0u, out_section);
+    ok = machine_elf_file_get_section(elf_file, elf_file ? elf_file->shstrtab_section_index : 0u, out_section);
+    if (ok && out_section_index && elf_file) {
+        *out_section_index = elf_file->shstrtab_section_index;
+    }
+    return ok;
 }
 
 int machine_elf_file_get_symbol(const MachineElfFile *elf_file,
@@ -446,7 +480,7 @@ int machine_elf_file_get_first_global_symbol_index(const MachineElfFile *elf_fil
         elf_file->symtab_section_index >= elf_file->section_count) {
         return 0;
     }
-    if ((size_t)elf_file->sections[elf_file->symtab_section_index].info >= elf_file->symbol_count) {
+    if ((size_t)elf_file->sections[elf_file->symtab_section_index].info > elf_file->symbol_count) {
         return 0;
     }
     *out_symbol_index = (size_t)elf_file->sections[elf_file->symtab_section_index].info;

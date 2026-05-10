@@ -29,6 +29,17 @@ void machine_image_file_init(MachineImageFile *image_file) {
     image_file->byte_count = 0u;
 }
 
+static int machine_image_try_add_size(size_t base, size_t delta, size_t *out_sum) {
+    if (!out_sum) {
+        return 0;
+    }
+    if (delta > ((size_t)-1) - base) {
+        return 0;
+    }
+    *out_sum = base + delta;
+    return 1;
+}
+
 void machine_image_report_init(MachineImageReport *report) {
     if (!report) {
         return;
@@ -95,6 +106,56 @@ void machine_image_report_init(MachineImageReport *report) {
     report->control_primary_relocation_count = 0u;
     report->control_secondary_relocation_indices = NULL;
     report->control_secondary_relocation_count = 0u;
+}
+
+static int machine_image_file_has_tables(const MachineImageFile *image_file) {
+    return image_file &&
+        (image_file->segment_count == 0u || image_file->segments) &&
+        (image_file->symbol_count == 0u || image_file->symbols) &&
+        (image_file->relocation_count == 0u || image_file->relocations);
+}
+
+static int machine_image_report_has_tables(const MachineImageReport *report) {
+    return report &&
+        machine_image_file_has_tables(&report->file) &&
+        report->segment_summary_count == report->file.segment_count &&
+        report->symbol_summary_count == report->file.symbol_count &&
+        report->relocation_summary_count == report->file.relocation_count &&
+        (report->segment_summary_count == 0u || report->segment_summaries) &&
+        (report->segment_summary_count == 0u || report->segment_symbol_start_indices) &&
+        (report->segment_summary_count == 0u || report->segment_symbol_counts) &&
+        (report->segment_summary_count == 0u || report->segment_relocation_start_indices) &&
+        (report->segment_summary_count == 0u || report->segment_relocation_counts) &&
+        (report->segment_summary_count == 0u || report->segment_resolved_relocation_start_indices) &&
+        (report->segment_summary_count == 0u || report->segment_resolved_relocation_counts) &&
+        (report->segment_summary_count == 0u || report->segment_unresolved_relocation_start_indices) &&
+        (report->segment_summary_count == 0u || report->segment_unresolved_relocation_counts) &&
+        (report->symbol_summary_count == 0u || report->symbol_summaries) &&
+        (report->symbol_summary_count == 0u || report->symbol_relocation_start_indices) &&
+        (report->symbol_summary_count == 0u || report->symbol_relocation_counts) &&
+        (report->symbol_summary_count == 0u || report->symbol_resolved_relocation_start_indices) &&
+        (report->symbol_summary_count == 0u || report->symbol_resolved_relocation_counts) &&
+        (report->symbol_summary_count == 0u || report->symbol_unresolved_relocation_start_indices) &&
+        (report->symbol_summary_count == 0u || report->symbol_unresolved_relocation_counts) &&
+        (report->relocation_summary_count == 0u || report->relocation_summaries) &&
+        (report->defined_symbol_count == 0u || report->defined_symbol_indices) &&
+        (report->undefined_symbol_count == 0u || report->undefined_symbol_indices) &&
+        (report->global_symbol_count == 0u || report->global_symbol_indices) &&
+        (report->local_symbol_count == 0u || report->local_symbol_indices) &&
+        (report->defined_global_symbol_count == 0u || report->defined_global_symbol_indices) &&
+        (report->undefined_global_symbol_count == 0u || report->undefined_global_symbol_indices) &&
+        (report->resolved_relocation_count == 0u || report->resolved_relocation_indices) &&
+        (report->unresolved_relocation_count == 0u || report->unresolved_relocation_indices) &&
+        (report->call_relocation_count == 0u || report->call_relocation_indices) &&
+        (report->control_primary_relocation_count == 0u || report->control_primary_relocation_indices) &&
+        (report->control_secondary_relocation_count == 0u || report->control_secondary_relocation_indices) &&
+        (report->segment_symbol_index_count == 0u || report->segment_symbol_indices) &&
+        (report->segment_relocation_index_count == 0u || report->segment_relocation_indices) &&
+        (report->segment_resolved_relocation_index_count == 0u || report->segment_resolved_relocation_indices) &&
+        (report->segment_unresolved_relocation_index_count == 0u || report->segment_unresolved_relocation_indices) &&
+        (report->symbol_relocation_index_count == 0u || report->symbol_relocation_indices) &&
+        (report->symbol_resolved_relocation_index_count == 0u || report->symbol_resolved_relocation_indices) &&
+        (report->symbol_unresolved_relocation_index_count == 0u || report->symbol_unresolved_relocation_indices);
 }
 
 void machine_image_file_free(MachineImageFile *image_file) {
@@ -275,7 +336,7 @@ int machine_image_file_get_summary(const MachineImageFile *image_file,
     size_t *out_symbol_count,
     size_t *out_relocation_count,
     size_t *out_byte_count) {
-    if (!image_file) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     if (out_segment_count) {
@@ -332,7 +393,7 @@ int machine_image_file_get_target_policy_summary(const MachineImageFile *image_f
 
 int machine_image_file_get_header_summary(const MachineImageFile *image_file,
     MachineImageHeaderSummary *out_summary) {
-    if (!image_file || !out_summary) {
+    if (!machine_image_file_has_tables(image_file) || !out_summary) {
         return 0;
     }
     out_summary->target_profile = image_file->target_profile;
@@ -465,7 +526,9 @@ int machine_image_file_copy_bytes(const MachineImageFile *image_file,
 int machine_image_file_get_segment(const MachineImageFile *image_file,
     size_t segment_index,
     const MachineImageSegment **out_segment) {
-    if (!image_file || !out_segment || !image_file->segments || segment_index >= image_file->segment_count) {
+    if (!machine_image_file_has_tables(image_file) ||
+        !out_segment ||
+        segment_index >= image_file->segment_count) {
         return 0;
     }
     *out_segment = &image_file->segments[segment_index];
@@ -478,7 +541,7 @@ int machine_image_file_find_segment_by_name(const MachineImageFile *image_file,
     const MachineImageSegment **out_segment) {
     size_t segment_index;
 
-    if (!image_file || !segment_name || !image_file->segments) {
+    if (!machine_image_file_has_tables(image_file) || !segment_name) {
         return 0;
     }
     for (segment_index = 0u; segment_index < image_file->segment_count; ++segment_index) {
@@ -502,14 +565,19 @@ int machine_image_file_find_segment_covering_virtual_address(const MachineImageF
     const MachineImageSegment **out_segment) {
     size_t segment_index;
 
-    if (!image_file || !image_file->segments) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     for (segment_index = 0u; segment_index < image_file->segment_count; ++segment_index) {
         const MachineImageSegment *segment = &image_file->segments[segment_index];
+        size_t segment_end = 0u;
+
+        if (!machine_image_try_add_size(segment->virtual_address, segment->byte_count, &segment_end)) {
+            return 0;
+        }
 
         if (virtual_address >= segment->virtual_address &&
-            virtual_address < segment->virtual_address + segment->byte_count) {
+            virtual_address < segment_end) {
             if (out_segment_index) {
                 *out_segment_index = segment_index;
             }
@@ -543,9 +611,15 @@ int machine_image_segment_copy_bytes(const MachineImageFile *image_file,
     if (segment->byte_count == 0u) {
         return 1;
     }
-    if (!image_file->bytes || segment->image_offset + segment->byte_count > image_file->byte_count) {
-        machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-104: invalid image segment byte span");
-        return 0;
+    {
+        size_t image_end = 0u;
+
+        if (!image_file->bytes ||
+            !machine_image_try_add_size(segment->image_offset, segment->byte_count, &image_end) ||
+            image_end > image_file->byte_count) {
+            machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-104: invalid image segment byte span");
+            return 0;
+        }
     }
     copy = (unsigned char *)malloc(segment->byte_count);
     if (!copy) {
@@ -570,7 +644,10 @@ int machine_image_file_get_segment_symbol_count(const MachineImageFile *image_fi
     if (out_count) {
         *out_count = 0u;
     }
-    if (!image_file || !out_count || !machine_image_file_get_segment(image_file, segment_index, &segment) || !segment) {
+    if (!machine_image_file_has_tables(image_file) ||
+        !out_count ||
+        !machine_image_file_get_segment(image_file, segment_index, &segment) ||
+        !segment) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < image_file->symbol_count; ++symbol_index) {
@@ -587,7 +664,9 @@ int machine_image_file_get_segment_symbol_count(const MachineImageFile *image_fi
 int machine_image_file_get_symbol(const MachineImageFile *image_file,
     size_t symbol_index,
     const MachineImageSymbol **out_symbol) {
-    if (!image_file || !out_symbol || !image_file->symbols || symbol_index >= image_file->symbol_count) {
+    if (!machine_image_file_has_tables(image_file) ||
+        !out_symbol ||
+        symbol_index >= image_file->symbol_count) {
         return 0;
     }
     *out_symbol = &image_file->symbols[symbol_index];
@@ -798,7 +877,7 @@ int machine_image_file_find_symbol_by_name(const MachineImageFile *image_file,
     const MachineImageSymbol **out_symbol) {
     size_t symbol_index;
 
-    if (!image_file || !symbol_name || !image_file->symbols) {
+    if (!machine_image_file_has_tables(image_file) || !symbol_name) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < image_file->symbol_count; ++symbol_index) {
@@ -822,7 +901,7 @@ int machine_image_file_find_symbol_by_virtual_address(const MachineImageFile *im
     const MachineImageSymbol **out_symbol) {
     size_t symbol_index;
 
-    if (!image_file || !image_file->symbols) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     for (symbol_index = 0u; symbol_index < image_file->symbol_count; ++symbol_index) {
@@ -856,7 +935,7 @@ int machine_image_file_get_entry_symbol(const MachineImageFile *image_file,
 int machine_image_file_get_relocation(const MachineImageFile *image_file,
     size_t relocation_index,
     const MachineImageRelocation **out_relocation) {
-    if (!image_file || !out_relocation || !image_file->relocations ||
+    if (!machine_image_file_has_tables(image_file) || !out_relocation ||
         relocation_index >= image_file->relocation_count) {
         return 0;
     }
@@ -874,7 +953,10 @@ int machine_image_file_get_segment_relocation_count(const MachineImageFile *imag
     if (out_count) {
         *out_count = 0u;
     }
-    if (!image_file || !out_count || !machine_image_file_get_segment(image_file, segment_index, &segment) || !segment) {
+    if (!machine_image_file_has_tables(image_file) ||
+        !out_count ||
+        !machine_image_file_get_segment(image_file, segment_index, &segment) ||
+        !segment) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
@@ -1036,7 +1118,7 @@ int machine_image_file_find_relocation_by_site_virtual_address(const MachineImag
     const MachineImageRelocation **out_relocation) {
     size_t relocation_index;
 
-    if (!image_file || !image_file->relocations) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
@@ -1060,7 +1142,7 @@ int machine_image_file_get_resolved_relocation_count(const MachineImageFile *ima
     size_t relocation_index;
     size_t count = 0u;
 
-    if (!image_file || !out_count) {
+    if (!machine_image_file_has_tables(image_file) || !out_count) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
@@ -1077,7 +1159,7 @@ int machine_image_file_get_unresolved_relocation_count(const MachineImageFile *i
     size_t relocation_index;
     size_t count = 0u;
 
-    if (!image_file || !out_count) {
+    if (!machine_image_file_has_tables(image_file) || !out_count) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
@@ -1096,7 +1178,7 @@ int machine_image_file_get_resolved_relocation_by_index(const MachineImageFile *
     size_t relocation_index;
     size_t current_index = 0u;
 
-    if (!image_file) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
@@ -1124,7 +1206,7 @@ int machine_image_file_get_unresolved_relocation_by_index(const MachineImageFile
     size_t relocation_index;
     size_t current_index = 0u;
 
-    if (!image_file) {
+    if (!machine_image_file_has_tables(image_file)) {
         return 0;
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {

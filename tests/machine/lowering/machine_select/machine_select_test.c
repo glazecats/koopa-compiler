@@ -203,6 +203,306 @@ static int test_machine_select_rejects_phi_input(void) {
     return ok;
 }
 
+static int test_machine_select_rejects_load_store_slot_kind_mismatch(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectProgram mutated_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    machine_select_program_init(&mutated_program);
+
+    if (!build_machine_ir_smoke_program(&machine_program, &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: slot-kind-mismatch setup failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: load-slot mismatch clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].ops[0].as.load_slot = machine_select_slot_global(0);
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_verify_program(&mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: verifier accepted load-local/global-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_select_program_free(&mutated_program);
+    machine_select_program_init(&mutated_program);
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: store-slot mismatch clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    mutated_program.functions[0].blocks[0].ops[2].as.store.slot = machine_select_slot_local(0);
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_verify_program(&mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: verifier accepted store-global/local-slot mismatch\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&mutated_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_rejects_missing_backing_tables(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectProgram mutated_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    machine_select_program_init(&mutated_program);
+
+    if (!build_machine_ir_smoke_program(&machine_program, &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-table setup failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-local-table clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(mutated_program.functions[0].locals);
+    mutated_program.functions[0].locals = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_verify_program(&mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: verifier accepted missing local table\n");
+        ok = 0;
+    }
+
+    machine_select_program_free(&mutated_program);
+    machine_select_program_init(&mutated_program);
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-op-table clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(mutated_program.functions[0].blocks[0].ops);
+    mutated_program.functions[0].blocks[0].ops = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_verify_program(&mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: verifier accepted missing op table\n");
+        ok = 0;
+    }
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&mutated_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_query_dump_rejects_missing_backing_tables(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectProgram mutated_program;
+    MachineSelectError select_error;
+    const MachineSelectFunction *function_view = NULL;
+    const MachineSelectBasicBlock *block_view = NULL;
+    MachineSelectFunctionSummary summary;
+    char *dump_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    memset(&summary, 0, sizeof(summary));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    machine_select_program_init(&mutated_program);
+
+    if (!build_machine_ir_smoke_program(&machine_program, &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: query/dump missing-table setup failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: query missing function-table clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(mutated_program.functions);
+    mutated_program.functions = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_program_get_function_by_name(&mutated_program, "main", NULL, &function_view) ||
+        machine_select_dump_program(&mutated_program, &dump_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: function-table query/dump should fail on missing table\n");
+        ok = 0;
+    }
+    free(dump_text);
+    dump_text = NULL;
+
+    machine_select_program_free(&mutated_program);
+    machine_select_program_init(&mutated_program);
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: query missing block/op-table clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(mutated_program.functions[0].blocks[0].ops);
+    mutated_program.functions[0].blocks[0].ops = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_program_get_block_by_function_name_and_block_id(
+            &mutated_program, "main", 0, NULL, NULL, &function_view, &block_view) &&
+        machine_select_function_compute_summary(&mutated_program.functions[0], &summary)) {
+        fprintf(stderr, "[machine-select] FAIL: block/op-table queries should not succeed on missing ops\n");
+        ok = 0;
+    }
+    if (machine_select_dump_program(&mutated_program, &dump_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: dump should fail on missing op table\n");
+        ok = 0;
+    }
+    free(dump_text);
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&mutated_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_dump_rejects_missing_call_args(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectProgram mutated_program;
+    MachineSelectError select_error;
+    char *dump_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    machine_select_program_init(&mutated_program);
+
+    machine_program.register_bank.register_count = 1u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-call-args setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-call-args setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.call.callee_name = "main";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(1u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-call-args lowering failed: %s\n", select_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+
+    if (!machine_select_clone_program(&select_program, &mutated_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: missing-call-args clone failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&mutated_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(mutated_program.functions[0].blocks[0].ops[1].as.call.args);
+    mutated_program.functions[0].blocks[0].ops[1].as.call.args = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_dump_program(&mutated_program, &dump_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: dump should fail on missing call args\n");
+        ok = 0;
+    }
+    free(dump_text);
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&mutated_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_summary_surface(void) {
     MachineIrProgram machine_program;
     MachineIrError machine_error;
@@ -1235,6 +1535,66 @@ static int test_machine_select_materializes_constant_binary_results(void) {
         fprintf(stderr, "[machine-select] FAIL: constant-binary summary mismatch\n");
         ok = 0;
     }
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_materializes_overflowing_constant_binary_results(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: overflowing-constant setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_immediate(2147483647LL);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: overflowing-constant lowering failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    reti -2147483648\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -3518,6 +3878,50 @@ static int test_machine_select_folds_constant_branches_to_jump(void) {
     return ok;
 }
 
+static int test_machine_select_folds_normalized_constant_branches_to_jump(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_immediate(4294967296LL), 1, 2, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-const-branch lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    jmp bb.2\n"
+        "  bb.1:\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_folds_constant_compare_branches_to_jump(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -3666,6 +4070,72 @@ static int test_machine_select_folds_materialized_boolean_branches_to_jump(void)
         fprintf(stderr, "[machine-select] FAIL: materialized-branch summary mismatch\n");
         ok = 0;
     }
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_folds_normalized_materialized_boolean_branches_to_jump(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-materialized-branch setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.mov_value = machine_ir_operand_immediate(4294967296LL);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 1, 2, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(11), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(22), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-materialized-branch lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    jmp bb.2\n"
+        "  bb.1:\n"
+        "    reti 11\n"
+        "  bb.2:\n"
+        "    reti 22\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -4055,6 +4525,87 @@ static int test_machine_select_cleanup_propagates_multiconsumer_immediate(void) 
         "    call_voidi sink(5)\n"
         "    store_globali global.0, 5\n"
         "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_cleanup_normalizes_folded_branch_immediate(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-folded-branch cleanup setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.mov_value = machine_ir_operand_immediate(4294967296LL);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-folded-branch cleanup setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1);
+    instruction.as.mov_value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(1), 1, 2, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: normalized-folded-branch cleanup lowering setup failed\n");
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    jmp bb.2\n"
+        "  bb.1:\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 2\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -6220,6 +6771,74 @@ static int test_machine_select_builds_canonicalized_flat_report_from_value_ssa(v
     return ok;
 }
 
+static int test_machine_select_report_query_dump_reject_missing_function_table(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectLowerReport report;
+    MachineSelectError select_error;
+    const MachineSelectFunction *function_view = NULL;
+    const MachineSelectFunctionSummary *summary_view = NULL;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_lower_report_init(&report);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: malformed-report setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_lower_report_free(&report);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.call.callee_name = dup_text("sink");
+    if (!instruction.as.call.callee_name ||
+        !machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0), &machine_error) ||
+        !machine_select_build_report_from_machine_ir_program(&machine_program, &report, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: malformed-report build failed: %s\n", select_error.message);
+        free(instruction.as.call.callee_name);
+        machine_ir_program_free(&machine_program);
+        machine_select_lower_report_free(&report);
+        return 0;
+    }
+
+    free(report.program.functions);
+    report.program.functions = NULL;
+    memset(&select_error, 0, sizeof(select_error));
+    if (machine_select_lower_report_get_function_by_name(&report, "main", NULL, &function_view) ||
+        machine_select_lower_report_get_function_with_calls_by_name(
+            &report, "main", NULL, NULL, &function_view, &summary_view) ||
+        machine_select_dump_lower_report_artifact(&report, &actual_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: malformed report query/dump should fail on missing function table\n");
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_ir_program_free(&machine_program);
+    machine_select_lower_report_free(&report);
+    return ok;
+}
+
 static int test_machine_select_reuses_repeated_internal_pure_call_in_indirect_block(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *helper = NULL;
@@ -6715,6 +7334,211 @@ static int test_machine_select_reuses_repeated_internal_pure_call_across_unrelat
     return ok;
 }
 
+static int test_machine_select_keeps_repeated_internal_pure_call_across_global_write_indirect(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *helper = NULL;
+    MachineIrFunction *main_function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1u;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name || !machine_program.register_bank.registers[1].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_global(&machine_program, "g", NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "helper", 1, &helper, &machine_error) ||
+        !helper ||
+        !machine_ir_function_append_local(helper, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(helper, NULL, NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &main_function, &machine_error) ||
+        !main_function ||
+        !machine_ir_function_append_local(main_function, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(main_function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: global-write-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_global(0u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper global-read setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper global-read setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_register(1u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&helper->blocks[0], machine_ir_operand_register(0u), &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper global-read setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main global-write-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(1u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main global-write-indirect setup failed: %s\n", machine_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.addr_slot = machine_ir_slot_global(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main global-write-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_register(1u);
+    instruction.as.store_indirect.value = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main global-write-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main global-write-indirect setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(1u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&main_function->blocks[0], machine_ir_operand_register(1u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: global-write-indirect lowering failed: %s\n", select_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function helper params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_global global.0\n"
+        "    reg.1 = load_local local.0\n"
+        "    reg.0 = alu.0 reg.0, reg.1\n"
+        "    ret reg.0\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.0 = call helper(reg.0)\n"
+        "    reg.1 = addr_global global.0\n"
+        "    store_indirect reg.1, reg.0\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.1 = call helper(reg.0)\n"
+        "    ret reg.1\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_reuses_repeated_spill_pure_expr(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -7155,11 +7979,585 @@ static int test_machine_select_reuses_repeated_internal_pure_call_with_live_in_s
     return ok;
 }
 
+static int test_machine_select_reuses_repeated_internal_pure_call_from_unique_predecessor(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *helper = NULL;
+    MachineIrFunction *main_function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1u;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name || !machine_program.register_bank.registers[1].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "helper", 1, &helper, &machine_error) ||
+        !helper ||
+        !machine_ir_function_append_local(helper, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_local(helper, "y", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(helper, NULL, NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &main_function, &machine_error) ||
+        !main_function ||
+        !machine_ir_function_append_local(main_function, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_local(main_function, "y", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(main_function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(main_function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(main_function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    main_function->spill_slot_count = 2u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.load_slot = machine_ir_slot_local(1u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_register(1u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&helper->blocks[0], machine_ir_operand_register(0u), &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(1u);
+    instruction.as.load_slot = machine_ir_slot_local(1u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(2u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_spill_slot(0u);
+    instruction.as.call.args[1] = machine_ir_operand_spill_slot(1u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_NE;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(
+            &main_function->blocks[0], machine_ir_operand_register(1u), 1u, 2u, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(2u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_spill_slot(0u);
+    instruction.as.call.args[1] = machine_ir_operand_spill_slot(1u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[1], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&main_function->blocks[1], machine_ir_operand_register(0u), &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call setup failed: %s\n", machine_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    if (!machine_ir_block_set_return(&main_function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: unique-pred pure-call lowering failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function helper params=2 locals=2 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.1 = load_local local.1\n"
+        "    reg.0 = alu.0 reg.0, reg.1\n"
+        "    ret reg.0\n"
+        "function main params=2 locals=2 spills=2\n"
+        "  bb.0:\n"
+        "    spill.0 = load_local local.0\n"
+        "    spill.1 = load_local local.1\n"
+        "    reg.0 = call helper(spill.0, spill.1)\n"
+        "    cmpbri.11 reg.0, 7, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ret reg.0\n"
+        "  bb.2:\n"
+        "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_reuses_repeated_internal_pure_call_with_same_block_indirect_load_arg(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *helper = NULL;
+    MachineIrFunction *main_function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1u;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name || !machine_program.register_bank.registers[1].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "helper", 1, &helper, &machine_error) ||
+        !helper ||
+        !machine_ir_function_append_local(helper, "x", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_local(helper, "y", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(helper, NULL, NULL, &machine_error) ||
+        !machine_ir_program_append_function(&machine_program, "main", 1, &main_function, &machine_error) ||
+        !main_function ||
+        !machine_ir_function_append_local(main_function, "y", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_local(main_function, "slot", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_block(main_function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load pure-call setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    main_function->spill_slot_count = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.load_slot = machine_ir_slot_local(1u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0u);
+    instruction.as.binary.rhs = machine_ir_operand_register(1u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&helper->blocks[0], machine_ir_operand_register(0u), &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: helper setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(0u);
+    instruction.as.addr_slot = machine_ir_slot_local(1u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_spill_slot(0u);
+    instruction.as.store_indirect.value = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(2u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_register(1u);
+    instruction.as.call.args[1] = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: main setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 2u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(2u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.args) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_register(1u);
+    instruction.as.call.args[1] = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&main_function->blocks[0], machine_ir_operand_register(1u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load pure-call lowering failed: %s\n", select_error.message);
+        free(instruction.as.call.args);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    free(instruction.as.call.args);
+    instruction.as.call.args = NULL;
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function helper params=2 locals=2 spills=0\n"
+        "  bb.0:\n"
+        "    reg.0 = load_local local.0\n"
+        "    reg.1 = load_local local.1\n"
+        "    reg.0 = alu.0 reg.0, reg.1\n"
+        "    ret reg.0\n"
+        "function main params=1 locals=2 spills=2\n"
+        "  bb.0:\n"
+        "    spill.0 = addr_local local.1\n"
+        "    store_indirect spill.0, 7\n"
+        "    reg.1 = load_indirect spill.0\n"
+        "    reg.0 = load_local local.0\n"
+        "    spill.1 = call_spill helper(reg.1, reg.0)\n"
+        "    reg.1 = load_indirect spill.0\n"
+        "    retspill spill.1\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_forwards_same_block_indirect_load_across_non_alias_store(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "addr", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "tmp", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    function->spill_slot_count = 1u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_spill_slot(0u);
+    instruction.as.addr_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = machine_ir_operand_spill_slot(0u);
+    instruction.as.store_indirect.value = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(1u);
+    instruction.as.store.value = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_spill_slot(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_register(0u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: indirect-load-forward lowering failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=2 spills=2\n"
+        "  bb.0:\n"
+        "    spill.0 = addr_local local.0\n"
+        "    store_indirect spill.0, 7\n"
+        "    spill.1 = load_indirect spill.0\n"
+        "    store_local local.1, spill.1\n"
+        "    retspill spill.1\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 int main(void) {
     if (!test_machine_select_lower_machine_ir_smoke()) {
         return 1;
     }
     if (!test_machine_select_rejects_phi_input()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_load_store_slot_kind_mismatch()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_missing_backing_tables()) {
+        return 1;
+    }
+    if (!test_machine_select_query_dump_rejects_missing_backing_tables()) {
+        return 1;
+    }
+    if (!test_machine_select_dump_rejects_missing_call_args()) {
         return 1;
     }
     if (!test_machine_select_summary_surface()) {
@@ -7196,6 +8594,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_materializes_constant_binary_results()) {
+        return 1;
+    }
+    if (!test_machine_select_materializes_overflowing_constant_binary_results()) {
         return 1;
     }
     if (!test_machine_select_cleanup_removes_shadowed_trivial_defs()) {
@@ -7270,10 +8671,16 @@ int main(void) {
     if (!test_machine_select_folds_constant_branches_to_jump()) {
         return 1;
     }
+    if (!test_machine_select_folds_normalized_constant_branches_to_jump()) {
+        return 1;
+    }
     if (!test_machine_select_folds_constant_compare_branches_to_jump()) {
         return 1;
     }
     if (!test_machine_select_folds_materialized_boolean_branches_to_jump()) {
+        return 1;
+    }
+    if (!test_machine_select_folds_normalized_materialized_boolean_branches_to_jump()) {
         return 1;
     }
     if (!test_machine_select_keeps_compare_result_when_live_out_of_block()) {
@@ -7286,6 +8693,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_cleanup_propagates_multiconsumer_immediate()) {
+        return 1;
+    }
+    if (!test_machine_select_cleanup_normalizes_folded_branch_immediate()) {
         return 1;
     }
     if (!test_machine_select_cleanup_removes_dead_cross_block_register_def_redefined_in_successor()) {
@@ -7354,13 +8764,28 @@ int main(void) {
     if (!test_machine_select_builds_canonicalized_flat_report_from_value_ssa()) {
         return 1;
     }
+    if (!test_machine_select_report_query_dump_reject_missing_function_table()) {
+        return 1;
+    }
     if (!test_machine_select_reuses_repeated_internal_pure_call_in_indirect_block()) {
         return 1;
     }
     if (!test_machine_select_reuses_repeated_internal_pure_call_across_unrelated_store_indirect()) {
         return 1;
     }
+    if (!test_machine_select_keeps_repeated_internal_pure_call_across_global_write_indirect()) {
+        return 1;
+    }
     if (!test_machine_select_reuses_repeated_internal_pure_call_with_live_in_spill_args()) {
+        return 1;
+    }
+    if (!test_machine_select_reuses_repeated_internal_pure_call_from_unique_predecessor()) {
+        return 1;
+    }
+    if (!test_machine_select_reuses_repeated_internal_pure_call_with_same_block_indirect_load_arg()) {
+        return 1;
+    }
+    if (!test_machine_select_forwards_same_block_indirect_load_across_non_alias_store()) {
         return 1;
     }
     if (!test_machine_select_reuses_repeated_spill_pure_expr()) {

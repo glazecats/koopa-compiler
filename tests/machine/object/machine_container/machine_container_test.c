@@ -378,12 +378,34 @@ static int test_machine_container_dump_uses_explicit_i386_preview_profile_name(v
     return ok;
 }
 
+static int test_machine_container_empty_file_copy_bytes_contract(void) {
+    MachineContainerFile container_file;
+    MachineContainerError container_error;
+    unsigned char *bytes = NULL;
+    size_t byte_count = 1u;
+
+    memset(&container_error, 0, sizeof(container_error));
+    machine_container_file_init(&container_file);
+
+    if (!machine_container_file_copy_bytes(&container_file, &bytes, &byte_count, &container_error) ||
+        bytes != NULL || byte_count != 0u) {
+        fprintf(stderr, "[machine-container] FAIL: empty container byte-copy contract mismatch: %s\n",
+            container_error.message);
+        machine_container_file_free(&container_file);
+        return 0;
+    }
+
+    machine_container_file_free(&container_file);
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_container_builds_from_machine_ir_report();
     ok &= test_machine_container_builds_from_machine_reloc_with_external_call();
     ok &= test_machine_container_dump_uses_explicit_i386_preview_profile_name();
+    ok &= test_machine_container_empty_file_copy_bytes_contract();
 
     if (!ok) {
         return 1;

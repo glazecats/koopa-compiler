@@ -30,6 +30,67 @@ static char *dup_text(const char *text) {
     return copy;
 }
 
+static int build_wrapped_machine_image_file(MachineImageFile *image_file) {
+    if (!image_file) {
+        return 0;
+    }
+
+    machine_image_file_init(image_file);
+    image_file->target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.target_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.origin_profile = MACHINE_ELF_TARGET_PROFILE_GENERIC_ELF32;
+    image_file->source_elf_artifact_summary.relocation_semantics =
+        MACHINE_ELF_RELOCATION_SEMANTICS_DIRECT_PATCH_SPANS;
+    image_file->base_virtual_address = ((size_t)-1) - 7u;
+    image_file->has_entry = 1u;
+    image_file->entry_symbol_index = 0u;
+    image_file->entry_virtual_address = image_file->base_virtual_address;
+    image_file->segment_count = 1u;
+    image_file->segment_capacity = 1u;
+    image_file->segments = (MachineImageSegment *)calloc(1u, sizeof(MachineImageSegment));
+    image_file->symbol_count = 1u;
+    image_file->symbol_capacity = 1u;
+    image_file->symbols = (MachineImageSymbol *)calloc(1u, sizeof(MachineImageSymbol));
+    image_file->relocation_count = 1u;
+    image_file->relocation_capacity = 1u;
+    image_file->relocations = (MachineImageRelocation *)calloc(1u, sizeof(MachineImageRelocation));
+    image_file->byte_count = 8u;
+    image_file->bytes = (unsigned char *)calloc(8u, sizeof(unsigned char));
+    if (!image_file->segments || !image_file->symbols || !image_file->relocations || !image_file->bytes) {
+        machine_image_file_free(image_file);
+        return 0;
+    }
+
+    image_file->segments[0].name = dup_text(".text");
+    image_file->segments[0].image_offset = 0u;
+    image_file->segments[0].virtual_address = image_file->base_virtual_address;
+    image_file->segments[0].byte_count = 8u;
+    image_file->segments[0].align = 4096u;
+
+    image_file->symbols[0].name = dup_text("main");
+    image_file->symbols[0].binding = MACHINE_ELF_SYMBOL_GLOBAL;
+    image_file->symbols[0].type = MACHINE_ELF_SYMBOL_FUNC;
+    image_file->symbols[0].is_defined = 1u;
+    image_file->symbols[0].segment_index = 0u;
+    image_file->symbols[0].value_offset = 0u;
+    image_file->symbols[0].virtual_address = image_file->base_virtual_address;
+
+    image_file->relocations[0].source_kind = MACHINE_BYTES_FIXUP_CONTROL_PRIMARY;
+    image_file->relocations[0].segment_index = 0u;
+    image_file->relocations[0].segment_offset = 1u;
+    image_file->relocations[0].site_virtual_address = image_file->base_virtual_address + 1u;
+    image_file->relocations[0].is_resolved = 1u;
+    image_file->relocations[0].target_virtual_address = image_file->base_virtual_address;
+    image_file->relocations[0].type = 2u;
+    image_file->relocations[0].symbol_index = 0u;
+    image_file->relocations[0].symbol_name = dup_text("main");
+    if (!image_file->segments[0].name || !image_file->symbols[0].name || !image_file->relocations[0].symbol_name) {
+        machine_image_file_free(image_file);
+        return 0;
+    }
+    return 1;
+}
+
 static int expect_dump(const MachineImageFile *image_file, const char *expected_text) {
     MachineImageError error;
     char *actual_text = NULL;
@@ -193,6 +254,121 @@ static int test_machine_image_builds_from_machine_ir_report(void) {
 
     free(bytes);
     machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_image_file_free(&image_file);
+    return ok;
+}
+
+static int test_machine_image_preserves_global_object_segments(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrGlobal *global = NULL;
+    MachineIrError machine_error;
+    MachineElfFile elf_file;
+    MachineElfError elf_error;
+    MachineImageFile image_file;
+    MachineImageError image_error;
+    const MachineImageSegment *text_segment = NULL;
+    const MachineImageSegment *sbss_segment = NULL;
+    const MachineImageSegment *sdata_segment = NULL;
+    const MachineImageSymbol *symbol = NULL;
+    unsigned char *segment_bytes = NULL;
+    size_t segment_byte_count = 0u;
+    size_t segment_count = 0u;
+    size_t symbol_count = 0u;
+    size_t relocation_count = 0u;
+    size_t byte_count = 0u;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&elf_error, 0, sizeof(elf_error));
+    memset(&image_error, 0, sizeof(image_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_elf_file_init(&elf_file);
+    machine_image_file_init(&image_file);
+
+    machine_report.program.register_bank.register_count = 1u;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1u, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0u;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+    if (!machine_report.program.register_bank.registers[0].name) {
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        machine_image_file_free(&image_file);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_global(&machine_report.program, "g", &global, &machine_error) ||
+        !global ||
+        !machine_ir_program_append_global(&machine_report.program, "h", &global, &machine_error) ||
+        !global) {
+        fprintf(stderr, "[machine-image] FAIL: global-segment setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        machine_image_file_free(&image_file);
+        return 0;
+    }
+    machine_report.program.globals[1].has_initializer = 1;
+    machine_report.program.globals[1].initializer_value = 7;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[0], machine_ir_operand_immediate(0), &machine_error)) {
+        fprintf(stderr, "[machine-image] FAIL: global-segment setup failed: %s\n", machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        machine_elf_file_free(&elf_file);
+        machine_image_file_free(&image_file);
+        return 0;
+    }
+
+    if (!machine_elf_build_from_machine_ir_report(&machine_report, &elf_file, &elf_error) ||
+        !machine_image_build_from_machine_elf_file(&elf_file, &image_file, &image_error) ||
+        !machine_image_file_get_summary(&image_file, &segment_count, &symbol_count, &relocation_count, &byte_count) ||
+        segment_count != 3u || symbol_count != 5u || relocation_count != 0u || byte_count < 12u ||
+        !machine_image_file_find_segment_by_name(&image_file, ".text", NULL, &text_segment) || !text_segment ||
+        !machine_image_file_find_segment_by_name(&image_file, ".sbss", NULL, &sbss_segment) || !sbss_segment ||
+        !machine_image_file_find_segment_by_name(&image_file, ".sdata", NULL, &sdata_segment) || !sdata_segment ||
+        text_segment->virtual_address != 0x1000u ||
+        sbss_segment->virtual_address <= text_segment->virtual_address ||
+        sdata_segment->virtual_address <= sbss_segment->virtual_address ||
+        (sbss_segment->image_offset % 4096u) != 0u ||
+        (sdata_segment->image_offset % 4096u) != 0u ||
+        sbss_segment->byte_count != 4u || sdata_segment->byte_count != 4u ||
+        !machine_image_file_find_symbol_by_name(&image_file, "g", NULL, &symbol) || !symbol ||
+        !symbol->is_defined || symbol->segment_index != 1u ||
+        symbol->virtual_address != sbss_segment->virtual_address ||
+        !machine_image_file_find_symbol_by_name(&image_file, "h", NULL, &symbol) || !symbol ||
+        !symbol->is_defined || symbol->segment_index != 2u ||
+        symbol->virtual_address != sdata_segment->virtual_address ||
+        !machine_image_segment_copy_bytes(&image_file, 1u, &segment_bytes, &segment_byte_count, &image_error) ||
+        !segment_bytes || segment_byte_count != 4u ||
+        segment_bytes[0] != 0u || segment_bytes[1] != 0u ||
+        segment_bytes[2] != 0u || segment_bytes[3] != 0u) {
+        fprintf(stderr, "[machine-image] FAIL: global object image mismatch: %s\n", image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    free(segment_bytes);
+    segment_bytes = NULL;
+    segment_byte_count = 0u;
+    if (!machine_image_segment_copy_bytes(&image_file, 2u, &segment_bytes, &segment_byte_count, &image_error) ||
+        !segment_bytes || segment_byte_count != 4u ||
+        segment_bytes[0] != 7u || segment_bytes[1] != 0u ||
+        segment_bytes[2] != 0u || segment_bytes[3] != 0u) {
+        fprintf(stderr, "[machine-image] FAIL: global object data bytes mismatch: %s\n", image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+cleanup:
+    free(segment_bytes);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    machine_elf_file_free(&elf_file);
     machine_image_file_free(&image_file);
     return ok;
 }
@@ -1566,16 +1742,273 @@ cleanup:
     return ok;
 }
 
+static int test_machine_image_rejects_wrapped_spans_and_addresses(void) {
+    MachineImageFile image_file;
+    MachineImageError image_error;
+    const MachineImageSegment *segment = NULL;
+    size_t segment_index = (size_t)-1;
+    int ok = 1;
+
+    machine_image_file_init(&image_file);
+    memset(&image_error, 0, sizeof(image_error));
+
+    if (!build_wrapped_machine_image_file(&image_file)) {
+        return 0;
+    }
+
+    image_file.symbols[0].value_offset = 4u;
+    image_file.symbols[0].virtual_address = 0u;
+    if (machine_image_verify_file(&image_file, &image_error) ||
+        strstr(image_error.message, "defined image symbol has invalid address") == NULL) {
+        fprintf(stderr,
+            "[machine-image] FAIL: wrapped symbol-address rejection mismatch: %s\n",
+            image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    image_file.symbols[0].value_offset = 0u;
+    image_file.symbols[0].virtual_address = image_file.base_virtual_address;
+    image_file.relocations[0].segment_offset = 4u;
+    image_file.relocations[0].site_virtual_address = 0u;
+    memset(&image_error, 0, sizeof(image_error));
+    if (machine_image_verify_file(&image_file, &image_error) ||
+        strstr(image_error.message, "invalid image relocation") == NULL) {
+        fprintf(stderr,
+            "[machine-image] FAIL: wrapped relocation-address rejection mismatch: %s\n",
+            image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    image_file.relocations[0].segment_offset = 1u;
+    image_file.relocations[0].site_virtual_address = image_file.base_virtual_address + 1u;
+    image_file.segments[0].image_offset = ((size_t)-1) - 3u;
+    memset(&image_error, 0, sizeof(image_error));
+    if (machine_image_verify_file(&image_file, &image_error) ||
+        strstr(image_error.message, "invalid image segment") == NULL) {
+        fprintf(stderr,
+            "[machine-image] FAIL: wrapped image-offset rejection mismatch: %s\n",
+            image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    image_file.segments[0].image_offset = 0u;
+    if (machine_image_file_find_segment_covering_virtual_address(
+            &image_file,
+            image_file.base_virtual_address,
+            &segment_index,
+            &segment) ||
+        segment != NULL || segment_index != (size_t)-1) {
+        fprintf(stderr, "[machine-image] FAIL: wrapped segment coverage query should reject wrapped span\n");
+        ok = 0;
+    }
+
+cleanup:
+    machine_image_file_free(&image_file);
+    return ok;
+}
+
+static int test_machine_image_query_helpers_reject_malformed_tables(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineImageFile image_file;
+    MachineImageReport image_report;
+    MachineImageError image_error;
+    MachineImageSegment *saved_file_segments = NULL;
+    MachineImageSymbol *saved_file_symbols = NULL;
+    MachineImageRelocation *saved_file_relocations = NULL;
+    MachineImageSegment *saved_report_file_segments = NULL;
+    MachineImageSymbol *saved_report_file_symbols = NULL;
+    MachineImageRelocation *saved_report_file_relocations = NULL;
+    MachineImageSegmentSummary *saved_segment_summaries = NULL;
+    MachineImageSymbolSummary *saved_symbol_summaries = NULL;
+    MachineImageRelocationSummary *saved_relocation_summaries = NULL;
+    size_t *saved_defined_symbol_indices = NULL;
+    size_t *saved_resolved_relocation_indices = NULL;
+    const MachineImageSegment *segment = NULL;
+    const MachineImageSymbol *symbol = NULL;
+    const MachineImageRelocation *relocation = NULL;
+    const MachineImageSegmentSummary *segment_summary = NULL;
+    const MachineImageSymbolSummary *symbol_summary = NULL;
+    const MachineImageRelocationSummary *relocation_summary = NULL;
+    MachineImageReportOverviewArtifact overview_artifact;
+    MachineImageReportSegmentArtifact segment_artifact;
+    MachineImageReportSymbolArtifact symbol_artifact;
+    MachineImageReportRelocationArtifact relocation_artifact;
+    MachineImageHeaderSummary header_summary;
+    const MachineImageFile *report_file = NULL;
+    size_t count = 0u;
+    size_t index = 0u;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&image_error, 0, sizeof(image_error));
+    memset(&overview_artifact, 0, sizeof(overview_artifact));
+    memset(&segment_artifact, 0, sizeof(segment_artifact));
+    memset(&symbol_artifact, 0, sizeof(symbol_artifact));
+    memset(&relocation_artifact, 0, sizeof(relocation_artifact));
+    memset(&header_summary, 0, sizeof(header_summary));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_image_file_init(&image_file);
+    machine_image_report_init(&image_report);
+
+    machine_report.program.register_bank.register_count = 1;
+    machine_report.program.register_bank.registers =
+        (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_report.program.register_bank.registers) {
+        return 0;
+    }
+    machine_report.program.register_bank.registers[0].register_id = 0;
+    machine_report.program.register_bank.registers[0].name = dup_text("r0");
+    machine_report.program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_report.program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-image] FAIL: malformed-image setup failed: %s\n", machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        fprintf(stderr, "[machine-image] FAIL: malformed-image setup failed: %s\n", machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_EQ;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(0), 2, 1, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(2), &machine_error) ||
+        !machine_image_build_from_machine_ir_report(&machine_report, &image_file, &image_error) ||
+        !machine_image_build_report_from_machine_ir_report(&machine_report, &image_report, &image_error)) {
+        fprintf(stderr, "[machine-image] FAIL: malformed-image setup failed: %s\n", image_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    saved_file_segments = image_file.segments;
+    saved_file_symbols = image_file.symbols;
+    saved_file_relocations = image_file.relocations;
+    image_file.segments = NULL;
+    image_file.symbols = NULL;
+    image_file.relocations = NULL;
+    if (machine_image_file_get_summary(&image_file, &count, NULL, NULL, NULL) ||
+        machine_image_file_get_header_summary(&image_file, &header_summary) ||
+        machine_image_file_get_segment(&image_file, 0u, &segment) ||
+        machine_image_file_find_segment_by_name(&image_file, ".text", &index, &segment) ||
+        machine_image_file_find_segment_covering_virtual_address(&image_file, 0x1000u, &index, &segment) ||
+        machine_image_file_get_symbol(&image_file, 0u, &symbol) ||
+        machine_image_file_find_symbol_by_name(&image_file, "main", &index, &symbol) ||
+        machine_image_file_find_symbol_by_virtual_address(&image_file, 0x1000u, &index, &symbol) ||
+        machine_image_file_get_relocation(&image_file, 0u, &relocation) ||
+        machine_image_file_find_relocation_by_site_virtual_address(&image_file, 0x1004u, &index, &relocation) ||
+        machine_image_file_get_resolved_relocation_count(&image_file, &count) ||
+        machine_image_file_get_unresolved_relocation_count(&image_file, &count)) {
+        fprintf(stderr, "[machine-image] FAIL: malformed image-file query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    image_file.segments = saved_file_segments;
+    image_file.symbols = saved_file_symbols;
+    image_file.relocations = saved_file_relocations;
+
+    saved_report_file_segments = image_report.file.segments;
+    saved_report_file_symbols = image_report.file.symbols;
+    saved_report_file_relocations = image_report.file.relocations;
+    saved_segment_summaries = image_report.segment_summaries;
+    saved_symbol_summaries = image_report.symbol_summaries;
+    saved_relocation_summaries = image_report.relocation_summaries;
+    saved_defined_symbol_indices = image_report.defined_symbol_indices;
+    saved_resolved_relocation_indices = image_report.resolved_relocation_indices;
+    image_report.file.segments = NULL;
+    image_report.file.symbols = NULL;
+    image_report.file.relocations = NULL;
+    image_report.segment_summaries = NULL;
+    image_report.symbol_summaries = NULL;
+    image_report.relocation_summaries = NULL;
+    image_report.defined_symbol_indices = NULL;
+    image_report.resolved_relocation_indices = NULL;
+    if (machine_image_report_get_summary(&image_report, &count, NULL, NULL, NULL) ||
+        machine_image_report_get_overview_artifact(&image_report, &overview_artifact) ||
+        machine_image_report_get_file(&image_report, &report_file) ||
+        machine_image_report_get_segment_summary(&image_report, 0u, &segment_summary) ||
+        machine_image_report_get_segment_artifact(&image_report, 0u, &segment_artifact) ||
+        machine_image_report_find_segment_summary_by_name(&image_report, ".text", &index, &segment_summary) ||
+        machine_image_report_get_symbol_summary(&image_report, 0u, &symbol_summary) ||
+        machine_image_report_get_symbol_artifact(&image_report, 0u, &symbol_artifact) ||
+        machine_image_report_find_symbol_summary_by_name(&image_report, "main", &index, &symbol_summary) ||
+        machine_image_report_get_relocation_summary(&image_report, 0u, &relocation_summary) ||
+        machine_image_report_get_relocation_artifact(&image_report, 0u, &relocation_artifact) ||
+        machine_image_report_get_symbol_filter_count(&image_report, MACHINE_IMAGE_SYMBOL_FILTER_DEFINED, &count) ||
+        machine_image_report_get_relocation_filter_count(
+            &image_report, MACHINE_IMAGE_RELOCATION_FILTER_RESOLVED, &count) ||
+        machine_image_report_get_resolved_relocation_count(&image_report, &count)) {
+        fprintf(stderr, "[machine-image] FAIL: malformed image-report query unexpectedly succeeded\n");
+        ok = 0;
+    }
+    image_report.file.segments = saved_report_file_segments;
+    image_report.file.symbols = saved_report_file_symbols;
+    image_report.file.relocations = saved_report_file_relocations;
+    image_report.segment_summaries = saved_segment_summaries;
+    image_report.symbol_summaries = saved_symbol_summaries;
+    image_report.relocation_summaries = saved_relocation_summaries;
+    image_report.defined_symbol_indices = saved_defined_symbol_indices;
+    image_report.resolved_relocation_indices = saved_resolved_relocation_indices;
+
+cleanup:
+    image_report.file.segments = saved_report_file_segments ? saved_report_file_segments : image_report.file.segments;
+    image_report.file.symbols = saved_report_file_symbols ? saved_report_file_symbols : image_report.file.symbols;
+    image_report.file.relocations =
+        saved_report_file_relocations ? saved_report_file_relocations : image_report.file.relocations;
+    image_report.segment_summaries = saved_segment_summaries ? saved_segment_summaries : image_report.segment_summaries;
+    image_report.symbol_summaries = saved_symbol_summaries ? saved_symbol_summaries : image_report.symbol_summaries;
+    image_report.relocation_summaries =
+        saved_relocation_summaries ? saved_relocation_summaries : image_report.relocation_summaries;
+    image_report.defined_symbol_indices =
+        saved_defined_symbol_indices ? saved_defined_symbol_indices : image_report.defined_symbol_indices;
+    image_report.resolved_relocation_indices =
+        saved_resolved_relocation_indices ? saved_resolved_relocation_indices : image_report.resolved_relocation_indices;
+    image_file.segments = saved_file_segments ? saved_file_segments : image_file.segments;
+    image_file.symbols = saved_file_symbols ? saved_file_symbols : image_file.symbols;
+    image_file.relocations = saved_file_relocations ? saved_file_relocations : image_file.relocations;
+    machine_image_report_free(&image_report);
+    machine_image_file_free(&image_file);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
     ok &= test_machine_image_builds_from_machine_ir_report();
+    ok &= test_machine_image_preserves_global_object_segments();
     ok &= test_machine_image_preserves_unresolved_external_call_site();
     ok &= test_machine_image_report_helpers();
     ok &= test_machine_image_build_from_elf_bytes_helpers();
     ok &= test_machine_image_clone_and_dump_helpers();
     ok &= test_machine_image_profile_and_ir_dump_helpers();
     ok &= test_machine_image_segment_cached_subset_helpers();
+    ok &= test_machine_image_query_helpers_reject_malformed_tables();
+    ok &= test_machine_image_rejects_wrapped_spans_and_addresses();
 
     if (!ok) {
         return 1;

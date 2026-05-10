@@ -54,9 +54,11 @@ int machine_image_verify_file(const MachineImageFile *image_file,
     }
     for (segment_index = 0u; segment_index < image_file->segment_count; ++segment_index) {
         const MachineImageSegment *segment = &image_file->segments[segment_index];
+        size_t image_end = 0u;
 
         if (!segment->name ||
-            segment->image_offset + segment->byte_count > image_file->byte_count ||
+            !machine_image_try_add_size(segment->image_offset, segment->byte_count, &image_end) ||
+            image_end > image_file->byte_count ||
             segment->align == 0u) {
             machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-118: invalid image segment");
             return 0;
@@ -70,13 +72,21 @@ int machine_image_verify_file(const MachineImageFile *image_file,
             return 0;
         }
         if (symbol->is_defined) {
+            size_t expected_virtual_address = 0u;
+
             if (symbol->segment_index >= image_file->segment_count) {
                 machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-120: defined image symbol references invalid segment");
                 return 0;
             }
+            if (!machine_image_try_add_size(
+                    image_file->segments[symbol->segment_index].virtual_address,
+                    symbol->value_offset,
+                    &expected_virtual_address)) {
+                machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-121: defined image symbol has invalid address");
+                return 0;
+            }
             if (symbol->value_offset > image_file->segments[symbol->segment_index].byte_count ||
-                symbol->virtual_address !=
-                    image_file->segments[symbol->segment_index].virtual_address + symbol->value_offset) {
+                symbol->virtual_address != expected_virtual_address) {
                 machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-121: defined image symbol has invalid address");
                 return 0;
             }
@@ -102,12 +112,21 @@ int machine_image_verify_file(const MachineImageFile *image_file,
     }
     for (relocation_index = 0u; relocation_index < image_file->relocation_count; ++relocation_index) {
         const MachineImageRelocation *relocation = &image_file->relocations[relocation_index];
+        size_t expected_site_virtual_address = 0u;
+
+        if (relocation->segment_index < image_file->segment_count &&
+            !machine_image_try_add_size(
+                image_file->segments[relocation->segment_index].virtual_address,
+                (size_t)relocation->segment_offset,
+                &expected_site_virtual_address)) {
+            machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-125: invalid image relocation");
+            return 0;
+        }
 
         if (!relocation->symbol_name ||
             relocation->segment_index >= image_file->segment_count ||
             relocation->segment_offset >= image_file->segments[relocation->segment_index].byte_count ||
-            relocation->site_virtual_address !=
-                image_file->segments[relocation->segment_index].virtual_address + (size_t)relocation->segment_offset ||
+            relocation->site_virtual_address != expected_site_virtual_address ||
             relocation->symbol_index >= image_file->symbol_count) {
             machine_image_set_error(error, 0, 0, "MACHINE-IMAGE-125: invalid image relocation");
             return 0;
