@@ -8,11 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int lower_source_to_ir_text(const char *source, char **out_text) {
+static int lower_source_to_ir_text_with_options(const char *source,
+    int skip_all_paths_return_check,
+    char **out_text) {
     TokenArray tokens;
     AstProgram program;
     ParserError parse_err;
     SemanticError sema_err;
+    SemanticOptions sema_options;
     IrProgram ir_program;
     IrError ir_err;
 
@@ -24,6 +27,8 @@ static int lower_source_to_ir_text(const char *source, char **out_text) {
     lexer_init_tokens(&tokens);
     ast_program_init(&program);
     ir_program_init(&ir_program);
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.skip_all_paths_return_check = skip_all_paths_return_check ? 1 : 0;
 
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr, "[ir-reg] FAIL: lexer failed for input\n");
@@ -41,7 +46,7 @@ static int lower_source_to_ir_text(const char *source, char **out_text) {
         return 0;
     }
 
-    if (!semantic_analyze_program(&program, &sema_err)) {
+    if (!semantic_analyze_program_with_options(&program, &sema_options, &sema_err)) {
         fprintf(stderr,
             "[ir-reg] FAIL: semantic failed at %d:%d: %s\n",
             sema_err.line,
@@ -78,6 +83,10 @@ static int lower_source_to_ir_text(const char *source, char **out_text) {
     return 1;
 }
 
+static int lower_source_to_ir_text(const char *source, char **out_text) {
+    return lower_source_to_ir_text_with_options(source, 0, out_text);
+}
+
 static int expect_ir_dump(const char *case_id,
     const char *source,
     const char *expected_text) {
@@ -89,6 +98,34 @@ static int expect_ir_dump(const char *case_id,
     }
 
     if (!lower_source_to_ir_text(source, &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s IR mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int expect_ir_dump_skip_return_check(const char *case_id,
+    const char *source,
+    const char *expected_text) {
+    char *actual_text = NULL;
+    int ok;
+
+    if (!case_id || !source || !expected_text) {
+        return 0;
+    }
+
+    if (!lower_source_to_ir_text_with_options(source, 1, &actual_text)) {
         free(actual_text);
         return 0;
     }
@@ -1864,6 +1901,268 @@ static int test_ir_lowers_for_init_step_cfg(void) {
         "}\n");
 }
 
+static int test_ir_lowers_if_condition_side_effect_even_when_truthiness_known(void) {
+    return expect_ir_dump("IR-IF-CONDITION-SIDE-EFFECT",
+        "int main(){ int i; i = 0; if (i = 1) { } return i; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 0\n"
+        "    i.0 = mov 1\n"
+        "    br 1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.2\n"
+        "  bb.2:\n"
+        "    ret i.0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_while_condition_side_effect_even_when_truthiness_known(void) {
+    return expect_ir_dump_skip_return_check("IR-WHILE-CONDITION-SIDE-EFFECT",
+        "int main(){ int i; i = 1; while (i = 0) { } return i; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 1\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    i.0 = mov 0\n"
+        "    br 0, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ret i.0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_for_condition_side_effect_even_when_truthiness_known(void) {
+    return expect_ir_dump_skip_return_check("IR-FOR-CONDITION-SIDE-EFFECT",
+        "int main(){ int i; i = 1; for (; i = 0; ) { } return i; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 1\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    i.0 = mov 0\n"
+        "    br 0, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ret i.0\n"
+        "}\n");
+}
+
+static int test_ir_merges_no_else_branch_facts_with_false_path(void) {
+    return expect_ir_dump("IR-IF-NO-ELSE-MERGE",
+        "int getint(){ return 0; }\n"
+        "int main(){ int a; int i; a = getint(); i = 1; if (a) { i = 2; } if (i == 1) return 1; else return 0; }\n",
+        "func getint() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call getint()\n"
+        "    a.0 = mov tmp.0\n"
+        "    i.1 = mov 1\n"
+        "    br a.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    i.1 = mov 2\n"
+        "    jmp bb.2\n"
+        "  bb.2:\n"
+        "    tmp.1 = eq i.1, 1\n"
+        "    br tmp.1, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    ret 1\n"
+        "  bb.4:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_merges_no_else_condition_side_effect_fact_to_continue(void) {
+    return expect_ir_dump("IR-IF-NO-ELSE-CONDITION-SIDE-EFFECT-MERGE",
+        "int main(){ int i; i = 0; if ((i = 1) && 0) { } if (i) return 1; else return 0; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 0\n"
+        "    i.0 = mov 1\n"
+        "    br 1, bb.3, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.2\n"
+        "  bb.2:\n"
+        "    br i.0, bb.4, bb.5\n"
+        "  bb.3:\n"
+        "    br 0, bb.1, bb.2\n"
+        "  bb.4:\n"
+        "    ret 1\n"
+        "  bb.5:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_clears_ternary_branch_mutation_facts_after_join(void) {
+    return expect_ir_dump("IR-TERNARY-JOIN-MUTATION-FACTS",
+        "int getint(){ return 1; }\n"
+        "int main(){ int a; int i; int x; a = getint(); i = 0; x = a ? (i = 1) : (i = 2); if (i == 1) return 1; else return 0; }\n",
+        "func getint() {\n"
+        "  bb.0:\n"
+        "    ret 1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call getint()\n"
+        "    a.0 = mov tmp.0\n"
+        "    i.1 = mov 0\n"
+        "    br a.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    i.1 = mov 1\n"
+        "    tmp.1 = mov 1\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    i.1 = mov 2\n"
+        "    tmp.1 = mov 2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    x.2 = mov tmp.1\n"
+        "    tmp.2 = eq i.1, 1\n"
+        "    br tmp.2, bb.4, bb.5\n"
+        "  bb.4:\n"
+        "    ret 1\n"
+        "  bb.5:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_clears_logical_value_branch_mutation_facts_after_join(void) {
+    return expect_ir_dump("IR-LOGICAL-VALUE-JOIN-MUTATION-FACTS",
+        "int getint(){ return 1; }\n"
+        "int main(){ int a; int i; int x; a = getint(); i = 0; x = a && (i = 1); if (i == 1) return 1; else return 0; }\n",
+        "func getint() {\n"
+        "  bb.0:\n"
+        "    ret 1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call getint()\n"
+        "    a.0 = mov tmp.0\n"
+        "    i.1 = mov 0\n"
+        "    br a.0, bb.3, bb.2\n"
+        "  bb.1:\n"
+        "    tmp.1 = mov 1\n"
+        "    jmp bb.4\n"
+        "  bb.2:\n"
+        "    tmp.1 = mov 0\n"
+        "    jmp bb.4\n"
+        "  bb.3:\n"
+        "    i.1 = mov 1\n"
+        "    br 1, bb.1, bb.2\n"
+        "  bb.4:\n"
+        "    x.2 = mov tmp.1\n"
+        "    tmp.2 = eq i.1, 1\n"
+        "    br tmp.2, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ret 1\n"
+        "  bb.6:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_keeps_pre_loop_local_fact_after_unknown_calling_while_body(void) {
+    return expect_ir_dump("IR-WHILE-CALL-BODY-SCOPE-RESTORE",
+        "int getv(){ return 49; }\n"
+        "int main(){"
+        "  int ch; int x; int f;"
+        "  ch = getv();"
+        "  x = 1;"
+        "  f = 0;"
+        "  while (ch < 48 || ch > 57) {"
+        "    if (ch == 45) f = 1;"
+        "    ch = getv();"
+        "  }"
+        "  if (f) return -x; else return x;"
+        "}\n",
+        "func getv() {\n"
+        "  bb.0:\n"
+        "    ret 49\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call getv()\n"
+        "    ch.0 = mov tmp.0\n"
+        "    x.1 = mov 1\n"
+        "    f.2 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.1 = lt ch.0, 48\n"
+        "    br tmp.1, bb.2, bb.4\n"
+        "  bb.2:\n"
+        "    tmp.3 = eq ch.0, 45\n"
+        "    br tmp.3, bb.5, bb.6\n"
+        "  bb.3:\n"
+        "    br f.2, bb.7, bb.8\n"
+        "  bb.4:\n"
+        "    tmp.2 = gt ch.0, 57\n"
+        "    br tmp.2, bb.2, bb.3\n"
+        "  bb.5:\n"
+        "    f.2 = mov 1\n"
+        "    jmp bb.6\n"
+        "  bb.6:\n"
+        "    tmp.4 = call getv()\n"
+        "    ch.0 = mov tmp.4\n"
+        "    jmp bb.1\n"
+        "  bb.7:\n"
+        "    tmp.5 = sub 0, x.1\n"
+        "    ret tmp.5\n"
+        "  bb.8:\n"
+        "    ret x.1\n"
+        "}\n");
+}
+
+static int test_ir_clears_mutated_local_fact_after_unknown_calling_for_loop(void) {
+    return expect_ir_dump("IR-FOR-CALL-BODY-SCOPE-RESTORE",
+        "int getv(){ return 1; }\n"
+        "int main(){"
+        "  int x; int f;"
+        "  x = 1;"
+        "  f = 0;"
+        "  for (; x && getv(); x = x - 1) {"
+        "    f = 1;"
+        "  }"
+        "  if (f) return 111; else return 222;"
+        "}\n",
+        "func getv() {\n"
+        "  bb.0:\n"
+        "    ret 1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    f.1 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    br x.0, bb.5, bb.4\n"
+        "  bb.2:\n"
+        "    f.1 = mov 1\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.1 = sub x.0, 1\n"
+        "    x.0 = mov tmp.1\n"
+        "    jmp bb.1\n"
+        "  bb.4:\n"
+        "    br f.1, bb.6, bb.7\n"
+        "  bb.5:\n"
+        "    tmp.0 = call getv()\n"
+        "    br tmp.0, bb.2, bb.4\n"
+        "  bb.6:\n"
+        "    ret 111\n"
+        "  bb.7:\n"
+        "    ret 222\n"
+        "}\n");
+}
+
 static int test_ir_lowers_nested_loop_break_continue(void) {
         return expect_ir_dump("IR-NESTED-LOOP-CONTROL",
         "int f(int a){for(;a;a=a-1){while(a){break;} continue;} return a;}\n",
@@ -2008,6 +2307,15 @@ int main(void) {
     ok &= test_ir_lowers_nested_loop_alias_return_family_without_malformed_exit_block();
     ok &= test_ir_lowers_while_break_exit();
     ok &= test_ir_lowers_for_init_step_cfg();
+    ok &= test_ir_lowers_if_condition_side_effect_even_when_truthiness_known();
+    ok &= test_ir_lowers_while_condition_side_effect_even_when_truthiness_known();
+    ok &= test_ir_lowers_for_condition_side_effect_even_when_truthiness_known();
+    ok &= test_ir_merges_no_else_branch_facts_with_false_path();
+    ok &= test_ir_merges_no_else_condition_side_effect_fact_to_continue();
+    ok &= test_ir_clears_ternary_branch_mutation_facts_after_join();
+    ok &= test_ir_clears_logical_value_branch_mutation_facts_after_join();
+    ok &= test_ir_keeps_pre_loop_local_fact_after_unknown_calling_while_body();
+    ok &= test_ir_clears_mutated_local_fact_after_unknown_calling_for_loop();
     ok &= test_ir_lowers_nested_loop_break_continue();
 
     if (!ok) {

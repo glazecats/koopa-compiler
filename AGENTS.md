@@ -150,6 +150,19 @@
     hypotheses open, including control-flow corruption, bad return/call
     lowering, stack/save-restore mistakes, broken address formation, and
     invalid memory accesses in generated code
+  - user reminder: do **not** dismiss `RUN_TIMEOUT` cases blindly as “just
+    slow” when the source program itself looks too small/simple to justify the
+    timeout. For previously observed `RUN_TIMEOUT` witnesses, explicitly
+    inspect whether the compiled result still looks semantically right:
+    compare the source-level algorithmic complexity against the observed
+    runtime, and use that to distinguish
+    `1)` genuinely heavy-but-correct programs from
+    `2)` wrong-code that manifests as timeout (for example bad control flow,
+    broken short-circuit, repeated-state corruption, or unintended extra
+    recursion/looping).
+  - when a timeout case is small enough that “real complexity timeout” is
+    doubtful, treat it as a first-class bug lead for the hidden runtime-RE
+    line instead of filing it away as generic performance noise
   - thread memory from the user: the earlier generated-program **`RTLE`**
     mainline is believed to be already fixed in a previous session, but this
     should be treated as a working memory note rather than a proof that all

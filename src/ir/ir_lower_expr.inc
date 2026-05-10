@@ -4,6 +4,9 @@
 #include "ir.c"
 #else
 
+static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack *stack,
+    const AstExpression *expr);
+
 static int ir_lower_boolean_branch(IrLowerContext *ctx,
     const AstExpression *expr,
     size_t then_target,
@@ -119,6 +122,13 @@ static int ir_lower_logical_value_expression(IrLowerContext *ctx,
 
     ctx->block_id = join_block_id;
     ctx->has_block = 1;
+    if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(&ctx->scopes, expr)) {
+        ir_set_error(ctx->error,
+            expr->line,
+            expr->column,
+            "IR-INT-077: failed to clear logical-expression mutated local facts during IR lowering");
+        return 0;
+    }
     *out_value = result_value;
     return 1;
 }
@@ -170,6 +180,13 @@ static int ir_lower_ternary_value_expression(IrLowerContext *ctx,
 
     ctx->block_id = join_block_id;
     ctx->has_block = 1;
+    if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(&ctx->scopes, expr)) {
+        ir_set_error(ctx->error,
+            expr->line,
+            expr->column,
+            "IR-INT-078: failed to clear ternary-expression mutated local facts during IR lowering");
+        return 0;
+    }
     *out_value = result_value;
     return 1;
 }

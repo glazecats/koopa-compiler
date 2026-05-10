@@ -417,6 +417,8 @@ def emit_bridge(cfg: Config, idx: int, kernel_count: int, twist_count: int) -> l
     kernel_b = (idx * 5 + 2) % kernel_count
     twist_a = (idx * 7 + 1) % twist_count
     alias_a = idx % max(6, kernel_count // 2)
+    def param_name(i: int) -> str:
+        return f"a{i % cfg.param_count}"
     params = ", ".join(f"int a{i}" for i in range(cfg.param_count))
     lines = [
         f"int bridge_{idx}({params}) {{",
@@ -429,7 +431,7 @@ def emit_bridge(cfg: Config, idx: int, kernel_count: int, twist_count: int) -> l
         "  int seed;",
         "  int dead;",
         f"  acc = ({' + '.join(f'a{i}' for i in range(min(cfg.param_count, 6)))} + {idx * 31 + 163}) % MOD;",
-        f"  seed = twist_{twist_a}(a0, a1, a2, a3);",
+        f"  seed = twist_{twist_a}({param_name(0)}, {param_name(1)}, {param_name(2)}, {param_name(3)});",
         "  i = 0;",
         f"  while (i < {cfg.array_size}) {{",
         "    dead = i;",
@@ -443,15 +445,15 @@ def emit_bridge(cfg: Config, idx: int, kernel_count: int, twist_count: int) -> l
         "    }",
         "    i = i + 1;",
         "  }",
-        f"  acc = (acc + arr_kernel_{kernel_a}(loc0, loc1, loc2, {cfg.array_size}, seed, a4, a5, a6)) % MOD;",
+        f"  acc = (acc + arr_kernel_{kernel_a}(loc0, loc1, loc2, {cfg.array_size}, seed, {param_name(4)}, {param_name(5)}, {param_name(6)})) % MOD;",
         "  if (((acc + seed) & 1) == 0) {",
-        f"    acc = (acc + arr_kernel_{kernel_b}(loc2, loc0, g{(idx + 3) % cfg.global_count}, {cfg.array_size}, acc, a7, a8, a9)) % MOD;",
+        f"    acc = (acc + arr_kernel_{kernel_b}(loc2, loc0, g{(idx + 3) % cfg.global_count}, {cfg.array_size}, acc, {param_name(7)}, {param_name(8)}, {param_name(9)})) % MOD;",
         "  } else {",
-        f"    acc = (acc + arr_kernel_{(idx * 7 + 3) % kernel_count}(g{(idx + 4) % cfg.global_count}, loc1, loc2, {cfg.array_size}, acc, a7, a8, a9)) % MOD;",
+        f"    acc = (acc + arr_kernel_{(idx * 7 + 3) % kernel_count}(g{(idx + 4) % cfg.global_count}, loc1, loc2, {cfg.array_size}, acc, {param_name(7)}, {param_name(8)}, {param_name(9)})) % MOD;",
         "  }",
         f"  acc = (acc + alias_kernel_{alias_a}(loc0, loc1, loc2, loc3, {cfg.array_size}, acc, seed)) % MOD;",
         f"  if (((acc + seed + {idx}) % 4) == 0) {{",
-        f"    acc = (acc + alias_kernel_{(alias_a + 1) % max(6, kernel_count // 2)}(loc2, loc0, loc3, g{(idx + 5) % cfg.global_count}, {cfg.array_size}, acc, a10)) % MOD;",
+        f"    acc = (acc + alias_kernel_{(alias_a + 1) % max(6, kernel_count // 2)}(loc2, loc0, loc3, g{(idx + 5) % cfg.global_count}, {cfg.array_size}, acc, {param_name(10)})) % MOD;",
         "  }",
     ]
     if idx > 0:

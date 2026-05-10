@@ -1869,6 +1869,49 @@ static int value_ssa_alloc_rewrite_block_local_spill_split_for_value(ValueSsaFun
         value_ssa_def_use_analysis_free(&def_use);
         return 1;
     }
+    if (def_use.def_instruction_indices[value_id] != (size_t)-1) {
+        const ValueSsaInstruction *def_instruction =
+            &function->blocks[def_use.def_block_ids[value_id]].instructions[def_use.def_instruction_indices[value_id]];
+
+        if (def_instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+            def_instruction->as.load_slot.kind == VALUE_SSA_SLOT_LOCAL &&
+            def_instruction->as.load_slot.id < function->local_count &&
+            function->locals[def_instruction->as.load_slot.id].source_name &&
+            strncmp(function->locals[def_instruction->as.load_slot.id].source_name, "spill.", 6) == 0) {
+            value_ssa_def_use_analysis_free(&def_use);
+            return 1;
+        }
+    }
+
+    {
+        size_t use_index;
+
+        for (use_index = def_use.use_offsets[value_id];
+             use_index < def_use.use_offsets[value_id] + def_use.use_counts[value_id];
+             ++use_index) {
+            const ValueSsaUseSite *use = &def_use.use_sites[use_index];
+
+            if (use->kind != VALUE_SSA_USE_INSTR ||
+                use->block_id >= function->block_count ||
+                use->instruction_index >= function->blocks[use->block_id].instruction_count) {
+                continue;
+            }
+            {
+                const ValueSsaInstruction *use_instruction =
+                    &function->blocks[use->block_id].instructions[use->instruction_index];
+
+                if (use_instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL &&
+                    use_instruction->as.store.slot.kind == VALUE_SSA_SLOT_LOCAL &&
+                    use_instruction->as.store.slot.id < function->local_count &&
+                    function->locals[use_instruction->as.store.slot.id].source_name &&
+                    strncmp(function->locals[use_instruction->as.store.slot.id].source_name, "spill.", 6) == 0) {
+                    value_ssa_def_use_analysis_free(&def_use);
+                    return 1;
+                }
+            }
+        }
+    }
+
     def_block_id = def_use.def_block_ids[value_id];
     def_instruction_index = def_use.def_instruction_indices[value_id];
     if (def_instruction_index != (size_t)-1) {

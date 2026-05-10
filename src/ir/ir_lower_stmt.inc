@@ -13,6 +13,15 @@ static int ir_try_eval_condition_truthiness_with_scope(const IrLowerContext *ctx
     int *out_truthy);
 static const AstExpression *statement_get_condition_expression(const AstStatement *stmt);
 static int ir_statement_contains_nested_loop(const AstStatement *stmt);
+static int ir_expression_has_side_effects(const AstExpression *expr);
+static int ir_prepare_condition_scope_snapshot(const IrLowerScopeStack *src_scopes,
+    const AstExpression *condition_expr,
+    int condition_has_side_effects,
+    IrLowerScopeStack *dest_scopes);
+static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack *stack,
+    const AstExpression *expr);
+static int ir_lower_scope_clear_mutated_scalar_locals_in_statement(IrLowerScopeStack *stack,
+    const AstStatement *stmt);
 
 static const AstExpression *statement_get_condition_expression(const AstStatement *stmt) {
     if (!stmt || !stmt->has_condition_expression) {
@@ -1426,6 +1435,258 @@ static int ir_statement_contains_nested_loop(const AstStatement *stmt) {
     return 0;
 }
 
+static int ir_expression_has_side_effects(const AstExpression *expr) {
+    size_t i;
+
+    if (!expr) {
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+        return 0;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (ir_expression_has_side_effects(
+                    expr->as.init_list.items ? expr->as.init_list.items[i] : NULL)) {
+                return 1;
+            }
+        }
+        return 0;
+    case AST_EXPR_PAREN:
+        return ir_expression_has_side_effects(expr->as.inner);
+    case AST_EXPR_UNARY:
+        if (expr->as.unary.op == TOKEN_PLUS_PLUS || expr->as.unary.op == TOKEN_MINUS_MINUS) {
+            return 1;
+        }
+        return ir_expression_has_side_effects(expr->as.unary.operand);
+    case AST_EXPR_POSTFIX:
+        if (expr->as.postfix.op == TOKEN_PLUS_PLUS || expr->as.postfix.op == TOKEN_MINUS_MINUS) {
+            return 1;
+        }
+        return ir_expression_has_side_effects(expr->as.postfix.operand);
+    case AST_EXPR_SUBSCRIPT:
+        return ir_expression_has_side_effects(expr->as.subscript.base) ||
+            ir_expression_has_side_effects(expr->as.subscript.index);
+    case AST_EXPR_CALL:
+        return 1;
+    case AST_EXPR_BINARY: {
+        TokenType op = expr->as.binary.op;
+
+        if (op == TOKEN_ASSIGN ||
+            op == TOKEN_PLUS_ASSIGN ||
+            op == TOKEN_MINUS_ASSIGN ||
+            op == TOKEN_STAR_ASSIGN ||
+            op == TOKEN_SLASH_ASSIGN ||
+            op == TOKEN_PERCENT_ASSIGN ||
+            op == TOKEN_AMP_ASSIGN ||
+            op == TOKEN_CARET_ASSIGN ||
+            op == TOKEN_PIPE_ASSIGN ||
+            op == TOKEN_SHIFT_LEFT_ASSIGN ||
+            op == TOKEN_SHIFT_RIGHT_ASSIGN) {
+            return 1;
+        }
+        return ir_expression_has_side_effects(expr->as.binary.left) ||
+            ir_expression_has_side_effects(expr->as.binary.right);
+    }
+    case AST_EXPR_TERNARY:
+        return ir_expression_has_side_effects(expr->as.ternary.condition) ||
+            ir_expression_has_side_effects(expr->as.ternary.then_expr) ||
+            ir_expression_has_side_effects(expr->as.ternary.else_expr);
+    default:
+        return 1;
+    }
+}
+
+static int ir_prepare_condition_scope_snapshot(const IrLowerScopeStack *src_scopes,
+    const AstExpression *condition_expr,
+    int condition_has_side_effects,
+    IrLowerScopeStack *dest_scopes) {
+    if (!src_scopes || !dest_scopes) {
+        return 0;
+    }
+
+    if (!ir_lower_scope_stack_clone(src_scopes, dest_scopes)) {
+        return 0;
+    }
+
+    if (condition_has_side_effects && condition_expr &&
+        !ir_lower_scope_clear_mutated_scalar_locals_in_expr(dest_scopes, condition_expr)) {
+        ir_lower_scope_stack_free(dest_scopes);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int ir_lower_scope_clear_scalar_local_fact(IrLowerScopeStack *stack,
+    const AstExpression *expr) {
+    const AstExpression *base = expr;
+    IrLowerBindingInfo binding_info;
+
+    if (!stack || !expr) {
+        return 1;
+    }
+
+    while (base && base->kind == AST_EXPR_PAREN) {
+        base = base->as.inner;
+    }
+    if (!base || base->kind != AST_EXPR_IDENTIFIER || !base->as.identifier.name) {
+        return 1;
+    }
+
+    if (!ir_lower_scope_lookup_binding(stack, base->as.identifier.name, &binding_info)) {
+        return 1;
+    }
+    if (binding_info.kind != IR_LOWER_BINDING_SCALAR_LOCAL) {
+        return 1;
+    }
+
+    return ir_lower_scope_update_binding_const_value_by_local_id(
+        stack,
+        binding_info.local_id,
+        0,
+        0);
+}
+
+static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack *stack,
+    const AstExpression *expr) {
+    size_t i;
+
+    if (!stack || !expr) {
+        return 1;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+        return 1;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(
+                    stack,
+                    expr->as.init_list.items ? expr->as.init_list.items[i] : NULL)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_PAREN:
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.inner);
+    case AST_EXPR_UNARY:
+        if ((expr->as.unary.op == TOKEN_PLUS_PLUS || expr->as.unary.op == TOKEN_MINUS_MINUS) &&
+            !ir_lower_scope_clear_scalar_local_fact(stack, expr->as.unary.operand)) {
+            return 0;
+        }
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.unary.operand);
+    case AST_EXPR_POSTFIX:
+        if ((expr->as.postfix.op == TOKEN_PLUS_PLUS || expr->as.postfix.op == TOKEN_MINUS_MINUS) &&
+            !ir_lower_scope_clear_scalar_local_fact(stack, expr->as.postfix.operand)) {
+            return 0;
+        }
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.postfix.operand);
+    case AST_EXPR_SUBSCRIPT:
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.subscript.base) &&
+            ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.subscript.index);
+    case AST_EXPR_CALL:
+        if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.call.callee)) {
+            return 0;
+        }
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(
+                    stack,
+                    expr->as.call.args ? expr->as.call.args[i] : NULL)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_BINARY: {
+        TokenType op = expr->as.binary.op;
+
+        if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.binary.left) ||
+            !ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.binary.right)) {
+            return 0;
+        }
+        if ((op == TOKEN_ASSIGN ||
+                op == TOKEN_PLUS_ASSIGN ||
+                op == TOKEN_MINUS_ASSIGN ||
+                op == TOKEN_STAR_ASSIGN ||
+                op == TOKEN_SLASH_ASSIGN ||
+                op == TOKEN_PERCENT_ASSIGN ||
+                op == TOKEN_AMP_ASSIGN ||
+                op == TOKEN_CARET_ASSIGN ||
+                op == TOKEN_PIPE_ASSIGN ||
+                op == TOKEN_SHIFT_LEFT_ASSIGN ||
+                op == TOKEN_SHIFT_RIGHT_ASSIGN) &&
+            !ir_lower_scope_clear_scalar_local_fact(stack, expr->as.binary.left)) {
+            return 0;
+        }
+        return 1;
+    }
+    case AST_EXPR_TERNARY:
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.ternary.condition) &&
+            ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.ternary.then_expr) &&
+            ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.ternary.else_expr);
+    default:
+        return 1;
+    }
+}
+
+static int ir_lower_scope_clear_mutated_scalar_locals_in_statement(IrLowerScopeStack *stack,
+    const AstStatement *stmt) {
+    size_t i;
+
+    if (!stack || !stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_COMPOUND:
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_statement(
+                    stack,
+                    stmt->children ? stmt->children[i] : NULL)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_DECLARATION:
+    case AST_STMT_EXPRESSION:
+    case AST_STMT_RETURN:
+        for (i = 0; i < stmt->expression_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(
+                    stack,
+                    stmt->expressions ? stmt->expressions[i] : NULL)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_IF:
+    case AST_STMT_WHILE:
+    case AST_STMT_FOR:
+        for (i = 0; i < stmt->expression_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(
+                    stack,
+                    stmt->expressions ? stmt->expressions[i] : NULL)) {
+                return 0;
+            }
+        }
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!ir_lower_scope_clear_mutated_scalar_locals_in_statement(
+                    stack,
+                    stmt->children ? stmt->children[i] : NULL)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_BREAK:
+    case AST_STMT_CONTINUE:
+        return 1;
+    default:
+        return 1;
+    }
+}
+
 static int ir_eval_constant_binary(TokenType op,
     long long lhs,
     long long rhs,
@@ -1869,18 +2130,22 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
     size_t header_block_id;
     size_t body_block_id;
     size_t exit_block_id = 0;
+    IrLowerScopeStack entry_scopes;
     int condition_known = 0;
     int condition_truthy = 0;
     int condition_constant_known = 0;
     int condition_constant_truthy = 0;
     IrLowerLoopTransferInfo body_info = {1, 0, 0, 0};
     int body_has_nested_loop = 0;
+    int condition_has_side_effects = 0;
     int needs_exit_block = 1;
     int loop_target_pushed = 0;
 
     if (!ctx || !stmt || !ctx->function || !ctx->has_block) {
         return 0;
     }
+
+    memset(&entry_scopes, 0, sizeof(entry_scopes));
 
     condition_expr = (stmt->has_condition_expression &&
         stmt->condition_expression_index < stmt->expression_count)
@@ -1905,8 +2170,23 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
             &condition_constant_truthy)) {
         return 0;
     }
+    condition_has_side_effects = ir_expression_has_side_effects(condition_expr);
+    if (condition_has_side_effects) {
+        condition_known = 0;
+        condition_truthy = 0;
+        condition_constant_known = 0;
+        condition_constant_truthy = 0;
+    }
     if (condition_known && !condition_truthy) {
         return 1;
+    }
+
+    if (!ir_lower_scope_stack_clone(&ctx->scopes, &entry_scopes)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-074: failed to snapshot while-loop scope state during IR lowering");
+        return 0;
     }
 
     if (stmt->child_count >= 1) {
@@ -1926,7 +2206,9 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
             !body_info.may_continue &&
             !body_info.may_fallthrough;
         int proven_stays_true =
-            !body_has_nested_loop && ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
+            !condition_has_side_effects &&
+            !body_has_nested_loop &&
+            ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
         needs_exit_block = !(body_forces_non_exit || proven_stays_true);
     }
 
@@ -1989,9 +2271,31 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
     if (needs_exit_block) {
         ctx->block_id = exit_block_id;
         ctx->has_block = 1;
+        if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(&entry_scopes, condition_expr) ||
+            (stmt->child_count >= 1 &&
+                !ir_lower_scope_clear_mutated_scalar_locals_in_statement(
+                    &entry_scopes,
+                    stmt->children[0]))) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-076: failed to clear while-loop mutated local facts during IR lowering");
+            ir_lower_scope_stack_free(&entry_scopes);
+            return 0;
+        }
+        ir_lower_scope_stack_free(&ctx->scopes);
+        if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-074: failed to restore while-loop scope state during IR lowering");
+            ir_lower_scope_stack_free(&entry_scopes);
+            return 0;
+        }
     } else {
         ctx->has_block = 0;
     }
+    ir_lower_scope_stack_free(&entry_scopes);
     return 1;
 }
 
@@ -2015,6 +2319,8 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     int body_may_fallthrough = 1;
     IrLowerLoopTransferInfo body_info = {1, 0, 0, 0};
     int body_has_nested_loop = 0;
+    int condition_has_side_effects = 0;
+    IrLowerScopeStack entry_scopes;
     int needs_step_block = 0;
     int needs_exit_block = 1;
     int scope_pushed = 0;
@@ -2023,6 +2329,8 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     if (!ctx || !stmt || !ctx->function || !ctx->has_block) {
         return 0;
     }
+
+    memset(&entry_scopes, 0, sizeof(entry_scopes));
 
     if (!ir_lower_scope_stack_push(&ctx->scopes)) {
         ir_set_error(ctx->error,
@@ -2084,6 +2392,13 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
             }
             return 0;
         }
+        condition_has_side_effects = ir_expression_has_side_effects(condition_expr);
+        if (condition_has_side_effects) {
+            condition_known = 0;
+            condition_truthy = 0;
+            condition_constant_known = 0;
+            condition_constant_truthy = 0;
+        }
     }
 
     if (condition_known && !condition_truthy) {
@@ -2093,11 +2408,23 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         return 1;
     }
 
+    if (!ir_lower_scope_stack_clone(&ctx->scopes, &entry_scopes)) {
+        ir_set_error(ctx->error,
+            stmt->line,
+            stmt->column,
+            "IR-INT-075: failed to snapshot for-loop scope state during IR lowering");
+        if (scope_pushed) {
+            ir_lower_scope_stack_pop(&ctx->scopes);
+        }
+        return 0;
+    }
+
     if (stmt->child_count >= 1) {
         IrLowerFlowState body_state;
 
         ir_lower_flow_state_init(&body_state);
         if (!ir_lower_flow_state_analyze_loop_transfer(ctx, stmt->children[0], &body_state, &body_info)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -2116,7 +2443,9 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
             !body_info.may_continue &&
             !body_info.may_fallthrough;
         int proven_stays_true =
-            !body_has_nested_loop && ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
+            !condition_has_side_effects &&
+            !body_has_nested_loop &&
+            ir_lower_flow_state_proves_loop_condition_stays_true(ctx, stmt);
         needs_exit_block = !(body_forces_non_exit || proven_stays_true);
     }
     needs_step_block = (step_expr != NULL) || body_has_continue;
@@ -2134,6 +2463,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         !ir_block_set_jump(ir_function_get_block_mut(ctx->function, entry_block_id),
             header_block_id,
             ctx->error)) {
+        ir_lower_scope_stack_free(&entry_scopes);
         if (scope_pushed) {
             ir_lower_scope_stack_pop(&ctx->scopes);
         }
@@ -2146,6 +2476,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     ctx->has_block = 1;
     if (condition_known && condition_truthy && !needs_exit_block) {
         if (!ir_block_set_jump(ir_lower_current_block(ctx), body_block_id, ctx->error)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -2153,12 +2484,14 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         }
     } else if (needs_exit_block && condition_expr) {
         if (!ir_lower_boolean_branch(ctx, condition_expr, body_block_id, exit_block_id)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
             return 0;
         }
     } else if (!ir_block_set_jump(ir_lower_current_block(ctx), body_block_id, ctx->error)) {
+        ir_lower_scope_stack_free(&entry_scopes);
         if (scope_pushed) {
             ir_lower_scope_stack_pop(&ctx->scopes);
         }
@@ -2174,6 +2507,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
             stmt->line,
             stmt->column,
             "IR-INT-024: failed to record loop targets for for-statement lowering");
+        ir_lower_scope_stack_free(&entry_scopes);
         if (scope_pushed) {
             ir_lower_scope_stack_pop(&ctx->scopes);
         }
@@ -2184,6 +2518,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         if (loop_target_pushed) {
             ir_loop_target_stack_pop(&ctx->loop_targets);
         }
+        ir_lower_scope_stack_free(&entry_scopes);
         if (scope_pushed) {
             ir_lower_scope_stack_pop(&ctx->scopes);
         }
@@ -2197,6 +2532,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
 
         if (body_exit_block && !body_exit_block->has_terminator &&
             !ir_block_set_jump(body_exit_block, continue_target_block_id, ctx->error)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -2208,6 +2544,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         ctx->block_id = step_block_id;
         ctx->has_block = 1;
         if (step_expr && !ir_lower_expression(ctx, step_expr, &unused_value)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -2215,6 +2552,7 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
         }
         if (ctx->has_block && !ir_lower_current_block(ctx)->has_terminator &&
             !ir_block_set_jump(ir_lower_current_block(ctx), header_block_id, ctx->error)) {
+            ir_lower_scope_stack_free(&entry_scopes);
             if (scope_pushed) {
                 ir_lower_scope_stack_pop(&ctx->scopes);
             }
@@ -2225,9 +2563,34 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     if (needs_exit_block) {
         ctx->block_id = exit_block_id;
         ctx->has_block = 1;
+        if ((condition_expr &&
+                !ir_lower_scope_clear_mutated_scalar_locals_in_expr(&entry_scopes, condition_expr)) ||
+            (step_expr &&
+                !ir_lower_scope_clear_mutated_scalar_locals_in_expr(&entry_scopes, step_expr)) ||
+            (stmt->child_count >= 1 &&
+                !ir_lower_scope_clear_mutated_scalar_locals_in_statement(
+                    &entry_scopes,
+                    stmt->children[0]))) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-076: failed to clear for-loop mutated local facts during IR lowering");
+            ir_lower_scope_stack_free(&entry_scopes);
+            return 0;
+        }
+        ir_lower_scope_stack_free(&ctx->scopes);
+        if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-075: failed to restore for-loop scope state during IR lowering");
+            ir_lower_scope_stack_free(&entry_scopes);
+            return 0;
+        }
     } else {
         ctx->has_block = 0;
     }
+    ir_lower_scope_stack_free(&entry_scopes);
     if (scope_pushed) {
         ir_lower_scope_stack_pop(&ctx->scopes);
     }
@@ -2247,6 +2610,7 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     int has_else;
     int condition_known = 0;
     int condition_truthy = 0;
+    int condition_has_side_effects = 0;
     int then_fallthrough;
     int else_fallthrough;
     int ok = 0;
@@ -2279,6 +2643,11 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
             &condition_truthy)) {
         goto cleanup;
     }
+    condition_has_side_effects = ir_expression_has_side_effects(condition_expr);
+    if (condition_has_side_effects) {
+        condition_known = 0;
+        condition_truthy = 0;
+    }
 
     if (condition_known) {
         if (condition_truthy) {
@@ -2289,9 +2658,18 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
         goto cleanup;
     }
 
-    if (!ir_lower_scope_stack_clone(&ctx->scopes, &entry_scopes) ||
-        !ir_lower_scope_stack_clone(&ctx->scopes, &then_scopes) ||
-        !ir_lower_scope_stack_clone(&ctx->scopes, &else_scopes)) {
+    if (!ir_prepare_condition_scope_snapshot(&ctx->scopes,
+            condition_expr,
+            condition_has_side_effects,
+            &entry_scopes) ||
+        !ir_prepare_condition_scope_snapshot(&ctx->scopes,
+            condition_expr,
+            condition_has_side_effects,
+            &then_scopes) ||
+        !ir_prepare_condition_scope_snapshot(&ctx->scopes,
+            condition_expr,
+            condition_has_side_effects,
+            &else_scopes)) {
         ir_set_error(ctx->error,
             stmt->line,
             stmt->column,
@@ -2405,8 +2783,14 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
         ctx->has_block = 1;
 
         if (then_fallthrough) {
-            ctx->scopes = then_scopes;
-            memset(&then_scopes, 0, sizeof(then_scopes));
+            if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes) ||
+                !ir_lower_scope_stack_merge_const_facts(&ctx->scopes, &then_scopes, &entry_scopes)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-019: failed to merge if/no-else scope state during IR lowering");
+                goto cleanup;
+            }
         } else {
             if (!ir_lower_scope_stack_clone(&entry_scopes, &ctx->scopes)) {
                 ir_set_error(ctx->error,

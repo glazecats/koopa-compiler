@@ -1,4 +1,10 @@
 #include "value_ssa_alloc.h"
+#include "lexer.h"
+#include "parser.h"
+#include "semantic.h"
+#include "ir.h"
+#include "lower_ir.h"
+#include "value_ssa_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +13,71 @@
 static int build_alloc_smoke_program(ValueSsaProgram *program, ValueSsaError *error);
 static int build_alloc_spill_program(ValueSsaProgram *program, ValueSsaError *error);
 static void clear_retry_phase_entry_item(ValueSsaAllocatorRetryFamilyAgendaItem *entry);
+
+static int build_value_ssa_program_from_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (error) {
+            snprintf(error->message, sizeof(error->message),
+                "VALUE-SSA-ALLOC-TEST-001: invalid source build contract");
+            error->line = 0;
+            error->column = 0;
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    value_ssa_program_free(out_program);
+    value_ssa_program_init(out_program);
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) &&
+        value_ssa_build_default_from_lower_ir(&lower_program, out_program, error);
+
+    if (!ok && error && error->message[0] == '\0') {
+        snprintf(error->message, sizeof(error->message),
+            "VALUE-SSA-ALLOC-TEST-002: source pipeline failed");
+        error->line = 0;
+        error->column = 0;
+    }
+
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
 
 static int expect_alloc_dump(const char *case_id,
     const ValueSsaFunction *function,
@@ -23474,6 +23545,128 @@ static int test_value_ssa_allocate_and_rewrite_program_reuses_branch_split_block
     return ok;
 }
 
+static int test_value_ssa_allocate_and_rewrite_program_keeps_distinct_nested_spill_families(void) {
+    static const char *source =
+        "int main() {\n"
+        "  int a=0;\n"
+        "  int i = 0;\n"
+        "  while (i < 3) {\n"
+        "    int j = 0;\n"
+        "    while (j < 4) {\n"
+        "      int k = 0;\n"
+        "      while (k < 5) {\n"
+        "        int ii = 0;\n"
+        "        while (ii < 3) {\n"
+        "          int jj = 0;\n"
+        "          while (jj < 5) {\n"
+        "            int kk = 0;\n"
+        "            while (kk < 4) {\n"
+        "              int iii = 0;\n"
+        "              while (iii < 6) {\n"
+        "                int jjj = 0;\n"
+        "                while (jjj < 5) {\n"
+        "                  int kkk = 0;\n"
+        "                  while (kkk < 5) {\n"
+        "                    int iiii = 0;\n"
+        "                    while (iiii < 3) {\n"
+        "                      int jjjj = 0;\n"
+        "                      while (jjjj < 6) {\n"
+        "                        int kkkk = 0;\n"
+        "                        while (kkkk < 7) {\n"
+        "                          int iiiii = 0;\n"
+        "                          while (iiiii < 5) {\n"
+        "                            int jjjjj = 0;\n"
+        "                            while (jjjjj < 3) {\n"
+        "                              int kkkkk = 0;\n"
+        "                              while (kkkkk < 6) {\n"
+        "                                a = (a + 3) % 999;\n"
+        "                                kkkkk = kkkkk + 3;\n"
+        "                              }\n"
+        "                              jjjjj = jjjjj + 1;\n"
+        "                            }\n"
+        "                            iiiii = iiiii + 2;\n"
+        "                          }\n"
+        "                          kkkk = kkkk + 2;\n"
+        "                        }\n"
+        "                        jjjj = jjjj + 2;\n"
+        "                      }\n"
+        "                      iiii = iiii + 1;\n"
+        "                    }\n"
+        "                    kkk = kkk + 1;\n"
+        "                  }\n"
+        "                  jjj = jjj + 1;\n"
+        "                }\n"
+        "                iii = iii + 1;\n"
+        "              }\n"
+        "              kk = kk + 1;\n"
+        "            }\n"
+        "            jj = jj + 1;\n"
+        "          }\n"
+        "          ii = ii + 1;\n"
+        "        }\n"
+        "        k = k + 1;\n"
+        "      }\n"
+        "      j = j + 1;\n"
+        "    }\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return a;\n"
+        "}\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaAllocateRewriteStats stats;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_allocate_rewrite_stats_init(&stats);
+
+    if (!build_value_ssa_program_from_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-alloc] FAIL: nested-spill-family source setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_optimize_perf_hotspots(&program, &error) ||
+        !value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(
+            &program, 8, &result, &stats, &error)) {
+        fprintf(stderr,
+            "[value-ssa-alloc] FAIL: nested-spill-family allocate+rewrite failed: %s\n",
+            error.message);
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: nested-spill-family dump failed\n");
+        value_ssa_program_allocation_result_free(&result);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (stats.rewrite_rounds < 1 ||
+        strstr(actual_text, "store_local spill.7.23, ssa.28") == NULL ||
+        strstr(actual_text, "store_local spill.0.16, ssa.28") != NULL) {
+        fprintf(stderr,
+            "[value-ssa-alloc] FAIL: nested-spill-family expected distinct spill locals after rewrite, "
+            "stats=(%zu,%zu), got:\n%s\n",
+            stats.allocation_rounds,
+            stats.rewrite_rounds,
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_allocate_and_rewrite_program_reports_stats(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -23751,6 +23944,7 @@ int main(void) {
     ok &= test_value_ssa_allocate_and_rewrite_program_does_not_respill_reload_family();
     ok &= test_value_ssa_allocate_and_rewrite_program_handles_phi_defined_spills();
     ok &= test_value_ssa_allocate_and_rewrite_program_reuses_branch_split_blocks();
+    ok &= test_value_ssa_allocate_and_rewrite_program_keeps_distinct_nested_spill_families();
     ok &= test_value_ssa_allocate_and_rewrite_program_reports_stats();
     ok &= test_value_ssa_allocate_and_rewrite_program_smoke_stats_without_rewrite();
     ok &= test_value_ssa_allocate_and_rewrite_program_stats_dump();
