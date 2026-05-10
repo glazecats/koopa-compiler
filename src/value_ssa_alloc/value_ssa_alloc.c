@@ -134,6 +134,7 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
     ValueSsaError *error);
 static int value_ssa_rewrite_program_block_local_spill_splits_with_change_map(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
+    const size_t *spill_local_floors,
     unsigned char *out_rewritten_functions,
     int *out_rewrote_any,
     ValueSsaError *error);

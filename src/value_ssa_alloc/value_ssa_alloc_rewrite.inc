@@ -1105,6 +1105,7 @@ static int value_ssa_alloc_try_reuse_reload_from_dominating_block(const ValueSsa
 static int value_ssa_alloc_insert_reload_for_current_use(ValueSsaFunction *function,
     size_t spill_local_id,
     const ValueSsaUseSite *use,
+    int allow_reload_reuse,
     ValueSsaError *error) {
     ValueSsaCfgAnalysis cfg;
     ValueSsaInstruction load_instruction;
@@ -1120,7 +1121,7 @@ static int value_ssa_alloc_insert_reload_for_current_use(ValueSsaFunction *funct
         return 0;
     }
     value_ssa_cfg_analysis_init(&cfg);
-    if (use->kind == VALUE_SSA_USE_INSTR) {
+    if (allow_reload_reuse && use->kind == VALUE_SSA_USE_INSTR) {
         if (!value_ssa_alloc_try_reuse_reload_in_block(
                 function,
                 use->block_id,
@@ -1198,7 +1199,7 @@ static int value_ssa_alloc_insert_reload_for_current_use(ValueSsaFunction *funct
             value_ssa_cfg_analysis_free(&cfg);
             return reused_reload;
         }
-    } else if (use->kind == VALUE_SSA_USE_TERM) {
+    } else if (allow_reload_reuse && use->kind == VALUE_SSA_USE_TERM) {
         if (!value_ssa_alloc_try_reuse_reload_in_block(
                 function,
                 use->block_id,
@@ -1258,7 +1259,7 @@ static int value_ssa_alloc_insert_reload_for_current_use(ValueSsaFunction *funct
             value_ssa_cfg_analysis_free(&cfg);
             return reused_reload;
         }
-    } else if (use->kind == VALUE_SSA_USE_PHI) {
+    } else if (allow_reload_reuse && use->kind == VALUE_SSA_USE_PHI) {
         ValueSsaBasicBlock *use_block = &function->blocks[use->block_id];
         size_t predecessor_block_id;
 
@@ -1487,6 +1488,7 @@ static int value_ssa_alloc_find_next_spill_rewrite_use(const ValueSsaFunction *f
 static int value_ssa_alloc_rewrite_spilled_value(ValueSsaFunction *function,
     size_t value_id,
     size_t spill_slot,
+    int allow_reload_reuse,
     ValueSsaError *error) {
     ValueSsaDefUseAnalysis def_use;
     ValueSsaBasicBlock *block;
@@ -1557,7 +1559,8 @@ static int value_ssa_alloc_rewrite_spilled_value(ValueSsaFunction *function,
             break;
         }
 
-        if (!value_ssa_alloc_insert_reload_for_current_use(function, spill_local_id, &use, error)) {
+        if (!value_ssa_alloc_insert_reload_for_current_use(
+                function, spill_local_id, &use, allow_reload_reuse, error)) {
             return 0;
         }
     }
@@ -1692,24 +1695,104 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         const ValueSsaAllocationResult *function_result = &result->function_results[function_index];
+        unsigned char *seen_spill_slots = NULL;
+        unsigned char *shared_spill_slots = NULL;
         size_t value_id;
+        int has_shared_spill_slots = 0;
+        int function_has_call = 0;
 
         if (!function->has_body) {
             continue;
         }
+        if (function->local_count > spill_local_floors[function_index]) {
+            continue;
+        }
+        if (function_result->spill_slot_count > 0u) {
+            seen_spill_slots =
+                (unsigned char *)calloc(function_result->spill_slot_count, sizeof(unsigned char));
+            shared_spill_slots =
+                (unsigned char *)calloc(function_result->spill_slot_count, sizeof(unsigned char));
+            if (!seen_spill_slots) {
+                value_ssa_alloc_set_error(
+                    error, 0, 0, "VALUE-SSA-ALLOC-239: out of memory checking shared spill slots");
+                return 0;
+            }
+            if (!shared_spill_slots) {
+                free(seen_spill_slots);
+                value_ssa_alloc_set_error(
+                    error, 0, 0, "VALUE-SSA-ALLOC-241: out of memory recording shared spill slots");
+                return 0;
+            }
+            for (value_id = 0; value_id < function_result->value_count; ++value_id) {
+                size_t spill_slot;
+
+                if (!function_result->spill_flags[value_id] ||
+                    function_result->spill_slots[value_id] == (size_t)-1) {
+                    continue;
+                }
+                spill_slot = function_result->spill_slots[value_id];
+                if (spill_slot >= function_result->spill_slot_count) {
+                    free(shared_spill_slots);
+                    free(seen_spill_slots);
+                    value_ssa_alloc_set_error(
+                        error, 0, 0, "VALUE-SSA-ALLOC-240: invalid spill slot while checking shared spills");
+                    return 0;
+                }
+                if (seen_spill_slots[spill_slot]) {
+                    has_shared_spill_slots = 1;
+                    shared_spill_slots[spill_slot] = 1u;
+                    continue;
+                }
+                seen_spill_slots[spill_slot] = 1u;
+            }
+            free(seen_spill_slots);
+            if (has_shared_spill_slots) {
+                size_t block_index;
+
+                for (block_index = 0; block_index < function->block_count && !function_has_call; ++block_index) {
+                    const ValueSsaBasicBlock *block = &function->blocks[block_index];
+                    size_t instruction_index;
+
+                    for (instruction_index = 0;
+                         instruction_index < block->instruction_count && !function_has_call;
+                         ++instruction_index) {
+                        if (block->instructions[instruction_index].kind == VALUE_SSA_INSTR_CALL) {
+                            function_has_call = 1;
+                        }
+                    }
+                }
+            }
+            if (has_shared_spill_slots && (function->block_count > 1u || function_has_call)) {
+                free(shared_spill_slots);
+                continue;
+            }
+        }
 
         for (value_id = 0; value_id < function_result->value_count; ++value_id) {
             int rewriteable = 0;
+            int allow_reload_reuse = 1;
 
             if (!value_ssa_alloc_result_value_is_rewriteable_spill(
                     function, function_result, spill_local_floors[function_index], value_id, &rewriteable, error)) {
+                free(shared_spill_slots);
                 return 0;
             }
             if (!rewriteable) {
                 continue;
             }
+            if (shared_spill_slots &&
+                function_result->spill_slots[value_id] != (size_t)-1 &&
+                function_result->spill_slots[value_id] < function_result->spill_slot_count &&
+                shared_spill_slots[function_result->spill_slots[value_id]]) {
+                allow_reload_reuse = 0;
+            }
             if (!value_ssa_alloc_rewrite_spilled_value(
-                    function, value_id, function_result->spill_slots[value_id], error)) {
+                    function,
+                    value_id,
+                    function_result->spill_slots[value_id],
+                    allow_reload_reuse,
+                    error)) {
+                free(shared_spill_slots);
                 return 0;
             }
             if (out_rewritten_functions) {
@@ -1717,6 +1800,7 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
             }
             rewrote_any = 1;
         }
+        free(shared_spill_slots);
     }
 
     if (!rewrote_any) {
@@ -1764,7 +1848,7 @@ static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
     }
 
     if (!value_ssa_rewrite_program_block_local_spill_splits_with_change_map(
-            program, result, out_rewritten_functions, &split_rewrote_any, error)) {
+            program, result, spill_local_floors, out_rewritten_functions, &split_rewrote_any, error)) {
         return 0;
     }
     if (trace_timing) {
@@ -1829,6 +1913,13 @@ static int value_ssa_alloc_run_program_rewrite_stage(ValueSsaProgram *program,
 
     if (!value_ssa_canonicalize_program(program, error)) {
         return 0;
+    }
+    if (out_rewritten_functions) {
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            if (program->functions[function_index].has_body) {
+                out_rewritten_functions[function_index] = 1u;
+            }
+        }
     }
     if (trace_timing) {
         value_ssa_alloc_trace_timing("rewrite-stage post-rewrite-canonicalize", value_ssa_alloc_now_s() - stage_start);
@@ -2447,6 +2538,7 @@ static int value_ssa_alloc_rewrite_edge_phi_spill_split_for_value(ValueSsaFuncti
 
 static int value_ssa_rewrite_program_block_local_spill_splits_with_change_map(ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
+    const size_t *spill_local_floors,
     unsigned char *out_rewritten_functions,
     int *out_rewrote_any,
     ValueSsaError *error) {
@@ -2468,6 +2560,9 @@ static int value_ssa_rewrite_program_block_local_spill_splits_with_change_map(Va
         int function_rewrote_any = 0;
 
         if (!function->has_body) {
+            continue;
+        }
+        if (spill_local_floors && function->local_count > spill_local_floors[function_index]) {
             continue;
         }
         for (value_id = 0; value_id < function_result->value_count; ++value_id) {
@@ -2503,7 +2598,7 @@ int value_ssa_rewrite_program_block_local_spill_splits_with_change_flag(ValueSsa
     int *out_rewrote_any,
     ValueSsaError *error) {
     return value_ssa_rewrite_program_block_local_spill_splits_with_change_map(
-        program, result, NULL, out_rewrote_any, error);
+        program, result, NULL, NULL, out_rewrote_any, error);
 }
 
 int value_ssa_rewrite_program_block_local_spill_splits(ValueSsaProgram *program,
@@ -2553,7 +2648,7 @@ int value_ssa_rewrite_program_single_block_spills(ValueSsaProgram *program,
                 continue;
             }
             if (!value_ssa_alloc_rewrite_spilled_value(
-                    function, value_id, function_result->spill_slots[value_id], error)) {
+                    function, value_id, function_result->spill_slots[value_id], 1, error)) {
                 return 0;
             }
         }

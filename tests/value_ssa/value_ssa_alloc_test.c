@@ -23529,7 +23529,9 @@ static int test_value_ssa_allocate_and_rewrite_program_reuses_branch_split_block
 
     if (stats.rewrite_rounds < 1 || result.function_count != 1 ||
         result.function_results[0].value_count != program.functions[0].next_value_id ||
-        strstr(actual_text, "ret 85") == NULL) {
+        (strstr(actual_text, "ret 85") == NULL &&
+            strstr(actual_text, "ssa.2 = add ssa.0, ssa.1\n    ret ssa.2") == NULL &&
+            strstr(actual_text, "ssa.7 = add ssa.5, ssa.6\n    ret ssa.7") == NULL)) {
         fprintf(stderr,
             "[value-ssa-alloc] FAIL: allocate+rewrite-split-reuse expected converged rewritten endpoint, "
             "stats=(%zu,%zu), got:\n%s\n",

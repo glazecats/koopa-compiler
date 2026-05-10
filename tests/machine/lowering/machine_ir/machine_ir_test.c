@@ -1,7 +1,13 @@
 #include "machine/ir.h"
 
+#include "ir.h"
+#include "lexer.h"
+#include "lower_ir.h"
+#include "parser.h"
+#include "semantic.h"
 #include "value_ssa_alloc.h"
 #include "value_ssa.h"
+#include "value_ssa_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +28,92 @@ static char *dup_text(const char *text) {
     }
     memcpy(copy, text, length + 1);
     return copy;
+}
+
+static int build_value_ssa_program_from_source_text(const char *source,
+    ValueSsaProgram *program,
+    ValueSsaError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "machine-ir source builder received invalid input");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, program, error) ||
+        !value_ssa_optimize_perf_hotspots(program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parser_error.message[0] != '\0') {
+                error->line = parser_error.line;
+                error->column = parser_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parser_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "machine-ir source builder failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
 }
 
 static int build_phi_spill_program(ValueSsaProgram *program, ValueSsaError *error) {
@@ -1021,6 +1113,188 @@ static int test_machine_ir_allocate_and_rewrite_report_memory_shape_surface(void
         fprintf(stderr,
             "[machine-ir] FAIL: memory-shape report dump mismatch\nactual:\n%s\n",
             actual_text);
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_allocate_and_rewrite_reallocates_functions_after_post_rewrite_canonicalize(void) {
+    static const char *source =
+        "int g0=1,g1=2,g2=3,g3=4,g4=5,g5=6;\n"
+        "int norm(int x){ while(x<0)x=x+10009; while(x>=10009)x=x-10009; return x; }\n"
+        "int pred(int x){ return (norm(x + g0 + g1 + 7) % 3) != 1; }\n"
+        "int side(int x){ if (((x + g2) & 1) == 0) g2 = norm(g2 + x + 13); else g3 = norm(g3 + x + g2 + 17); return norm(g2 + g3 + x); }\n"
+        "int wide0(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,int a8,int a9,int a10,int a11){\n"
+        "  int t = norm(a0+a1+a2+a3+a4+a5+a6+a7+a8+a9+a10+a11+g0+g1+g2+29);\n"
+        "  if ((pred(t) && side(a0 + a5)) || pred(a11)) t = norm(t + g2 + g3); else t = norm(t + g4 + g5);\n"
+        "  return t;\n"
+        "}\n"
+        "int wide1(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,int a8,int a9,int a10,int a11){\n"
+        "  return wide0(a11,a10,a9,a8,a7,a6,a5,a4,a3,a2,a1,a0);\n"
+        "}\n"
+        "int main(){ return wide1(1,2,3,4,5,6,7,8,9,10,11,12); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+
+    if (!build_value_ssa_program_from_source_text(source, &program, &value_error) ||
+        !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_report(
+            &program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: post-rewrite canonicalize reallocate witness setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function wide0 params=12") ||
+        !strstr(actual_text,
+            "  bb.1:\n"
+            "    reg.0(r0) = load global.2\n"
+            "    reg.1(r1) = add spill.3, reg.0(r0)\n"
+            "    reg.0(r0) = load global.3\n"
+            "    reg.0(r0) = add reg.1(r1), reg.0(r0)\n") ||
+        strstr(actual_text,
+            "  bb.1:\n"
+            "    reg.1(r1) = load global.2\n"
+            "    reg.0(r0) = add spill.3, reg.1(r1)\n"
+            "    reg.0(r0) = load global.3\n"
+            "    reg.0(r0) = add reg.0(r0), reg.0(r0)\n")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: post-rewrite canonicalize witness kept stale allocation mapping\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_shape_stable(void) {
+    static const char *source =
+        "int g0=4973,g1=1981,g2=8998,g3=6006,g4=3014,g5=22;\n"
+        "int norm(int x){ while(x<0)x=x+10009; while(x>=10009)x=x-10009; return x; }\n"
+        "int pred(int x){ return (norm(x + g0 + g1 + 7) % 3) != 1; }\n"
+        "int side(int x){ if (((x + g2) & 1) == 0) g2 = norm(g2 + x + 13); else g3 = norm(g3 + x + g2 + 17); return norm(g2 + g3 + x); }\n"
+        "int wide0(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,int a8,int a9,int a10,int a11){\n"
+        "  int t = norm(a0+a1+a2+a3+a4+a5+a6+a7+a8+a9+a10+a11+g0+g1+g2+29);\n"
+        "  if ((pred(t) && side(a0 + a5)) || pred(a11)) t = norm(t + g2 + g3); else t = norm(t + g4 + g5);\n"
+        "  return t;\n"
+        "}\n"
+        "int wide1(int a0,int a1,int a2,int a3,int a4,int a5,int a6,int a7,int a8,int a9,int a10,int a11){\n"
+        "  if (pred(wide0(a11,a10,a9,a8,a7,a6,a5,a4,a3,a2,a1,a0))) return 1;\n"
+        "  return 0;\n"
+        "}\n"
+        "int main(){ return wide1(2131,9151,6162,3173,184,7204,2149,9169,6180,3191,202,7222); }\n";
+    MachineIrAllocateRewriteReport report;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+
+    if (!build_value_ssa_program_from_source_text(source, &program, &value_error) ||
+        !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+            &program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: many-args spill-shape witness setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function wide1 params=12 locals=16 spills=4") ||
+        !strstr(actual_text,
+            "    reg.7(r7) = load local.11\n"
+            "    store local.12, reg.7(r7)\n"
+            "    reg.6(r6) = load local.10\n"
+            "    store local.13, reg.6(r6)\n"
+            "    reg.5(r5) = load local.9\n"
+            "    store local.14, reg.5(r5)\n"
+            "    reg.4(r4) = load local.8\n"
+            "    store local.15, reg.4(r4)\n") ||
+        !strstr(actual_text,
+            "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), spill.0, spill.1, spill.2, spill.3, reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n") ||
+        strstr(actual_text,
+            "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: many-args spill-shape witness regressed\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_allocate_and_rewrite_protects_branch_condition_from_live_out_alias(void) {
+    static const char *source =
+        "int main(){\n"
+        "  int a = 0;\n"
+        "  int i = 0;\n"
+        "  while (i < 5) {\n"
+        "    a = a + 1;\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return a;\n"
+        "}\n";
+    MachineIrAllocateRewriteReport report;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+
+    if (!build_value_ssa_program_from_source_text(source, &program, &value_error) ||
+        !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+            &program, 1, 1, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: branch-condition-protect witness setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text,
+            "  bb.1:\n"
+            "    phi spill.0 = [bb.0: 0], [bb.2: spill.0]\n"
+            "    phi spill.2 = [bb.0: 0], [bb.2: reg.0(r0)]\n"
+            "    spill.1 = lt spill.0, 5\n"
+            "    br spill.1, bb.2, bb.3\n") ||
+        strstr(actual_text,
+            "  bb.1:\n"
+            "    phi reg.0(r0) = [bb.0: 0], [bb.2: reg.0(r0)]\n"
+            "    reg.0(r0) = lt reg.0(r0), 5\n"
+            "    br reg.0(r0), bb.2, bb.3\n")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: branch condition was not protected from live-out aliasing\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
         ok = 0;
     }
 
@@ -10150,6 +10424,15 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_allocate_and_rewrite_report_memory_shape_surface()) {
+        return 1;
+    }
+    if (!test_machine_ir_allocate_and_rewrite_reallocates_functions_after_post_rewrite_canonicalize()) {
+        return 1;
+    }
+    if (!test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_shape_stable()) {
+        return 1;
+    }
+    if (!test_machine_ir_allocate_and_rewrite_protects_branch_condition_from_live_out_alias()) {
         return 1;
     }
     if (!test_machine_ir_phi_elimination_dump()) {

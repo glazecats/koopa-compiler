@@ -133,19 +133,298 @@ segfault?” rather than on generic optimization value:
 
 - compact hidden runtime-RE/segfault plan setup: **complete / 100%**
 - remaining segfault-family source audit on the current stable tree:
-  **in progress / ~66%**
+  **in progress / ~72%**
 - next concrete source slice:
   post-loop canonical-IR fact handling is now reclosed for the latest
   `while`/`for` local-fact leak family, and condition-side-effect lowering is
   now reclosed too; `if (cond) stmt;` false-path fact merging is now reclosed
   as well, and expression-level ternary/logical joins are now reclosed too.
-  The new downstream `34_multi_loop.sy` witness has now also been closed on
-  the Value-SSA allocate+rewrite line. Next concrete slice is the remaining
-  generated-program repro hunt plus any fresh reopens in late
-  `machine_select` / `machine_bytes` / `compiler_driver` only when a new
-  witness points there again
+  The downstream `34_multi_loop.sy` witness and the later many-args
+  allocate+rewrite result-sync family are now both reclosed on the
+  Value-SSA allocate+rewrite line. Next concrete slice is the remaining
+  generated-program repro hunt **after** the many-args batch closure plus any
+  fresh reopens in late `machine_select` / `machine_bytes` /
+  `compiler_driver` only when a new witness points there again
 
 ## Latest finding
+
+- 2026-05-10: the next active repro-search round finally produced a **new concrete supported-subset runtime wrong-code witness family** instead of another all-green widening batch. Three fresh temporary pools were used:
+  - `/tmp/lv8_hidden_like_batch` (`80/80 PASS`): no-array Lv8-style
+    `short-circuit + global mutation + nested calls + recursion`
+  - `/tmp/array_hidden_like_batch` (`50/50 PASS`): array/global/call recursion mixes
+  - `/tmp/many_args_hidden_like_batch` (`0/60 PASS`): **all red**, a new
+    wide-arity nested-call family
+- The failing family is now reduced further under `/tmp/many_args_reduce3/`:
+  - `caseD_callee_side_only.sy` FAIL
+  - `caseE_callee_side_plus_caller_globals.sy` FAIL
+  - `caseG_original_no_branch_in_caller.sy` FAIL
+  - `caseF_callee_side_plus_caller_params.sy` PASS
+- Current minimized shape:
+  a caller with `12` scalar parameters forwards them into another `12`-arg
+  callee in reversed order; the callee is fine when called directly from
+  `main`, but miscompiles when its body both
+  `1)` performs calls/branches and
+  `2)` later recombines a pre-call accumulator with reloaded globals.
+- Stage localization so far:
+  canonical IR, lower IR, Value-SSA, and `valueopt` dumps for
+  `/tmp/many_args_reduce3/caseD_callee_side_only.sy` still show the correct
+  `t + g2 + g3` structure, but the first machine allocate/rewrite dump is
+  already wrong in `wide0 bb.1`:
+  it becomes `load global.2; add spill.3, reg; load global.3; add reg, reg`,
+  i.e. effectively `g3 + g3` instead of preserving `t + g2 + g3`.
+- Current working conclusion:
+  this is no longer only a front-end/IR-side hypothesis. There is now a real
+  post-`valueopt` / machine-stage wrong-code lead in a **wide-arity nested
+  call + side-effectful callee** family, and that family is plausibly related
+  to hidden runtime `RE` because in larger programs the same corruption can
+  hit address/index/call-state values instead of only printing the wrong
+  integer.
+
+- 2026-05-10: that many-args family is now partially closed with **two kept fixes** on the allocate+rewrite line rather than on the front-end or final text line.
+- First fix:
+  when post-rewrite canonicalization runs after one function introduced spill
+  locals, later allocation/layout rebuilding must treat **all body functions**
+  as rewritten for the next allocation round. Otherwise untouched sibling
+  functions can keep pre-canonicalization placement ids against a
+  post-canonicalization Value-SSA program. The minimized witness was
+  `/tmp/many_args_reduce3/caseD_callee_side_only.sy`, where `wide0` needed
+  `t + g2 + g3` but stale placements lowered it like `g3 + g3`.
+- Second fix:
+  once a function already owns concrete spill locals from an earlier rewrite
+  round, the later rewriteable-spill stage must not materialize **another**
+  spill-rewrite round into that same function blindly. The minimized witness
+  was `/tmp/many_args_reduce3/caseG_original_no_branch_in_caller.sy`: after a
+  correct first rewrite round, a second spill rewrite started reusing the
+  existing `spill.0`/`spill.1` locals for newly spilled values and corrupted a
+  12-arg nested call into duplicated arguments. The live rule is now more
+  conservative: later rounds still reallocate/recolor such functions, but the
+  rewriteable-spill materialization step skips functions that already have
+  earlier spill locals.
+- Focused rechecks after these closures:
+  - `make test-value-ssa-alloc` PASS
+  - `make test-value-ssa-machine` PASS
+  - `make test-machine-ir` PASS
+  - `autotest -riscv -s lv8` PASS (`12/12`)
+  - `autotest -riscv -s lv9` PASS (`22/22`)
+  - `/tmp/many_args_reduce3` runtime witnesses now reclose on the `.sy` cases
+    (`caseD`, `caseE`, `caseF`, `caseG`, `caseH`, `caseI`, `caseJ` all PASS;
+    the `.c` host-helper files in that temp dir are irrelevant harness noise).
+- Current status of the broader generated many-args search:
+  the broad `/tmp/many_args_hidden_like_batch` line no longer represents an
+  immediately minimized runtime wrong-code lead; its latest rerun is still a
+  long-running / compile-pressure-heavy sweep rather than a closed result, so
+  keep treating it as an adjacent widening probe instead of proof that the
+  whole many-args family is exhausted.
+
+- 2026-05-10: one more adjacent allocator/rewrite pressure family is now narrowed too, and this time the first visible symptom was **compile timeout** rather than direct wrong-code. After the earlier many-args runtime fixes landed, the widened generated batch `/tmp/many_args_hidden_like_batch` started failing first at `many_args_hidden_like_3001.sy -> COMPILE_TIMEOUT`. Trace-guided profiling showed the sink was a split-only rewrite loop on the recursive `rec` function: coalesce analysis kept getting rerun on a slightly larger split-expanded SSA body even though that iteration had not performed any spill-materialization rewrite. The live rule is now more conservative there: once a rewrite-loop iteration rewrote only via block-local spill splitting and then completed one successful reallocation, the allocator accepts that reallocated result as converged instead of insisting on another split-only round. Focused checks after this closure are green (`make test-value-ssa-alloc`, `make test-value-ssa-machine`, `make test-machine-ir`), and `many_args_hidden_like_3001.sy` now moves from `COMPILE_TIMEOUT` to `PASS`. The next active similar witnesses in that generated family are now `many_args_hidden_like_3002.sy` and `many_args_hidden_like_3003.sy`, both runtime mismatches rather than compile-time stalls.
+
+- 2026-05-10: the **actual** remaining `3002/3003` bug turned out to be one step later than the earlier rewrite-stage guess. Fresh reduction first narrowed it to `/tmp/ma3002_reduce/P_postpred_bool.sy`: the fully rewritten Value-SSA program was already correct again (`wide1` still stored `a11..a8` into `spill.0..3` before the `wide0(...)` call), but the final machine-IR path still lowered the call incorrectly because the **final allocation result had drifted away from the rewritten spill shape**. Concretely, the rewritten program still explicitly spilled `ssa.0..ssa.3`, while the post-rewrite reallocation wanted to spill `ssa.4..ssa.7`; machine lowering then paired the rewritten program with that mismatched newer allocation and rebuilt the call with the wrong argument carriers. The kept repair is now on the allocate+rewrite loop handoff itself: after a rewrite round has already materialized spill locals and the current function still has the same value-count shape, a later reallocation is no longer allowed to replace that function's allocation result with a different spill family. Instead the loop preserves the earlier spill-compatible allocation result for that function, so the rewritten program and final allocation stay in sync. Focused rechecks after this closure are green:
+  - reduced witnesses:
+    `P_postpred_bool.sy`, `K_postcall_side_only.sy`, `N_postcall_pred_only.sy`
+    -> all PASS
+  - generated seeds:
+    `many_args_hidden_like_3001.sy`, `3002.sy`, `3003.sy` -> PASS
+  - widened generated family:
+    `/tmp/many_args_hidden_like_batch` -> **`60/60 PASS`**
+  - regression surfaces:
+    `make test-value-ssa-alloc` PASS,
+    `make test-value-ssa-machine` PASS,
+    `make test-machine-ir` PASS,
+    `autotest -riscv -s lv8` PASS (`12/12`),
+    `autotest -riscv -s lv9` PASS (`22/22`)
+- Current authority after this closure:
+  the earlier many-args batch is no longer an open runtime-wrong-code lead.
+  The active runtime-RE hunt should now widen **away from** this closed
+  family instead of continuing to treat `3002/3003` as the front-most
+  witness.
+
+- 2026-05-10: the first widening step **after** closing the many-args family
+  is now recorded too, and it produced one reopened lead plus one useful
+  non-lead classification.
+  - New generated adjacent stress direction:
+    `/tmp/runtime_re_adjacent_batch3`
+    (`many-args + arrays + alias-style kernels + branch nesting`, but kept
+    below the earlier wide-branch cliff as much as practical).
+    Result so far:
+    `adj2_a`, `adj2_b`, `adj2_c`, `adj2_e` -> PASS;
+    `adj2_d`, `adj2_f` -> `COMPILE_FAIL` with the already-known
+    `MACHINE-BYTES-344: riscv preview branch target out of range` boundary.
+    Current interpretation: this batch did **not** reproduce a new runtime RE
+    yet; the red points here are compile-stage size/range limits rather than
+    generated-program wrong-code.
+  - Rotated external follow-up:
+    `compiler2023 hidden_functional`
+    `09_BFS.sy` PASS, `10_DFS.sy` PASS, `28_side_effect2.sy` PASS,
+    `32_many_params3.sy` PASS.
+  - Fresh reopened lead:
+    `compiler2023 hidden_functional/34_multi_loop.sy`
+    is now timing out again under focused reruns (`--case-timeout 120` still
+    `RUN_TIMEOUT` on the current tree). Because this witness had previously
+    been reclosed during the allocator work, current authority is to treat it
+    as the **next active runtime/logic lead** instead of assuming the new
+    result is harmless noise.
+
+- 2026-05-10: that reopened `34_multi_loop.sy` lead is now reclosed too, and
+  the actual root cause was one stage later than the earlier Value-SSA fix:
+  **machine-ir lowering was reusing the pre-phi-elimination allocation across
+  branch-carried live-through values**.
+- Root cause:
+  in deep nested-loop CFGs, raw machine-ir with explicit phi nodes could still
+  look locally plausible, but once phi elimination materialized edge copies,
+  some outer loop counters were still living through inner loop regions while
+  sharing the same physical register with inner phi/branch values. That meant
+  the no-phi program could clobber an outer carrier (for example `j`) inside
+  the inner subtree, then later increment the wrong value on loop exit. The
+  first visible symptom on this witness was `RUN_TIMEOUT`; after one partial
+  protection pass it sharpened into a direct `MISMATCH`.
+- Live repair:
+  `src/machine/lowering/machine_ir/machine_ir_lower.inc` now allocates
+  protected spill slots not only for call-crossing caller-clobbered values,
+  but also for branch-sensitive / phi-sensitive live-through values:
+  - phi results that would alias a live-out register on the same block
+  - branch conditions that would alias a live-out register
+  - and, more conservatively, register-colored values that are live-out of a
+    branch block, so phi elimination no longer depends on the pre-phi
+    allocation keeping those branch-carried carriers intact through nested
+    regions
+- Focused rechecks after this closure:
+  - `34_multi_loop.sy` PASS
+  - `make test-machine-ir` PASS
+  - `autotest -riscv -s lv8` PASS (`12/12`)
+  - `autotest -riscv -s lv9` PASS (`22/22`)
+  - `compiler2023` focused follow-up:
+    `09_BFS.sy`, `10_DFS.sy`, `28_side_effect2.sy`, `32_many_params3.sy`,
+    `34_multi_loop.sy` -> PASS
+  - post-fix generated widening:
+    `/tmp/runtime_re_post34_batch` -> `4/4 PASS`
+- Remaining adjacent note after this closure:
+  the earlier `/tmp/runtime_re_adjacent_batch3` still has two reds
+  (`adj2_d`, `adj2_f`), but those remain the already-known compile-stage
+  `MACHINE-BYTES-344` branch-range boundary rather than a fresh runtime-RE
+  family.
+
+- 2026-05-10: after re-closing `34_multi_loop.sy`, the next widening step did
+  find **one new similar runtime wrong-code lead** instead of another all-green
+  batch:
+  - new loop/phi-heavy generated batch:
+    `/tmp/runtime_re_loopphi_batch`
+    -> `7/8 PASS`
+  - fresh failing witness:
+    `loopphi_e.sy` -> `MISMATCH`
+    (`expected 445`, actual `5898`)
+- Current localization on `loopphi_e.sy`:
+  - raw/rewritten Value-SSA still shows distinct values such as
+    `ssa.91 = load_local acc.0` and `ssa.92 = load_local mix.1`
+  - the final allocation result colors both to the **same register color**
+    even though the interference graph still says they interfere
+  - machine-ir lowering therefore emits bad shapes like
+    `load local.0 ; load local.1 ; add reg, reg`, i.e. the first operand is
+    lost before the binary op
+- Working conclusion:
+  this is now the next active runtime-risk family after the `34_multi_loop`
+  closure: an allocator/select/mainline correctness bug where interfering
+  non-spilled values can still receive the same color in a rewrite-heavy
+  function. The currently attempted machine-ir-side protection work fixed the
+  reopened `34_multi_loop` path but does **not** close this new direct
+  `loopphi_e` witness yet, so the next implementation slice should pivot onto
+  the allocator/mainline color-conflict root cause itself.
+
+- 2026-05-10: that `loopphi_e.sy` lead is now reclosed too, and the final root
+  cause turned out to be **one stage later than the allocator-color guess**:
+  `machine_ir` lowering still needed to protect same-register multi-operand
+  uses after allocation. The critical raw bad shapes were things like
+  `load local.0; load local.1; add reg.0, reg.0` and similar nested-loop
+  sibling forms where two distinct SSA operands had the same colored machine
+  register and the second lowered use clobbered the first before the binary op
+  consumed both values.
+- Live repair:
+  `src/machine/lowering/machine_ir/machine_ir_lower.inc` now extends protected
+  spill-slot assignment beyond the earlier branch/phi live-through cases:
+  - binary operands that would lower from two distinct SSA values onto the same
+    colored register are protected through spill slots
+  - call arguments with the same problem are protected the same way
+  - `store_indirect(addr, value)` now also protects same-register addr/value
+    pairs
+  This keeps machine-ir lowering from collapsing two-input value operations
+  into one clobbered register operand before any later cleanup or text export.
+- Focused rechecks after this closure:
+  - `loopphi_e.sy` PASS
+  - widened loop/phi batch:
+    `/tmp/runtime_re_loopphi_batch` -> **`8/8 PASS`**
+  - post-fix adjacent widening:
+    `/tmp/runtime_re_loopphi_postfix_batch` -> **`4/4 PASS`**
+  - regression/kept-closure surfaces:
+    `make test-machine-ir` PASS,
+    `autotest -riscv -s lv8` PASS (`12/12`),
+    `autotest -riscv -s lv9` PASS (`22/22`),
+    `/tmp/ma300x` -> `3/3 PASS`,
+    `/tmp/compiler2023_focus2` ->
+    `28_side_effect2.sy`, `32_many_params3.sy`, `34_multi_loop.sy` all PASS
+- Current authority after this closure:
+  the loop-/phi-heavy family that reopened after `34_multi_loop` is now closed
+  again. The active runtime-RE hunt should rotate to a different adjacent
+  family instead of continuing to treat this loop-carried/multi-operand line
+  as the front-most red witness.
+
+- 2026-05-10: the next rotated post-fix widening step moved off the closed
+  loop-/phi carrier family and onto **indirect-memory / array-address /
+  repeated-index** shapes. The fresh generated batch
+  `/tmp/runtime_re_indirect_batch` stayed all green (`8/8 PASS`), and the
+  targeted external `compiler2023` array/indirection neighbors
+  (`24_array_only`, `30_many_dimensions`, `31_many_indirections`) also stayed
+  green when rerun through the local focused bundle. Current authority is
+  therefore that this adjacent indirect-memory family did **not** immediately
+  reproduce a new runtime wrong-code/RE after the latest machine-ir repair,
+  so the next search step should rotate again instead of reopening this now
+  all-green slice.
+
+- 2026-05-10: one more rotated widening step then probed the next adjacent
+  family: **array-parameter aliasing + nested calls + branch-heavy control**.
+  The fresh generated batch `/tmp/runtime_re_aliascall_batch` stayed all green
+  too (`8/8 PASS`). Current authority is therefore that this alias/call-heavy
+  family also does **not** currently reproduce a new runtime wrong-code/RE on
+  the current tree, so the next search turn should rotate again instead of
+  sitting on this all-green slice.
+
+- 2026-05-10: the next rotated widening step after that moved onto
+  **indirect-store addr/value overlap + same-array aliasing through helper
+  calls**. The fresh generated batch `/tmp/runtime_re_storealias_batch` stayed
+  all green too (`8/8 PASS`). Current authority is therefore that this
+  store-/alias-heavy adjacent family also does **not** currently reproduce a
+  new runtime wrong-code/RE on the current tree, so the search should keep
+  rotating instead of reopening these now-all-green synthetic slices.
+
+- 2026-05-10: one more rotated widening step then probed
+  **recursion + global-array mutation + short-circuit / branch gating**.
+  The fresh generated batch `/tmp/runtime_re_recur_short_batch` also stayed
+  all green (`8/8 PASS`). Current authority is therefore that this
+  recursion/side-effect-heavy adjacent family does **not** currently reproduce
+  a new runtime wrong-code/RE on the current tree either, so the search should
+  keep rotating instead of reopening this now-all-green slice.
+
+- 2026-05-10: the next rotated widening step then moved onto
+  **local-array stack traffic + same-base multi-parameter aliasing + helper
+  mutation**. The fresh generated batch `/tmp/runtime_re_localalias_batch`
+  also stayed all green (`8/8 PASS`). Current authority is therefore that this
+  local-array/stack-alias adjacent family does **not** currently reproduce a
+  new runtime wrong-code/RE on the current tree either, so the search should
+  keep rotating instead of reopening this now-all-green slice.
+
+- 2026-05-10: the next rotated widening step after that moved onto
+  **global-scalar/global-array side effects + branch-gated helper calls**.
+  The fresh generated batch `/tmp/runtime_re_globalside_batch` also stayed all
+  green (`8/8 PASS`). Current authority is therefore that this global-side-
+  effect adjacent family does **not** currently reproduce a new runtime
+  wrong-code/RE on the current tree either, so the search should keep rotating
+  instead of reopening this now-all-green slice.
+
+- 2026-05-10: the next rotated widening step after that moved onto
+  **helper return values reused as array indices / branch gates**. The fresh
+  generated batch `/tmp/runtime_re_retindex_batch` also stayed all green
+  (`8/8 PASS`). Current authority is therefore that this return-value-as-index
+  adjacent family does **not** currently reproduce a new runtime wrong-code/RE
+  on the current tree either, so the search should keep rotating instead of
+  reopening this now-all-green slice.
 
 - 2026-05-10: another concrete hidden-runtime-wrong-code family is now
   closed one stage earlier than the late backend line: canonical-IR

@@ -121,6 +121,181 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     ValueSsaAllocateRewriteStats *out_stats,
     ValueSsaAllocationRewriteLoopStepResult *out_result,
     ValueSsaError *error);
+static void value_ssa_alloc_mark_evicted_value_spilled(ValueSsaAllocationResult *result, size_t value_id);
+static int value_ssa_alloc_assign_spill_slots(const ValueSsaAllocationPrep *prep,
+    const ValueSsaInterferenceGraph *interference_graph,
+    ValueSsaAllocationResult *result,
+    ValueSsaError *error);
+
+static int value_ssa_alloc_function_spill_shape_differs(const ValueSsaAllocationResult *lhs,
+    const ValueSsaAllocationResult *rhs) {
+    size_t value_id;
+
+    if (!lhs || !rhs || lhs->value_count != rhs->value_count) {
+        return 1;
+    }
+    for (value_id = 0; value_id < lhs->value_count; ++value_id) {
+        if ((lhs->spill_flags[value_id] ? 1u : 0u) != (rhs->spill_flags[value_id] ? 1u : 0u)) {
+            return 1;
+        }
+        if (lhs->spill_flags[value_id] &&
+            lhs->spill_slots[value_id] != rhs->spill_slots[value_id]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int value_ssa_alloc_function_has_call_instruction(const ValueSsaFunction *function) {
+    size_t block_index;
+
+    if (!function || !function->has_body) {
+        return 0;
+    }
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            if (block->instructions[instruction_index].kind == VALUE_SSA_INSTR_CALL) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int value_ssa_alloc_function_has_new_spill_local_loads(const ValueSsaFunction *function,
+    size_t spill_local_floor) {
+    size_t block_index;
+
+    if (!function || !function->has_body) {
+        return 0;
+    }
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t instruction_index;
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+            if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+                instruction->as.load_slot.kind == VALUE_SSA_SLOT_LOCAL &&
+                instruction->as.load_slot.id >= spill_local_floor) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int value_ssa_alloc_result_has_interference_color_conflict(const ValueSsaInterferenceGraph *interference,
+    const ValueSsaAllocationResult *result) {
+    size_t lhs;
+
+    if (!interference || !result || interference->value_count != result->value_count || !interference->interferes) {
+        return 0;
+    }
+    for (lhs = 0; lhs < result->value_count; ++lhs) {
+        size_t rhs;
+
+        if (!result->has_color[lhs] || result->spill_flags[lhs]) {
+            continue;
+        }
+        for (rhs = lhs + 1; rhs < result->value_count; ++rhs) {
+            if (!result->has_color[rhs] || result->spill_flags[rhs]) {
+                continue;
+            }
+            if (!interference->interferes[lhs * interference->value_count + rhs]) {
+                continue;
+            }
+            if (result->colors[lhs] == result->colors[rhs]) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int value_ssa_alloc_build_identity_coalesce_analysis(size_t value_count,
+    ValueSsaAllocatorCoalesceAnalysis *analysis,
+    ValueSsaError *error) {
+    size_t value_id;
+
+    if (!analysis) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-243: invalid identity-coalesce contract");
+        return 0;
+    }
+    value_ssa_allocator_coalesce_analysis_free(analysis);
+    analysis->value_count = value_count;
+    if (value_count == 0u) {
+        return 1;
+    }
+    analysis->value_roots = (size_t *)calloc(value_count, sizeof(size_t));
+    analysis->class_sizes = (size_t *)calloc(value_count, sizeof(size_t));
+    if (!analysis->value_roots || !analysis->class_sizes) {
+        value_ssa_allocator_coalesce_analysis_free(analysis);
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-244: out of memory building identity coalesce analysis");
+        return 0;
+    }
+    for (value_id = 0; value_id < value_count; ++value_id) {
+        analysis->value_roots[value_id] = value_id;
+        analysis->class_sizes[value_id] = 1u;
+    }
+    return 1;
+}
+
+static int value_ssa_alloc_force_spill_interference_color_conflicts(const ValueSsaAllocationPrep *prep,
+    const ValueSsaInterferenceGraph *interference,
+    ValueSsaAllocationResult *result,
+    ValueSsaError *error) {
+    int changed = 0;
+
+    if (!interference || !result || interference->value_count != result->value_count) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-246: invalid conflict-spill contract");
+        return 0;
+    }
+    for (;;) {
+        size_t lhs;
+        int found = 0;
+
+        for (lhs = 0; lhs < result->value_count && !found; ++lhs) {
+            size_t rhs;
+
+            if (!result->has_color[lhs] || result->spill_flags[lhs]) {
+                continue;
+            }
+            for (rhs = lhs + 1; rhs < result->value_count; ++rhs) {
+                size_t victim = lhs;
+
+                if (!result->has_color[rhs] || result->spill_flags[rhs] ||
+                    !interference->interferes[lhs * interference->value_count + rhs] ||
+                    result->colors[lhs] != result->colors[rhs]) {
+                    continue;
+                }
+                if (result->spill_priorities &&
+                    result->spill_priorities[rhs] < result->spill_priorities[lhs]) {
+                    victim = rhs;
+                } else if (result->spill_priorities &&
+                    result->spill_priorities[rhs] == result->spill_priorities[lhs] &&
+                    rhs > lhs) {
+                    victim = rhs;
+                }
+                value_ssa_alloc_mark_evicted_value_spilled(result, victim);
+                changed = 1;
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            break;
+        }
+    }
+    if (changed && !value_ssa_alloc_assign_spill_slots(prep, interference, result, error)) {
+        return 0;
+    }
+    return 1;
+}
 
 static void value_ssa_alloc_pipeline_step_result_init(ValueSsaAllocationPipelineStepResult *result) {
     if (!result) {
@@ -524,6 +699,40 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
                 return 0;
             }
         }
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            ValueSsaFunction *function = &program->functions[function_index];
+
+            if (!function->has_body || !rewritten_functions[function_index]) {
+                continue;
+            }
+            if (!value_ssa_alloc_function_has_call_instruction(function)) {
+                continue;
+            }
+            if (function->local_count <= spill_local_floors[function_index]) {
+                continue;
+            }
+            if (!value_ssa_alloc_function_has_new_spill_local_loads(
+                    function, spill_local_floors[function_index])) {
+                continue;
+            }
+            if (current_result->function_results[function_index].value_count != function->next_value_id) {
+                continue;
+            }
+            if (!value_ssa_alloc_function_spill_shape_differs(
+                    &current_result->function_results[function_index],
+                    &next_result->function_results[function_index])) {
+                continue;
+            }
+            value_ssa_allocation_result_free(&next_result->function_results[function_index]);
+            value_ssa_allocation_result_init(&next_result->function_results[function_index]);
+            if (!value_ssa_clone_allocation_result(&current_result->function_results[function_index],
+                    &next_result->function_results[function_index],
+                    error)) {
+                free(rewritten_functions);
+                value_ssa_program_allocation_result_free(next_result);
+                return 0;
+            }
+        }
     }
     if (trace_timing) {
         size_t reallocated_function_count = 0;
@@ -541,6 +750,20 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
     }
     if (out_stats) {
         ++out_stats->allocation_rounds;
+    }
+
+    if (!spill_rewrote_any) {
+        if (trace_timing) {
+            value_ssa_alloc_trace_timing("rewrite-loop split-only-converge", value_ssa_alloc_now_s() - stage_start);
+            value_ssa_alloc_trace_timing("rewrite-loop total", value_ssa_alloc_now_s() - total_start);
+        }
+        free(rewritten_functions);
+        value_ssa_program_allocation_result_free(current_result);
+        *current_result = *next_result;
+        value_ssa_program_allocation_result_init(next_result);
+        out_result->reallocated_after_rewrite = 1u;
+        out_result->status = VALUE_SSA_ALLOC_REWRITE_LOOP_STEP_CONVERGED;
+        return 1;
     }
 
     if (value_ssa_program_allocation_result_equivalent_ignoring_names(current_result, next_result)) {
@@ -728,6 +951,8 @@ int value_ssa_allocate_function(const ValueSsaFunction *function,
     ValueSsaError *error) {
     ValueSsaAllocationOwnedArtifacts artifacts;
     ValueSsaAllocationFullStepResult full_step;
+    ValueSsaAllocationEntryStepResult fallback_entry;
+    ValueSsaAllocatorCoalesceAnalysis identity_coalesce;
     int ok = 0;
 
     if (!function || !result) {
@@ -737,6 +962,8 @@ int value_ssa_allocate_function(const ValueSsaFunction *function,
 
     value_ssa_alloc_owned_artifacts_init(&artifacts);
     value_ssa_alloc_full_step_result_init(&full_step);
+    value_ssa_alloc_entry_step_result_init(&fallback_entry);
+    value_ssa_allocator_coalesce_analysis_init(&identity_coalesce);
 
     if (!value_ssa_alloc_run_full_step(function,
             color_budget,
@@ -750,10 +977,49 @@ int value_ssa_allocate_function(const ValueSsaFunction *function,
         value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-201: full-step ended in unknown state");
         goto cleanup;
     }
+    if (value_ssa_alloc_result_has_interference_color_conflict(&artifacts.interference, result)) {
+        value_ssa_allocation_result_free(result);
+        value_ssa_allocator_plan_free(&artifacts.plan);
+        value_ssa_allocator_plan_init(&artifacts.plan);
+        if (!value_ssa_alloc_build_identity_coalesce_analysis(
+                function->next_value_id, &identity_coalesce, error) ||
+            !value_ssa_alloc_run_entry_step(function,
+                &artifacts.prep,
+                &artifacts.worklist,
+                &artifacts.interference,
+                &artifacts.affinity,
+                &identity_coalesce,
+                &artifacts.plan,
+                color_budget,
+                0,
+                result,
+                &fallback_entry,
+                error) ||
+            !value_ssa_alloc_entry_step_completed_or_cleanup(NULL, &fallback_entry, error) ||
+            value_ssa_alloc_result_has_interference_color_conflict(&artifacts.interference, result)) {
+            if (!error || error->message[0] == '\0') {
+                value_ssa_alloc_set_error(
+                    error, 0, 0, "VALUE-SSA-ALLOC-245: allocation fallback still produced an interference color conflict");
+            }
+            goto cleanup;
+        }
+    }
+    if (value_ssa_alloc_result_has_interference_color_conflict(&artifacts.interference, result)) {
+        if (!value_ssa_alloc_force_spill_interference_color_conflicts(
+                &artifacts.prep, &artifacts.interference, result, error) ||
+            value_ssa_alloc_result_has_interference_color_conflict(&artifacts.interference, result)) {
+            if (!error || error->message[0] == '\0') {
+                value_ssa_alloc_set_error(
+                    error, 0, 0, "VALUE-SSA-ALLOC-247: forced conflict spilling still left an interference color conflict");
+            }
+            goto cleanup;
+        }
+    }
 
     ok = 1;
 
 cleanup:
+    value_ssa_allocator_coalesce_analysis_free(&identity_coalesce);
     value_ssa_alloc_owned_artifacts_free(&artifacts);
     if (!ok) {
         value_ssa_allocation_result_free(result);
