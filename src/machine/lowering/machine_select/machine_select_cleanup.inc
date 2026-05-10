@@ -1918,40 +1918,6 @@ static int machine_select_operand_redefined_before_result_uses_end_in_block(cons
     return 0;
 }
 
-static int machine_select_insert_op_at(MachineSelectBasicBlock *block,
-    size_t op_index,
-    const MachineSelectOp *op,
-    MachineSelectError *error) {
-    MachineSelectOp *new_ops;
-    size_t new_capacity;
-    size_t move_count;
-
-    if (!block || !op || op_index > block->op_count) {
-        return 0;
-    }
-    if (block->op_count == block->op_capacity) {
-        new_capacity = block->op_capacity == 0u ? 4u : block->op_capacity * 2u;
-        new_ops = (MachineSelectOp *)realloc(block->ops, new_capacity * sizeof(MachineSelectOp));
-        if (!new_ops) {
-            machine_select_set_error(error, 0, 0, "MACHINE-SELECT-427: out of memory growing selected op table");
-            return 0;
-        }
-        block->ops = new_ops;
-        block->op_capacity = new_capacity;
-    }
-
-    move_count = block->op_count - op_index;
-    if (move_count > 0u) {
-        memmove(
-            &block->ops[op_index + 1u],
-            &block->ops[op_index],
-            move_count * sizeof(MachineSelectOp));
-    }
-    block->ops[op_index] = *op;
-    ++block->op_count;
-    return 1;
-}
-
 static int machine_select_describe_call_arg_source_in_block(const MachineSelectBasicBlock *block,
     size_t use_index,
     MachineSelectOperand operand,
@@ -2208,6 +2174,8 @@ static int machine_select_cleanup_reuse_internal_pure_calls_in_block(const Machi
     MachineSelectError *error) {
     size_t op_index;
     int changed = 0;
+
+    (void)error;
 
     if (!program || !function || !block || !summary) {
         return 0;

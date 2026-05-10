@@ -79,19 +79,6 @@ static uint32_t read_u32_le(const unsigned char *bytes) {
         ((uint32_t)bytes[3] << 24u);
 }
 
-static int decode_riscv_j_imm(uint32_t word) {
-    int imm = 0;
-
-    imm |= (int)(((word >> 21u) & 0x3FFu) << 1u);
-    imm |= (int)(((word >> 20u) & 0x1u) << 11u);
-    imm |= (int)(((word >> 12u) & 0xFFu) << 12u);
-    imm |= (int)(((word >> 31u) & 0x1u) << 20u);
-    if ((imm & (1 << 20)) != 0) {
-        imm |= ~((1 << 21) - 1);
-    }
-    return imm;
-}
-
 static int decode_riscv_b_imm(uint32_t word) {
     int imm = 0;
 
