@@ -554,6 +554,13 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("verify-initial", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
+    if (!machine_select_aggressive_opt_mode_enabled()) {
+        if (trace_timing) {
+            machine_select_trace_timing("cleanup-conservative-skipped", machine_select_now_s() - stage_start);
+            machine_select_trace_timing("total", machine_select_now_s() - total_start);
+        }
+        return 1;
+    }
     if (!machine_select_program_should_skip_cleanup_pure(out_program)) {
         cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
         if (cleanup_changed < 0) {

@@ -451,6 +451,121 @@ segfault?” rather than on generic optimization value:
   on the current tree either, so the search should keep rotating instead of
   reopening this now-all-green slice.
 
+- 2026-05-10: after the invalid stress-witness line was disqualified, the next
+  valid rotated widening step moved onto **multi-dimensional local/global
+  array indexing + helper-returned bounded indices + same-base write/read
+  recombination**. The fresh generated batch
+  `/tmp/runtime_re_mdindex_batch` also stayed all green (`8/8 PASS`).
+  Current authority is therefore that this multidimensional
+  address-formation/index-reuse adjacent family does **not** currently
+  reproduce a new runtime wrong-code/RE on the current tree either, so the
+  search should keep rotating instead of reopening this now-all-green slice.
+
+- 2026-05-10: the next valid rotated widening step after that moved onto
+  **deep recursion + 12-argument calls + local-array stack traffic +
+  branch-gated parameter permutation**. The fresh generated batch
+  `/tmp/runtime_re_widerecur_batch` also stayed all green (`8/8 PASS`).
+  Current authority is therefore that this wide-recursive stack/argument
+  adjacent family does **not** currently reproduce a new runtime
+  wrong-code/RE on the current tree either, so the search should keep
+  rotating instead of reopening this now-all-green slice.
+
+- 2026-05-10: the next two valid rotated widening steps after that moved onto
+  **many scalar globals + nested short-circuit gating + helper side effects**
+  and then a heavier follow-up with the same scalar-global/short-circuit idea.
+  The fresh generated batches `/tmp/runtime_re_scalarshort_batch` and
+  `/tmp/runtime_re_scalarshort2_batch` both stayed all green (`8/8 PASS`
+  each). Current authority is therefore that this scalar-global /
+  short-circuit-heavy adjacent family does **not** currently reproduce a new
+  runtime wrong-code/RE on the current tree either, so the search should keep
+  rotating instead of reopening this now-all-green slice.
+
+- 2026-05-10: after that, I biased the next valid rotated widening step more
+  explicitly toward optimization-sensitive shapes: **constant-heavy local
+  assignments + trivially foldable arithmetic + branch-heavy control +
+  scalar-global side effects**. The fresh generated batch
+  `/tmp/runtime_re_constbranch_batch` also stayed all green (`8/8 PASS`).
+  Current authority is therefore that this constant-heavy
+  optimization-trigger adjacent family does **not** currently reproduce a new
+  runtime wrong-code/RE on the current tree either, so the search should keep
+  rotating instead of only restating the same scalar-global/short-circuit
+  family.
+
+- 2026-05-10: after that, I tried a first **splay-style tree rotation**
+  family in response to the user hint. The larger direct batch
+  `/tmp/runtime_re_splay_batch` only hit the already-known preview
+  compare-branch span limit (`MACHINE-BYTES-345`) rather than a runtime lead,
+  so I shrank it into a compile-safe version that still preserves the core
+  tree-shape risks: global pointer arrays, parent/child rewiring, rotations,
+  `find`/`kth`/`splay`, lazy tags, and branch-heavy update logic. That
+  compile-safe batch `/tmp/runtime_re_splay_small_batch` stayed all green
+  (`4/4 PASS`). Current authority is therefore that this first splay-style
+  family does **not** currently reproduce a new runtime wrong-code/RE on the
+  current tree, while the larger version only reiterates the existing branch-
+  span compile boundary.
+
+- 2026-05-10: after that, I pushed another explicitly optimization-sensitive
+  widening round in the direction the user asked for: **constant-heavy locals
+  + trivially foldable predicates + nested branch storms + scalar-global
+  helper side effects**. The fresh valid batch
+  `/tmp/runtime_re_optstress_batch` also stayed all green (`8/8 PASS`).
+  Current authority is therefore that this optimization-stress adjacent
+  family does **not** currently reproduce a new runtime wrong-code/RE on the
+  current tree either, so the search should keep rotating instead of staying
+  on only one constant/branch recipe.
+
+- 2026-05-10: after that, I moved one step closer to the existing pass names
+  instead of only writing broad optimization-stress code. The fresh valid
+  batch `/tmp/runtime_re_exprreuse_batch` targeted **repeated arithmetic
+  expressions + branch-merge joins + helper side-effect barriers**, and it
+  stayed all green (`8/8 PASS`). The next valid batch
+  `/tmp/runtime_re_purecall_batch` targeted **repeated pure-call-looking
+  helpers + branch joins + impure barriers**, and it also stayed all green
+  (`8/8 PASS`). Current authority is therefore that neither this
+  expression-reuse nor pure-call-reuse adjacent family currently reproduces a
+  new runtime wrong-code/RE on the current tree.
+
+- 2026-05-10: after that, I completed the earlier “maybe try LCT after
+  splay” suggestion instead of stopping at one tree-rotation checkpoint. A
+  first `LCT-lite` batch with global arrays, `makeroot/access/link/cut`,
+  pathsum queries, lazy reverse tags, and branch-heavy operation gating
+  (`/tmp/runtime_re_lct_batch`) stayed all green (`4/4 PASS`). Current
+  authority is therefore that this first link-cut-tree-style structural
+  family also does **not** currently reproduce a new runtime wrong-code/RE on
+  the current tree.
+
+- 2026-05-10: after that, I pushed one more pass-shaped differential family
+  rather than only adding new semantic stories. A direct raw-pointer version
+  was discarded as invalid SysY syntax, and the corrected valid replacement
+  `/tmp/runtime_re_addrreuse_batch2` used **array parameters + repeated
+  same-base indexing + pure-expression reuse + side-effect barriers** to
+  pressure `reuse_addr_roots` / `cleanup-pure`. That valid batch stayed all
+  green (`8/8 PASS`), and there was no observed output drift between the
+  normal compiler and skip-flag variants with
+  `MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS=1` or
+  `MACHINE_SELECT_SKIP_CLEANUP_PURE=1` on those witnesses. Current authority
+  is therefore that this first differential addr-root / pure-cleanup family
+  also does **not** currently reproduce a new runtime wrong-code/RE on the
+  current tree.
+
+- 2026-05-10: I also prepared one **conservative diagnostic submission mode**
+  at the user's request so we can check whether the still-open hidden red
+  points materially depend on optimization layers. In the current tree,
+  aggressive optimization is now disabled by default unless
+  `COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS=1` is set. The conservative path
+  keeps parsing/semantic/lower-IR intact but then:
+  - uses plain `value_ssa_build_from_lower_ir(...)` instead of the default
+    canonicalized / memory-SSA-heavy build
+  - skips `value_ssa_optimize_perf_hotspots(...)`
+  - returns early from `machine_select` immediately after the initial verify,
+    skipping the later cleanup stack
+  - skips final preview-text peepholes in `compiler_driver`
+  This is intentionally a **diagnostic build**, not a claimed fix. Focused
+  smoke rechecks on the conservative build stayed viable (`34_multi_loop.sy`
+  PASS, `92_register_alloc.sy` PASS, `short_circuit1.sy` PASS), so the tree
+  is ready if we want to compare judge results against this lower-
+  optimization version.
+
 - 2026-05-10: another concrete hidden-runtime-wrong-code family is now
   closed one stage earlier than the late backend line: canonical-IR
   loop-exit local facts in `src/ir/ir_lower_stmt.inc`.

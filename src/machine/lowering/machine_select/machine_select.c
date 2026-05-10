@@ -45,6 +45,12 @@ static int machine_select_skip_cleanup_reuse_addr_roots_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_aggressive_opt_mode_enabled(void) {
+    const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static void machine_select_trace_timing(const char *stage, double elapsed_s) {
     if (!stage || !machine_select_trace_enabled()) {
         return;

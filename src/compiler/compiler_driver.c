@@ -43,6 +43,12 @@ typedef struct {
     size_t block_label_count;
 } CompilerRiscvPreviewCache;
 
+static int compiler_aggressive_opt_mode_enabled(void) {
+    const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static void compiler_set_error(CompilerError *error, int line, int column, const char *message);
 static char *compiler_read_file_text(const char *path, CompilerError *error);
 static void compiler_copy_stage_error(CompilerError *error,
@@ -4055,15 +4061,16 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
 
     *out_text = builder.data;
     builder.data = NULL;
-    if (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
-        !compiler_optimize_riscv_preview_zero_adds(out_text) ||
-        !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
-        !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
-        !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
-        !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
-        !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
-        !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text) ||
-        !compiler_optimize_riscv_preview_stack_staged_call_args(out_text)) {
+    if (compiler_aggressive_opt_mode_enabled() &&
+        (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
+            !compiler_optimize_riscv_preview_zero_adds(out_text) ||
+            !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
+            !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
+            !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
+            !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
+            !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
+            !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text) ||
+            !compiler_optimize_riscv_preview_stack_staged_call_args(out_text))) {
         compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
         ok = 0;
         goto cleanup;
@@ -4172,14 +4179,20 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
         goto cleanup;
     }
-    ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
+    if (compiler_aggressive_opt_mode_enabled()) {
+        ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
+    } else {
+        ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
+    }
     if (!ok) {
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
-        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-        goto cleanup;
+    if (compiler_aggressive_opt_mode_enabled()) {
+        if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
+            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+            goto cleanup;
+        }
     }
     ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
         &value_program,
