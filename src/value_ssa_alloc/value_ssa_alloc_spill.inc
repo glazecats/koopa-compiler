@@ -915,11 +915,26 @@ static int value_ssa_alloc_assign_spill_slots(const ValueSsaAllocationPrep *prep
             }
 
             if (preferred_parent_slot != (size_t)-1) {
-                result->spill_slots[value_id] = preferred_parent_slot;
-                if (preferred_parent_slot + 1 > result->spill_slot_count) {
-                    result->spill_slot_count = preferred_parent_slot + 1;
+                int blocked = 0;
+                size_t neighbor_value_id;
+
+                for (neighbor_value_id = 0; neighbor_value_id < result->value_count; ++neighbor_value_id) {
+                    if (neighbor_value_id == value_id || !result->spill_flags[neighbor_value_id] ||
+                        result->spill_slots[neighbor_value_id] != preferred_parent_slot) {
+                        continue;
+                    }
+                    if (interference_graph->interferes[value_id * interference_graph->value_count + neighbor_value_id]) {
+                        blocked = 1;
+                        break;
+                    }
                 }
-                continue;
+                if (!blocked) {
+                    result->spill_slots[value_id] = preferred_parent_slot;
+                    if (preferred_parent_slot + 1 > result->spill_slot_count) {
+                        result->spill_slot_count = preferred_parent_slot + 1;
+                    }
+                    continue;
+                }
             }
 
             for (;;) {

@@ -218,6 +218,33 @@
     - current priority inside that audit remains **generated-program runtime
       RE**, not compiler-process crashes: keep checking late preview-text
       peepholes, final text/control-flow export, stack/call/address-formation
+    - fresh 2026-05-10 stability note inside that same audit: the reopened
+      public/hidden-adjacent `register_alloc` WA line is now reclosed again.
+      Root cause was allocator spill-slot assignment reusing a split child's
+      parent slot **without** rechecking interference against values already
+      assigned to that slot, which let later rewrite rounds alias live spilled
+      values. The kept fix now only inherits the parent slot when it is still
+      interference-safe; otherwise the allocator falls back to the normal slot
+      search. Rechecks after the fix: `make test-value-ssa-alloc` PASS,
+      `make test-machine-ir` PASS, focused public witnesses
+      `92_register_alloc.sy` PASS and `114_register_alloc.sy` PASS (with real
+      `.in` inputs), plus rotated spill-conflict scans over
+      `compiler2023/.../functional` (`100` cases; only the already-unsupported
+      `95_float`/`96-99_matrix_*` parser tails fail to build) and
+      `compiler2021/.../h_functional` (`37` cases) found **no** remaining
+      same-slot interference conflicts in allocate+rewrite results
+    - immediate follow-up hunt after that fix first seemed to find a new
+      synthetic witness under `/tmp/runtime_re_spill_followup/`, but that
+      line is now **disqualified as generator UB rather than kept as a real
+      compiler bug**. `stress_spill_101.sy` was failing only because the
+      generator allowed `global_size < array_size`, then passed
+      `len=array_size` into helpers whose first array argument was a shorter
+      global array (`g9[18]` with `len=24`), so later `a[idx0]` accesses
+      legitimately walked out of bounds. The generator now rejects that shape
+      directly (`global-size must be >= array-size`), and the revalidated
+      valid follow-up batches are green again:
+      `/tmp/runtime_re_spill_followup_valid/` -> `3/3 PASS`,
+      `/tmp/runtime_re_spill_followup_valid2/` -> `6/6 PASS`
       wrong-code risks, adjacent handoff surfaces that can corrupt the
       emitted program, and earlier control/data-flow fact lowering when a
       concrete runtime witness points back into it

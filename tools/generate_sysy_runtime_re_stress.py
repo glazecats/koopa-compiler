@@ -600,6 +600,12 @@ def main() -> int:
     if args.leaf_count <= 0 or args.chain_count <= 0 or args.array_size <= 0 or args.global_count <= 0 or args.global_size <= 1 or args.params <= 0:
         print("all size/count arguments must be positive and global-size > 1", file=sys.stderr)
         return 2
+    if args.global_size < args.array_size:
+        print(
+            "global-size must be >= array-size so generated global-array helper calls stay in-bounds",
+            file=sys.stderr,
+        )
+        return 2
 
     cfg = Config(
         leaf_count=args.leaf_count,

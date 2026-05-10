@@ -138,6 +138,65 @@ static int expect_alloc_results_equal_by_dump(const char *case_id,
     return ok;
 }
 
+static int expect_no_same_slot_interference_conflicts(const char *case_id,
+    const ValueSsaFunction *function,
+    const ValueSsaAllocationResult *result) {
+    ValueSsaCfgAnalysis cfg;
+    ValueSsaLivenessAnalysis liveness;
+    ValueSsaInterferenceGraph interference;
+    ValueSsaError error;
+    int ok = 1;
+
+    value_ssa_cfg_analysis_init(&cfg);
+    value_ssa_liveness_analysis_init(&liveness);
+    value_ssa_interference_graph_init(&interference);
+    memset(&error, 0, sizeof(error));
+
+    if (!function || !result) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: %s invalid same-slot-conflict check contract\n", case_id);
+        ok = 0;
+        goto cleanup;
+    }
+    if (!value_ssa_compute_cfg_analysis(function, &cfg, &error) ||
+        !value_ssa_compute_liveness_analysis(function, &cfg, &liveness, &error) ||
+        !value_ssa_compute_interference_graph(function, &cfg, &liveness, &interference, &error)) {
+        fprintf(stderr,
+            "[value-ssa-alloc] FAIL: %s same-slot-conflict analysis failed: %s\n",
+            case_id,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    for (size_t lhs = 0; lhs < result->value_count; ++lhs) {
+        if (!result->spill_flags[lhs] || result->spill_slots[lhs] == (size_t)-1) {
+            continue;
+        }
+        for (size_t rhs = lhs + 1; rhs < result->value_count; ++rhs) {
+            if (!result->spill_flags[rhs] || result->spill_slots[rhs] != result->spill_slots[lhs]) {
+                continue;
+            }
+            if (!interference.interferes[lhs * interference.value_count + rhs]) {
+                continue;
+            }
+            fprintf(stderr,
+                "[value-ssa-alloc] FAIL: %s spill slot %zu reused by interfering values ssa.%zu and ssa.%zu\n",
+                case_id,
+                result->spill_slots[lhs],
+                lhs,
+                rhs);
+            ok = 0;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    value_ssa_interference_graph_free(&interference);
+    value_ssa_liveness_analysis_free(&liveness);
+    value_ssa_cfg_analysis_free(&cfg);
+    return ok;
+}
+
 static int expect_program_alloc_dump(const char *case_id,
     const ValueSsaProgram *program,
     const ValueSsaProgramAllocationResult *result,
@@ -15161,16 +15220,12 @@ static int test_value_ssa_allocate_function_reuses_spill_slot_for_noninterfering
     return ok;
 }
 
-static int test_value_ssa_allocate_function_reuses_parent_spill_slot_for_split_child(void) {
+static int test_value_ssa_allocate_function_split_child_spill_assignment_is_interference_safe(void) {
     ValueSsaProgram program;
     ValueSsaProgramAllocationResult split_result;
     ValueSsaAllocationPrep prep;
     ValueSsaAllocationResult result;
     ValueSsaError error;
-    int has_slot0 = 0;
-    int has_slot4 = 0;
-    size_t slot0 = 0;
-    size_t slot4 = 0;
     int ok = 1;
 
     value_ssa_program_init(&program);
@@ -15212,27 +15267,140 @@ static int test_value_ssa_allocate_function_reuses_parent_spill_slot_for_split_c
         ok = 0;
         goto cleanup;
     }
-
-    if (!value_ssa_allocation_result_get_spill_slot(&result, 0, &has_slot0, &slot0) ||
-        !value_ssa_allocation_result_get_spill_slot(&result, 4, &has_slot4, &slot4)) {
-        fprintf(stderr, "[value-ssa-alloc] FAIL: split-child-slot query failed\n");
-        ok = 0;
-        goto cleanup;
-    }
-    if (!has_slot0 || !has_slot4 || slot0 != slot4) {
-        fprintf(stderr,
-            "[value-ssa-alloc] FAIL: split-child-slot expected parent/child shared slot, got has0=%d slot0=%zu has4=%d slot4=%zu\n",
-            has_slot0,
-            slot0,
-            has_slot4,
-            slot4);
-        ok = 0;
-    }
+    ok &= expect_no_same_slot_interference_conflicts(
+        "VALUE-SSA-ALLOC-SPLIT-CHILD-SLOT-SAFETY",
+        &program.functions[0],
+        &result);
 
 cleanup:
     value_ssa_allocation_result_free(&result);
     value_ssa_allocation_prep_free(&prep);
     value_ssa_program_allocation_result_free(&split_result);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_allocate_and_rewrite_program_keeps_split_family_spill_slots_interference_safe(void) {
+    static const char *source =
+        "int a1 = 1;\n"
+        "int a2 = 2;\n"
+        "int a3 = 3;\n"
+        "int a4 = 4;\n"
+        "int a5 = 5;\n"
+        "int a6 = 6;\n"
+        "int a7 = 7;\n"
+        "int a8 = 8;\n"
+        "int a9 = 9;\n"
+        "int a10 = 10;\n"
+        "int a11 = 11;\n"
+        "int a12 = 12;\n"
+        "int a13 = 13;\n"
+        "int a14 = 14;\n"
+        "int a15 = 15;\n"
+        "int a16 = 16;\n"
+        "int a17 = 1;\n"
+        "int a18 = 2;\n"
+        "int a19 = 3;\n"
+        "int a20 = 4;\n"
+        "int a21 = 5;\n"
+        "int a22 = 6;\n"
+        "int a23 = 7;\n"
+        "int a24 = 8;\n"
+        "int a25 = 9;\n"
+        "int a26 = 10;\n"
+        "int a27 = 11;\n"
+        "int a28 = 12;\n"
+        "int a29 = 13;\n"
+        "int a30 = 14;\n"
+        "int a31 = 15;\n"
+        "int a32 = 16;\n"
+        "int func(int a, int b) {\n"
+        "  int i;\n"
+        "  i = a + b;\n"
+        "  int c1; int c2; int c3; int c4;\n"
+        "  int d1; int d2; int d3; int d4;\n"
+        "  int e1; int e2; int e3; int e4;\n"
+        "  int f1; int f2; int f3; int f4;\n"
+        "  int g1; int g2; int g3; int g4;\n"
+        "  int h1; int h2; int h3; int h4;\n"
+        "  int i1; int i2; int i3; int i4;\n"
+        "  int j1; int j2; int j3; int j4;\n"
+        "  int k1; int k2; int k3; int k4;\n"
+        "  c1 = getint(); c2 = getint(); c3 = getint(); c4 = getint();\n"
+        "  d1 = 1 + c1 + a1; d2 = 2 + c2 + a2; d3 = 3 + c3 + a3; d4 = 4 + c4 + a4;\n"
+        "  e1 = 1 + d1 + a5; e2 = 2 + d2 + a6; e3 = 3 + d3 + a7; e4 = 4 + d4 + a8;\n"
+        "  f1 = 1 + e1 + a9; f2 = 2 + e2 + a10; f3 = 3 + e3 + a11; f4 = 4 + e4 + a12;\n"
+        "  g1 = 1 + f1 + a13; g2 = 2 + f2 + a14; g3 = 3 + f3 + a15; g4 = 4 + f4 + a16;\n"
+        "  h1 = 1 + g1 + a17; h2 = 2 + g2 + a18; h3 = 3 + g3 + a19; h4 = 4 + g4 + a20;\n"
+        "  i1 = 1 + h1 + a21; i2 = 2 + h2 + a22; i3 = 3 + h3 + a23; i4 = 4 + h4 + a24;\n"
+        "  j1 = 1 + i1 + a25; j2 = 2 + i2 + a26; j3 = 3 + i3 + a27; j4 = 4 + i4 + a28;\n"
+        "  k1 = 1 + j1 + a29; k2 = 2 + j2 + a30; k3 = 3 + j3 + a31; k4 = 4 + j4 + a32;\n"
+        "  i = a - b + 10;\n"
+        "  k1 = 1 + j1 + a29; k2 = 2 + j2 + a30; k3 = 3 + j3 + a31; k4 = 4 + j4 + a32;\n"
+        "  j1 = 1 + i1 + a25; j2 = 2 + i2 + a26; j3 = 3 + i3 + a27; j4 = 4 + i4 + a28;\n"
+        "  i1 = 1 + h1 + a21; i2 = 2 + h2 + a22; i3 = 3 + h3 + a23; i4 = 4 + h4 + a24;\n"
+        "  h1 = 1 + g1 + a17; h2 = 2 + g2 + a18; h3 = 3 + g3 + a19; h4 = 4 + g4 + a20;\n"
+        "  g1 = 1 + f1 + a13; g2 = 2 + f2 + a14; g3 = 3 + f3 + a15; g4 = 4 + f4 + a16;\n"
+        "  f1 = 1 + e1 + a9; f2 = 2 + e2 + a10; f3 = 3 + e3 + a11; f4 = 4 + e4 + a12;\n"
+        "  e1 = 1 + d1 + a5; e2 = 2 + d2 + a6; e3 = 3 + d3 + a7; e4 = 4 + d4 + a8;\n"
+        "  d1 = 1 + c1 + a1; d2 = 2 + c2 + a2; d3 = 3 + c3 + a3; d4 = 4 + c4 + a4;\n"
+        "  d1 = 1 + c1 + a1; d2 = 2 + c2 + a2; d3 = 3 + c3 + a3; d4 = 4 + c4 + a4;\n"
+        "  return i + c1 + c2 + c3 + c4\n"
+        "    - d1 - d2 - d3 - d4\n"
+        "    + e1 + e2 + e3 + e4\n"
+        "    - f1 - f2 - f3 - f4\n"
+        "    + g1 + g2 + g3 + g4\n"
+        "    - h1 - h2 - h3 - h4\n"
+        "    + i1 + i2 + i3 + i4\n"
+        "    - j1 - j2 - j3 - j4\n"
+        "    + k1 + k2 + k3 + k4\n"
+        "    + a1 - a2 + a3 - a4\n"
+        "    + a5 - a6 + a7 - a8\n"
+        "    + a9 - a10 + a11 - a12\n"
+        "    + a13 - a14 + a15 - a16\n"
+        "    + a17 - a18 + a19 - a20\n"
+        "    + a21 - a22 + a23 - a24\n"
+        "    + a25 - a26 + a27 - a28\n"
+        "    + a29 - a30 + a31 - a32;\n"
+        "}\n";
+    ValueSsaProgram program;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaError error;
+    int found_func = 0;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    value_ssa_program_allocation_result_init(&result);
+    memset(&error, 0, sizeof(error));
+
+    if (!build_value_ssa_program_from_source_text(source, &program, &error)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: split-family-slot-safety source build failed: %s\n", error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_allocate_and_rewrite_program_single_block_spills(&program, 8, &result, &error)) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: split-family-slot-safety allocate+rewrite failed: %s\n", error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    for (size_t function_index = 0; function_index < program.function_count; ++function_index) {
+        if (strcmp(program.functions[function_index].name, "func") != 0) {
+            continue;
+        }
+        found_func = 1;
+        ok &= expect_no_same_slot_interference_conflicts(
+            "VALUE-SSA-ALLOC-SPLIT-FAMILY-SLOT-SAFETY",
+            &program.functions[function_index],
+            &result.function_results[function_index]);
+        break;
+    }
+    if (!found_func) {
+        fprintf(stderr, "[value-ssa-alloc] FAIL: split-family-slot-safety missing function 'func'\n");
+        ok = 0;
+    }
+
+cleanup:
+    value_ssa_program_allocation_result_free(&result);
     value_ssa_program_free(&program);
     return ok;
 }
@@ -23879,7 +24047,8 @@ int main(void) {
     ok &= test_value_ssa_allocate_function_spill_dump_has_slot();
     ok &= test_value_ssa_build_function_allocation_layout_spill_mix();
     ok &= test_value_ssa_allocate_function_reuses_spill_slot_for_noninterfering_values();
-    ok &= test_value_ssa_allocate_function_reuses_parent_spill_slot_for_split_child();
+    ok &= test_value_ssa_allocate_function_split_child_spill_assignment_is_interference_safe();
+    ok &= test_value_ssa_allocate_and_rewrite_program_keeps_split_family_spill_slots_interference_safe();
     ok &= test_value_ssa_rewrite_program_single_block_spills();
     ok &= test_value_ssa_rewrite_program_reuses_spill_local_for_shared_slot();
     ok &= test_value_ssa_rewrite_program_single_block_spill_return();

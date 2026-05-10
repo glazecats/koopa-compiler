@@ -33,6 +33,10 @@
 
 ## Closed “looks-like-RE” families already handled
 
+- allocator split-family spill-slot aliasing in
+  `src/value_ssa_alloc/value_ssa_alloc_spill.inc`
+  (parent-slot reuse now rechecks interference before inheriting the slot,
+  which reclosed the public/hidden-adjacent `register_alloc` WA regression)
 - final text peephole address/base reuse invalidation holes in
   `src/compiler/compiler_driver.c`
 - dropped `.sbss/.sdata` during image construction in
@@ -118,6 +122,27 @@ segfault?” rather than on generic optimization value:
   - deep nested call chains
   - many-argument calls
   - repeated global/local array reads and writes
+
+### Current generated-witness memory
+
+- The first post-fix rotated batch under `/tmp/runtime_re_spill_followup/`
+  initially looked promising because `stress_spill_101.sy` came back WA, but
+  that witness turned out to be **generator-invalid**, not a real compiler
+  lead:
+  - the generated program passed `len=array_size=24` into helper calls whose
+    first array argument was a global `g9[18]`, so later `a[idx0]` accesses in
+    `arr_kernel_2` could legally reach `g9[18..23]` and go out of bounds
+  - host/target divergence therefore came from undefined behavior in the
+    synthetic testcase rather than from a supported-subset compiler bug
+- The generator now guards against that shape directly:
+  `tools/generate_sysy_runtime_re_stress.py` rejects
+  `global_size < array_size`.
+- Revalidated valid follow-up batches are green again:
+  - `/tmp/runtime_re_spill_followup_valid/` -> `3/3 PASS`
+  - `/tmp/runtime_re_spill_followup_valid2/` -> `6/6 PASS`
+- Current authority is therefore: the apparent new stress witness is
+  **disqualified**, and this generated nested-call/global-array stress family
+  is back in the “adjacent family expanded and currently green” bucket.
   - nested helper calls inside memory-heavy functions
   so the backend sees more combinations of call-lowering plus indirect-memory
   traffic than the stock public suites alone provide.
