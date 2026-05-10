@@ -49,6 +49,10 @@ static int compiler_aggressive_opt_mode_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static size_t compiler_preview_caller_save_area_size(void) {
+    return 15u * 4u;
+}
+
 static void compiler_set_error(CompilerError *error, int line, int column, const char *message);
 static char *compiler_read_file_text(const char *path, CompilerError *error);
 static void compiler_copy_stage_error(CompilerError *error,
@@ -3853,6 +3857,10 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
         frame_bytes = local_storage_bytes;
         if (function_summary->call_count > 0u) {
+            if (!compiler_aggressive_opt_mode_enabled()) {
+                frame_bytes += compiler_preview_caller_save_area_size();
+                save_caller_regs_around_call = 1;
+            }
             frame_bytes += 4u;   /* ra */
             frame_bytes += 4u;   /* s11 */
             frame_restores_ra = 1;

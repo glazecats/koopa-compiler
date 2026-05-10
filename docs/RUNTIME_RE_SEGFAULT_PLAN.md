@@ -587,6 +587,28 @@ segfault?” rather than on generic optimization value:
   small-data-specific backend configuration is ready if we want to compare
   judge results against it.
 
+- 2026-05-10: after that, I added one more always-on-backend witness family
+  instead of only toggling diagnostic modes. The fresh valid batch
+  `/tmp/runtime_re_bigframe_batch` targeted **large stack frames + many local
+  slots + repeated local/indirect memory traffic + helper-call mixing**, and
+  it stayed all green (`8/8 PASS`). Current authority is therefore that this
+  big-frame/local-slot adjacent family does **not** currently reproduce a new
+  runtime wrong-code/RE on the current tree either, which weakens the older
+  suspicion that the still-open hidden RE is just a generic large-frame /
+  many-locals backend failure.
+
+- 2026-05-10: after that, I prepared one more **calling-convention
+  diagnostic variant** instead of only shrinking optimizers or writing new
+  witnesses. In the current conservative mode, functions with calls now also
+  reserve an explicit caller-save area and save/restore the caller-clobbered
+  register set around each call site. This is intentionally diagnostic-only
+  and specifically tests whether the still-open hidden RE is really a
+  residual call-clobber / caller-save hole that the existing `machine_ir`
+  call-crossing protections failed to cover. Focused smoke rechecks stayed
+  viable (`34_multi_loop.sy` PASS, `92_register_alloc.sy` PASS,
+  `short_circuit1.sy` PASS), so this caller-save diagnostic variant is ready
+  if we want another judge-side comparison.
+
 - 2026-05-10: another concrete hidden-runtime-wrong-code family is now
   closed one stage earlier than the late backend line: canonical-IR
   loop-exit local facts in `src/ir/ir_lower_stmt.inc`.
