@@ -566,6 +566,27 @@ segfault?” rather than on generic optimization value:
   is ready if we want to compare judge results against this lower-
   optimization version.
 
+- 2026-05-10: after the all-spill conservative submission still appeared
+  unchanged on the judge, I shifted the active narrowing focus away from
+  “optimizer main culprit” and into downstream non-optimization surfaces.
+  The first library/ABI-adjacent batch on that line,
+  `/tmp/runtime_re_libabi_batch2`, targeted **`getarray`/`putarray` + local/
+  global arrays + 2D accumulation + scalar-global side effects**, and it
+  stayed all green (`8/8 PASS`). Current authority is therefore that this
+  first library-function / array-ABI adjacent family does **not** currently
+  reproduce a new runtime wrong-code/RE on the current tree either.
+
+- 2026-05-10: I also prepared one more downstream diagnostic variant to test
+  whether small-data section policy itself could be part of the hidden
+  runtime issue. In addition to the existing conservative/all-spill defaults,
+  global-object emission now falls back to **plain `.bss/.data`** instead of
+  `.sbss/.sdata` unless `COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS=1` is set.
+  This is intentionally diagnostic-only. Focused smoke rechecks on the
+  relevant array/global surfaces stayed viable (`07_arr_init_nd.sy` PASS,
+  `08_global_arr_init.sy` PASS, `24_array_only.sy` PASS), so this less
+  small-data-specific backend configuration is ready if we want to compare
+  judge results against it.
+
 - 2026-05-10: another concrete hidden-runtime-wrong-code family is now
   closed one stage earlier than the late backend line: canonical-IR
   loop-exit local facts in `src/ir/ir_lower_stmt.inc`.

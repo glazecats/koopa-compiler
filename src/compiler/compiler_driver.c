@@ -615,7 +615,11 @@ static int compiler_emit_global_sections(
     }
 
     if (has_bss) {
-        if (!compiler_builder_appendf(builder, ".section .sbss,\"aw\",@nobits\n")) {
+        if (!compiler_builder_appendf(
+                builder,
+                compiler_aggressive_opt_mode_enabled()
+                    ? ".section .sbss,\"aw\",@nobits\n"
+                    : ".section .bss,\"aw\",@nobits\n")) {
             return 0;
         }
         for (global_index = 0u; global_index < program->global_count; ++global_index) {
@@ -642,7 +646,11 @@ static int compiler_emit_global_sections(
     }
 
     if (has_data) {
-        if (!compiler_builder_appendf(builder, ".section .sdata,\"aw\",@progbits\n")) {
+        if (!compiler_builder_appendf(
+                builder,
+                compiler_aggressive_opt_mode_enabled()
+                    ? ".section .sdata,\"aw\",@progbits\n"
+                    : ".section .data,\"aw\",@progbits\n")) {
             return 0;
         }
         for (global_index = 0u; global_index < program->global_count; ++global_index) {
