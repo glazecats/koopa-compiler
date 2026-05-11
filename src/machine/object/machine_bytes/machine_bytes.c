@@ -253,6 +253,13 @@ static int machine_bytes_riscv_resolve_block_target_byte_offset(
     size_t function_byte_offset,
     size_t target_index,
     size_t *out_target_byte_offset);
+static void machine_bytes_debug_materialize_failure(
+    const char *tag,
+    const MachineBytesBlock *block,
+    size_t byte_index,
+    size_t op_index,
+    const MachineEmitOp *op,
+    const MachineEmitTerminator *terminator);
 static int machine_bytes_reference_patch_for_call(
     MachineBytesTargetProfile profile,
     size_t owner_byte_offset,
@@ -2067,6 +2074,12 @@ static size_t machine_bytes_riscv_emit_cmp_result(
         long long imm = op->as.binary.rhs.immediate;
         rs1 = machine_bytes_riscv_effective_operand_register(&op->as.binary.lhs, lhs_scratch);
         offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.lhs, rs1);
+        if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+            fprintf(stderr,
+                "[machine-bytes-debug] cmp-imm lhs-prep op=%d after=%zu\n",
+                (int)op->as.binary.op,
+                offset - start_offset);
+        }
 
         switch (op->as.binary.op) {
             case MACHINE_IR_BINARY_EQ:
@@ -2124,6 +2137,7 @@ static size_t machine_bytes_riscv_emit_cmp_result(
             default:
                 break;
         }
+        offset = start_offset;
     }
 
     if (op->as.binary.lhs.kind == MACHINE_SELECT_OPERAND_IMMEDIATE) {
@@ -2134,6 +2148,12 @@ static size_t machine_bytes_riscv_emit_cmp_result(
     } else {
         rs1 = machine_bytes_riscv_effective_operand_register(&op->as.binary.lhs, lhs_scratch);
         offset += machine_bytes_riscv_emit_prepare_operand(function, bytes, offset, &op->as.binary.lhs, rs1);
+        if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+            fprintf(stderr,
+                "[machine-bytes-debug] cmp-imm general-lhs-prep op=%d after=%zu\n",
+                (int)op->as.binary.op,
+                offset - start_offset);
+        }
         rs2 = rhs_scratch;
         offset += machine_bytes_riscv_emit_materialize_immediate(bytes, offset, rs2, op->as.binary.rhs.immediate);
     }
@@ -2152,6 +2172,12 @@ static size_t machine_bytes_riscv_emit_cmp_result(
         offset += 8u;
     }
     offset += machine_bytes_riscv_emit_writeback_result(function, bytes, offset, &op->result, rd);
+    if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+        fprintf(stderr,
+            "[machine-bytes-debug] cmp-imm total op=%d total=%zu\n",
+            (int)op->as.binary.op,
+            offset - start_offset);
+    }
     return offset - start_offset;
 }
 
@@ -2336,6 +2362,74 @@ static int machine_bytes_riscv_resolve_block_target_byte_offset(
     return 1;
 }
 
+static void machine_bytes_debug_materialize_failure(
+    const char *tag,
+    const MachineBytesBlock *block,
+    size_t byte_index,
+    size_t op_index,
+    const MachineEmitOp *op,
+    const MachineEmitTerminator *terminator) {
+    const MachineEmitOperand *operand = NULL;
+    long long lhs_imm = 0ll;
+    long long rhs_imm = 0ll;
+    size_t result_spill = 0u;
+    size_t lhs_spill = 0u;
+    size_t rhs_spill = 0u;
+    int result_kind = -1;
+    int binary_op = -1;
+    int lhs_kind = -1;
+    int rhs_kind = -1;
+
+    if (!getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+        return;
+    }
+    if (op) {
+        result_kind = (int)op->result.kind;
+        result_spill = op->result.spill_slot;
+        binary_op = (int)op->as.binary.op;
+        lhs_kind = (int)op->as.binary.lhs.kind;
+        rhs_kind = (int)op->as.binary.rhs.kind;
+        lhs_imm = op->as.binary.lhs.immediate;
+        rhs_imm = op->as.binary.rhs.immediate;
+        lhs_spill = op->as.binary.lhs.spill_slot;
+        rhs_spill = op->as.binary.rhs.spill_slot;
+    }
+    if (terminator) {
+        switch (terminator->kind) {
+            case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
+                operand = &terminator->as.branch_fallthrough.condition;
+                break;
+            case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_FALLTHROUGH:
+            case MACHINE_LAYOUT_TERM_COMPARE_BRANCH_IMM_FALLTHROUGH:
+                operand = &terminator->as.compare_branch_fallthrough.lhs;
+                break;
+            default:
+                break;
+        }
+    }
+    fprintf(stderr,
+        "[machine-bytes-debug] %s block_bytes=%zu byte_index=%zu op_index=%zu op_kind=%d term_kind=%d operand_kind=%d imm=%lld spill=%zu reg=%zu result_kind=%d result_spill=%zu binary_op=%d lhs_kind=%d lhs_imm=%lld lhs_spill=%zu rhs_kind=%d rhs_imm=%lld rhs_spill=%zu\n",
+        tag ? tag : "?",
+        block ? block->byte_count : 0u,
+        byte_index,
+        op_index,
+        op ? (int)op->kind : -1,
+        terminator ? (int)terminator->kind : -1,
+        operand ? (int)operand->kind : -1,
+        operand ? operand->immediate : 0ll,
+        operand ? operand->spill_slot : 0u,
+        operand ? operand->machine_register_id : 0u,
+        result_kind,
+        result_spill,
+        binary_op,
+        lhs_kind,
+        lhs_imm,
+        lhs_spill,
+        rhs_kind,
+        rhs_imm,
+        rhs_spill);
+}
+
 static int machine_bytes_write_block_bytes_for_profile(
     MachineBytesTargetProfile profile,
     const MachineBytesProgram *program,
@@ -2360,6 +2454,15 @@ static int machine_bytes_write_block_bytes_for_profile(
         for (op_index = 0; op_index < dest_block->block.op_count; ++op_index) {
             const MachineEmitOp *op = &dest_block->block.ops[op_index];
 
+            if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+                fprintf(stderr,
+                    "[machine-bytes-debug] op-size block_bytes=%zu byte_index=%zu op_index=%zu op_kind=%d op_size=%zu\n",
+                    dest_block->byte_count,
+                    byte_index,
+                    op_index,
+                    (int)op->kind,
+                    machine_bytes_op_encoded_size_for_profile(profile, function, op));
+            }
             if (byte_index + machine_bytes_op_encoded_size_for_profile(profile, function, op) > dest_block->byte_count) {
                 return 0;
             }
@@ -2833,6 +2936,14 @@ static int machine_bytes_write_block_bytes_for_profile(
             }
         }
 
+        if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+            fprintf(stderr,
+                "[machine-bytes-debug] term-size block_bytes=%zu byte_index=%zu term_kind=%d term_size=%zu\n",
+                dest_block->byte_count,
+                byte_index,
+                (int)dest_block->block.terminator.kind,
+                machine_bytes_terminator_encoded_size_for_profile(profile, function, &dest_block->block.terminator));
+        }
         switch (dest_block->block.terminator.kind) {
             case MACHINE_LAYOUT_TERM_RETURN:
                 if (dest_block->block.terminator.as.return_value.kind == MACHINE_SELECT_OPERAND_REGISTER) {
@@ -2871,6 +2982,8 @@ static int machine_bytes_write_block_bytes_for_profile(
 
                 if (!machine_bytes_riscv_resolve_block_target_byte_offset(
                         function, function_byte_offset, target_index, &target_byte_offset)) {
+                    machine_bytes_debug_materialize_failure(
+                        "jump-resolve", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                     return 0;
                 }
                 {
@@ -2881,6 +2994,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                     if (!machine_bytes_riscv_is_jump_immediate(jump_imm)) {
                         machine_bytes_set_error(
                             error, 0, 0, "MACHINE-BYTES-343: riscv preview jump target out of range");
+                        machine_bytes_debug_materialize_failure(
+                            "jump-range", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                         return 0;
                     }
                     machine_bytes_write_u32_le(
@@ -2916,6 +3031,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                         function, function_byte_offset, primary_target_index, &primary_target_byte_offset) ||
                     !machine_bytes_riscv_resolve_block_target_byte_offset(
                         function, function_byte_offset, secondary_target_index, &secondary_target_byte_offset)) {
+                    machine_bytes_debug_materialize_failure(
+                        "branch-resolve", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                     return 0;
                 }
                 byte_index += machine_bytes_riscv_emit_prepare_operand(
@@ -2932,6 +3049,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                     if (!machine_bytes_riscv_is_branch_immediate(branch_imm)) {
                         machine_bytes_set_error(
                             error, 0, 0, "MACHINE-BYTES-344: riscv preview branch target out of range");
+                        machine_bytes_debug_materialize_failure(
+                            "branch-range", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                         return 0;
                     }
                     machine_bytes_write_u32_le(
@@ -2951,6 +3070,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                     if (!machine_bytes_riscv_is_jump_immediate(jump_imm)) {
                         machine_bytes_set_error(
                             error, 0, 0, "MACHINE-BYTES-343: riscv preview jump target out of range");
+                        machine_bytes_debug_materialize_failure(
+                            "branch-secondary-range", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                         return 0;
                     }
                     machine_bytes_write_u32_le(
@@ -2990,6 +3111,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                         function, function_byte_offset, primary_target_index, &primary_target_byte_offset) ||
                     !machine_bytes_riscv_resolve_block_target_byte_offset(
                         function, function_byte_offset, secondary_target_index, &secondary_target_byte_offset)) {
+                    machine_bytes_debug_materialize_failure(
+                        "cmpbranch-resolve", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                     return 0;
                 }
                 if (dest_block->block.terminator.kind == MACHINE_LAYOUT_TERM_COMPARE_BRANCH ||
@@ -3038,6 +3161,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                     if (!machine_bytes_riscv_is_branch_immediate(branch_imm)) {
                         machine_bytes_set_error(
                             error, 0, 0, "MACHINE-BYTES-345: riscv preview compare-branch target out of range");
+                        machine_bytes_debug_materialize_failure(
+                            "cmpbranch-range", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                         return 0;
                     }
                     machine_bytes_write_u32_le(
@@ -3058,6 +3183,8 @@ static int machine_bytes_write_block_bytes_for_profile(
                     if (!machine_bytes_riscv_is_jump_immediate(jump_imm)) {
                         machine_bytes_set_error(
                             error, 0, 0, "MACHINE-BYTES-343: riscv preview jump target out of range");
+                        machine_bytes_debug_materialize_failure(
+                            "cmpbranch-secondary-range", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                         return 0;
                     }
                     machine_bytes_write_u32_le(
@@ -3069,7 +3196,14 @@ static int machine_bytes_write_block_bytes_for_profile(
                 break;
             }
             default:
+                machine_bytes_debug_materialize_failure(
+                    "terminator-unsupported", dest_block, byte_index, op_index, NULL, &dest_block->block.terminator);
                 return 0;
+        }
+        if (byte_index != dest_block->byte_count) {
+            const MachineEmitOp *last_op = op_index > 0u ? &dest_block->block.ops[op_index - 1u] : NULL;
+            machine_bytes_debug_materialize_failure(
+                "term-size-mismatch", dest_block, byte_index, op_index, last_op, &dest_block->block.terminator);
         }
         return byte_index == dest_block->byte_count;
     }
@@ -3078,7 +3212,17 @@ static int machine_bytes_write_block_bytes_for_profile(
         const MachineEmitOp *op = &dest_block->block.ops[op_index];
         size_t op_size = machine_bytes_op_encoded_size_for_profile(profile, function, op);
 
+        if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+            fprintf(stderr,
+                "[machine-bytes-debug] op-size block_bytes=%zu byte_index=%zu op_index=%zu op_kind=%d op_size=%zu\n",
+                dest_block->byte_count,
+                byte_index,
+                op_index,
+                (int)op->kind,
+                op_size);
+        }
         if (byte_index + op_size > dest_block->byte_count) {
+            machine_bytes_debug_materialize_failure("op-size-overflow", dest_block, byte_index, op_index, op, NULL);
             return 0;
         }
         dest_block->bytes[byte_index++] = machine_bytes_encode_op_kind(op->kind);
@@ -3121,7 +3265,16 @@ static int machine_bytes_write_block_bytes_for_profile(
         const MachineEmitTerminator *terminator = &dest_block->block.terminator;
         size_t term_size = machine_bytes_terminator_encoded_size_for_profile(profile, function, terminator);
 
+        if (getenv("CODEX_MACHINE_BYTES_DEBUG")) {
+            fprintf(stderr,
+                "[machine-bytes-debug] term-size block_bytes=%zu byte_index=%zu term_kind=%d term_size=%zu\n",
+                dest_block->byte_count,
+                byte_index,
+                (int)terminator->kind,
+                term_size);
+        }
         if (byte_index + term_size > dest_block->byte_count) {
+            machine_bytes_debug_materialize_failure("term-size-overflow", dest_block, byte_index, op_index, NULL, terminator);
             return 0;
         }
         dest_block->bytes[byte_index++] = machine_bytes_encode_terminator_kind(terminator->kind);
@@ -3197,8 +3350,14 @@ static int machine_bytes_write_block_bytes_for_profile(
                     terminator->as.compare_branch_fallthrough.fallthrough_target);
                 break;
             default:
+                machine_bytes_debug_materialize_failure("term-unsupported", dest_block, byte_index, op_index, NULL, terminator);
                 return 0;
         }
+    }
+    if (byte_index != dest_block->byte_count) {
+        const MachineEmitOp *last_op = op_index > 0u ? &dest_block->block.ops[op_index - 1u] : NULL;
+        machine_bytes_debug_materialize_failure(
+            "op-size-mismatch", dest_block, byte_index, op_index, last_op, &dest_block->block.terminator);
     }
     return byte_index == dest_block->byte_count;
 }

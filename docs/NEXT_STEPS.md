@@ -219,7 +219,15 @@
       - result of this chunk: no fresh concrete generated-program runtime-RE
         bug is proven yet in that reread span, so the active mainline still
         stays on the `machine_ir` closure plus continued rotated witness
-        hunting rather than a newly localized downstream tail reopen
+        hunting rather than a newly localized downstream tail reopen. A later
+        diagnosis round on `machine_bytes` did, however, uncover a separate
+        preview-path bug: `CMP_IMM` could emit its left operand preparation on
+        the non-optimized fallback path and then emit it again in the general
+        path, which was the reason `83_long_array.sy`, `091_long_func.c`, and
+        `94_nested_loops.sy` had started failing with
+        `MACHINE-BYTES-341` / block-bytes materialization errors.
+        The live fix now resets the offset before falling back so the left
+        operand is only written once.
     - current priority inside that audit remains **generated-program runtime
       RE**, not compiler-process crashes: keep checking late preview-text
       peepholes, final text/control-flow export, stack/call/address-formation

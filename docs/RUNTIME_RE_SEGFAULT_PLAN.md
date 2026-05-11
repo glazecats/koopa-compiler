@@ -405,13 +405,25 @@ segfault?” rather than on generic optimization value:
     - `/tmp/runtime_re_func_exprish_batch` => `80/80 PASS`
       (denser `func_expr2/global_var2`-adjacent
       `global mutation + nested call expressions + later global reload`)
-  - current authority after this chunk:
-    the active front-most kept closure is still the
-    `machine_ir_slot_cleanup` known-slot-tail family; the sibling generic
-    `machine_ir_cleanup` folds have now also been reread without exposing the
-    next concrete runtime-RE witness; and the search should keep rotating to
-    nearby always-on runtime-risk families instead of reopening these now-green
-    no-array/generated batches immediately again.
+- current authority after this chunk:
+  the active front-most kept closure is still the
+  `machine_ir_slot_cleanup` known-slot-tail family; the sibling generic
+  `machine_ir_cleanup` folds have now also been reread without exposing the
+  next concrete runtime-RE witness; and the search should keep rotating to
+  nearby always-on runtime-risk families instead of reopening these now-green
+  no-array/generated batches immediately again.
+
+- 2026-05-11: a separate downstream preview-path bug was then localized in
+  `machine_bytes` while validating the same always-on tail. `CMP_IMM` had a
+  fallback path for non-optimized compare-immediate cases that prepended the
+  left-operand preparation and then, after falling through to the general
+  path, emitted that same left operand a second time. That made large
+  spill-heavy blocks overrun their predicted byte counts and surfaced as
+  `MACHINE-BYTES-341` on `83_long_array.sy`, `091_long_func.c`, and
+  `94_nested_loops.sy`. The fix is to reset the offset before falling back so
+  the left operand is written once. This is a separate compile-stage bug
+  from the runtime-RE `machine_ir_slot_cleanup` witness, but it mattered for
+  checkpoint stability on the current tree.
 
 - 2026-05-11: conservative/default pipeline boundary clarification plus next
   always-on family widening:
