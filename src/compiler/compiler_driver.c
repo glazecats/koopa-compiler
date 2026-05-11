@@ -83,9 +83,10 @@ static int compiler_use_perf_hotspots_enabled(void) {
 }
 
 static int compiler_use_caller_save_text_enabled(void) {
-    return compiler_env_flag_enabled(
+    /* return compiler_env_flag_enabled(
         "COMPILER_USE_CALLER_SAVE_TEXT",
-        !compiler_aggressive_opt_mode_enabled());
+        !compiler_aggressive_opt_mode_enabled()); */
+    return 1;
 }
 
 static int compiler_use_final_text_peepholes_enabled(void) {
