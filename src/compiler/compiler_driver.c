@@ -83,16 +83,16 @@ static int compiler_use_perf_hotspots_enabled(void) {
 }
 
 static int compiler_use_caller_save_text_enabled(void) {
-    return compiler_env_flag_enabled(
+    /* return compiler_env_flag_enabled(
         "COMPILER_USE_CALLER_SAVE_TEXT",
-        !compiler_aggressive_opt_mode_enabled());
+        !compiler_aggressive_opt_mode_enabled()); */
+    return 1;
 }
 
 static int compiler_use_final_text_peepholes_enabled(void) {
-    /* return compiler_env_flag_enabled(
+    return compiler_env_flag_enabled(
         "COMPILER_USE_FINAL_TEXT_PEEPHOLES",
-        compiler_aggressive_opt_mode_enabled()); */
-    return 0;
+        compiler_aggressive_opt_mode_enabled());
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {
