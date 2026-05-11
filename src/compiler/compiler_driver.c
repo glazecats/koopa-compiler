@@ -65,10 +65,9 @@ static int compiler_aggressive_opt_mode_enabled(void) {
 }
 
 static int compiler_use_small_data_sections_enabled(void) {
-    /* return compiler_env_flag_enabled(
+    return compiler_env_flag_enabled(
         "COMPILER_USE_SMALL_DATA_SECTIONS",
-        compiler_aggressive_opt_mode_enabled()); */
-    return 0;
+        compiler_aggressive_opt_mode_enabled());
 }
 
 static int compiler_use_default_ssa_build_enabled(void) {
@@ -90,9 +89,10 @@ static int compiler_use_caller_save_text_enabled(void) {
 }
 
 static int compiler_use_final_text_peepholes_enabled(void) {
-    return compiler_env_flag_enabled(
+    /* return compiler_env_flag_enabled(
         "COMPILER_USE_FINAL_TEXT_PEEPHOLES",
-        compiler_aggressive_opt_mode_enabled());
+        compiler_aggressive_opt_mode_enabled()); */
+    return 0;
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {
