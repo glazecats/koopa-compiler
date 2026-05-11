@@ -13,7 +13,9 @@ static int simple_backend_build_simple_mode_text(
     char **out_text,
     CompilerError *error) {
     MachineIrAllocateRewriteReport report;
+    ValueSsaMachineRegisterBank bank;
     MachineIrError machine_error;
+    ValueSsaError value_error;
     int ok = 0;
 
     if (!program || !out_text) {
@@ -21,13 +23,22 @@ static int simple_backend_build_simple_mode_text(
     }
 
     machine_ir_allocate_rewrite_report_init(&report);
+    value_ssa_machine_register_bank_init(&bank);
     memset(&machine_error, 0, sizeof(machine_error));
+    memset(&value_error, 0, sizeof(value_error));
 
-    if (!machine_ir_build_all_spill_flat_program_only_report(
-            program,
-            8u,
-            &report,
-            &machine_error)) {
+    if (!value_ssa_build_flat_machine_register_bank(8u, &bank, &value_error)) {
+        if (error) {
+            error->line = value_error.line;
+            error->column = value_error.column;
+            if (value_error.message[0] != '\0') {
+                snprintf(error->message, sizeof(error->message), "%s", value_error.message);
+            }
+        }
+        goto cleanup;
+    }
+
+    if (!machine_ir_build_all_spill_program_only_report(program, &bank, &report, &machine_error)) {
         if (error) {
             error->line = machine_error.line;
             error->column = machine_error.column;
@@ -46,6 +57,7 @@ static int simple_backend_build_simple_mode_text(
 
 cleanup:
     machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_machine_register_bank_free(&bank);
     return ok;
 }
 
