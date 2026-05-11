@@ -83,10 +83,9 @@ static int compiler_use_perf_hotspots_enabled(void) {
 }
 
 static int compiler_use_caller_save_text_enabled(void) {
-    /* return compiler_env_flag_enabled(
+    return compiler_env_flag_enabled(
         "COMPILER_USE_CALLER_SAVE_TEXT",
-        !compiler_aggressive_opt_mode_enabled()); */
-    return 1;
+        !compiler_aggressive_opt_mode_enabled());
 }
 
 static int compiler_use_final_text_peepholes_enabled(void) {
@@ -3500,7 +3499,8 @@ static int compiler_append_riscv_preview_instruction(
                 compiler_riscv_register_name(rd),
                 (unsigned)(word >> 12u));
         case 0x17u:
-            if (fixup &&
+            if (!save_caller_regs_around_call &&
+                fixup &&
                 fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
                 fixup->target_name && fixup->target_name[0] != '\0') {
                 if (!compiler_builder_appendf(builder, "  call ") ||
@@ -4097,7 +4097,8 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
                     ok = 0;
                     goto cleanup;
                 }
-                if (current_fixup &&
+                if (!save_caller_regs_around_call &&
+                    current_fixup &&
                     current_fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
                     (word & 0x7Fu) == 0x17u) {
                     skip_until_program_byte_offset = program_byte_offset + 8u;
