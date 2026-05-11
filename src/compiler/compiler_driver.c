@@ -65,9 +65,10 @@ static int compiler_aggressive_opt_mode_enabled(void) {
 }
 
 static int compiler_use_small_data_sections_enabled(void) {
-    return compiler_env_flag_enabled(
+    /* return compiler_env_flag_enabled(
         "COMPILER_USE_SMALL_DATA_SECTIONS",
-        compiler_aggressive_opt_mode_enabled());
+        compiler_aggressive_opt_mode_enabled()); */
+    return 0;
 }
 
 static int compiler_use_default_ssa_build_enabled(void) {
