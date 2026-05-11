@@ -173,6 +173,10 @@ segfault?” rather than on generic optimization value:
     `MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS=1`, removing one narrower
     selected-side address-root reuse cleanup from the current diagnostic
     submission route
+  - the default simple-backend profile now also sets
+    `MACHINE_SELECT_SKIP_CLEANUP_PURE=1`, removing one broader
+    selected-side pure cleanup layer from the current diagnostic submission
+    route as the next hidden-RE shrink step
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`
