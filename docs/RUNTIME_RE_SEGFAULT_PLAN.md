@@ -160,12 +160,15 @@ segfault?” rather than on generic optimization value:
 - remaining segfault-family source audit on the current stable tree:
   **in progress / ~83%**
 - simple-backend diagnostic shrink:
-  **in progress / ~70%**
+  **in progress / ~78%**
   - the default submission path now goes through the dedicated all-spill
     simple backend, unless `COMPILER_DISABLE_SIMPLE_BACKEND=1` is set
   - the conservative env/profile isolation for this branch now lives in
     `compiler_driver.c`, leaving the simple-backend helper itself as a
     thinner all-spill + emit wrapper
+  - the direct simple-text emitter path is now behind
+    `COMPILER_USE_DIRECT_SIMPLE_TEXT=1` so the default simple path prefers
+    the more mature bytes/text export chain while we debug the new `AE`
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`

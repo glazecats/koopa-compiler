@@ -107,6 +107,10 @@ static int compiler_use_simple_backend_enabled(void) {
     return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 0);
 }
 
+static int compiler_use_direct_simple_text_enabled(void) {
+    return compiler_env_flag_enabled("COMPILER_USE_DIRECT_SIMPLE_TEXT", 0);
+}
+
 static void compiler_saved_env_init(CompilerSavedEnv *slot, const char *name) {
     if (!slot) {
         return;
@@ -4934,12 +4938,14 @@ int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateR
 
     machine_ir_program_init(&simple_program);
     memset(&machine_error, 0, sizeof(machine_error));
-    if (machine_ir_clone_program(&report->program, &simple_program, &machine_error) &&
-        machine_ir_eliminate_phi_nodes(&simple_program, &machine_error) &&
-        machine_ir_cleanup_after_phi_elimination(&simple_program, &machine_error) &&
-        compiler_emit_riscv_preview_text_from_machine_ir_program_simple(&simple_program, out_text, error)) {
-        machine_ir_program_free(&simple_program);
-        return 1;
+    if (compiler_use_direct_simple_text_enabled()) {
+        if (machine_ir_clone_program(&report->program, &simple_program, &machine_error) &&
+            machine_ir_eliminate_phi_nodes(&simple_program, &machine_error) &&
+            machine_ir_cleanup_after_phi_elimination(&simple_program, &machine_error) &&
+            compiler_emit_riscv_preview_text_from_machine_ir_program_simple(&simple_program, out_text, error)) {
+            machine_ir_program_free(&simple_program);
+            return 1;
+        }
     }
     machine_ir_program_free(&simple_program);
 
