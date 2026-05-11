@@ -541,11 +541,12 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("clone+lower", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
         fprintf(stderr,
-            "[machine-select-timing] decisions skip_pure=%d skip_reuse_addr_roots=%d skip_forward_indirect=%d skip_reuse_spill=%d\n",
+            "[machine-select-timing] decisions skip_pure=%d skip_reuse_addr_roots=%d skip_forward_indirect=%d skip_reuse_spill=%d skip_full_cleanup=%d\n",
             machine_select_program_should_skip_cleanup_pure(out_program),
             machine_select_program_should_skip_reuse_addr_roots(out_program),
             machine_select_skip_cleanup_forward_same_block_indirect_loads_enabled(),
-            machine_select_skip_cleanup_reuse_spill_pure_expr_enabled());
+            machine_select_skip_cleanup_reuse_spill_pure_expr_enabled(),
+            machine_select_skip_cleanup_full_enabled());
     }
 
     if (!machine_select_verify_program(out_program, error)) {
@@ -740,7 +741,8 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("cleanup-reuse-spill-pure-expr", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
-    if (!machine_select_program_uses_indirect_memory(out_program)) {
+    if (!machine_select_skip_cleanup_full_enabled() &&
+        !machine_select_program_uses_indirect_memory(out_program)) {
         if (!machine_select_cleanup_program(out_program, error)) {
             machine_select_program_free(out_program);
             return 0;
@@ -757,6 +759,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             machine_select_trace_timing("verify-after-full", machine_select_now_s() - stage_start);
             machine_select_trace_timing("total", machine_select_now_s() - total_start);
         }
+    } else if (machine_select_skip_cleanup_full_enabled() && trace_timing) {
+        machine_select_trace_timing("cleanup-full-skipped", machine_select_now_s() - stage_start);
+        machine_select_trace_timing("total", machine_select_now_s() - total_start);
     } else if (trace_timing) {
         machine_select_trace_timing("cleanup-full-skipped-indirect-memory", machine_select_now_s() - stage_start);
         machine_select_trace_timing("total", machine_select_now_s() - total_start);

@@ -170,6 +170,8 @@
   and it should be treated as the default mainline until these items are
   materially closed:
   1. keep the post-allocator correctness checkpoint green while the hidden / default compatibility audit continues to shrink the remaining `CTE` / `AE` / `RE` tails
+     - latest shrink: the current third-version default route now also skips `MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS` and `MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR`; public `lv8` / `lv9` stayed green and an external `indigo` functional slice stayed green too
+     - follow-up shrink: the current third-version default route now also skips the final `machine_select` full cleanup via `MACHINE_SELECT_SKIP_FULL_CLEANUP`, keeping the same all-spill + shared bytes/text export branch even smaller
   2. continue the explicit performance reopen on the narrowed public tails:
      - `hoist-2` compile-time pressure in the allocator-heavy path
      - keep the older locally-tracked `03_sort2` / `shuffle2` runtime witnesses as useful references, but treat the fresh full-sweep public authority as higher priority when it disagrees

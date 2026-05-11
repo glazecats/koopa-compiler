@@ -69,6 +69,12 @@ static int machine_select_skip_cleanup_reuse_spill_pure_expr_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_skip_cleanup_full_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_FULL_CLEANUP");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 
