@@ -8072,6 +8072,100 @@ static int build_machine_ir_inlineable_known_slot_return_wrapper_program(Machine
     return 1;
 }
 
+static int build_machine_ir_nonempty_known_slot_return_tail_program(MachineIrProgram *program,
+    MachineIrError *error) {
+    MachineIrFunction *function = NULL;
+    size_t entry_id;
+    size_t wrapper_id;
+    size_t local_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 1;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    program->global_count = 1;
+    program->global_capacity = 1;
+    program->globals = (MachineIrGlobal *)calloc(1, sizeof(MachineIrGlobal));
+    if (!program->register_bank.registers || !program->globals) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+    program->globals[0].name = dup_text("g");
+    if (!program->register_bank.registers[0].name || !program->globals[0].name) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(program, "main", 1, &function, error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 0, &local_id, error) ||
+        !machine_ir_function_append_block(function, &entry_id, NULL, error) ||
+        !machine_ir_function_append_block(function, &wrapper_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(local_id);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = machine_ir_slot_global(0);
+    instruction.as.store.value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_jump(&function->blocks[entry_id], wrapper_id, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_global(0);
+    if (!machine_ir_block_append_instruction(&function->blocks[wrapper_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(5);
+    if (!machine_ir_block_append_instruction(&function->blocks[wrapper_id], &instruction, error) ||
+        !machine_ir_block_set_return(&function->blocks[wrapper_id], machine_ir_operand_register(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_machine_ir_inlineable_known_slot_branch_wrapper_program(MachineIrProgram *program,
     MachineIrError *error) {
     MachineIrFunction *function = NULL;
@@ -8134,6 +8228,209 @@ static int build_machine_ir_inlineable_known_slot_branch_wrapper_program(Machine
         !machine_ir_block_set_branch(&function->blocks[wrapper_id], machine_ir_operand_register(0), true_id, false_id, error) ||
         !machine_ir_block_set_return(&function->blocks[true_id], machine_ir_operand_immediate(1), error) ||
         !machine_ir_block_set_return(&function->blocks[false_id], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_machine_ir_nonempty_known_slot_branch_tail_with_local_store_program(MachineIrProgram *program,
+    MachineIrError *error) {
+    MachineIrFunction *helper = NULL;
+    MachineIrFunction *main_function = NULL;
+    size_t helper_entry_id;
+    size_t entry_id;
+    size_t wrapper_id;
+    size_t true_id;
+    size_t false_id;
+    size_t cond_local_id;
+    size_t value_local_id;
+    MachineIrInstruction instruction;
+
+    machine_ir_program_init(program);
+    program->register_bank.register_count = 1;
+    program->register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    program->global_count = 1;
+    program->global_capacity = 1;
+    program->globals = (MachineIrGlobal *)calloc(1, sizeof(MachineIrGlobal));
+    if (!program->register_bank.registers || !program->globals) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+    program->register_bank.registers[0].register_id = 0;
+    program->register_bank.registers[0].name = dup_text("r0");
+    program->register_bank.registers[0].allocatable = 1u;
+    program->globals[0].name = dup_text("g");
+    if (!program->register_bank.registers[0].name || !program->globals[0].name) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(program, "mut", 1, &helper, error) ||
+        !helper ||
+        !machine_ir_function_append_local(helper, "x", 1, NULL, error) ||
+        !machine_ir_function_append_block(helper, &helper_entry_id, NULL, error) ||
+        !machine_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !main_function ||
+        !machine_ir_function_append_local(main_function, "cond", 0, &cond_local_id, error) ||
+        !machine_ir_function_append_local(main_function, "value", 0, &value_local_id, error) ||
+        !machine_ir_function_append_block(main_function, &entry_id, NULL, error) ||
+        !machine_ir_function_append_block(main_function, &wrapper_id, NULL, error) ||
+        !machine_ir_function_append_block(main_function, &true_id, NULL, error) ||
+        !machine_ir_function_append_block(main_function, &false_id, NULL, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&helper->blocks[helper_entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = machine_ir_slot_global(0u);
+    instruction.as.store.value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&helper->blocks[helper_entry_id], &instruction, error) ||
+        !machine_ir_block_set_return(&helper->blocks[helper_entry_id], machine_ir_operand_immediate(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_global(0u);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(value_local_id);
+    instruction.as.store.value = machine_ir_operand_register(0);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[entry_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = machine_ir_slot_local(cond_local_id);
+    instruction.as.store.value = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[entry_id], &instruction, error) ||
+        !machine_ir_block_set_jump(&main_function->blocks[entry_id], wrapper_id, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(cond_local_id);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[wrapper_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_BIT_XOR;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(1);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[wrapper_id], &instruction, error) ||
+        !machine_ir_block_set_branch(&main_function->blocks[wrapper_id], machine_ir_operand_register(0), true_id, false_id, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.as.call.callee_name = dup_text("mut");
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(1u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.callee_name || !instruction.as.call.args) {
+        free(instruction.as.call.callee_name);
+        free(instruction.as.call.args);
+        machine_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[true_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        free(instruction.as.call.args);
+        machine_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.callee_name);
+    free(instruction.as.call.args);
+    instruction.as.call.callee_name = NULL;
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(value_local_id);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[true_id], &instruction, error) ||
+        !machine_ir_block_set_return(&main_function->blocks[true_id], machine_ir_operand_register(0), error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_CALL;
+    instruction.as.call.callee_name = dup_text("mut");
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (MachineIrOperand *)calloc(1u, sizeof(MachineIrOperand));
+    if (!instruction.as.call.callee_name || !instruction.as.call.args) {
+        free(instruction.as.call.callee_name);
+        free(instruction.as.call.args);
+        machine_ir_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = machine_ir_operand_immediate(9);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[false_id], &instruction, error)) {
+        free(instruction.as.call.callee_name);
+        free(instruction.as.call.args);
+        machine_ir_program_free(program);
+        return 0;
+    }
+    free(instruction.as.call.callee_name);
+    free(instruction.as.call.args);
+    instruction.as.call.callee_name = NULL;
+    instruction.as.call.args = NULL;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.load_slot = machine_ir_slot_local(value_local_id);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[false_id], &instruction, error)) {
+        machine_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(0);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(5);
+    if (!machine_ir_block_append_instruction(&main_function->blocks[false_id], &instruction, error) ||
+        !machine_ir_block_set_return(&main_function->blocks[false_id], machine_ir_operand_register(0), error)) {
         machine_ir_program_free(program);
         return 0;
     }
@@ -9703,6 +10000,36 @@ static int test_machine_ir_cleanup_folds_inlineable_known_slot_return_wrapper(vo
     return ok;
 }
 
+static int test_machine_ir_cleanup_keeps_nonempty_known_slot_return_tail_body(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    machine_ir_program_init(&program);
+    if (!build_machine_ir_nonempty_known_slot_return_tail_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: nonempty-known-slot-ret-tail setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination_dump(&program, &actual_text, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: nonempty-known-slot-ret-tail dump failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (strstr(actual_text, "store_global global.0") == NULL ||
+        strstr(actual_text, "load_local local.0") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: nonempty known-slot return tail should keep predecessor body intact\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_ir_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_cleanup_folds_inlineable_known_slot_branch_wrapper(void) {
     MachineIrProgram program;
     MachineIrError error;
@@ -9725,6 +10052,35 @@ static int test_machine_ir_cleanup_folds_inlineable_known_slot_branch_wrapper(vo
         !strstr(actual_text, "ret 0")) {
         fprintf(stderr,
             "[machine-ir] FAIL: inlineable known-slot branch wrapper should fold through value op\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    machine_ir_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_cleanup_keeps_nonempty_known_slot_branch_tail_local_store(void) {
+    MachineIrProgram program;
+    MachineIrError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    machine_ir_program_init(&program);
+    if (!build_machine_ir_nonempty_known_slot_branch_tail_with_local_store_program(&program, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: nonempty-known-slot-branch-tail-local-store setup failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (!machine_ir_cleanup_after_phi_elimination_dump(&program, &actual_text, &error)) {
+        fprintf(stderr, "[machine-ir] FAIL: nonempty-known-slot-branch-tail-local-store dump failed: %s\n", error.message);
+        machine_ir_program_free(&program);
+        return 0;
+    }
+    if (strstr(actual_text, "store_local local.1, reg.0") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: nonempty known-slot branch tail should keep predecessor local store body\nactual:\n%s\n",
             actual_text);
         ok = 0;
     }
@@ -10678,7 +11034,13 @@ int main(void) {
     if (!test_machine_ir_cleanup_folds_inlineable_known_slot_return_wrapper()) {
         return 1;
     }
+    if (!test_machine_ir_cleanup_keeps_nonempty_known_slot_return_tail_body()) {
+        return 1;
+    }
     if (!test_machine_ir_cleanup_folds_inlineable_known_slot_branch_wrapper()) {
+        return 1;
+    }
+    if (!test_machine_ir_cleanup_keeps_nonempty_known_slot_branch_tail_local_store()) {
         return 1;
     }
     if (!test_machine_ir_cleanup_folds_shared_inlineable_known_slot_return_successors()) {

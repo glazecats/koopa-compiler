@@ -428,6 +428,49 @@ static int machine_ir_rewrite_inlineable_instruction_from_known_operand(MachineI
     return 0;
 }
 
+static int machine_ir_block_can_replace_wholesale_with_rewritten_inlineable_instruction(
+    const MachineIrBasicBlock *block,
+    const MachineIrInstruction *rewritten_instruction,
+    int allow_local_store_elision) {
+    size_t instruction_index;
+    int uses = 0;
+
+    if (!block || !rewritten_instruction) {
+        return 0;
+    }
+
+    for (instruction_index = 0u; instruction_index < block->instruction_count; ++instruction_index) {
+        const MachineIrInstruction *instruction = &block->instructions[instruction_index];
+
+        switch (instruction->kind) {
+            case MACHINE_IR_INSTR_STORE_LOCAL:
+                if (!allow_local_store_elision) {
+                    return 0;
+                }
+                break;
+            case MACHINE_IR_INSTR_STORE_GLOBAL:
+            case MACHINE_IR_INSTR_LOAD_INDIRECT:
+            case MACHINE_IR_INSTR_STORE_INDIRECT:
+            case MACHINE_IR_INSTR_CALL:
+                return 0;
+            default:
+                break;
+        }
+
+        if (!instruction->has_result) {
+            continue;
+        }
+        if (!machine_ir_instruction_uses_operand(rewritten_instruction, instruction->result, &uses)) {
+            return 0;
+        }
+        if (uses) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int machine_ir_slot_inlineable_return_instructions_equivalent(
     const MachineIrProgram *program,
     const MachineIrFunction *function,
@@ -709,9 +752,24 @@ static void machine_ir_try_fold_known_slot_return_branch_successors(const Machin
 
         rewritten_terminator.kind = MACHINE_IR_TERM_RETURN;
         rewritten_terminator.as.return_value = rewritten_instruction.result;
-        if (!machine_ir_replace_block_with_single_instruction_and_terminator(
-                block, &rewritten_instruction, &rewritten_terminator, error)) {
-            return;
+        if (machine_ir_block_can_replace_wholesale_with_rewritten_inlineable_instruction(
+                block, &rewritten_instruction, 1)) {
+            if (!machine_ir_replace_block_with_single_instruction_and_terminator(
+                    block, &rewritten_instruction, &rewritten_terminator, error)) {
+                return;
+            }
+        } else {
+            int saved_has_terminator = block->has_terminator;
+            MachineIrTerminator saved_terminator = block->terminator;
+
+            block->has_terminator = 0;
+            if (!machine_ir_block_append_instruction(block, &rewritten_instruction, error)) {
+                block->terminator = saved_terminator;
+                block->has_terminator = saved_has_terminator;
+                return;
+            }
+            block->terminator = rewritten_terminator;
+            block->has_terminator = 1;
         }
         if (out_changed) {
             *out_changed = 1;
@@ -815,10 +873,27 @@ static void machine_ir_try_fold_known_slot_branch_branch_successors(const Machin
                     block_exit_facts + (block_id * slot_count),
                     block_exit_facts[(block_id * slot_count) + slot_index].value)) ||
             !machine_ir_slot_inlineable_branch_instructions_equivalent(
-                program, function, &rewritten_instruction, &then_branch, &else_instruction, &else_branch) ||
-            !machine_ir_replace_block_with_single_instruction_and_terminator(
-                block, &rewritten_instruction, &then_branch, error)) {
+                program, function, &rewritten_instruction, &then_branch, &else_instruction, &else_branch)) {
             return;
+        }
+        if (machine_ir_block_can_replace_wholesale_with_rewritten_inlineable_instruction(
+                block, &rewritten_instruction, 0)) {
+            if (!machine_ir_replace_block_with_single_instruction_and_terminator(
+                    block, &rewritten_instruction, &then_branch, error)) {
+                return;
+            }
+        } else {
+            int saved_has_terminator = block->has_terminator;
+            MachineIrTerminator saved_terminator = block->terminator;
+
+            block->has_terminator = 0;
+            if (!machine_ir_block_append_instruction(block, &rewritten_instruction, error)) {
+                block->terminator = saved_terminator;
+                block->has_terminator = saved_has_terminator;
+                return;
+            }
+            block->terminator = then_branch;
+            block->has_terminator = 1;
         }
         if (out_changed) {
             *out_changed = 1;
@@ -918,12 +993,26 @@ static void machine_ir_try_fold_known_slot_return_tails(const MachineIrProgram *
                     block_exit_facts[(block_id * slot_count) + slot_index].value))) {
             return;
         }
-
         rewritten_terminator.kind = MACHINE_IR_TERM_RETURN;
         rewritten_terminator.as.return_value = rewritten_instruction.result;
-        if (!machine_ir_replace_block_with_single_instruction_and_terminator(
-                block, &rewritten_instruction, &rewritten_terminator, error)) {
-            return;
+        if (machine_ir_block_can_replace_wholesale_with_rewritten_inlineable_instruction(
+                block, &rewritten_instruction, 1)) {
+            if (!machine_ir_replace_block_with_single_instruction_and_terminator(
+                    block, &rewritten_instruction, &rewritten_terminator, error)) {
+                return;
+            }
+        } else {
+            int saved_has_terminator = block->has_terminator;
+            MachineIrTerminator saved_terminator = block->terminator;
+
+            block->has_terminator = 0;
+            if (!machine_ir_block_append_instruction(block, &rewritten_instruction, error)) {
+                block->terminator = saved_terminator;
+                block->has_terminator = saved_has_terminator;
+                return;
+            }
+            block->terminator = rewritten_terminator;
+            block->has_terminator = 1;
         }
     } else {
         return;
@@ -1011,10 +1100,24 @@ static void machine_ir_try_fold_known_slot_branch_tails(const MachineIrProgram *
                     block_exit_facts[(block_id * slot_count) + slot_index].value))) {
             return;
         }
+        if (machine_ir_block_can_replace_wholesale_with_rewritten_inlineable_instruction(
+                block, &rewritten_instruction, 0)) {
+            if (!machine_ir_replace_block_with_single_instruction_and_terminator(
+                    block, &rewritten_instruction, &branch_terminator, error)) {
+                return;
+            }
+        } else {
+            int saved_has_terminator = block->has_terminator;
+            MachineIrTerminator saved_terminator = block->terminator;
 
-        if (!machine_ir_replace_block_with_single_instruction_and_terminator(
-                block, &rewritten_instruction, &branch_terminator, error)) {
-            return;
+            block->has_terminator = 0;
+            if (!machine_ir_block_append_instruction(block, &rewritten_instruction, error)) {
+                block->terminator = saved_terminator;
+                block->has_terminator = saved_has_terminator;
+                return;
+            }
+            block->terminator = branch_terminator;
+            block->has_terminator = 1;
         }
     } else {
         return;

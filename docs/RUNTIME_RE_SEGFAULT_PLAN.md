@@ -158,7 +158,7 @@ segfault?” rather than on generic optimization value:
 
 - compact hidden runtime-RE/segfault plan setup: **complete / 100%**
 - remaining segfault-family source audit on the current stable tree:
-  **in progress / ~72%**
+  **in progress / ~83%**
 - next concrete source slice:
   post-loop canonical-IR fact handling is now reclosed for the latest
   `while`/`for` local-fact leak family, and condition-side-effect lowering is
@@ -258,10 +258,424 @@ segfault?” rather than on generic optimization value:
     `autotest -riscv -s lv8` PASS (`12/12`),
     `autotest -riscv -s lv9` PASS (`22/22`)
 - Current authority after this closure:
+  the earlier many-args / allocator / late-text lines stay closed, but the
+  still-open hidden runtime-RE hunt has now produced one fresh concrete
+  **non-array / global-side-effect** public synthetic witness again on the
+  current conservative tree, so the active line has moved back up to
+  `machine_ir` canonicalization rather than staying only on final export.
+
+- 2026-05-10: a new conservative-path public synthetic witness,
+  `/tmp/noarray_hidden2/case_001.c`, exposed another concrete wrong-code
+  family that is plausibly adjacent to the hidden segfault line:
+  `global mutation + branch-gated later return reload`.
+  - Symptom:
+    host expected `124`, generated program returned `130`; an instrumented
+    variant showed the first divergence already inside `f3(...)`, where the
+    `if (g1 > 2 && g0 != 3) g0 = g0 + 3; return a1 + g0;` tail skipped the
+    `g0 = g0 + 3` update on the taken path.
+  - Stage localization:
+    the raw conservative `machine_ir` allocate+rewrite dump was still correct,
+    but the **canonicalized machine-ir** dump was already wrong. The key bad
+    rewrite came from
+    `src/machine/lowering/machine_ir/machine_ir_slot_cleanup.inc`:
+    `machine_ir_try_fold_known_slot_return_tails(...)` /
+    `machine_ir_try_fold_known_slot_branch_tails(...)` were allowed to replace
+    a non-empty jump block wholesale with a successor's rewritten inlineable
+    return/branch wrapper, even when the current block's own instructions were
+    still needed to define the rewritten operand or to preserve side effects
+    such as `store_global`.
+  - Kept repair:
+    known-slot inlineable tail folding now distinguishes
+    `1)` blocks that are safe to replace wholesale from
+    `2)` non-empty predecessor blocks that must keep their body.
+    When the rewritten inlineable instruction cannot safely replace the whole
+    block, the cleanup now appends the rewritten instruction and new
+    terminator to the existing block instead of deleting the predecessor body.
+    The same safety rule was then widened across the sibling
+    known-slot inlineable fold sites too (shared return-successor and shared
+    branch-successor variants), because the same “replace whole non-empty
+    predecessor block” unsoundness exists there as well.
+  - Focused rechecks after the fix:
+    `/tmp/case001_dbg.c` PASS,
+    `08_global_arr_init.sy` PASS,
+    `28_side_effect2.sy` PASS,
+    `32_many_params3.sy` PASS,
+    `34_multi_loop.sy` PASS,
+    `09_BFS.sy` PASS,
+    `10_DFS.sy` PASS,
+    `lava_test/short_circuit1.sy` PASS.
+  - Adjacent widening after the fix:
+    a new host-oracle-backed no-array/global-side-effect batch under
+    `/tmp/runtime_re_globaltail_batch` now stays fully green
+    (`100/100 PASS`). That batch intentionally stresses
+    `global mutation + branch-gated later return/global reload + nested helper
+    calls` around the same repaired family, so current authority is that the
+    immediately adjacent witness family is reclosed on the live tree.
+    Another sibling batch under `/tmp/runtime_re_sharedtail_batch`,
+    targeting `shared tail / wrapper fold / global side-effect / nested call`
+    shapes, also stays fully green (`100/100 PASS`).
+    A third sibling batch under `/tmp/runtime_re_wrappermerge_batch`,
+    targeting duplicated then/else wrapper-merging opportunities with helper
+    calls and global stores, also stays fully green (`100/100 PASS`).
+    A fourth sibling batch under `/tmp/runtime_re_callwrapper_batch`,
+    targeting duplicated call-wrapper tails plus surrounding global mutation
+    and branch gating, also stays fully green (`100/100 PASS`).
+    A fifth sibling batch under `/tmp/runtime_re_branchwrapper_batch`,
+    targeting duplicated branch-wrapper tails with surrounding global mutation,
+    helper calls, and branch gating, also stays fully green (`100/100 PASS`).
+    The first attempt to widen farther into a “linear-merge-heavy” family with
+    `/tmp/runtime_re_linearmerge_batch` produced a few red points, but that
+    batch is now **disqualified as generator UB** rather than kept as a real
+    compiler lead: the generated arithmetic let signed `int` expressions grow
+    into large overflow territory, so host-oracle `.c` behavior was no longer
+    a reliable reference. A rebuilt overflow-safe version under
+    `/tmp/runtime_re_linearmerge_safe_batch` now stays fully green
+    (`100/100 PASS`).
+    A separate bounded array/indirect-memory widening under
+    `/tmp/runtime_re_arrmerge2_batch`, targeting `bounded array traffic +
+    merge-heavy control flow + helper-call interleaving`, also stays green
+    (`50/50 PASS`).
+    Another bounded indirect-memory/control-flow batch under
+    `/tmp/runtime_re_indirectphi_batch`, targeting
+    `indirect memory + merge-heavy branch joins + helper-call interleaving`,
+    also stays green (`60/60 PASS`).
+    A compare-branch-heavy bounded batch under
+    `/tmp/runtime_re_cmpbranch_batch`, targeting
+    `compare-branch immediate/control-flow density + helper-call interleaving`,
+    also stays green (`80/80 PASS`).
+  - Outstanding local validation note:
+    the repository's broad golden-output unit surfaces (`test-machine-ir`,
+    `test-compiler-driver`) are not currently a clean confidence signal in
+    this worktree, so the immediate evidence for this closure is the direct
+    witness plus the rotated course/external runtime-facing rechecks above.
   the earlier many-args batch is no longer an open runtime-wrong-code lead.
   The active runtime-RE hunt should now widen **away from** this closed
   family instead of continuing to treat `3002/3003` as the front-most
   witness.
+
+- 2026-05-11: follow-up continuation after that `machine_ir` closure:
+  - regression maintenance:
+    the sibling guard
+    `test_machine_ir_cleanup_keeps_nonempty_known_slot_branch_tail_local_store`
+    is now wired into the live `machine_ir` test mainline instead of being an
+    unused static helper; `make build/machine_ir/machine_ir_test` rebuilds
+    cleanly after that change.
+  - local validation status:
+    `make test-machine-ir` is still **not** a clean checkpoint surface for
+    this line because it continues to stop earlier on the pre-existing
+    allocate+rewrite dump-expectation noise (`spill.3/spill.4` shape), so the
+    current evidence remains the focused runtime-facing rechecks rather than
+    that whole target.
+  - rotated runtime-facing rechecks:
+    `/tmp/recheck_runtime_re_globaltail_rotA` => `25/25 PASS`,
+    `/tmp/recheck_runtime_re_cmpbranch_rotA` => `16/16 PASS`,
+    direct witness rerun `case_001.c` => PASS.
+    One ad-hoc symlinked c-only `noarray_hidden2` subset produced many SKIPs
+    because the subset lost standalone oracle context for several generated
+    cases; treat that as harness noise, not as new compiler evidence.
+  - reread/audit boundary advanced:
+    `src/machine/lowering/machine_select/machine_select_lower_control.inc`,
+    `src/machine/lowering/machine_select/machine_select_cleanup.inc`,
+    `src/machine/object/machine_bytes/machine_bytes.c`, and
+    `src/compiler/compiler_driver.c`
+    were reread again under the generated-program runtime-RE lens after the
+    latest `machine_ir` fix.
+  - current conclusion:
+    no fresh concrete runtime-RE bug is localized in that downstream reread
+    span yet, so the active front-most kept closure still remains the
+    `machine_ir_slot_cleanup` known-slot-tail family while the search
+    continues through rotated witness generation/rechecks.
+
+- 2026-05-11: next continuation after that downstream reread:
+  - sibling `machine_ir` cleanup reread:
+    I re-audited the always-on generic canonicalization folds in
+    `src/machine/lowering/machine_ir/machine_ir_cleanup.inc`
+    (`inlineable/call/thin wrapper tails`, `same-single-instruction branch
+    successors`, `equivalent inlineable successor folds`, and linear jump-block
+    merge) under the same “non-empty predecessor / side-effect / could this
+    directly produce wrong generated code or segfault?” lens.
+  - current code-read conclusion:
+    still conservative: no fresh concrete wrong-code bug is proven in that
+    sibling reread span yet.
+  - rotated no-array/runtime-facing widening:
+    two fresh host-oracle-backed families were added and both stayed green:
+    - `/tmp/runtime_re_noarray_callmix_batch` => `40/40 PASS`
+      (`scalar globals + recursion + nested calls + short-circuit + branch
+      gating + constant-heavy locals`)
+    - `/tmp/runtime_re_func_exprish_batch` => `80/80 PASS`
+      (denser `func_expr2/global_var2`-adjacent
+      `global mutation + nested call expressions + later global reload`)
+  - current authority after this chunk:
+    the active front-most kept closure is still the
+    `machine_ir_slot_cleanup` known-slot-tail family; the sibling generic
+    `machine_ir_cleanup` folds have now also been reread without exposing the
+    next concrete runtime-RE witness; and the search should keep rotating to
+    nearby always-on runtime-risk families instead of reopening these now-green
+    no-array/generated batches immediately again.
+
+- 2026-05-11: conservative/default pipeline boundary clarification plus next
+  always-on family widening:
+  - traced current default path:
+    `compiler_compile_source_text_with_options(...)` currently uses
+    plain `value_ssa_build_from_lower_ir(...)` when
+    `COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS` is unset, skips
+    `value_ssa_optimize_perf_hotspots(...)`, builds
+    `machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(...)`,
+    runs only raw `machine_select` lowering + verifier (later cleanup skipped),
+    and skips the final preview-text peepholes in `compiler_driver`.
+  - implication:
+    the already-kept `machine_ir_slot_cleanup` canonicalization fix remains a
+    valid/aggressive-path closure, but by itself it is **not** an always-on
+    explanation for the still-open conservative default hidden runtime-RE line.
+    The remaining search should therefore bias harder toward always-on
+    surfaces:
+    `machine_ir` lower without canonicalize,
+    raw `machine_select` lower,
+    `machine_bytes`,
+    preview-text emission,
+    and global/runtime layout handoff.
+  - rotated always-on array/global widening:
+    a fresh host-oracle-backed batch
+    `/tmp/runtime_re_globalobjmix_batch` targeted
+    `mixed initialized/uninitialized global arrays + multi-global declaration
+    style + helper calls + 1d/2d array traffic + later global reloads`,
+    and it stayed fully green (`60/60 PASS`).
+  - current authority after this chunk:
+    the hidden runtime-RE root cause is increasingly likely to sit in one of
+    the **always-on** downstream surfaces above rather than only in the
+    already-fixed aggressive cleanup/peephole layers.
+
+- 2026-05-11: one more always-on widening round after that boundary
+  clarification also stayed green:
+  - `/tmp/runtime_re_runtimeinit_batch` => `40/40 PASS`
+    (runtime-global-initializer / startup-helper family with declaration-order
+    dependent scalar globals plus 1d/2d globals initialized through helper
+    calls/branches)
+  - `/tmp/runtime_re_indirect_globalmix_batch` => `50/50 PASS`
+    (always-on indirect/global-array traffic with array-parameter helpers,
+    repeated indexed reads/writes, helper calls, and later global reloads)
+  - current authority after this chunk:
+    the still-open hidden runtime-RE root cause looks even less like the
+    already-expanded runtime-global-init or indirect-global-array families and
+    even more like a narrower always-on downstream lowering/bytes/preview
+    handoff issue.
+
+- 2026-05-11: follow-up precision note on that boundary plus one more widened
+  family:
+  - default-path nuance:
+    the conservative/default path still reaches `machine_ir` canonicalization
+    **conditionally** through `machine_select_build_program_from_machine_ir_report(...)`
+    whenever any function in the report still carries phi nodes; only fully
+    phi-free programs stay on the raw machine-ir -> machine_select path.
+  - reread span:
+    `machine_select_lower_memory.inc`,
+    `machine_bytes` global load/store/addr emit,
+    and the matching compiler preview global/load/store/address pretty-printer
+    path were reread again under the generated-program runtime-RE lens.
+  - current code-read result:
+    still conservative: no fresh concrete wrong-code bug proven from that
+    reread span yet.
+  - rotated conditional-canonicalization widening:
+    `/tmp/runtime_re_phianchor_globaltail_batch` => `60/60 PASS`
+    (`unrelated phi-bearing anchor function + no-array global-tail /
+    branch-gated later reload family`)
+  - current authority after this chunk:
+    machine-ir canonicalization is still a conditionally-always-on surface on
+    the default path, but this newly widened `phi-anchor + global-tail` family
+    is green too, so the remaining hidden runtime-RE root cause should still
+    be searched in a narrower downstream handoff issue rather than in this
+    now-expanded slice alone.
+
+- 2026-05-11: next downstream handoff follow-up after that:
+  - reread span:
+    `machine_layout_lower.inc`,
+    `machine_emit_lower.inc`,
+    and the corresponding `machine_bytes` compare-branch / fallthrough
+    emission path were reread under the generated-program runtime-RE lens with
+    emphasis on branch polarity, fallthrough target shaping, and global/call
+    operand handoff.
+  - current code-read result:
+    still conservative: no fresh concrete wrong-code bug is proven directly
+    from that reread span yet.
+  - rotated downstream handoff widening:
+    `/tmp/runtime_re_cmpfall_batch` => `80/80 PASS`
+    (`compare-branch + fallthrough-heavy control + helper calls + global
+    mutations + loop anchors`)
+  - discarded line:
+    one attempted stronger `phi + runtime-global-init + later global-tail`
+    synthetic family is **disqualified as generator/oracle-invalid** rather
+    than kept as a compiler lead; the first emitted `.out` values were wrong.
+  - current authority after this chunk:
+    the compare/fallthrough-heavy downstream handoff slice is widened and
+    still green, so the remaining hidden runtime-RE root cause still looks
+    narrower than these now-expanded control-handoff families.
+
+- 2026-05-11: one more adjacent downstream-control widening round after that:
+  - invalid line kept discarded:
+    the heavier `phi + runtime-init + later global-tail` synthetic family
+    remains **disqualified as generator/oracle-invalid** after host-equivalent
+    checking; do not treat it as compiler evidence.
+  - valid neighboring widening:
+    `/tmp/runtime_re_localcmp_batch` => `60/60 PASS`
+    (`local arrays + compare-heavy control + helper calls + later
+    local/global interaction`)
+  - current authority after this chunk:
+    another nearby stack/local/control combination is green too, so the
+    remaining hidden runtime-RE root cause still appears narrower than the
+    already-expanded compare/fallthrough and local-array/control downstream
+    handoff families.
+
+- 2026-05-11: follow-up on the conditional-canonicalization + array/global
+  angle:
+  - valid widened family:
+    `/tmp/runtime_re_phi_arraymix_batch` => `60/60 PASS`
+    (`unrelated phi-bearing anchor function + array/global-side-effect-heavy
+    helper code with local arrays, 2D locals, compare-heavy control, and later
+    global reloads`)
+  - current authority after this chunk:
+    even the `phi present elsewhere` + `array/global hidden-family` combination
+    is green on the live tree, so the remaining hidden runtime-RE root cause
+    looks narrower than these now-expanded conditional-canonicalization +
+    array/global combinations too.
+
+- 2026-05-11: matching no-array follow-up on that same conditional-canonicalization
+  line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_funcexpr_batch` => `70/70 PASS`
+    (`unrelated phi-bearing anchor function + func_expr2/global_var2-adjacent
+    family with nested call expressions, global mutation, later global reload,
+    short-circuit, and helper side effects`)
+  - discarded first draft:
+    the initial draft of this batch had a generator/source bug
+    (`v` referenced before declaration in some cases) and was regenerated
+    before treating the results as evidence.
+  - current authority after this chunk:
+    neither the array/global hidden family nor the lv8-style
+    `func_expr/global-side-effect` hidden family reproduces when the default
+    path is forced into the conditional `machine_ir` canonicalization branch by
+    an unrelated phi-bearing function elsewhere in the same program.
+
+- 2026-05-11: BFS/DFS-like follow-up on that same conditional-canonicalization
+  line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_bfsmix_batch` => `40/40 PASS`
+    (`unrelated phi-bearing anchor function + BFS/DFS-like global-array,
+    queue/visited, short-circuit recursion/queue gating family`)
+  - current authority after this chunk:
+    even the earlier BFS/DFS-style control/state-corruption suspicion is not
+    reproducing when the default path is forced into the conditional
+    `machine_ir` canonicalization branch elsewhere in the same program.
+
+- 2026-05-11: address-carrier/array-parameter follow-up on that same
+  conditional-canonicalization line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_addrcarrier_batch` => `60/60 PASS`
+    (`unrelated phi-bearing anchor + local arrays, 2D locals, array-parameter
+    helper calls, repeated address-carrier style read/write traffic, global
+    side effects, and later reload/useback`)
+  - current authority after this chunk:
+    even the address-carrier / array-parameter neighborhood is not currently
+    exposing the hidden runtime-RE line when the default path is forced into
+    the conditional `machine_ir` canonicalization branch elsewhere in the same
+    program.
+
+- 2026-05-11: hanoi-like recursion follow-up on that same
+  conditional-canonicalization line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_hanoi_batch` => `50/50 PASS`
+    (`unrelated phi-bearing anchor + hanoi-like recursion with global peg
+    arrays, global counters, short-circuit move gating, and later
+    score/useback`)
+  - current authority after this chunk:
+    even the `phi elsewhere + hanoi-like recursive global-state family`
+    combination is not currently exposing the hidden runtime-RE line on the
+    live tree either.
+
+- 2026-05-11: separate always-on caller-save suspicion follow-up:
+  - discarded first draft:
+    `/tmp/runtime_re_voidcall_save_batch` is **disqualified as
+    generator/oracle-invalid** because the draft allowed negative `%`-based
+    final results, making host exit-code oracles unstable/ambiguous.
+  - corrected valid family:
+    `/tmp/runtime_re_voidcall_save_batch2` => `70/70 PASS`
+    (`void calls + live caller values + stack arguments + later reuse`)
+  - current authority after this chunk:
+    the preview-text caller-save/void-call suspicion did not produce a valid
+    compiler witness once the oracle was repaired, so it should not be treated
+    as the hidden runtime-RE explanation either.
+
+- 2026-05-11: matching non-void caller-save/stack-arg follow-up:
+  - valid widened family:
+    `/tmp/runtime_re_nonvoid_stackcall_batch` => `80/80 PASS`
+    (`non-void calls + stack arguments + live caller values after the call +
+    later reuse`)
+  - current authority after this chunk:
+    neither the void-call nor the non-void-call version of the
+    caller-save/stack-arg suspicion is currently reproducing the hidden
+    runtime-RE line on the live tree.
+
+- 2026-05-11: cross-product follow-up with conditional canonicalization:
+  - valid widened family:
+    `/tmp/runtime_re_phi_nonvoid_stackcall_batch` => `60/60 PASS`
+    (`unrelated phi-bearing anchor + non-void calls + stack arguments + live
+    caller values after the call + later reuse`)
+  - current authority after this chunk:
+    neither the plain path nor the phi-triggered conditional-canonicalization
+    path is reproducing the non-void caller-save/stack-arg suspicion on the
+    live tree.
+
+- 2026-05-11: return-value / local-array pressure follow-up on that same
+  line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_returnspill_batch` => `80/80 PASS`
+    (`unrelated phi-bearing anchor + non-void helper returns carried through
+    local-array-heavy callers, many arguments, and later reuse`)
+  - current authority after this chunk:
+    even the return-value / local-array pressure variant of this always-on
+    downstream suspicion is not currently exposing the hidden runtime-RE line
+    on the live tree either.
+
+- 2026-05-11: runtime-global-init + many-arg-call follow-up:
+  - discarded first draft:
+    `/tmp/runtime_re_rtinit_manyargs_batch` is **disqualified as
+    oracle-invalid** because the expected outputs came from an incorrect
+    handwritten runtime-init simulation.
+  - corrected valid family:
+    `/tmp/runtime_re_rtinit_manyargs_valid_batch` => `30/30 PASS`
+    (`runtime global initializer helper + many-argument non-void calls + later
+    array/global readback`)
+  - current authority after this chunk:
+    even the runtime-global-init + many-argument non-void-call family is not
+    currently exposing the hidden runtime-RE line on the live tree once the
+    oracle is made trustworthy.
+
+- 2026-05-11: cross-product follow-up with conditional canonicalization on that
+  same runtime-init line:
+  - valid widened family:
+    `/tmp/runtime_re_phi_rtinit_manyargs_batch` => `30/30 PASS`
+    (`unrelated phi-bearing anchor + runtime global initializer helper +
+    many-argument non-void calls + later array/global readback`)
+  - current authority after this chunk:
+    neither the plain path nor the phi-triggered conditional-canonicalization
+    path is reproducing the runtime-init + many-arg non-void-call suspicion on
+    the live tree.
+
+- 2026-05-11: broad mixed always-on downstream follow-up:
+  - discarded first drafts:
+    `/tmp/runtime_re_megamix_batch` is **disqualified as generator-invalid**
+    because it included incompatible 2D array parameter dimensions, and the
+    intermediate `/tmp/runtime_re_megamix_valid_batch` is also disqualified
+    because it still allowed invalid negative-index / negative-modulo oracle
+    behavior.
+  - corrected valid family:
+    `/tmp/runtime_re_megamix_nonneg_batch` => `100/100 PASS`
+    (`broad mixed always-on downstream family combining globals, local arrays,
+    2D locals, scan helpers, recursion, call chains, stack-arg calls, and
+    later global/local readback`)
+  - current authority after this chunk:
+    even a broader mixed downstream family is not currently exposing the
+    hidden runtime-RE line once oracle-invalid UB is removed from the
+    generated surface.
 
 - 2026-05-10: the first widening step **after** closing the many-args family
   is now recorded too, and it produced one reopened lead plus one useful
