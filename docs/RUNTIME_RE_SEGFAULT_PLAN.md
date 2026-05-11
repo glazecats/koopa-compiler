@@ -169,6 +169,10 @@ segfault?” rather than on generic optimization value:
   - the direct simple-text emitter path is now behind
     `COMPILER_USE_DIRECT_SIMPLE_TEXT=1` so the default simple path prefers
     the more mature bytes/text export chain while we debug the new `AE`
+  - the default simple-backend profile now also sets
+    `MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS=1`, removing one narrower
+    selected-side address-root reuse cleanup from the current diagnostic
+    submission route
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`

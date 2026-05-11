@@ -159,7 +159,8 @@ static int compiler_apply_simple_backend_profile(void) {
         setenv("COMPILER_USE_FINAL_TEXT_PEEPHOLES", "0", 1) == 0 &&
         setenv("COMPILER_USE_SMALL_DATA_SECTIONS", "0", 1) == 0 &&
         setenv("COMPILER_USE_DEFAULT_SSA_BUILD", "0", 1) == 0 &&
-        setenv("COMPILER_USE_PERF_HOTSPOTS", "0", 1) == 0;
+        setenv("COMPILER_USE_PERF_HOTSPOTS", "0", 1) == 0 &&
+        setenv("MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS", "1", 1) == 0;
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {
@@ -5213,6 +5214,7 @@ int compiler_compile_source_text_with_options(const char *source,
         {0},
         {0},
         {0},
+        {0},
     };
     const char *simple_backend_env_names[] = {
         "COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS",
@@ -5221,6 +5223,7 @@ int compiler_compile_source_text_with_options(const char *source,
         "COMPILER_USE_SMALL_DATA_SECTIONS",
         "COMPILER_USE_DEFAULT_SSA_BUILD",
         "COMPILER_USE_PERF_HOTSPOTS",
+        "MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS",
     };
     size_t simple_backend_env_index = 0u;
     int simple_backend_profile_applied = 0;
