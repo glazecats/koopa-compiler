@@ -57,6 +57,18 @@ static int machine_select_skip_cleanup_reuse_unique_predecessor_pure_calls_enabl
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_skip_cleanup_forward_same_block_indirect_loads_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_reuse_spill_pure_expr_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 

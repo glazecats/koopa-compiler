@@ -163,7 +163,9 @@ static int compiler_apply_simple_backend_profile(void) {
         setenv("MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS", "1", 1) == 0 &&
         setenv("MACHINE_SELECT_SKIP_CLEANUP_PURE", "1", 1) == 0 &&
         setenv("MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS", "1", 1) == 0;
+        setenv("MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS", "1", 1) == 0 &&
+        setenv("MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS", "1", 1) == 0 &&
+        setenv("MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR", "1", 1) == 0;
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {

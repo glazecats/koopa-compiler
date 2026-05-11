@@ -160,7 +160,7 @@ segfault?” rather than on generic optimization value:
 - remaining segfault-family source audit on the current stable tree:
   **in progress / ~83%**
 - simple-backend diagnostic shrink:
-  **in progress / ~78%**
+  **in progress / ~82%**
   - the default submission path now goes through the dedicated all-spill
     simple backend, unless `COMPILER_DISABLE_SIMPLE_BACKEND=1` is set
   - the conservative env/profile isolation for this branch now lives in
@@ -181,6 +181,10 @@ segfault?” rather than on generic optimization value:
     reuse passes in `machine_select`
     (`MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS=1` and
     `MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS=1`)
+  - the default simple-backend profile now also skips the two remaining
+    indirect-memory cleanup passes in `machine_select`
+    (`MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS=1` and
+    `MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR=1`)
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`
