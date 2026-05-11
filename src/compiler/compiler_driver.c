@@ -46,10 +46,7 @@ typedef struct {
 static int compiler_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 
-    if (!flag || flag[0] == '\0') {
-        return 1;
-    }
-    return strcmp(flag, "0") != 0;
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {

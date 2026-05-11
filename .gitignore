@@ -4,6 +4,8 @@
 *.out
 build/
 third_party/
+asanbuild/
+.codex_logs/
 
 # Native binaries
 *.exe
