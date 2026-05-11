@@ -43,10 +43,55 @@ typedef struct {
     size_t block_label_count;
 } CompilerRiscvPreviewCache;
 
-static int compiler_aggressive_opt_mode_enabled(void) {
-    const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
+static int compiler_env_flag_enabled(const char *name, int default_value) {
+    const char *flag = NULL;
 
-    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+    if (!name || name[0] == '\0') {
+        return default_value;
+    }
+    flag = getenv(name);
+    if (!flag || flag[0] == '\0') {
+        return default_value;
+    }
+    return strcmp(flag, "0") != 0;
+}
+
+static int compiler_aggressive_opt_mode_enabled(void) {
+    /*
+     * Keep the historical default on the main path, but let narrower toggles
+     * override individual downstream behaviors for isolation experiments.
+     */
+    return compiler_env_flag_enabled("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS", 1);
+}
+
+static int compiler_use_small_data_sections_enabled(void) {
+    return compiler_env_flag_enabled(
+        "COMPILER_USE_SMALL_DATA_SECTIONS",
+        compiler_aggressive_opt_mode_enabled());
+}
+
+static int compiler_use_default_ssa_build_enabled(void) {
+    return compiler_env_flag_enabled(
+        "COMPILER_USE_DEFAULT_SSA_BUILD",
+        compiler_aggressive_opt_mode_enabled());
+}
+
+static int compiler_use_perf_hotspots_enabled(void) {
+    return compiler_env_flag_enabled(
+        "COMPILER_USE_PERF_HOTSPOTS",
+        compiler_aggressive_opt_mode_enabled());
+}
+
+static int compiler_use_caller_save_text_enabled(void) {
+    return compiler_env_flag_enabled(
+        "COMPILER_USE_CALLER_SAVE_TEXT",
+        !compiler_aggressive_opt_mode_enabled());
+}
+
+static int compiler_use_final_text_peepholes_enabled(void) {
+    return compiler_env_flag_enabled(
+        "COMPILER_USE_FINAL_TEXT_PEEPHOLES",
+        compiler_aggressive_opt_mode_enabled());
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {
@@ -621,7 +666,7 @@ static int compiler_emit_global_sections(
     if (has_bss) {
         if (!compiler_builder_appendf(
                 builder,
-                compiler_aggressive_opt_mode_enabled()
+                compiler_use_small_data_sections_enabled()
                     ? ".section .sbss,\"aw\",@nobits\n"
                     : ".section .bss,\"aw\",@nobits\n")) {
             return 0;
@@ -652,7 +697,7 @@ static int compiler_emit_global_sections(
     if (has_data) {
         if (!compiler_builder_appendf(
                 builder,
-                compiler_aggressive_opt_mode_enabled()
+                compiler_use_small_data_sections_enabled()
                     ? ".section .sdata,\"aw\",@progbits\n"
                     : ".section .data,\"aw\",@progbits\n")) {
             return 0;
@@ -3857,7 +3902,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
         frame_bytes = local_storage_bytes;
         if (function_summary->call_count > 0u) {
-            if (!compiler_aggressive_opt_mode_enabled()) {
+            if (compiler_use_caller_save_text_enabled()) {
                 frame_bytes += compiler_preview_caller_save_area_size();
                 save_caller_regs_around_call = 1;
             }
@@ -4077,7 +4122,7 @@ static int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateR
 
     *out_text = builder.data;
     builder.data = NULL;
-    if (compiler_aggressive_opt_mode_enabled() &&
+    if (compiler_use_final_text_peepholes_enabled() &&
         (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
             !compiler_optimize_riscv_preview_zero_adds(out_text) ||
             !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
@@ -4195,7 +4240,7 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
         goto cleanup;
     }
-    if (compiler_aggressive_opt_mode_enabled()) {
+    if (compiler_use_default_ssa_build_enabled()) {
         ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
     } else {
         ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
@@ -4204,7 +4249,7 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    if (compiler_aggressive_opt_mode_enabled()) {
+    if (compiler_use_perf_hotspots_enabled()) {
         if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
             compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
             goto cleanup;

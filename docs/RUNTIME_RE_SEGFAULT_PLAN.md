@@ -429,6 +429,19 @@ segfault?” rather than on generic optimization value:
 - 2026-05-11 fold-probe follow-up: one further generated family then targeted exactly the user-specified “optimizable but side-effectful” neighborhood with 96 cases of constant-true / constant-false-else / algebraically-constant / nested-constant / short-circuit-side-effect / sequential-if / address-index / global-index / call-chain / store-then-branch shapes, crossed with local/global/array/index/call/global-index/helper-store/array-global tails. The generated suite `/tmp/runtime_re_fold_probe_suite` stayed fully green too (`96/96 PASS`). Current authority after this round is therefore stronger again: this nearby side-effect-preservation-under-folding family is not currently reproducing the remaining hidden runtime-RE line either, so the next search step should rotate farther toward address-root/base-carrier corruption families.
 - 2026-05-11 lv8 no-array follow-up: a new focused probe suite then targeted exactly the remaining user-listed lv8 cluster (`short_circuit1 / func_expr2 / global_var2 / hanoi2`) without arrays, using globals, short-circuit, nested function-expression calls, global shadowing, and hanoi-style recursion. The generated suite `/tmp/runtime_re_lv8_probe_suite` came back with a clean split: `short_circuit / global_shadow / hanoi` stayed green, but `func_expr` failed `5/5` (`lv8probe_05..09`). Current minimization already shrank that family to a much smaller nested-call-argument trigger: `m(f(1), h(2), f(3))`-style shapes fail, while simpler neighbors such as `f(1)+h(2)+f(3)`, `m(f(1), h(2), 3)`, `m(1, 2, f(3))`, and `m(1, h(2), f(3))` stay green. Current authority after this chunk is therefore that the front-most remaining lv8 hidden-like lead is now a **nested function-expression / call-argument lowering** family rather than broad short-circuit or hanoi behavior.
 - 2026-05-11 clarification follow-up: the `m(f(1), h(2), f(3))` shape is now treated as a **求值顺序歧义伪 witness** rather than a stable compiler bug signal. The repository's actual call-argument lowering is left-to-right, so a host-oracle comparison against a different evaluation order is not a clean bug oracle. To avoid that ambiguity, I switched to a deterministic call/side-effect family where each full-expression keeps only one side-effectful call, and the new `/tmp/runtime_re_deterministic_funcexpr_safe` batch is fully green (`48/48 PASS`). The active search should therefore continue on the broader later-call / stack-arg / address-carrier family instead of the ambiguous nested-argument shape itself.
+- 2026-05-11 compiler-driver isolation follow-up: an attempt to make the driver default conservative exposed that `COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS` is currently an overly broad umbrella, not a pure final-peephole toggle. Flipping it changes at least:
+  `.sbss/.sdata` vs `.bss/.data`,
+  default SSA-build entry,
+  perf-hotspot pass enablement,
+  caller-save text wrapping around calls,
+  and the final RISC-V text peepholes.
+  A judge-side `AE` appeared under that broad conservative-default experiment, but local checks still passed (`make`, `autotest -riscv -s lv8`). To turn that into a useful diagnosis rather than a noisy rollback, the live tree now keeps the historical aggressive-default baseline while adding narrower env toggles in `compiler_driver.c`:
+  `COMPILER_USE_SMALL_DATA_SECTIONS`,
+  `COMPILER_USE_DEFAULT_SSA_BUILD`,
+  `COMPILER_USE_PERF_HOTSPOTS`,
+  `COMPILER_USE_CALLER_SAVE_TEXT`,
+  `COMPILER_USE_FINAL_TEXT_PEEPHOLES`.
+  The immediate next step is to use those one at a time against the judge so we can tell whether the `AE` is really tied to final text peepholes, caller-save text emission, section naming, or an earlier SSA-side divergence.
 
 - 2026-05-11: conservative/default pipeline boundary clarification plus next
   always-on family widening:
