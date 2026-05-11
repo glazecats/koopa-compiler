@@ -382,6 +382,9 @@ int machine_ir_allocate_rewrite_report_get_summary(const MachineIrAllocateRewrit
     size_t *out_register_count,
     size_t *out_global_count,
     size_t *out_function_count);
+int machine_ir_clone_program(const MachineIrProgram *source,
+    MachineIrProgram *out_program,
+    MachineIrError *error);
 int machine_ir_allocate_rewrite_report_get_program(const MachineIrAllocateRewriteReport *report,
     const MachineIrProgram **out_program);
 int machine_ir_allocate_rewrite_report_get_function(const MachineIrAllocateRewriteReport *report,
@@ -484,6 +487,16 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_repor
 int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
     const ValueSsaProgram *program,
     size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
+int machine_ir_build_all_spill_program_only_report(
+    const ValueSsaProgram *program,
+    const ValueSsaMachineRegisterBank *bank,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
+int machine_ir_build_all_spill_flat_program_only_report(
+    const ValueSsaProgram *program,
     size_t machine_register_count,
     MachineIrAllocateRewriteReport *out_report,
     MachineIrError *error);

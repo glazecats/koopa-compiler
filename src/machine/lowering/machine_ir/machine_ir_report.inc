@@ -852,6 +852,81 @@ cleanup:
     return ok;
 }
 
+int machine_ir_build_all_spill_program_only_report(
+    const ValueSsaProgram *program,
+    const ValueSsaMachineRegisterBank *bank,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error) {
+    ValueSsaProgramAllocationResult result;
+    ValueSsaProgramAllocationLayout layout;
+    ValueSsaProgramMachineAllocationView machine_view;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    if (!program || !bank || !out_report) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-532: invalid all-spill program-only machine-ir report contract");
+        return 0;
+    }
+
+    machine_ir_allocate_rewrite_report_free(out_report);
+    machine_ir_allocate_rewrite_report_init(out_report);
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_program_allocation_layout_init(&layout);
+    value_ssa_program_machine_allocation_view_init(&machine_view);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (!machine_ir_build_all_spill_allocation_result(program, &result, error)) {
+        goto cleanup;
+    }
+    if (!value_ssa_build_program_allocation_layout(&result, &layout, &value_error) ||
+        !value_ssa_program_allocation_layout_attach_program_context(&layout, program, &value_error) ||
+        !value_ssa_build_program_machine_allocation_view(&layout, bank, &machine_view, &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        goto cleanup;
+    }
+    if (!machine_ir_lower_program_from_value_ssa(program, &machine_view, bank, &out_report->program, error)) {
+        goto cleanup;
+    }
+    if (!machine_ir_allocate_rewrite_report_refresh_shape(out_report, error)) {
+        machine_ir_allocate_rewrite_report_free(out_report);
+        goto cleanup;
+    }
+    out_report->allocation_rounds = 0u;
+    out_report->rewrite_rounds = 0u;
+    ok = 1;
+
+cleanup:
+    value_ssa_program_machine_allocation_view_free(&machine_view);
+    value_ssa_program_allocation_layout_free(&layout);
+    value_ssa_program_allocation_result_free(&result);
+    return ok;
+}
+
+int machine_ir_build_all_spill_flat_program_only_report(
+    const ValueSsaProgram *program,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error) {
+    ValueSsaMachineRegisterBank bank;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    if (!program || !out_report) {
+        machine_ir_set_error(error, 0, 0, "MACHINE-IR-533: invalid flat all-spill machine-ir report contract");
+        return 0;
+    }
+
+    value_ssa_machine_register_bank_init(&bank);
+    memset(&value_error, 0, sizeof(value_error));
+    if (!value_ssa_build_flat_machine_register_bank(machine_register_count, &bank, &value_error)) {
+        machine_ir_set_error_from_value_ssa(error, &value_error);
+        return 0;
+    }
+    ok = machine_ir_build_all_spill_program_only_report(program, &bank, out_report, error);
+    value_ssa_machine_register_bank_free(&bank);
+    return ok;
+}
+
 int machine_ir_build_allocate_and_rewrite_program_single_block_spills_report_dump(
     const ValueSsaProgram *program,
     size_t color_budget,

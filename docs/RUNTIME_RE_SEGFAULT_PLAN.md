@@ -159,6 +159,19 @@ segfault?” rather than on generic optimization value:
 - compact hidden runtime-RE/segfault plan setup: **complete / 100%**
 - remaining segfault-family source audit on the current stable tree:
   **in progress / ~83%**
+- simple-backend diagnostic shrink:
+  **in progress / ~70%**
+  - the default submission path now goes through the dedicated all-spill
+    simple backend, unless `COMPILER_DISABLE_SIMPLE_BACKEND=1` is set
+  - the conservative env/profile isolation for this branch now lives in
+    `compiler_driver.c`, leaving the simple-backend helper itself as a
+    thinner all-spill + emit wrapper
+  - focused public rechecks after this shrink stayed green:
+    default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
+    `lv9` `22/22`
+  - `make test-machine-ir` still hits the already-known `spill.3/spill.4`
+    dump-shape expectation noise, so it remains a non-clean checkpoint
+    surface here rather than evidence of a new regression from the shrink
 - next concrete source slice:
   post-loop canonical-IR fact handling is now reclosed for the latest
   `while`/`for` local-fact leak family, and condition-side-effect lowering is
@@ -442,6 +455,7 @@ segfault?” rather than on generic optimization value:
   `COMPILER_USE_CALLER_SAVE_TEXT`,
   `COMPILER_USE_FINAL_TEXT_PEEPHOLES`.
   The immediate next step is to use those one at a time against the judge so we can tell whether the `AE` is really tied to final text peepholes, caller-save text emission, section naming, or an earlier SSA-side divergence.
+- 2026-05-11 caller-save follow-up: `COMPILER_USE_CALLER_SAVE_TEXT` is now confirmed as a separate live bug line. The first restore-placement error was fixed by moving the caller-save restore point to after the explicit `jalr` in caller-save mode, and the external/internal call split was also tightened so external helpers still print as symbolic `call foo`. That eliminated the judge-side `AE`, but the caller-save mode still reproduces runtime corruption locally on caller-heavy `lv9` shapes (`05_global_arr_init`, `08_arr_access`, `09_const_arr_read`, `12_more_arr_params`, `13_complex_arr_params` show `-11` in the caller-save sweep). The current narrowed suspicion is therefore live-value / frame-layout handling around some call sites, not assembler syntax anymore.
 
 - 2026-05-11: conservative/default pipeline boundary clarification plus next
   always-on family widening:

@@ -54,7 +54,7 @@ static char *machine_ir_strdup(const char *text);
 static int machine_ir_clone_value_ssa_program(const ValueSsaProgram *source,
     ValueSsaProgram *out_program,
     MachineIrError *error);
-static int machine_ir_clone_program(const MachineIrProgram *source,
+int machine_ir_clone_program(const MachineIrProgram *source,
     MachineIrProgram *out_program,
     MachineIrError *error);
 static int machine_ir_append_format(MachineIrStringBuilder *builder, const char *fmt, ...);
@@ -296,7 +296,7 @@ static int machine_ir_clone_value_ssa_program(const ValueSsaProgram *source,
     return 1;
 }
 
-static int machine_ir_clone_program(const MachineIrProgram *source,
+int machine_ir_clone_program(const MachineIrProgram *source,
     MachineIrProgram *out_program,
     MachineIrError *error) {
     size_t register_index;
