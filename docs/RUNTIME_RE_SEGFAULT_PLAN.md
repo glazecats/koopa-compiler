@@ -177,6 +177,10 @@ segfault?” rather than on generic optimization value:
     `MACHINE_SELECT_SKIP_CLEANUP_PURE=1`, removing one broader
     selected-side pure cleanup layer from the current diagnostic submission
     route as the next hidden-RE shrink step
+  - the default simple-backend profile now also skips the two pure-call
+    reuse passes in `machine_select`
+    (`MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS=1` and
+    `MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS=1`)
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`

@@ -45,6 +45,18 @@ static int machine_select_skip_cleanup_reuse_addr_roots_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_skip_cleanup_reuse_internal_pure_calls_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_reuse_unique_predecessor_pure_calls_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 
