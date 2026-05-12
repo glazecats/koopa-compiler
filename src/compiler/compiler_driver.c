@@ -104,7 +104,12 @@ static int compiler_use_final_text_peepholes_enabled(void) {
 }
 
 static int compiler_use_simple_backend_enabled(void) {
-    return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 0);
+    const char *explicit_enable = getenv("COMPILER_SIMPLE_BACKEND");
+
+    if (explicit_enable && explicit_enable[0] != '\0') {
+        return strcmp(explicit_enable, "0") != 0;
+    }
+    return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 1);
 }
 
 static int compiler_use_direct_simple_text_enabled(void) {
@@ -3965,7 +3970,6 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
     int ok = 0;
     size_t symbol_index;
     size_t function_index;
-    int has_main = 0;
 
     if (out_text) {
         *out_text = NULL;
@@ -4096,9 +4100,6 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
         }
         if (!has_body || !function_name || function_name[0] == '\0') {
             continue;
-        }
-        if (strcmp(function_name, "main") == 0) {
-            has_main = 1;
         }
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
         frame_bytes = local_storage_bytes > parameter_count * 4u
@@ -4326,22 +4327,6 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
 
         if (!compiler_builder_appendf(&builder, ".size %s, .-%s\n\n", function_name, function_name)) {
             compiler_set_error(error, 0, 0, "COMPILER-122: out of memory separating functions");
-            ok = 0;
-            goto cleanup;
-        }
-    }
-
-    if (has_main) {
-        if (!compiler_builder_appendf(&builder,
-                ".weak _start\n"
-                ".type _start, @function\n"
-                "_start:\n"
-                "  la gp, __global_pointer$\n"
-                "  call main\n"
-                "  li a7, 93\n"
-                "  ecall\n"
-                ".size _start, .-_start\n\n")) {
-            compiler_set_error(error, 0, 0, "COMPILER-115: out of memory writing startup stub");
             ok = 0;
             goto cleanup;
         }

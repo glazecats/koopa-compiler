@@ -195,6 +195,11 @@ segfault?” rather than on generic optimization value:
     hidden-course feedback widened from the current `1 RE` baseline to
     `3 RE`; current authority is therefore that this default route must not
     currently inject its own `_start`/`la gp, __global_pointer$` sequence
+  - one follow-up experiment is now staged on the opposite side too: the
+    default route has been temporarily switched back to the old
+    allocate+rewrite mainline, but with that old mainline's custom `_start`
+    stub removed as well, so the current judge-facing trial isolates
+    "old mainline + passes fully open" from "custom startup path"
   - the shared bytes/text export tail now also has one concrete peephole
     bug closed: `repeated_indexed_addr_sequences` had been hardcoding `sp`
     as the base during a fold that could match non-`sp` carriers, and the
