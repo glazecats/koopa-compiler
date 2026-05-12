@@ -73,7 +73,7 @@ static int test_compiler_builds_riscv_backend_dump_from_source(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n") != output ||
-        strstr(output, ".weak _start\n.type _start, @function\n_start:\n") == NULL ||
+        strstr(output, ".weak _start\n.type _start, @function\n_start:\n  la gp, __global_pointer$\n") == NULL ||
         strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
         strstr(output, ".Lmain_0:\n") == NULL ||
         strstr(output, "  li a0, 0\n") == NULL ||
@@ -97,7 +97,7 @@ static int test_compiler_builds_perf_backend_dump_from_source(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_PERF, &output, &error) ||
         !output ||
         strstr(output, ".attribute arch, \"rv32im\"\n.text\n.p2align 2\n") != output ||
-        strstr(output, ".weak _start\n.type _start, @function\n_start:\n") == NULL ||
+        strstr(output, ".weak _start\n.type _start, @function\n_start:\n  la gp, __global_pointer$\n") == NULL ||
         strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
         strstr(output, ".Lmain_0:\n") == NULL ||
         strstr(output, "  li a0, 1\n") == NULL ||
