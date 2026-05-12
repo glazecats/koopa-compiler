@@ -190,10 +190,11 @@ segfault?” rather than on generic optimization value:
   - the direct simple-text-first variant was backed out again after it
     widened the hidden red surface; the default route stays on the shared
     bytes/text export chain
-  - the shared bytes/text export tail now also emits the same `_start`
-    startup stub as the direct simple-text path, including `la gp,
-    __global_pointer$`, `call main`, and the exit `ecall`, so the default
-    route no longer skips `gp` initialization
+  - a later attempt to copy the direct simple-text `_start` startup stub
+    into the shared bytes/text export tail was **reverted** again after
+    hidden-course feedback widened from the current `1 RE` baseline to
+    `3 RE`; current authority is therefore that this default route must not
+    currently inject its own `_start`/`la gp, __global_pointer$` sequence
   - the shared bytes/text export tail now also has one concrete peephole
     bug closed: `repeated_indexed_addr_sequences` had been hardcoding `sp`
     as the base during a fold that could match non-`sp` carriers, and the

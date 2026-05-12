@@ -5220,20 +5220,6 @@ int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateR
         }
     }
 
-    if (!compiler_builder_appendf(&builder,
-            ".weak _start\n"
-            ".type _start, @function\n"
-            "_start:\n"
-            "  la gp, __global_pointer$\n"
-            "  call main\n"
-            "  li a7, 93\n"
-            "  ecall\n"
-            ".size _start, .-_start\n")) {
-        compiler_set_error(error, 0, 0, "COMPILER-123: out of memory writing riscv startup");
-        ok = 0;
-        goto cleanup;
-    }
-
     *out_text = builder.data;
     builder.data = NULL;
     ok = 1;
