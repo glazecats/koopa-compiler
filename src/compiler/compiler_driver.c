@@ -116,6 +116,10 @@ static int compiler_use_direct_simple_text_enabled(void) {
     return compiler_env_flag_enabled("COMPILER_USE_DIRECT_SIMPLE_TEXT", 0);
 }
 
+static int compiler_use_runtime_startup_stub_enabled(void) {
+    return compiler_env_flag_enabled("COMPILER_USE_RUNTIME_STARTUP_STUB", 1);
+}
+
 static void compiler_saved_env_init(CompilerSavedEnv *slot, const char *name) {
     if (!slot) {
         return;
@@ -4590,6 +4594,7 @@ static int compiler_emit_riscv_preview_text_from_machine_ir_program_simple(
     CompilerError *error) {
     CompilerStringBuilder builder;
     size_t function_index;
+    int has_main = 0;
 
     if (out_text) {
         *out_text = NULL;
@@ -4623,6 +4628,9 @@ static int compiler_emit_riscv_preview_text_from_machine_ir_program_simple(
 
         if (!function->has_body || !function->name || function->name[0] == '\0') {
             continue;
+        }
+        if (strcmp(function->name, "main") == 0) {
+            has_main = 1;
         }
 
         frame_bytes += 8u;
@@ -4938,18 +4946,20 @@ static int compiler_emit_riscv_preview_text_from_machine_ir_program_simple(
         }
     }
 
-    if (!compiler_builder_appendf(&builder,
-            ".weak _start\n"
-            ".type _start, @function\n"
-            "_start:\n"
-            "  la gp, __global_pointer$\n"
-            "  call main\n"
-            "  li a7, 93\n"
-            "  ecall\n"
-            ".size _start, .-_start\n")) {
-        compiler_builder_free(&builder);
-        compiler_set_error(error, 0, 0, "COMPILER-156: failed to emit simple startup");
-        return 0;
+    if (has_main && compiler_use_runtime_startup_stub_enabled()) {
+        if (!compiler_builder_appendf(&builder,
+                ".weak _start\n"
+                ".type _start, @function\n"
+                "_start:\n"
+                "  la gp, __global_pointer$\n"
+                "  call main\n"
+                "  li a7, 93\n"
+                "  ecall\n"
+                ".size _start, .-_start\n")) {
+            compiler_builder_free(&builder);
+            compiler_set_error(error, 0, 0, "COMPILER-156: failed to emit simple startup");
+            return 0;
+        }
     }
 
     *out_text = builder.data;
@@ -4972,6 +4982,7 @@ int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateR
     int ok = 0;
     size_t symbol_index;
     size_t function_index;
+    int has_main = 0;
 
     if (out_text) {
         *out_text = NULL;
@@ -5071,6 +5082,9 @@ int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateR
         }
         if (!has_body || !function_name || function_name[0] == '\0') {
             continue;
+        }
+        if (strcmp(function_name, "main") == 0) {
+            has_main = 1;
         }
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
         frame_bytes = local_storage_bytes > parameter_count * 4u ? local_storage_bytes : parameter_count * 4u;
@@ -5200,6 +5214,22 @@ int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateR
         }
         if (!compiler_builder_appendf(&builder, ".size %s, .-%s\n\n", function_name, function_name)) {
             compiler_set_error(error, 0, 0, "COMPILER-122: out of memory separating functions");
+            ok = 0;
+            goto cleanup;
+        }
+    }
+
+    if (has_main && compiler_use_runtime_startup_stub_enabled()) {
+        if (!compiler_builder_appendf(&builder,
+                ".weak _start\n"
+                ".type _start, @function\n"
+                "_start:\n"
+                "  la gp, __global_pointer$\n"
+                "  call main\n"
+                "  li a7, 93\n"
+                "  ecall\n"
+                ".size _start, .-_start\n")) {
+            compiler_set_error(error, 0, 0, "COMPILER-123: out of memory writing riscv startup");
             ok = 0;
             goto cleanup;
         }
