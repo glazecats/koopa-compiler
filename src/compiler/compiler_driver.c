@@ -109,7 +109,7 @@ static int compiler_use_simple_backend_enabled(void) {
     if (explicit_enable && explicit_enable[0] != '\0') {
         return strcmp(explicit_enable, "0") != 0;
     }
-    return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 1);
+    return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 0);
 }
 
 static int compiler_use_direct_simple_text_enabled(void) {
@@ -5259,6 +5259,12 @@ int compiler_compile_source_text_with_options(const char *source,
         {0},
         {0},
         {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
+        {0},
     };
     const char *simple_backend_env_names[] = {
         "COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS",
@@ -5271,6 +5277,9 @@ int compiler_compile_source_text_with_options(const char *source,
         "MACHINE_SELECT_SKIP_CLEANUP_PURE",
         "MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS",
         "MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS",
+        "MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS",
+        "MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR",
+        "MACHINE_SELECT_SKIP_FULL_CLEANUP",
     };
     size_t simple_backend_env_index = 0u;
     int simple_backend_profile_applied = 0;
@@ -5331,21 +5340,6 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
         goto cleanup;
     }
-    if (compiler_use_default_ssa_build_enabled()) {
-        ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
-    } else {
-        ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
-    }
-    if (!ok) {
-        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-        goto cleanup;
-    }
-    if (compiler_use_perf_hotspots_enabled()) {
-        if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
-            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-            goto cleanup;
-        }
-    }
     if (compiler_use_simple_backend_enabled()) {
         for (simple_backend_env_index = 0u;
              simple_backend_env_index < sizeof(simple_backend_saved_envs) / sizeof(simple_backend_saved_envs[0]);
@@ -5363,6 +5357,23 @@ int compiler_compile_source_text_with_options(const char *source,
             goto cleanup;
         }
         simple_backend_profile_applied = 1;
+    }
+    if (compiler_use_default_ssa_build_enabled()) {
+        ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
+    } else {
+        ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
+    }
+    if (!ok) {
+        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+        goto cleanup;
+    }
+    if (compiler_use_perf_hotspots_enabled()) {
+        if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
+            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+            goto cleanup;
+        }
+    }
+    if (compiler_use_simple_backend_enabled()) {
         ok = compiler_simple_backend_emit_from_value_ssa(&value_program, out_text, error);
         if (!ok) {
             goto cleanup;
