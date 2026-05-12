@@ -1054,6 +1054,94 @@ static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_ca
     return ok;
 }
 
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_jump_barrier(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n"
+        "  j .Ldone\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence jump-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should stop at jump barrier\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_non_sp_base(void) {
+    static const char *source_text =
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n"
+        "  slli a0, a2, 2\n"
+        "  lw t6, 0(s1)\n"
+        "  add a0, t6, a0\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: repeated-indexed-sequence non-sp-base regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: repeated indexed sequence fold should not rewrite non-sp bases\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_indexed_local_base_offset_across_ret_barrier(void) {
+    static const char *source_text =
+        "  lw t6, 24(sp)\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n"
+        "  ret\n"
+        "  add a0, t6, a2\n"
+        "  lw a1, 0(a0)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: indexed-local-base-offset ret-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_indexed_local_base_offsets(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: indexed local base offset fold should stop at ret barrier\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_fold_indexed_local_base_offset_across_stack_slot_overwrite(void) {
     static const char *source_text =
         "  lw t6, 24(sp)\n"
@@ -1806,8 +1894,11 @@ int main(void) {
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_base_reg_redefinition();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_loaded_base_reg_redefinition();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_materialized_stack_slot_store();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_non_sp_base();
+    ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_jump_barrier();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_call();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_sequence_across_call_when_regs_survive_call();
+    ok &= test_compiler_does_not_fold_indexed_local_base_offset_across_ret_barrier();
     ok &= test_compiler_does_not_fold_indexed_local_base_offset_across_stack_slot_overwrite();
     ok &= test_compiler_does_not_fold_indexed_local_base_offset_across_materialized_stack_slot_overwrite();
     ok &= test_compiler_does_not_fold_indexed_local_base_offset_when_base_reg_is_needed_past_label();

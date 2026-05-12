@@ -187,8 +187,16 @@ segfault?” rather than on generic optimization value:
     `MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR=1`)
   - the default simple-backend profile now also skips the final full
     `machine_select` cleanup via `MACHINE_SELECT_SKIP_FULL_CLEANUP=1`
-  - the simple-backend helper now uses a thinner all-spill program-only
-    report path before the shared bytes/text export chain
+  - the direct simple-text-first variant was backed out again after it
+    widened the hidden red surface; the default route stays on the shared
+    bytes/text export chain
+  - the shared bytes/text export tail now also has one concrete peephole
+    bug closed: `repeated_indexed_addr_sequences` had been hardcoding `sp`
+    as the base during a fold that could match non-`sp` carriers, and the
+    fold is now restricted back to genuine stack-based sequences
+  - that same late text-export area now also has a second safety tightening:
+    address-reuse scans no longer treat post-`ret` / post-`j` / post-direct-
+    branch text as if it were still one continuous safe straight-line window
   - focused public rechecks after this shrink stayed green:
     default `lv8` `12/12`, simple-backend `lv8` `12/12`, simple-backend
     `lv9` `22/22`

@@ -1122,6 +1122,17 @@ static int compiler_append_stack_access(
     if (!builder || !op || !reg || !base || !scratch) {
         return 0;
     }
+    if (strcmp(base, "s11") == 0 && offset > 2047u) {
+        return compiler_builder_appendf(
+            builder,
+            "  li sp, %zu\n"
+            "  add sp, s11, sp\n"
+            "  %s %s, 0(sp)\n"
+            "  mv sp, s11\n",
+            offset,
+            op,
+            reg);
+    }
     if (offset <= 2047u) {
         return compiler_builder_appendf(builder, "  %s %s, %zu(%s)\n", op, reg, offset, base);
     }
@@ -1858,6 +1869,29 @@ static int compiler_riscv_preview_line_is_call_like(const char *line) {
     return 0;
 }
 
+static int compiler_riscv_preview_line_is_control_transfer_barrier(const char *line) {
+    char tokens[8][32];
+    size_t token_count = 0u;
+
+    if (!line || compiler_riscv_preview_line_is_label(line)) {
+        return 0;
+    }
+    if (compiler_riscv_preview_line_is_call_like(line) || compiler_riscv_preview_line_is_ret(line)) {
+        return 1;
+    }
+
+    compiler_riscv_preview_tokenize_line(line, tokens, &token_count);
+    if (token_count == 0u) {
+        return 0;
+    }
+    if (strcmp(tokens[0], "j") == 0 || strcmp(tokens[0], "beq") == 0 || strcmp(tokens[0], "bne") == 0 ||
+        strcmp(tokens[0], "blt") == 0 || strcmp(tokens[0], "bge") == 0 || strcmp(tokens[0], "bltu") == 0 ||
+        strcmp(tokens[0], "bgeu") == 0) {
+        return 1;
+    }
+    return strcmp(tokens[0], "jal") == 0 && token_count >= 2u && strcmp(tokens[1], "zero") == 0;
+}
+
 static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name) {
     char tokens[8][32];
     size_t token_count = 0u;
@@ -1916,7 +1950,8 @@ static int compiler_riscv_preview_reg_is_used_again_before_redefinition(
         if (!line) {
             continue;
         }
-        if (compiler_riscv_preview_line_is_label(line)) {
+        if (compiler_riscv_preview_line_is_label(line) ||
+            compiler_riscv_preview_line_is_control_transfer_barrier(line)) {
             return 0;
         }
         if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
@@ -1945,7 +1980,8 @@ static int compiler_riscv_preview_reg_may_be_needed_past_label_before_redefiniti
         if (!line) {
             continue;
         }
-        if (compiler_riscv_preview_line_is_label(line)) {
+        if (compiler_riscv_preview_line_is_label(line) ||
+            compiler_riscv_preview_line_is_control_transfer_barrier(line)) {
             return 1;
         }
         if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
@@ -2595,7 +2631,7 @@ static int compiler_optimize_riscv_preview_repeated_indexed_addr_triples(char **
 
                 for (check_index = index + 3u; check_index < scan_index; ++check_index) {
                     if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
-                        compiler_riscv_preview_line_is_call_like(lines[check_index]) ||
+                        compiler_riscv_preview_line_is_control_transfer_barrier(lines[check_index]) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rd) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rs) ||
                         (compiler_riscv_preview_line_is_sw_sp_reg(
@@ -2726,6 +2762,7 @@ static int compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(char 
                 &first_load_offset,
                 first_load_base,
                 sizeof(first_load_base)) &&
+            strcmp(first_load_base, "sp") == 0 &&
             compiler_riscv_preview_line_is_add_regs(
                 lines[index + 2u],
                 first_add_rd,
@@ -2792,7 +2829,7 @@ static int compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(char 
 
                 for (check_index = index + 3u; check_index < scan_index; ++check_index) {
                     if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
-                        compiler_riscv_preview_line_is_call_like(lines[check_index]) ||
+                        compiler_riscv_preview_line_is_control_transfer_barrier(lines[check_index]) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rd) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rs) ||
                         compiler_riscv_preview_line_defines_reg(lines[check_index], first_load_rd) ||
@@ -3159,6 +3196,7 @@ static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_
                 int materialized_stack_offset = 0;
 
                 if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
+                    compiler_riscv_preview_line_is_control_transfer_barrier(lines[scan_index]) ||
                     compiler_riscv_preview_line_defines_reg(lines[scan_index], "sp") ||
                     (compiler_riscv_preview_line_is_sw_sp_reg(
                             lines[scan_index],
@@ -3362,10 +3400,11 @@ static int compiler_append_caller_save_sequence(
             logical_index = (size_t)(reg[1] - '0') + (include_a0 ? 8u : 7u);
         }
 
-        if (!is_store && strcmp(reg, "t6") == 0) {
-            continue;
+        if (strcmp(reg, "t6") == 0) {
+            scratch = include_a0 ? "t5" : "a0";
+        } else {
+            scratch = "t6";
         }
-        scratch = (strcmp(reg, "t6") == 0) ? "t5" : "t6";
         if (!compiler_append_stack_access(builder,
                 is_store ? "sw" : "lw",
                 reg,
