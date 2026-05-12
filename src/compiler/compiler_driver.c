@@ -109,7 +109,7 @@ static int compiler_use_simple_backend_enabled(void) {
     if (explicit_enable && explicit_enable[0] != '\0') {
         return strcmp(explicit_enable, "0") != 0;
     }
-    return !compiler_env_flag_enabled("COMPILER_DISABLE_SIMPLE_BACKEND", 0);
+    return 0;
 }
 
 static int compiler_use_direct_simple_text_enabled(void) {

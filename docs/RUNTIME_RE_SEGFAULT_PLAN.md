@@ -161,8 +161,12 @@ segfault?” rather than on generic optimization value:
   **in progress / ~83%**
 - simple-backend diagnostic shrink:
   **in progress / ~89%**
-  - the default submission path now goes through the dedicated all-spill
-    simple backend, unless `COMPILER_DISABLE_SIMPLE_BACKEND=1` is set
+  - the dedicated all-spill simple backend remains available as the main
+    diagnostic comparison route, but it is no longer the live default
+    submission path; current local authority is that the rebuilt default
+    `build/compiler -riscv` route is back on the old allocate+rewrite
+    mainline, and `COMPILER_SIMPLE_BACKEND=1` is now the explicit knob for
+    entering the third-route simple backend
   - the conservative env/profile isolation for this branch now lives in
     `compiler_driver.c`, leaving the simple-backend helper itself as a
     thinner all-spill + emit wrapper
@@ -197,8 +201,10 @@ segfault?” rather than on generic optimization value:
     currently inject its own `_start`/`la gp, __global_pointer$` sequence
   - one follow-up experiment then temporarily switched the default route back
     to the old allocate+rewrite mainline without its custom `_start` stub so
-    the startup path could be isolated; that trial is now complete and the
-    default route has been restored to the third-version simple-backend path
+    the startup path could be isolated; that line is now the kept live
+    default again, with local probe confirmation that default output omits
+    `_start` while the explicit simple-backend route still keeps its scoped
+    startup-stub behavior
   - a later route-audit also found that the simple-backend conservative
     profile had been applied too late: until this fix, the third route still
     built `value_ssa` with the ordinary default bridge/hotspot settings
