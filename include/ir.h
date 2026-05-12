@@ -132,6 +132,7 @@ typedef struct {
 typedef struct {
     char *name;
     int has_body;
+    AstFunctionReturnType return_type;
     size_t parameter_count;
     IrLocal *locals;
     size_t local_count;

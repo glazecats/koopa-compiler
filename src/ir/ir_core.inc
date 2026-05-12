@@ -261,6 +261,7 @@ static int ir_program_append_function(IrProgram *program,
     function = &program->functions[program->function_count];
     function->name = NULL;
     function->has_body = 0;
+    function->return_type = AST_FUNCTION_RETURN_INT;
     function->parameter_count = 0;
     function->locals = NULL;
     function->local_count = 0;

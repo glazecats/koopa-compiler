@@ -44,6 +44,17 @@ static const IrBuiltinFunctionInfo *ir_find_builtin_function_info(const char *na
     return NULL;
 }
 
+static int ir_builtin_function_returns_value(const char *name) {
+    if (!name || name[0] == '\0') {
+        return 0;
+    }
+    return strcmp(name, "putint") != 0 &&
+        strcmp(name, "putch") != 0 &&
+        strcmp(name, "putarray") != 0 &&
+        strcmp(name, "starttime") != 0 &&
+        strcmp(name, "stoptime") != 0;
+}
+
 static int ir_function_parameter_count_matches_external(const IrFunction *function,
     const AstExternal *external) {
     return function && external && function->parameter_count == external->parameter_count;
@@ -125,6 +136,9 @@ static int ir_ensure_builtin_function_signature(IrProgram *program,
             return 0;
         }
     }
+    function->return_type = ir_builtin_function_returns_value(builtin->name)
+        ? AST_FUNCTION_RETURN_INT
+        : AST_FUNCTION_RETURN_VOID;
 
     if (function->local_count == 0u && function->parameter_count == 0u &&
         builtin->parameter_count > 0u) {
@@ -666,6 +680,7 @@ static int ir_ensure_function_signature(IrProgram *program,
             return 0;
         }
     }
+    function->return_type = external->function_return_type;
 
     if (function->local_count == 0 && function->parameter_count == 0 &&
         external->parameter_count > 0) {

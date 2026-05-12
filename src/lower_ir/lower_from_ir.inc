@@ -19,6 +19,30 @@ static int lower_ir_builtin_call_returns_void(const char *callee_name) {
         strcmp(callee_name, "stoptime") == 0;
 }
 
+static int lower_ir_call_returns_void(const IrProgram *program, const IrInstruction *instruction) {
+    size_t function_index;
+
+    if (!instruction || instruction->kind != IR_INSTR_CALL ||
+        !instruction->as.call.callee_name || instruction->as.call.callee_name[0] == '\0') {
+        return 0;
+    }
+    if (lower_ir_builtin_call_returns_void(instruction->as.call.callee_name)) {
+        return 1;
+    }
+    if (!program || !program->functions) {
+        return 0;
+    }
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        const IrFunction *callee = &program->functions[function_index];
+
+        if (!callee->name || strcmp(callee->name, instruction->as.call.callee_name) != 0) {
+            continue;
+        }
+        return callee->return_type == AST_FUNCTION_RETURN_VOID;
+    }
+    return 0;
+}
+
 static int lower_ir_append_call_result_zero_definition(LowerIrFunction *out_function,
     LowerIrBasicBlock *out_block,
     size_t temp_id,
@@ -143,6 +167,7 @@ static int lower_ir_lower_store_like_mov(const IrInstruction *instruction,
 }
 
 static int lower_ir_lower_instruction(const IrInstruction *instruction,
+    const IrProgram *program,
     LowerIrFunction *out_function,
     LowerIrBasicBlock *out_block,
     LowerIrError *error) {
@@ -184,7 +209,7 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
     case IR_INSTR_CALL:
         memset(&lowered_instruction, 0, sizeof(lowered_instruction));
         lowered_instruction.kind = LOWER_IR_INSTR_CALL;
-        lowered_instruction.has_result = lower_ir_builtin_call_returns_void(instruction->as.call.callee_name) ? 0 : 1;
+        lowered_instruction.has_result = lower_ir_call_returns_void(program, instruction) ? 0 : 1;
         if (lowered_instruction.has_result) {
             lowered_instruction.result = lower_ir_value_temp(instruction->result.id);
         }
@@ -422,6 +447,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
                  instruction_index < source_block->instruction_count;
                  ++instruction_index) {
                 if (!lower_ir_lower_instruction(&source_block->instructions[instruction_index],
+                        program,
                         target_function,
                         target_block,
                         error)) {
