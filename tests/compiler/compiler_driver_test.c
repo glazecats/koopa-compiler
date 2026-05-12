@@ -495,6 +495,35 @@ static int test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1
     return ok;
 }
 
+static int test_compiler_does_not_fold_call_arg_load_swap_when_first_base_is_a0(void) {
+    static const char *source_text =
+        "  lw a1, 0(a0)\n"
+        "  lw a0, 8(sp)\n"
+        "  mv t5, a0\n"
+        "  mv a0, a1\n"
+        "  mv a1, t5\n"
+        "  call ext\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: call-arg swap first-base regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_call_arg_load_swaps(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: call-arg swap regression should keep the a0-based first load unchanged\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_fold_stack_staged_call_args_when_both_args_reload_same_slot(void) {
     static const char *source_text =
         "  lw t0, 16(sp)\n"
@@ -519,6 +548,36 @@ static int test_compiler_does_not_fold_stack_staged_call_args_when_both_args_rel
         strstr(text, "  lw a0, 16(sp)\n  sw a0, 0(sp)\n  lw a1, 20(sp)\n  sw a1, 0(sp)\n  call ext\n") != NULL ||
         strstr(text, source_text) == NULL) {
         fprintf(stderr, "[compiler] FAIL: stack-staged call-arg fold should keep same-slot reload pattern unchanged\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0(void) {
+    static const char *source_text =
+        "  lw a0, 16(sp)\n"
+        "  sw a0, 0(sp)\n"
+        "  lw t1, 20(sp)\n"
+        "  sw t1, 4(sp)\n"
+        "  lw a0, 0(sp)\n"
+        "  lw a1, 4(sp)\n"
+        "  call ext\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: stack-staged-call-args a0-stage regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_stack_staged_call_args(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: stack-staged call-arg fold should keep the a0-staged pattern unchanged\n");
         ok = 0;
     }
 
@@ -691,6 +750,33 @@ static int test_compiler_does_not_reuse_stack_address_before_call_when_later_rel
             "  call foo\n"
             "  lw a0, 0(sp)\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: stack-address reuse should not delete the saved stack-slot definition when a later reload after the call still needs it\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_reuse_stack_address_across_ret_barrier(void) {
+    static const char *source_text =
+        "  addi t0, sp, 24\n"
+        "  sw t0, 0(sp)\n"
+        "  ret\n"
+        "  lw a0, 0(sp)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: stack-address ret-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_stack_addr_reuse(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: stack-address reuse should stop at ret barrier\n");
         ok = 0;
     }
 
@@ -1452,6 +1538,42 @@ static int test_compiler_preserves_a0_across_nested_call_spans(void) {
     return ok;
 }
 
+static int test_compiler_restores_large_frame_s11_before_restoring_sp(void) {
+    static const char *source =
+        "int g(int x) { return x + 1; }\n"
+        "int f(int n) {\n"
+        "  int a[600];\n"
+        "  a[0] = n;\n"
+        "  a[599] = g(n);\n"
+        "  return a[0] + a[599];\n"
+        "}\n"
+        "int main() { return f(3); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (setenv("COMPILER_USE_DIRECT_SIMPLE_TEXT", "1", 1) != 0) {
+        fprintf(stderr, "[compiler] FAIL: large-frame s11 restore setup failed\n");
+        return 0;
+    }
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output,
+            "  mv t6, sp\n"
+            "  li sp, 2456\n"
+            "  add sp, s11, sp\n"
+            "  lw sp, 0(sp)\n"
+            "  mv s11, sp\n"
+            "  mv sp, t6\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: large-frame s11 restore ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+    unsetenv("COMPILER_USE_DIRECT_SIMPLE_TEXT");
+    free(output);
+    return ok;
+}
+
 static int test_compiler_folds_sysy_int_literal_boundaries(void) {
     static const char *source =
         "int main() {"
@@ -1877,7 +1999,9 @@ int main(void) {
     ok &= test_compiler_folds_indexed_local_base_offset_in_text();
     ok &= test_compiler_folds_call_arg_load_swap_in_text();
     ok &= test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1();
+    ok &= test_compiler_does_not_fold_call_arg_load_swap_when_first_base_is_a0();
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_both_args_reload_same_slot();
+    ok &= test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
@@ -1886,6 +2010,7 @@ int main(void) {
     ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_across_call_when_saved_addr_reg_survives_call();
     ok &= test_compiler_does_not_reuse_stack_address_before_call_when_later_reload_still_needs_saved_slot();
+    ok &= test_compiler_does_not_reuse_stack_address_across_ret_barrier();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_stack_slot_store();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_materialized_stack_slot_store();
     ok &= test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_call();
@@ -1908,6 +2033,7 @@ int main(void) {
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
     ok &= test_compiler_saves_caller_regs_around_whole_call_span();
     ok &= test_compiler_preserves_a0_across_nested_call_spans();
+    ok &= test_compiler_restores_large_frame_s11_before_restoring_sp();
     ok &= test_compiler_folds_sysy_int_literal_boundaries();
     ok &= test_compiler_handles_32bit_wraparound_loop_condition();
     ok &= test_compiler_handles_memory_ssa_loop_local_entry_seed_case();

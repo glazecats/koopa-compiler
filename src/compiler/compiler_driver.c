@@ -1123,15 +1123,22 @@ static int compiler_append_stack_access(
         return 0;
     }
     if (strcmp(base, "s11") == 0 && offset > 2047u) {
+        const char *addr_reg = strcmp(reg, "s11") == 0 ? "sp" : reg;
+
         return compiler_builder_appendf(
             builder,
+            "  mv %s, sp\n"
             "  li sp, %zu\n"
             "  add sp, s11, sp\n"
             "  %s %s, 0(sp)\n"
-            "  mv sp, s11\n",
+            "%s"
+            "  mv sp, %s\n",
+            scratch,
             offset,
             op,
-            reg);
+            addr_reg,
+            strcmp(reg, "s11") == 0 ? "  mv s11, sp\n" : "",
+            scratch);
     }
     if (offset <= 2047u) {
         return compiler_builder_appendf(builder, "  %s %s, %zu(%s)\n", op, reg, offset, base);
@@ -2448,7 +2455,7 @@ static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
                 int materialized_stack_offset = 0;
 
                 if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
-                    compiler_riscv_preview_line_is_call_like(lines[scan_index]) ||
+                    compiler_riscv_preview_line_is_control_transfer_barrier(lines[scan_index]) ||
                     compiler_riscv_preview_line_defines_reg(lines[scan_index], "sp")) {
                     end_index = scan_index;
                     break;
@@ -2964,6 +2971,7 @@ static int compiler_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
                 lines[index + 1u], second_reg, sizeof(second_reg), &second_offset, second_base, sizeof(second_base)) &&
             strcmp(first_reg, "a1") == 0 &&
             strcmp(second_reg, "a0") == 0 &&
+            strcmp(first_base, "a0") != 0 &&
             strcmp(second_base, "a0") != 0 &&
             strcmp(second_base, "a1") != 0 &&
             strcmp(lines[index + 2u], "  mv t5, a0") == 0 &&
@@ -3085,6 +3093,10 @@ static int compiler_optimize_riscv_preview_stack_staged_call_args(char **io_text
             strcmp(stage1_reg, store1_reg) == 0 &&
             strcmp(load0_reg, "a0") == 0 &&
             strcmp(load1_reg, "a1") == 0 &&
+            strcmp(stage0_reg, "a0") != 0 &&
+            strcmp(stage0_reg, "a1") != 0 &&
+            strcmp(stage1_reg, "a0") != 0 &&
+            strcmp(stage1_reg, "a1") != 0 &&
             dst0_offset != dst1_offset &&
             load0_offset == dst0_offset &&
             load1_offset == dst1_offset &&
