@@ -548,6 +548,47 @@
        Current authority is therefore:
        keep this as another small but real runtime-facing text cleanup and use
        it as the next stable checkpoint before reopening bigger hotspot work.
+     - later 2026-05-14 materialized stack-slot access folding, kept:
+       From that checkpoint, I then added one more very narrow final-text fold
+       aimed directly at the hottest remaining `brainfuck` stack-address
+       tails under the correct course-perf route
+       (`build/compiler -perf` on `/opt/bin/testcases/perf`).
+       The kept rewrite is:
+       if the final text contains
+       `addi tmp, sp, K`
+       immediately followed by
+       `lw reg, 0(tmp)` or `sw reg, 0(tmp)`,
+       then fold the pair into direct `lw/sw reg, K(sp)`.
+       This directly removed many repeated `run_program` / `read_program`
+       patterns such as
+       `addi t6, sp, 2016 ; sw a3, 0(t6)` and
+       `addi t4, sp, 12 ; lw t6, 0(t4)`.
+       Stability restamp on the live tree is green:
+       `make test-compiler-driver` PASS,
+       `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`).
+       On the same formal perf script shape, the focused first rerun kept the
+       slowest two witnesses green and improved:
+       `18_brainfuck-bootstrap = 10347.901 ms`,
+       `19_brainfuck-calculator = 13053.860 ms`.
+       The full 4-case confirmation versus the previous stable checkpoint then
+       came back:
+       previous checkpoint
+       `06_mv1 = 13093.687 ms`,
+       `09_spmv1 = 13569.223 ms`,
+       `18_brainfuck-bootstrap = 10900.765 ms`,
+       `19_brainfuck-calculator = 13649.472 ms`;
+       candidate
+       `06_mv1 = 12185.660 ms`,
+       `09_spmv1 = 12902.074 ms`,
+       `18_brainfuck-bootstrap = 10383.171 ms`,
+       `19_brainfuck-calculator = 13187.953 ms`.
+       Aggregate result is net positive by about `2554 ms` across the 4-case
+       set.
+       Current authority is therefore:
+       keep this as another stable runtime-facing text cleanup and use it as
+       the new checkpoint before reopening larger `ValueSSA` / selected-IR
+       hotspot work.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

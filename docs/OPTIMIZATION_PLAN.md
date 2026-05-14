@@ -391,6 +391,46 @@
     - current authority:
       keep this as another small but real text-side runtime cleanup and treat
       it as the next stable checkpoint before reopening larger hotspot lines
+  - Current 2026-05-14 materialized stack-slot access folding, kept:
+    - from that checkpoint, I then added a very narrow final-text fold aimed
+      directly at the hottest remaining `brainfuck` stack-address tails under
+      the correct course-perf route (`build/compiler -perf` on
+      `/opt/bin/testcases/perf`)
+    - specific rule:
+      when final text contains
+      `addi tmp, sp, K`
+      followed immediately by
+      `lw reg, 0(tmp)` or `sw reg, 0(tmp)`,
+      and `tmp` is just a temporary register holding that stack address,
+      rewrite the pair into direct `lw/sw reg, K(sp)`
+    - this directly removed many repeated `run_program` / `read_program`
+      patterns such as
+      `addi t6, sp, 2016 ; sw a3, 0(t6)` and
+      `addi t4, sp, 12 ; lw t6, 0(t4)`
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS with new load/store folding regressions,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`)
+    - focused formal perf rerun on the user-provided script shape first kept
+      the slowest witnesses green and improved:
+      `18_brainfuck-bootstrap ~= 10347.901 ms`,
+      `19_brainfuck-calculator ~= 13053.860 ms`
+    - full 4-case confirmation on the same formal perf path then came back:
+      previous stable checkpoint:
+      `06_mv1 ~= 13093.687 ms`,
+      `09_spmv1 ~= 13569.223 ms`,
+      `18_brainfuck-bootstrap ~= 10900.765 ms`,
+      `19_brainfuck-calculator ~= 13649.472 ms`
+      candidate:
+      `06_mv1 ~= 12185.660 ms`,
+      `09_spmv1 ~= 12902.074 ms`,
+      `18_brainfuck-bootstrap ~= 10383.171 ms`,
+      `19_brainfuck-calculator ~= 13187.953 ms`
+      for an aggregate improvement of about `2554 ms`
+    - current authority:
+      keep this as another stable runtime-facing text cleanup and use it as
+      the new checkpoint before reopening larger `ValueSSA` / selected-IR
+      hotspot work
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come

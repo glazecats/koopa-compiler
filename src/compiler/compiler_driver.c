@@ -3620,6 +3620,108 @@ int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_t
     return compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(io_text);
 }
 
+static int compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        int sp_offset = 0;
+        char reg[32];
+        char base[32];
+        int mem_offset = 0;
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_addi_sp_imm(lines[index], base, sizeof(base), &sp_offset) &&
+            compiler_riscv_preview_is_temp_reg_name(base) &&
+            compiler_riscv_preview_line_is_lw_reg_offset(
+                lines[index + 1u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
+            mem_offset == 0) {
+            if (!compiler_builder_appendf(&builder, "  lw %s, %d(sp)\n", reg, sp_offset)) {
+                goto cleanup;
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_addi_sp_imm(lines[index], base, sizeof(base), &sp_offset) &&
+            compiler_riscv_preview_is_temp_reg_name(base) &&
+            compiler_riscv_preview_line_is_sw_reg_offset(
+                lines[index + 1u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
+            mem_offset == 0) {
+            if (!compiler_builder_appendf(&builder, "  sw %s, %d(sp)\n", reg, sp_offset)) {
+                goto cleanup;
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+int compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(char **io_text) {
+    return compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(io_text);
+}
+
 static int compiler_riscv_preview_target_redefines_reg_before_use(
     char **lines,
     size_t line_count,
@@ -4984,6 +5086,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
             !compiler_optimize_riscv_preview_forward_store_copy_source(out_text) ||
             !compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(out_text) ||
+            !compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(out_text) ||
             !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text))) {
         compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
         ok = 0;
