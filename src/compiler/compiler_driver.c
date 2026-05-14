@@ -5731,6 +5731,10 @@ int compiler_compile_source_text_with_options(const char *source,
             compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
             goto cleanup;
         }
+        if (!memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error)) {
+            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+            goto cleanup;
+        }
     }
     if (compiler_use_perf_hotspots_enabled()) {
         if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
