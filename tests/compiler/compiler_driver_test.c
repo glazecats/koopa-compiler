@@ -788,6 +788,62 @@ static int test_compiler_folds_materialized_stack_slot_store(void) {
     return ok;
 }
 
+static int test_compiler_folds_large_materialized_stack_slot_load(void) {
+    static const char *source_text =
+        "  lui t6, 0x1\n"
+        "  addi t6, t6, -2036\n"
+        "  add t6, sp, t6\n"
+        "  lw a0, 0(t6)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: fold-large-materialized-stack-load regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(&text) ||
+        !text ||
+        strstr(text, "  addi t6, sp, 2047\n  lw a0, 13(t6)\n") == NULL ||
+        strstr(text, "  lui t6, 0x1\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: large materialized stack-slot load should fold into split sp-offset load\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_folds_large_materialized_stack_slot_store(void) {
+    static const char *source_text =
+        "  lui t6, 0x1\n"
+        "  addi t6, t6, -2016\n"
+        "  add t6, sp, t6\n"
+        "  sw a3, 0(t6)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: fold-large-materialized-stack-store regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(&text) ||
+        !text ||
+        strstr(text, "  addi t6, sp, 2047\n  sw a3, 33(t6)\n") == NULL ||
+        strstr(text, "  lui t6, 0x1\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: large materialized stack-slot store should fold into split sp-offset store\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0(void) {
     static const char *source_text =
         "  lw a0, 16(sp)\n"
@@ -2353,6 +2409,8 @@ int main(void) {
     ok &= test_compiler_does_not_remove_jump_seed_move_when_target_uses_it_first();
     ok &= test_compiler_folds_materialized_stack_slot_load();
     ok &= test_compiler_folds_materialized_stack_slot_store();
+    ok &= test_compiler_folds_large_materialized_stack_slot_load();
+    ok &= test_compiler_folds_large_materialized_stack_slot_store();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();

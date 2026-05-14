@@ -1797,6 +1797,27 @@ static int compiler_riscv_preview_line_is_addi_reg_imm(
     return sscanf(line, "  addi %31[^,], %31[^,], %31s", rd, rs1, imm) == 3;
 }
 
+static int compiler_parse_signed_immediate_text(const char *text, long long *out_value) {
+    char *end = NULL;
+    long long value = 0;
+
+    if (out_value) {
+        *out_value = 0;
+    }
+    if (!text || text[0] == '\0') {
+        return 0;
+    }
+
+    value = strtoll(text, &end, 0);
+    if (!end || *end != '\0') {
+        return 0;
+    }
+    if (out_value) {
+        *out_value = value;
+    }
+    return 1;
+}
+
 static int compiler_riscv_preview_line_is_label(const char *line) {
     size_t length;
 
@@ -3698,6 +3719,84 @@ static int compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses
             }
             index += 2u;
             continue;
+        }
+
+        if (index + 3u < line_count) {
+            char lui_rd[32];
+            char lui_imm[32];
+            char addi_rd[32];
+            char addi_rs1[32];
+            char addi_imm[32];
+            char add_rd[32];
+            char add_rs1[32];
+            char add_rs2[32];
+            long long upper_imm = 0;
+            long long lower_imm = 0;
+            long long full_offset = 0;
+            long long split_base = 0;
+            long long split_mem = 0;
+
+            if (compiler_riscv_preview_line_is_lui_imm(
+                    lines[index], lui_rd, sizeof(lui_rd), lui_imm, sizeof(lui_imm)) &&
+                compiler_riscv_preview_is_temp_reg_name(lui_rd) &&
+                compiler_riscv_preview_line_is_addi_reg_imm(
+                    lines[index + 1u],
+                    addi_rd,
+                    sizeof(addi_rd),
+                    addi_rs1,
+                    sizeof(addi_rs1),
+                    addi_imm,
+                    sizeof(addi_imm)) &&
+                strcmp(addi_rd, lui_rd) == 0 &&
+                strcmp(addi_rs1, lui_rd) == 0 &&
+                compiler_riscv_preview_line_is_add_regs(
+                    lines[index + 2u],
+                    add_rd,
+                    sizeof(add_rd),
+                    add_rs1,
+                    sizeof(add_rs1),
+                    add_rs2,
+                    sizeof(add_rs2)) &&
+                strcmp(add_rd, lui_rd) == 0 &&
+                ((strcmp(add_rs1, "sp") == 0 && strcmp(add_rs2, lui_rd) == 0) ||
+                    (strcmp(add_rs2, "sp") == 0 && strcmp(add_rs1, lui_rd) == 0)) &&
+                compiler_parse_signed_immediate_text(lui_imm, &upper_imm) &&
+                compiler_parse_signed_immediate_text(addi_imm, &lower_imm)) {
+                full_offset = (upper_imm << 12) + lower_imm;
+                split_base = full_offset;
+                if (split_base > 2047) {
+                    split_base = 2047;
+                } else if (split_base < -2048) {
+                    split_base = -2048;
+                }
+                split_mem = full_offset - split_base;
+
+                if (split_mem >= -2048 && split_mem <= 2047) {
+                    if (compiler_riscv_preview_line_is_lw_reg_offset(
+                            lines[index + 3u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
+                        mem_offset == 0 &&
+                        strcmp(base, lui_rd) == 0) {
+                        if (!compiler_builder_appendf(&builder, "  addi %s, sp, %lld\n", lui_rd, split_base) ||
+                            !compiler_builder_appendf(&builder, "  lw %s, %lld(%s)\n", reg, split_mem, lui_rd)) {
+                            goto cleanup;
+                        }
+                        index += 4u;
+                        continue;
+                    }
+
+                    if (compiler_riscv_preview_line_is_sw_reg_offset(
+                            lines[index + 3u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
+                        mem_offset == 0 &&
+                        strcmp(base, lui_rd) == 0) {
+                        if (!compiler_builder_appendf(&builder, "  addi %s, sp, %lld\n", lui_rd, split_base) ||
+                            !compiler_builder_appendf(&builder, "  sw %s, %lld(%s)\n", reg, split_mem, lui_rd)) {
+                            goto cleanup;
+                        }
+                        index += 4u;
+                        continue;
+                    }
+                }
+            }
         }
 
         if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {

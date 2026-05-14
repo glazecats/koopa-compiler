@@ -500,6 +500,44 @@
     - current authority:
       keep this as another small but real runtime-facing final-text cleanup
       and use it as the new stable checkpoint before the next hotspot round
+  - Current 2026-05-14 split large materialized stack-slot access folding, kept:
+    - from that checkpoint, I then widened the same final-text stack-slot fold
+      one careful step further for the hot large-offset `brainfuck` tails
+    - specific rule:
+      when final text contains
+      `lui tmp, U`
+      `addi tmp, tmp, L`
+      `add tmp, sp, tmp`
+      followed immediately by
+      `lw reg, 0(tmp)` or `sw reg, 0(tmp)`,
+      parse the full signed stack offset `(U << 12) + L` and rewrite it into a
+      split 2-line form
+      `addi tmp, sp, B ; lw/sw reg, R(tmp)`
+      where both `B` and `R` stay within the 12-bit signed immediate range
+    - rationale for the keep:
+      the earlier kept 2-line `addi sp` fold had already shown that these
+      repeated `brainfuck` stack-address tails are worth targeting, and the
+      large-offset family was still very visible in the live final assembly as
+      repeated shapes such as
+      `lui t6, 0x1 ; addi t6, t6, -2016 ; add t6, sp, t6 ; sw a3, 0(t6)`
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS with new large-offset load/store text
+      regressions, `lv8` PASS (`12/12`), `lv9` PASS (`22/22`)
+    - same-command formal perf rerun on the user-provided 4-case path gave:
+      baseline
+      `06_mv1 ~= 12415.351 ms`,
+      `09_spmv1 ~= 13460.767 ms`,
+      `18_brainfuck-bootstrap ~= 10474.370 ms`,
+      `19_brainfuck-calculator ~= 13385.143 ms`;
+      candidate
+      `06_mv1 ~= 12376.699 ms`,
+      `09_spmv1 ~= 13012.514 ms`,
+      `18_brainfuck-bootstrap ~= 10381.432 ms`,
+      `19_brainfuck-calculator ~= 13066.591 ms`.
+      Aggregate result is net positive by about `899 ms` across the 4-case set
+    - current authority:
+      keep this as another real final-text runtime cleanup and use it as the
+      new stable checkpoint before the next hotspot round
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come

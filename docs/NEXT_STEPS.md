@@ -646,6 +646,35 @@
        for an aggregate gain of about `841 ms`. Current authority is therefore:
        keep this as another small but real final-text runtime cleanup and use
        it as the new stable checkpoint before the next hotspot round.
+     - later 2026-05-14 split large materialized stack-slot access folding, kept:
+       from that checkpoint, I then widened the same final-text stack-slot
+       fold one careful step further for the hot large-offset `brainfuck`
+       tails. The new rule recognizes
+       `lui tmp, U ; addi tmp, tmp, L ; add tmp, sp, tmp ; lw/sw ..., 0(tmp)`
+       and rewrites it into a split 2-line form
+       `addi tmp, sp, B ; lw/sw ..., R(tmp)`
+       when the total signed stack offset `(U << 12) + L` can be split into
+       two 12-bit signed immediates. This directly hit many remaining
+       `run_program` shapes such as
+       `lui t6, 0x1 ; addi t6, t6, -2016 ; add t6, sp, t6 ; sw a3, 0(t6)`,
+       which now become
+       `addi t6, sp, 2047 ; sw a3, 33(t6)`. Stability restamp on the live tree
+       is green: `make test-compiler-driver` PASS, `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`). The user-required formal 4-case perf rerun then
+       came back:
+       baseline
+       `06_mv1 = 12415.351 ms`,
+       `09_spmv1 = 13460.767 ms`,
+       `18_brainfuck-bootstrap = 10474.370 ms`,
+       `19_brainfuck-calculator = 13385.143 ms`;
+       candidate
+       `06_mv1 = 12376.699 ms`,
+       `09_spmv1 = 13012.514 ms`,
+       `18_brainfuck-bootstrap = 10381.432 ms`,
+       `19_brainfuck-calculator = 13066.591 ms`,
+       for an aggregate gain of about `899 ms`. Current authority is therefore:
+       keep this as another real final-text runtime cleanup and use it as the
+       new stable checkpoint before the next hotspot round.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:
