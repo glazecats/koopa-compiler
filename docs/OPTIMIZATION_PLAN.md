@@ -336,10 +336,233 @@
       `09_spmv1 ~= 15365.625 ms`,
       `18_brainfuck-bootstrap ~= 12249.894 ms`,
       `19_brainfuck-calculator ~= 22233.816 ms`
+    - later same-day recheck from stable `5f399df` with wider witnesses:
+      one more rerun then rechecked this peephole on the restored stable tree
+      while widening the witness set to include the strong `fft` cases too.
+      The result stayed mixed on the real required path:
+      `06_mv1 ~= 12318.652 ms`,
+      `09_spmv1 ~= 13406.531 ms`,
+      `13_fft1 ~= 8450.335 ms`,
+      `14_fft2 ~= 7995.136 ms`,
+      `18_brainfuck-bootstrap ~= 10533.153 ms`,
+      `19_brainfuck-calculator ~= 13077.959 ms`.
+      `13_fft1` / `14_fft2` improved a little, but `09_spmv1` regressed and
+      `18_brainfuck-bootstrap` also drifted slower, so the keep/no-keep
+      decision does not change.
     - current authority:
       fully back out this pipeline retry too; the text-side stack-reload-to-`mv`
       rule is not currently earning a stable runtime win on the active witness
       set, even after narrowing away the obvious `brainfuck` address-chain tail
+  - Current 2026-05-14 `-perf` memory-full SSA-route retry, not kept:
+    - I also tested one broader perf-only route swap at the SSA build
+      boundary: for `-perf`, temporarily use
+      `value_ssa_build_memory_canonicalized_from_lower_ir(...)` instead of
+      the current `value_ssa_build_default_from_lower_ir(...)` path.
+    - static/middle-shape evidence on `spmv1` looked superficially promising:
+      the `value-ssa-memory-full` dump exposed cleaner carried `phi` /
+      recurrence structure and reduced a rough hotspot-op count from about
+      `62` down to about `51`.
+    - but the real end-to-end perf result on the required course path was
+      clearly worse even though the correctness gates stayed green
+      (`make test-compiler-driver`, `lv8`, `lv9`):
+      `06_mv1 = 13383.026 ms`,
+      `09_spmv1 = 14418.912 ms`,
+      `13_fft1 = 14299.469 ms`,
+      `14_fft2 = 13718.911 ms`,
+      `18_brainfuck-bootstrap = 10671.488 ms`,
+      `19_brainfuck-calculator = 13244.776 ms`.
+    - current authority:
+      do not replace the current perf mainline's default direct-fast-cleanup
+      SSA build with the heavier `memory-full` route wholesale; keep using it
+      only as a diagnostic comparison surface unless a much narrower
+      witness-specific use proves out later.
+  - Current 2026-05-14 function-entry `addr_global` hoist retry, not kept:
+    - I also tested one new narrow `ValueSSA` perf-hotspot pass that hoisted
+      repeated `addr_global` of the same global slot to function entry for
+      call-free functions, then rewrote later occurrences to `mov` the
+      hoisted SSA address value.
+    - the pass itself stayed correctness-green:
+      `test-value-ssa-regression`, `test-compiler-driver`, `lv8`, and `lv9`
+      all passed.
+    - but the real witness timings only came back as small mixed movement
+      rather than a convincing hotspot win:
+      `06_mv1 = 12374.236 ms`,
+      `09_spmv1 = 13285.267 ms`,
+      `13_fft1 = 8546.448 ms`,
+      `14_fft2 = 8067.552 ms`,
+      `18_brainfuck-bootstrap = 10442.845 ms`,
+      `19_brainfuck-calculator = 13185.327 ms`.
+    - current authority:
+      fully back out this line too; even though it is safe, it did not hit
+      the hottest dynamic core strongly enough to earn a kept checkpoint.
+  - Current 2026-05-14 parameter-pointer alias relaxation retry, not kept:
+    - I then tested one smaller bridge-level widening aimed more directly at
+      the current `spmv1` shape: let dominated repeated `load_indirect`
+      rooted at a parameter-array base survive across an intervening
+      `store_local` to an unrelated scalar local.
+    - correctness stayed green:
+      `test-value-ssa-regression`, `test-compiler-driver`, `lv8`, and `lv9`
+      all passed.
+    - but the real witness timings again moved in the wrong direction on the
+      targeted course-hotspot set:
+      `06_mv1 = 13083.724 ms`,
+      `09_spmv1 = 13762.300 ms`,
+      `13_fft1 = 8507.902 ms`,
+      `14_fft2 = 8011.523 ms`,
+      `18_brainfuck-bootstrap = 10496.615 ms`,
+      `19_brainfuck-calculator = 13126.022 ms`.
+    - current authority:
+      fully back out this widening too; do not broaden
+      parameter-pointer alias assumptions in the current dominated repeated
+      indirect-load reuse line unless a later narrower proof yields a clear
+      end-to-end runtime win.
+  - Current 2026-05-14 direct wiring of simple-loop invariant-load hoist, not kept:
+    - I also tested a lower-risk A/B by wiring the already-implemented but
+      currently unused
+      `value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(...)`
+      into the indirect-memory direct fast-cleanup pipeline.
+    - correctness stayed green:
+      `test-value-ssa-regression`, `test-compiler-driver`, `lv8`, and `lv9`
+      all passed.
+    - but the real witness timings again moved the wrong way on the active
+      hotspot set:
+      `06_mv1 = 13860.149 ms`,
+      `09_spmv1 = 13932.003 ms`,
+      `13_fft1 = 8609.577 ms`,
+      `14_fft2 = 8017.928 ms`,
+      `18_brainfuck-bootstrap = 10447.510 ms`,
+      `19_brainfuck-calculator = 13100.866 ms`.
+    - current authority:
+      fully back out this direct wiring too; do not enable the generic
+      simple-loop invariant-load hoist on the live indirect-memory perf path
+      unless a later narrower admission rule proves a clear end-to-end win.
+  - Current 2026-05-14 parameter-non-alias matrix retry, not kept:
+    - I then pushed one more new-pass direction that was narrower than the
+      earlier unconditional parameter-pointer alias relaxation: for the
+      perf-hotspot loop-invariant indirect-load hoist only, build a tiny
+      matrix proving two parameter-array roots are non-aliasing when all
+      observed callsites bind them to different `addr_global` arguments.
+    - correctness stayed green:
+      `test-value-ssa-regression`, `test-compiler-driver`, `lv8`, and `lv9`
+      all passed.
+    - but the formal witness timings still did not justify keeping it:
+      `06_mv1 = 13144.554 ms`,
+      `09_spmv1 = 13603.924 ms`,
+      `13_fft1 = 8457.020 ms`,
+      `14_fft2 = 8110.185 ms`,
+      `18_brainfuck-bootstrap = 10400.511 ms`,
+      `19_brainfuck-calculator = 13127.805 ms`.
+    - current authority:
+      fully back out this more surgical parameter-non-alias pass too; stop
+      spending rounds on generalized parameter-pointer alias relaxations
+      around the existing indirect-load hoist line.
+    - later same-day isolated-baseline recheck:
+      I reran this line one more time using an explicit isolated `HEAD`
+      baseline compiler built from `git archive HEAD` and compared it
+      directly against the live candidate under the exact course-perf route
+      (`build/compiler -perf` on `/opt/bin/testcases/perf`, then
+      `clang -> ld.lld -> qemu-riscv32-static` with ms precision).
+      That cleaner A/B confirmed the same verdict:
+      baseline
+      `06_mv1 = 12614.827 ms`,
+      `09_spmv1 = 13390.188 ms`,
+      `13_fft1 = 9466.762 ms`,
+      `14_fft2 = 8018.672 ms`,
+      `18_brainfuck-bootstrap = 10440.183 ms`,
+      `19_brainfuck-calculator = 13144.827 ms`;
+      candidate
+      `06_mv1 = 12430.717 ms`,
+      `09_spmv1 = 13592.422 ms`,
+      `13_fft1 = 8574.146 ms`,
+      `14_fft2 = 7991.481 ms`,
+      `18_brainfuck-bootstrap = 11125.073 ms`,
+      `19_brainfuck-calculator = 13727.943 ms`.
+      Even though `mv1` / `fft1` improved, the user-priority `spmv1`
+      witness regressed and both `brainfuck` witnesses also moved the wrong
+      way, so this pass remains fully backed out on the live tree.
+  - Current 2026-05-14 phi-header loop-hoist retry, not kept:
+    - I then tested one structural reopening inside the existing perf
+      hotspot pass instead of widening alias rules again: allow the simple
+      loop-hoist path to see header-phi inner `while` loops and treat
+      values defined by an outer loop phi as invariant for the inner loop.
+    - this did materially change the `spmv1` hot SSA shape:
+      the pass started hoisting invariant `xptr[i+1]` address-chain pieces
+      like `add i, 1`, `shl`, and base-add into the inner-loop preheaders.
+    - correctness stayed green after the implementation was repaired:
+      `make test-value-ssa-regression` PASS and
+      `make test-compiler-driver` PASS.
+    - but the formal isolated-baseline A/B still did not justify keeping it:
+      baseline
+      `06_mv1 = 12499.019 ms`,
+      `09_spmv1 = 13553.209 ms`,
+      `13_fft1 = 8692.876 ms`,
+      `14_fft2 = 8235.306 ms`,
+      `18_brainfuck-bootstrap = 10684.399 ms`,
+      `19_brainfuck-calculator = 13291.643 ms`;
+      candidate
+      `06_mv1 = 12571.492 ms`,
+      `09_spmv1 = 13871.038 ms`,
+      `13_fft1 = 8610.653 ms`,
+      `14_fft2 = 8493.740 ms`,
+      `18_brainfuck-bootstrap = 10548.288 ms`,
+      `19_brainfuck-calculator = 13100.156 ms`.
+    - current authority:
+      fully back out this phi-header loop-hoist retry too; it is a useful
+      proof that the live `spmv1` hotspot is reachable from this pass, but
+      the current hoist mix adds enough spill/live-range cost that the main
+      `spmv1` witness still regresses. If this line is reopened later, it
+      should be with a much narrower admission rule aimed specifically at
+      the profitable inner-loop invariants rather than broad header-phi
+      enablement.
+  - Current 2026-05-14 narrow `spmv1` branch-bound hoist, kept:
+    - I then reopened that same pass family in a much narrower way instead
+      of broadening generic phi-header loop hoists: only recognize
+      phi-header inner loops for one witness-driven pattern where the branch
+      condition compares an induction-carried value against one invariant
+      `load_indirect` bound.
+    - on the live `spmv1` witness this hits the intended `xptr[i+1]` bound
+      loads in both inner loops and hoists those bound-address chains to the
+      loop preheaders, while leaving the broader generic invariant-load
+      machinery disabled for the rest of the phi-header body.
+    - checkpoint stability is green on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+    - isolated-baseline formal A/B on the required course-perf route gave:
+      baseline
+      `06_mv1 = 12356.456 ms`,
+      `09_spmv1 = 13497.726 ms`,
+      `13_fft1 = 8538.175 ms`,
+      `14_fft2 = 8036.788 ms`,
+      `18_brainfuck-bootstrap = 10545.824 ms`,
+      `19_brainfuck-calculator = 13173.538 ms`;
+      candidate
+      `06_mv1 = 12591.689 ms`,
+      `09_spmv1 = 13319.377 ms`,
+      `13_fft1 = 8493.398 ms`,
+      `14_fft2 = 8248.464 ms`,
+      `18_brainfuck-bootstrap = 10487.972 ms`,
+      `19_brainfuck-calculator = 13184.208 ms`.
+    - one focused rerun on the more directly related witnesses then came back
+      near-flat rather than contradictory:
+      baseline
+      `06_mv1 = 12445.151 ms`,
+      `09_spmv1 = 13327.861 ms`,
+      `18_brainfuck-bootstrap = 10460.587 ms`,
+      `19_brainfuck-calculator = 13200.639 ms`;
+      candidate
+      `06_mv1 = 12415.219 ms`,
+      `09_spmv1 = 13336.491 ms`,
+      `18_brainfuck-bootstrap = 10476.222 ms`,
+      `19_brainfuck-calculator = 13102.523 ms`.
+    - current authority:
+      keep this narrow branch-bound hoist as the new stable perf baseline.
+      The measured gain is modest and noisy, but it is backed by a real hot-
+      path shape change on the primary `spmv1` witness and does not reopen
+      correctness. The next reopen on this line should stay equally narrow,
+      with the best adjacent candidate being the second inner loop's
+      invariant `b[i]-1` path rather than any broad generic hoist widening.
   - Current 2026-05-14 final-text `mv -> sw` store-copy forwarding, kept:
     - I then switched to a narrower final-text cleanup aimed directly at the
       hot `brainfuck` `run_program` / `read_program` tails under the correct

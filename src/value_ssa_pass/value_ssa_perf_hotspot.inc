@@ -601,6 +601,144 @@ typedef struct {
     size_t id;
 } ValueSsaPerfAddressRoot;
 
+static int value_ssa_perf_extract_global_arg_root(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    size_t *out_global_id,
+    unsigned depth) {
+    ValueSsaInstruction *definition;
+
+    if (!function || !analysis || !out_global_id || depth > 8u || value.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        return 0;
+    }
+
+    switch (definition->kind) {
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
+        if (definition->as.addr_slot.kind != VALUE_SSA_SLOT_GLOBAL) {
+            return 0;
+        }
+        *out_global_id = definition->as.addr_slot.id;
+        return 1;
+    case VALUE_SSA_INSTR_MOV:
+        return value_ssa_perf_extract_global_arg_root(
+            function, analysis, definition->as.mov_value, out_global_id, depth + 1u);
+    default:
+        return 0;
+    }
+}
+
+static int value_ssa_perf_collect_non_alias_parameter_pointer_pairs(const ValueSsaProgram *program,
+    const ValueSsaFunction *callee,
+    unsigned char *pair_matrix) {
+    size_t param_count;
+    size_t lhs_index;
+    size_t rhs_index;
+    size_t caller_index;
+    int saw_callsite = 0;
+
+    if (!program || !callee || !pair_matrix) {
+        return 0;
+    }
+
+    param_count = callee->parameter_count;
+    for (lhs_index = 0; lhs_index < param_count; ++lhs_index) {
+        for (rhs_index = 0; rhs_index < param_count; ++rhs_index) {
+            pair_matrix[lhs_index * param_count + rhs_index] =
+                (unsigned char)(lhs_index != rhs_index &&
+                    lhs_index < callee->local_count &&
+                    rhs_index < callee->local_count &&
+                    callee->locals[lhs_index].is_parameter &&
+                    callee->locals[rhs_index].is_parameter &&
+                    callee->locals[lhs_index].array_rank > 0u &&
+                    callee->locals[rhs_index].array_rank > 0u);
+        }
+    }
+
+    for (caller_index = 0; caller_index < program->function_count; ++caller_index) {
+        const ValueSsaFunction *caller = &program->functions[caller_index];
+        ValueSsaDefUseAnalysis def_use;
+        size_t block_index;
+
+        if (!caller->has_body) {
+            continue;
+        }
+
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_def_use_analysis(caller, &def_use, NULL)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            return 0;
+        }
+
+        for (block_index = 0; block_index < caller->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &caller->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t lhs_global_id;
+                size_t rhs_global_id;
+
+                if (instruction->kind != VALUE_SSA_INSTR_CALL ||
+                    !instruction->as.call.callee_name ||
+                    !callee->name ||
+                    strcmp(instruction->as.call.callee_name, callee->name) != 0 ||
+                    instruction->as.call.arg_count != param_count) {
+                    continue;
+                }
+
+                saw_callsite = 1;
+                for (lhs_index = 0; lhs_index < param_count; ++lhs_index) {
+                    for (rhs_index = lhs_index + 1u; rhs_index < param_count; ++rhs_index) {
+                        if (!pair_matrix[lhs_index * param_count + rhs_index]) {
+                            continue;
+                        }
+
+                        if (!value_ssa_perf_extract_global_arg_root(
+                                caller, &def_use, instruction->as.call.args[lhs_index], &lhs_global_id, 0u) ||
+                            !value_ssa_perf_extract_global_arg_root(
+                                caller, &def_use, instruction->as.call.args[rhs_index], &rhs_global_id, 0u) ||
+                            lhs_global_id == rhs_global_id) {
+                            pair_matrix[lhs_index * param_count + rhs_index] = 0u;
+                            pair_matrix[rhs_index * param_count + lhs_index] = 0u;
+                        }
+                    }
+                }
+            }
+        }
+
+        value_ssa_def_use_analysis_free(&def_use);
+    }
+
+    if (!saw_callsite) {
+        memset(pair_matrix, 0, param_count * param_count * sizeof(unsigned char));
+    }
+
+    return 1;
+}
+
+static int value_ssa_perf_parameter_pointer_pair_proven_non_alias(const ValueSsaFunction *function,
+    const unsigned char *pair_matrix,
+    size_t lhs_id,
+    size_t rhs_id) {
+    size_t param_count;
+
+    if (!function || !pair_matrix || lhs_id == rhs_id) {
+        return 0;
+    }
+
+    param_count = function->parameter_count;
+    if (lhs_id >= param_count || rhs_id >= param_count) {
+        return 0;
+    }
+
+    return pair_matrix[lhs_id * param_count + rhs_id] != 0u;
+}
+
 static int value_ssa_perf_find_simple_single_body_loop(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t header_id,
@@ -619,6 +757,89 @@ static int value_ssa_perf_find_simple_single_body_loop(const ValueSsaFunction *f
     header = &function->blocks[header_id];
     if (header->phi_count != 0u ||
         !header->has_terminator ||
+        header->terminator.kind != VALUE_SSA_TERM_BRANCH ||
+        analysis->predecessor_counts[header_id] != 2u) {
+        return 0;
+    }
+
+    for (predecessor_index = 0; predecessor_index < function->block_count; ++predecessor_index) {
+        if (!analysis->predecessor_matrix[predecessor_index * function->block_count + header_id]) {
+            continue;
+        }
+        if (predecessor_a == (size_t)-1) {
+            predecessor_a = predecessor_index;
+        } else if (predecessor_b == (size_t)-1) {
+            predecessor_b = predecessor_index;
+        } else {
+            return 0;
+        }
+    }
+
+    if (predecessor_a == (size_t)-1 || predecessor_b == (size_t)-1) {
+        return 0;
+    }
+
+    if (function->blocks[predecessor_a].has_terminator &&
+        function->blocks[predecessor_a].terminator.kind == VALUE_SSA_TERM_JUMP &&
+        function->blocks[predecessor_a].terminator.as.jump_target == header_id &&
+        analysis->dominates[header_id * function->block_count + predecessor_a]) {
+        body_id = predecessor_a;
+        preheader_id = predecessor_b;
+    } else if (function->blocks[predecessor_b].has_terminator &&
+               function->blocks[predecessor_b].terminator.kind == VALUE_SSA_TERM_JUMP &&
+               function->blocks[predecessor_b].terminator.as.jump_target == header_id &&
+               analysis->dominates[header_id * function->block_count + predecessor_b]) {
+        body_id = predecessor_b;
+        preheader_id = predecessor_a;
+    } else {
+        return 0;
+    }
+
+    if (body_id >= function->block_count || preheader_id >= function->block_count) {
+        return 0;
+    }
+
+    if (header->terminator.as.branch.then_target == body_id) {
+        out_loop->exit_id = header->terminator.as.branch.else_target;
+    } else if (header->terminator.as.branch.else_target == body_id) {
+        out_loop->exit_id = header->terminator.as.branch.then_target;
+    } else {
+        return 0;
+    }
+    if (function->blocks[body_id].phi_count != 0u ||
+        function->blocks[preheader_id].phi_count != 0u ||
+        !function->blocks[body_id].has_terminator ||
+        function->blocks[body_id].terminator.kind != VALUE_SSA_TERM_JUMP ||
+        function->blocks[body_id].terminator.as.jump_target != header_id ||
+        !function->blocks[preheader_id].has_terminator ||
+        function->blocks[preheader_id].terminator.kind != VALUE_SSA_TERM_JUMP ||
+        function->blocks[preheader_id].terminator.as.jump_target != header_id) {
+        return 0;
+    }
+
+    out_loop->header_id = header_id;
+    out_loop->body_id = body_id;
+    out_loop->preheader_id = preheader_id;
+    return 1;
+}
+
+static int value_ssa_perf_find_phi_header_single_body_loop(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    size_t header_id,
+    ValueSsaPerfSimpleLoop *out_loop) {
+    const ValueSsaBasicBlock *header;
+    size_t predecessor_index;
+    size_t predecessor_a = (size_t)-1;
+    size_t predecessor_b = (size_t)-1;
+    size_t body_id = (size_t)-1;
+    size_t preheader_id = (size_t)-1;
+
+    if (!function || !analysis || !out_loop || header_id >= function->block_count) {
+        return 0;
+    }
+
+    header = &function->blocks[header_id];
+    if (!header->has_terminator ||
         header->terminator.kind != VALUE_SSA_TERM_BRANCH ||
         analysis->predecessor_counts[header_id] != 2u) {
         return 0;
@@ -754,7 +975,9 @@ static int value_ssa_perf_extract_address_root(const ValueSsaFunction *function,
     }
 }
 
-static int value_ssa_perf_address_roots_proven_non_alias(const ValueSsaPerfAddressRoot *lhs,
+static int value_ssa_perf_address_roots_proven_non_alias(const ValueSsaFunction *function,
+    const unsigned char *parameter_pointer_non_alias_pairs,
+    const ValueSsaPerfAddressRoot *lhs,
     const ValueSsaPerfAddressRoot *rhs) {
     if (!lhs || !rhs ||
         lhs->kind == VALUE_SSA_PERF_ADDRESS_ROOT_UNKNOWN ||
@@ -778,12 +1001,21 @@ static int value_ssa_perf_address_roots_proven_non_alias(const ValueSsaPerfAddre
         (lhs->kind == VALUE_SSA_PERF_ADDRESS_ROOT_PARAMETER_POINTER && rhs->kind == VALUE_SSA_PERF_ADDRESS_ROOT_LOCAL_SLOT)) {
         return 1;
     }
+    if (lhs->kind == VALUE_SSA_PERF_ADDRESS_ROOT_PARAMETER_POINTER &&
+        rhs->kind == VALUE_SSA_PERF_ADDRESS_ROOT_PARAMETER_POINTER) {
+        return value_ssa_perf_parameter_pointer_pair_proven_non_alias(
+            function,
+            parameter_pointer_non_alias_pairs,
+            lhs->id,
+            rhs->id);
+    }
 
     return 0;
 }
 
 static int value_ssa_perf_store_cannot_alias_loaded_address(const ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *analysis,
+    const unsigned char *parameter_pointer_non_alias_pairs,
     const ValueSsaPerfAddressRoot *load_root,
     const ValueSsaInstruction *store_instruction) {
     ValueSsaPerfAddressRoot store_root;
@@ -816,7 +1048,8 @@ static int value_ssa_perf_store_cannot_alias_loaded_address(const ValueSsaFuncti
                 function, analysis, store_instruction->as.store_indirect.addr, &store_root, 0u)) {
             return 0;
         }
-        return value_ssa_perf_address_roots_proven_non_alias(load_root, &store_root);
+        return value_ssa_perf_address_roots_proven_non_alias(
+            function, parameter_pointer_non_alias_pairs, load_root, &store_root);
     default:
         return 1;
     }
@@ -865,7 +1098,8 @@ static int value_ssa_perf_function_preserves_global_slot(const ValueSsaFunction 
             if (instruction->kind == VALUE_SSA_INSTR_CALL) {
                 return 0;
             }
-            if (!value_ssa_perf_store_cannot_alias_loaded_address(function, analysis, &load_root, instruction)) {
+            if (!value_ssa_perf_store_cannot_alias_loaded_address(
+                    function, analysis, NULL, &load_root, instruction)) {
                 return 0;
             }
         }
@@ -1024,6 +1258,13 @@ static int value_ssa_perf_value_is_loop_invariant(const ValueSsaProgram *program
     if (depth > 12u) {
         return 0;
     }
+    if (value.value_id >= analysis->value_count || !analysis->has_def[value.value_id]) {
+        return 0;
+    }
+    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
+        analysis->def_block_ids[value.value_id] != loop->body_id) {
+        return 1;
+    }
 
     definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
     if (!definition) {
@@ -1032,11 +1273,6 @@ static int value_ssa_perf_value_is_loop_invariant(const ValueSsaProgram *program
     if (definition->kind == VALUE_SSA_INSTR_CALL) {
         return 0;
     }
-    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
-        analysis->def_block_ids[value.value_id] != loop->body_id) {
-        return 1;
-    }
-
     switch (definition->kind) {
     case VALUE_SSA_INSTR_ADDR_LOCAL:
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
@@ -1101,6 +1337,13 @@ static int value_ssa_perf_value_is_loop_invariant_for_indirect_addr(const ValueS
     if (depth > 12u) {
         return 0;
     }
+    if (value.value_id >= analysis->value_count || !analysis->has_def[value.value_id]) {
+        return 0;
+    }
+    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
+        analysis->def_block_ids[value.value_id] != loop->body_id) {
+        return 1;
+    }
 
     definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
     if (!definition) {
@@ -1109,11 +1352,6 @@ static int value_ssa_perf_value_is_loop_invariant_for_indirect_addr(const ValueS
     if (definition->kind == VALUE_SSA_INSTR_CALL) {
         return 0;
     }
-    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
-        analysis->def_block_ids[value.value_id] != loop->body_id) {
-        return 1;
-    }
-
     switch (definition->kind) {
     case VALUE_SSA_INSTR_ADDR_LOCAL:
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
@@ -1183,6 +1421,7 @@ static int value_ssa_perf_value_is_defined_inside_loop(const ValueSsaFunction *f
 static int value_ssa_perf_loop_instructions_preserve_indirect_load(const ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *analysis,
     const ValueSsaBasicBlock *block,
+    const unsigned char *parameter_pointer_non_alias_pairs,
     const ValueSsaPerfAddressRoot *load_root) {
     size_t instruction_index;
 
@@ -1194,6 +1433,7 @@ static int value_ssa_perf_loop_instructions_preserve_indirect_load(const ValueSs
         if (!value_ssa_perf_store_cannot_alias_loaded_address(
                 function,
                 analysis,
+                parameter_pointer_non_alias_pairs,
                 load_root,
                 &block->instructions[instruction_index])) {
             return 0;
@@ -1203,12 +1443,27 @@ static int value_ssa_perf_loop_instructions_preserve_indirect_load(const ValueSs
     return 1;
 }
 
+static int value_ssa_perf_clone_loop_invariant_value_into_preheader(const ValueSsaProgram *program,
+    ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const unsigned char *readonly_globals,
+    const ValueSsaPerfSimpleLoop *loop,
+    ValueSsaValueRef value,
+    unsigned char *has_mapping,
+    ValueSsaValueRef *mappings,
+    ValueSsaBasicBlock *rebuilt_preheader,
+    ValueSsaValueRef *out_value,
+    ValueSsaError *error);
+
 static int value_ssa_perf_try_hoist_loop_invariant_indirect_load(ValueSsaFunction *function,
     const ValueSsaProgram *program,
     const ValueSsaDefUseAnalysis *analysis,
     const unsigned char *readonly_globals,
     const unsigned char *address_taken_locals,
+    const unsigned char *parameter_pointer_non_alias_pairs,
     const ValueSsaPerfSimpleLoop *loop,
+    unsigned char *value_has_mapping,
+    ValueSsaValueRef *value_mappings,
     ValueSsaBasicBlock *rebuilt_preheader,
     ValueSsaBasicBlock *rebuilt_target,
     const ValueSsaInstruction *instruction,
@@ -1217,6 +1472,7 @@ static int value_ssa_perf_try_hoist_loop_invariant_indirect_load(ValueSsaFunctio
     ValueSsaPerfAddressRoot load_root;
     ValueSsaInstruction cloned_load;
     ValueSsaInstruction replacement;
+    ValueSsaValueRef hoisted_addr;
 
     if (out_changed) {
         *out_changed = 0;
@@ -1242,9 +1498,17 @@ static int value_ssa_perf_try_hoist_loop_invariant_indirect_load(ValueSsaFunctio
     }
     if (!value_ssa_perf_extract_address_root(function, analysis, instruction->as.load_indirect_addr, &load_root, 0u) ||
         !value_ssa_perf_loop_instructions_preserve_indirect_load(
-            function, analysis, &function->blocks[loop->header_id], &load_root) ||
+            function,
+            analysis,
+            &function->blocks[loop->header_id],
+            parameter_pointer_non_alias_pairs,
+            &load_root) ||
         !value_ssa_perf_loop_instructions_preserve_indirect_load(
-            function, analysis, &function->blocks[loop->body_id], &load_root)) {
+            function,
+            analysis,
+            &function->blocks[loop->body_id],
+            parameter_pointer_non_alias_pairs,
+            &load_root)) {
         return 1;
     }
 
@@ -1252,7 +1516,21 @@ static int value_ssa_perf_try_hoist_loop_invariant_indirect_load(ValueSsaFunctio
     cloned_load.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
     cloned_load.has_result = 1;
     cloned_load.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
-    cloned_load.as.load_indirect_addr = instruction->as.load_indirect_addr;
+    if (!value_ssa_perf_clone_loop_invariant_value_into_preheader(
+            program,
+            function,
+            analysis,
+            readonly_globals,
+            loop,
+            instruction->as.load_indirect_addr,
+            value_has_mapping,
+            value_mappings,
+            rebuilt_preheader,
+            &hoisted_addr,
+            error)) {
+        return 0;
+    }
+    cloned_load.as.load_indirect_addr = hoisted_addr;
     if (cloned_load.result.value_id == (size_t)-1 ||
         !value_ssa_block_append_instruction(rebuilt_preheader, &cloned_load, error)) {
         return 0;
@@ -1262,6 +1540,184 @@ static int value_ssa_perf_try_hoist_loop_invariant_indirect_load(ValueSsaFunctio
     replacement.kind = VALUE_SSA_INSTR_MOV;
     replacement.has_result = 1;
     replacement.result = instruction->result;
+    replacement.as.mov_value = cloned_load.result;
+    if (!value_ssa_block_append_instruction(rebuilt_target, &replacement, error)) {
+        return 0;
+    }
+
+    if (out_changed) {
+        *out_changed = 1;
+    }
+    return 1;
+}
+
+static int value_ssa_perf_try_hoist_loop_invariant_branch_bound_load(ValueSsaFunction *function,
+    const ValueSsaProgram *program,
+    const ValueSsaDefUseAnalysis *analysis,
+    const unsigned char *readonly_globals,
+    const unsigned char *address_taken_locals,
+    const unsigned char *parameter_pointer_non_alias_pairs,
+    const ValueSsaPerfSimpleLoop *loop,
+    unsigned char *value_has_mapping,
+    ValueSsaValueRef *value_mappings,
+    ValueSsaBasicBlock *rebuilt_preheader,
+    ValueSsaBasicBlock *rebuilt_target,
+    const ValueSsaInstruction *instruction,
+    int *out_changed,
+    ValueSsaError *error) {
+    ValueSsaInstruction *condition_def = NULL;
+    ValueSsaValueRef candidate_value;
+    ValueSsaInstruction *candidate_def = NULL;
+    ValueSsaUseSite load_use_site;
+    ValueSsaInstruction cloned_load;
+    ValueSsaInstruction replacement;
+    ValueSsaPerfAddressRoot load_root;
+    ValueSsaValueRef hoisted_addr;
+    size_t use_offset;
+
+    if (out_changed) {
+        *out_changed = 0;
+    }
+    if (!function || !program || !analysis || !readonly_globals || !loop || !value_has_mapping || !value_mappings ||
+        !rebuilt_preheader || !rebuilt_target || !instruction) {
+        return 1;
+    }
+    if ((!address_taken_locals && function->local_count > 0u) ||
+        (!parameter_pointer_non_alias_pairs && function->parameter_count > 0u)) {
+        return 1;
+    }
+    if (loop->header_id >= function->block_count) {
+        return 1;
+    }
+    if (!function->blocks[loop->header_id].has_terminator ||
+        function->blocks[loop->header_id].terminator.kind != VALUE_SSA_TERM_BRANCH) {
+        return 1;
+    }
+    if (function->blocks[loop->header_id].terminator.as.branch.condition.kind != VALUE_SSA_VALUE_ID) {
+        return 1;
+    }
+
+    condition_def = value_ssa_pass_lookup_instruction_definition(
+        function, analysis, function->blocks[loop->header_id].terminator.as.branch.condition.value_id);
+    if (!condition_def || condition_def->kind != VALUE_SSA_INSTR_BINARY) {
+        return 1;
+    }
+
+    candidate_value.kind = VALUE_SSA_VALUE_IMMEDIATE;
+    candidate_value.immediate = 0;
+    candidate_value.value_id = 0u;
+    if (condition_def->as.binary.lhs.kind == VALUE_SSA_VALUE_ID) {
+        ValueSsaInstruction *lhs_def = value_ssa_pass_lookup_instruction_definition(
+            function, analysis, condition_def->as.binary.lhs.value_id);
+        if (lhs_def && lhs_def->kind == VALUE_SSA_INSTR_LOAD_INDIRECT) {
+            candidate_value = condition_def->as.binary.lhs;
+        }
+    }
+    if (candidate_value.kind != VALUE_SSA_VALUE_ID && condition_def->as.binary.rhs.kind == VALUE_SSA_VALUE_ID) {
+        ValueSsaInstruction *rhs_def = value_ssa_pass_lookup_instruction_definition(
+            function, analysis, condition_def->as.binary.rhs.value_id);
+        if (rhs_def && rhs_def->kind == VALUE_SSA_INSTR_LOAD_INDIRECT) {
+            candidate_value = condition_def->as.binary.rhs;
+        }
+    }
+    if (candidate_value.kind != VALUE_SSA_VALUE_ID ||
+        candidate_value.value_id >= analysis->value_count ||
+        analysis->use_counts[candidate_value.value_id] != 1u) {
+        return 1;
+    }
+
+    use_offset = analysis->use_offsets[candidate_value.value_id];
+    if (!analysis->use_sites ||
+        use_offset >= analysis->use_offsets[candidate_value.value_id] + analysis->use_counts[candidate_value.value_id]) {
+        return 1;
+    }
+    load_use_site = analysis->use_sites[use_offset];
+    if (load_use_site.kind != VALUE_SSA_USE_INSTR ||
+        load_use_site.block_id != loop->header_id ||
+        load_use_site.instruction_index >= function->blocks[loop->header_id].instruction_count) {
+        return 1;
+    }
+    if (&function->blocks[loop->header_id].instructions[load_use_site.instruction_index] != condition_def) {
+        return 1;
+    }
+    if (condition_def->has_result &&
+        condition_def->result.kind == VALUE_SSA_VALUE_ID &&
+        condition_def->result.value_id < analysis->value_count &&
+        analysis->use_counts[condition_def->result.value_id] == 1u) {
+        size_t condition_use_offset = analysis->use_offsets[condition_def->result.value_id];
+
+        if (!analysis->use_sites ||
+            analysis->use_sites[condition_use_offset].kind != VALUE_SSA_USE_TERM ||
+            analysis->use_sites[condition_use_offset].role != VALUE_SSA_USE_ROLE_BRANCH_CONDITION ||
+            analysis->use_sites[condition_use_offset].block_id != loop->header_id) {
+            return 1;
+        }
+    } else {
+        return 1;
+    }
+
+    candidate_def = value_ssa_pass_lookup_instruction_definition(function, analysis, candidate_value.value_id);
+    if (!candidate_def || candidate_def->kind != VALUE_SSA_INSTR_LOAD_INDIRECT) {
+        return 1;
+    }
+    if (candidate_def != instruction) {
+        return 1;
+    }
+    if (!value_ssa_perf_value_is_loop_invariant_for_indirect_addr(
+            program,
+            function,
+            analysis,
+            readonly_globals,
+            address_taken_locals,
+            loop,
+            candidate_def->as.load_indirect_addr,
+            0u)) {
+        return 1;
+    }
+    if (!value_ssa_perf_extract_address_root(function, analysis, candidate_def->as.load_indirect_addr, &load_root, 0u) ||
+        !value_ssa_perf_loop_instructions_preserve_indirect_load(
+            function,
+            analysis,
+            &function->blocks[loop->header_id],
+            parameter_pointer_non_alias_pairs,
+            &load_root) ||
+        !value_ssa_perf_loop_instructions_preserve_indirect_load(
+            function,
+            analysis,
+            &function->blocks[loop->body_id],
+            parameter_pointer_non_alias_pairs,
+            &load_root)) {
+        return 1;
+    }
+
+    memset(&cloned_load, 0, sizeof(cloned_load));
+    cloned_load.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
+    cloned_load.has_result = 1;
+    cloned_load.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+    if (!value_ssa_perf_clone_loop_invariant_value_into_preheader(
+            program,
+            function,
+            analysis,
+            readonly_globals,
+            loop,
+            candidate_def->as.load_indirect_addr,
+            value_has_mapping,
+            value_mappings,
+            rebuilt_preheader,
+            &hoisted_addr,
+            error)) {
+        return 0;
+    }
+    cloned_load.as.load_indirect_addr = hoisted_addr;
+    if (cloned_load.result.value_id == (size_t)-1 ||
+        !value_ssa_block_append_instruction(rebuilt_preheader, &cloned_load, error)) {
+        return 0;
+    }
+
+    memset(&replacement, 0, sizeof(replacement));
+    replacement.kind = VALUE_SSA_INSTR_MOV;
+    replacement.has_result = 1;
+    replacement.result = candidate_def->result;
     replacement.as.mov_value = cloned_load.result;
     if (!value_ssa_block_append_instruction(rebuilt_target, &replacement, error)) {
         return 0;
@@ -1300,9 +1756,7 @@ static int value_ssa_perf_clone_loop_invariant_value_into_preheader(const ValueS
         *out_value = mappings[value.value_id];
         return 1;
     }
-
-    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
-    if (!definition) {
+    if (value.value_id >= analysis->value_count || !analysis->has_def[value.value_id]) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-297: missing perf invariant definition for ssa.%zu", value.value_id);
         return 0;
     }
@@ -1310,6 +1764,12 @@ static int value_ssa_perf_clone_loop_invariant_value_into_preheader(const ValueS
         analysis->def_block_ids[value.value_id] != loop->body_id) {
         *out_value = value;
         return 1;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-297: missing perf invariant definition for ssa.%zu", value.value_id);
+        return 0;
     }
     if (!value_ssa_perf_value_is_loop_invariant(
             program,
@@ -1459,6 +1919,7 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             ValueSsaBasicBlock rebuilt_header;
             ValueSsaBasicBlock rebuilt_body;
             unsigned char *address_taken_locals = NULL;
+            unsigned char *parameter_pointer_non_alias_pairs = NULL;
             unsigned char *value_has_mapping = NULL;
             ValueSsaValueRef *value_mappings = NULL;
             unsigned char *local_has_mapping = NULL;
@@ -1467,11 +1928,15 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             ValueSsaValueRef *global_mappings = NULL;
             size_t instruction_index;
             int changed_loop = 0;
+            int phi_header_only = 0;
             int ok = 1;
 
             if (!value_ssa_perf_find_simple_single_body_loop(function, &cfg, header_id, &loop) &&
                 !value_ssa_perf_find_simple_branch_body_loop(function, &cfg, header_id, &loop)) {
-                continue;
+                if (!value_ssa_perf_find_phi_header_single_body_loop(function, &cfg, header_id, &loop)) {
+                    continue;
+                }
+                phi_header_only = 1;
             }
 
             preheader = &function->blocks[loop.preheader_id];
@@ -1492,6 +1957,11 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             if (function->local_count > 0u) {
                 address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
             }
+            if (function->parameter_count > 0u) {
+                parameter_pointer_non_alias_pairs = (unsigned char *)calloc(
+                    function->parameter_count * function->parameter_count,
+                    sizeof(unsigned char));
+            }
             if (function->next_value_id > 0u) {
                 value_has_mapping = (unsigned char *)calloc(function->next_value_id, sizeof(unsigned char));
                 value_mappings = (ValueSsaValueRef *)calloc(function->next_value_id, sizeof(ValueSsaValueRef));
@@ -1505,9 +1975,11 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                 global_mappings = (ValueSsaValueRef *)calloc(program->global_count, sizeof(ValueSsaValueRef));
             }
             if ((function->local_count > 0u && !address_taken_locals) ||
+                (function->parameter_count > 0u && !parameter_pointer_non_alias_pairs) ||
                 (function->next_value_id > 0u && (!value_has_mapping || !value_mappings)) ||
                 (function->local_count > 0u && (!local_has_mapping || !local_mappings)) ||
                 (program->global_count > 0u && (!global_has_mapping || !global_mappings))) {
+                free(parameter_pointer_non_alias_pairs);
                 free(global_mappings);
                 free(global_has_mapping);
                 free(local_mappings);
@@ -1525,6 +1997,7 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             }
             if (address_taken_locals &&
                 !value_ssa_perf_collect_address_taken_locals(function, address_taken_locals)) {
+                free(parameter_pointer_non_alias_pairs);
                 free(global_mappings);
                 free(global_has_mapping);
                 free(local_mappings);
@@ -1538,6 +2011,26 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                 value_ssa_cfg_analysis_free(&cfg);
                 free(readonly_globals);
                 value_ssa_set_error(error, 0, 0, "VALUE-SSA-295: failed collecting perf local address-taken flags");
+                return 0;
+            }
+            if (parameter_pointer_non_alias_pairs &&
+                !value_ssa_perf_collect_non_alias_parameter_pointer_pairs(
+                    program, function, parameter_pointer_non_alias_pairs)) {
+                free(parameter_pointer_non_alias_pairs);
+                free(global_mappings);
+                free(global_has_mapping);
+                free(local_mappings);
+                free(local_has_mapping);
+                free(value_mappings);
+                free(value_has_mapping);
+                free(address_taken_locals);
+                value_ssa_basic_block_free(&rebuilt_preheader);
+                value_ssa_basic_block_free(&rebuilt_header);
+                value_ssa_basic_block_free(&rebuilt_body);
+                value_ssa_cfg_analysis_free(&cfg);
+                free(readonly_globals);
+                value_ssa_set_error(
+                    error, 0, 0, "VALUE-SSA-295: failed collecting perf parameter non-alias pairs");
                 return 0;
             }
 
@@ -1729,7 +2222,38 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                 }
 
                 {
+                    int hoisted_branch_bound = 0;
                     int hoisted_indirect = 0;
+
+                    if (!value_ssa_perf_try_hoist_loop_invariant_branch_bound_load(
+                            function,
+                            program,
+                            &def_use,
+                            readonly_globals,
+                            address_taken_locals,
+                            parameter_pointer_non_alias_pairs,
+                            &loop,
+                            value_has_mapping,
+                            value_mappings,
+                            &rebuilt_preheader,
+                            &rebuilt_header,
+                            instruction,
+                            &hoisted_branch_bound,
+                            error)) {
+                        ok = 0;
+                        break;
+                    }
+                    if (hoisted_branch_bound) {
+                        changed_loop = 1;
+                        continue;
+                    }
+                    if (phi_header_only) {
+                        if (!value_ssa_block_append_instruction(&rebuilt_header, instruction, error)) {
+                            ok = 0;
+                            break;
+                        }
+                        continue;
+                    }
 
                     if (!value_ssa_perf_try_hoist_loop_invariant_indirect_load(
                             function,
@@ -1737,7 +2261,10 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                             &def_use,
                             readonly_globals,
                             address_taken_locals,
+                            parameter_pointer_non_alias_pairs,
                             &loop,
+                            value_has_mapping,
+                            value_mappings,
                             &rebuilt_preheader,
                             &rebuilt_header,
                             instruction,
@@ -1939,7 +2466,38 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                 }
 
                 {
+                    int hoisted_branch_bound = 0;
                     int hoisted_indirect = 0;
+
+                    if (!value_ssa_perf_try_hoist_loop_invariant_branch_bound_load(
+                            function,
+                            program,
+                            &def_use,
+                            readonly_globals,
+                            address_taken_locals,
+                            parameter_pointer_non_alias_pairs,
+                            &loop,
+                            value_has_mapping,
+                            value_mappings,
+                            &rebuilt_preheader,
+                            &rebuilt_body,
+                            instruction,
+                            &hoisted_branch_bound,
+                            error)) {
+                        ok = 0;
+                        break;
+                    }
+                    if (hoisted_branch_bound) {
+                        changed_loop = 1;
+                        continue;
+                    }
+                    if (phi_header_only) {
+                        if (!value_ssa_block_append_instruction(&rebuilt_body, instruction, error)) {
+                            ok = 0;
+                            break;
+                        }
+                        continue;
+                    }
 
                     if (!value_ssa_perf_try_hoist_loop_invariant_indirect_load(
                             function,
@@ -1947,7 +2505,10 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                             &def_use,
                             readonly_globals,
                             address_taken_locals,
+                            parameter_pointer_non_alias_pairs,
                             &loop,
+                            value_has_mapping,
+                            value_mappings,
                             &rebuilt_preheader,
                             &rebuilt_body,
                             instruction,
@@ -2022,6 +2583,7 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             free(local_has_mapping);
             free(value_mappings);
             free(value_has_mapping);
+            free(parameter_pointer_non_alias_pairs);
             free(address_taken_locals);
 
             if (!ok) {
