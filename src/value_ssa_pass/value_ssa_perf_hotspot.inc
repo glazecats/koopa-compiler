@@ -1310,6 +1310,50 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
             for (instruction_index = 0; ok && instruction_index < header->instruction_count; ++instruction_index) {
                 const ValueSsaInstruction *instruction = &header->instructions[instruction_index];
 
+                if ((instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL ||
+                        instruction->kind == VALUE_SSA_INSTR_ADDR_GLOBAL) &&
+                    instruction->has_result &&
+                    instruction->result.kind == VALUE_SSA_VALUE_ID &&
+                    value_ssa_perf_value_is_loop_invariant(
+                        program,
+                        function,
+                        &def_use,
+                        readonly_globals,
+                        &loop,
+                        instruction->result,
+                        0u)) {
+                    ValueSsaInstruction replacement;
+                    ValueSsaValueRef hoisted_value;
+
+                    if (!value_ssa_perf_clone_loop_invariant_value_into_preheader(
+                            program,
+                            function,
+                            &def_use,
+                            readonly_globals,
+                            &loop,
+                            instruction->result,
+                            value_has_mapping,
+                            value_mappings,
+                            &rebuilt_preheader,
+                            &hoisted_value,
+                            error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    memset(&replacement, 0, sizeof(replacement));
+                    replacement.kind = VALUE_SSA_INSTR_MOV;
+                    replacement.has_result = 1;
+                    replacement.result = instruction->result;
+                    replacement.as.mov_value = hoisted_value;
+                    if (!value_ssa_block_append_instruction(&rebuilt_header, &replacement, error)) {
+                        ok = 0;
+                        break;
+                    }
+                    changed_loop = 1;
+                    continue;
+                }
+
                 if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
                     instruction->has_result &&
                     instruction->result.kind == VALUE_SSA_VALUE_ID &&
@@ -1475,6 +1519,50 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
 
             for (instruction_index = 0; ok && instruction_index < body->instruction_count; ++instruction_index) {
                 const ValueSsaInstruction *instruction = &body->instructions[instruction_index];
+
+                if ((instruction->kind == VALUE_SSA_INSTR_ADDR_LOCAL ||
+                        instruction->kind == VALUE_SSA_INSTR_ADDR_GLOBAL) &&
+                    instruction->has_result &&
+                    instruction->result.kind == VALUE_SSA_VALUE_ID &&
+                    value_ssa_perf_value_is_loop_invariant(
+                        program,
+                        function,
+                        &def_use,
+                        readonly_globals,
+                        &loop,
+                        instruction->result,
+                        0u)) {
+                    ValueSsaInstruction replacement;
+                    ValueSsaValueRef hoisted_value;
+
+                    if (!value_ssa_perf_clone_loop_invariant_value_into_preheader(
+                            program,
+                            function,
+                            &def_use,
+                            readonly_globals,
+                            &loop,
+                            instruction->result,
+                            value_has_mapping,
+                            value_mappings,
+                            &rebuilt_preheader,
+                            &hoisted_value,
+                            error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    memset(&replacement, 0, sizeof(replacement));
+                    replacement.kind = VALUE_SSA_INSTR_MOV;
+                    replacement.has_result = 1;
+                    replacement.result = instruction->result;
+                    replacement.as.mov_value = hoisted_value;
+                    if (!value_ssa_block_append_instruction(&rebuilt_body, &replacement, error)) {
+                        ok = 0;
+                        break;
+                    }
+                    changed_loop = 1;
+                    continue;
+                }
 
                 if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
                     instruction->has_result &&
