@@ -101,6 +101,38 @@ static int machine_ir_protect_same_register_value_pair(const ValueSsaFunctionMac
                rhs.value_id, machine_view->value_count, slots, next_spill_slot, error);
 }
 
+static int machine_ir_branch_live_out_value_has_register_alias(
+    const ValueSsaFunctionMachineAllocationView *machine_view,
+    const ValueSsaMachineRegisterBank *bank,
+    const unsigned char *live_out_row,
+    size_t value_id) {
+    const ValueSsaMachineAllocatedValuePlacement *placement = NULL;
+    size_t other_value_id;
+
+    if (!machine_view || !bank || !live_out_row || value_id >= machine_view->value_count || !live_out_row[value_id] ||
+        !value_ssa_function_machine_allocation_view_get_placement(machine_view, value_id, &placement) ||
+        !placement || placement->kind != VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR ||
+        placement->machine_register_id >= bank->register_count) {
+        return 0;
+    }
+
+    for (other_value_id = 0; other_value_id < machine_view->value_count; ++other_value_id) {
+        const ValueSsaMachineAllocatedValuePlacement *other_placement = NULL;
+
+        if (other_value_id == value_id || !live_out_row[other_value_id] ||
+            !value_ssa_function_machine_allocation_view_get_placement(
+                machine_view, other_value_id, &other_placement) ||
+            !other_placement || other_placement->kind != VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR) {
+            continue;
+        }
+        if (other_placement->machine_register_id == placement->machine_register_id) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int machine_ir_function_has_call_instruction(const ValueSsaFunction *function) {
     size_t block_index;
 
@@ -119,6 +151,18 @@ static int machine_ir_function_has_call_instruction(const ValueSsaFunction *func
         }
     }
     return 0;
+}
+
+static int machine_ir_call_crossing_protection_enabled(void) {
+    return !machine_ir_env_flag_enabled("MACHINE_IR_SKIP_PROTECTED_CALL_CROSSING_SPILLS");
+}
+
+static int machine_ir_branch_alias_protection_enabled(void) {
+    return !machine_ir_env_flag_enabled("MACHINE_IR_SKIP_BRANCH_ALIAS_PROTECTED_SPILLS");
+}
+
+static int machine_ir_phi_alias_protection_enabled(void) {
+    return !machine_ir_env_flag_enabled("MACHINE_IR_SKIP_PHI_ALIAS_PROTECTED_SPILLS");
 }
 
 static int machine_ir_build_protected_call_crossing_spill_slots(
@@ -184,7 +228,7 @@ static int machine_ir_build_protected_call_crossing_spill_slots(
     }
 
     next_spill_slot = machine_view->spill_slot_count;
-    if (function_has_call) {
+    if (function_has_call && machine_ir_call_crossing_protection_enabled()) {
         for (value_id = 0; value_id < machine_view->value_count; ++value_id) {
             const ValueSsaMachineAllocatedValuePlacement *placement = NULL;
 
@@ -272,7 +316,8 @@ static int machine_ir_build_protected_call_crossing_spill_slots(
             }
         }
 
-        for (phi_index = 0u; phi_index < block->phi_count; ++phi_index) {
+        if (machine_ir_phi_alias_protection_enabled()) {
+            for (phi_index = 0u; phi_index < block->phi_count; ++phi_index) {
             size_t phi_value_id = block->phis[phi_index].result_id;
             const ValueSsaMachineAllocatedValuePlacement *phi_placement = NULL;
 
@@ -300,23 +345,21 @@ static int machine_ir_build_protected_call_crossing_spill_slots(
                 slots[phi_value_id] = next_spill_slot++;
                 break;
             }
+            }
         }
 
         if (block->terminator.kind != VALUE_SSA_TERM_BRANCH) {
             continue;
         }
-        for (value_id = 0; value_id < machine_view->value_count; ++value_id) {
-            const ValueSsaMachineAllocatedValuePlacement *live_out_placement = NULL;
-
-            if (!live_out_row[value_id] || slots[value_id] != (size_t)-1 ||
-                !value_ssa_function_machine_allocation_view_get_placement(
-                    machine_view, value_id, &live_out_placement) ||
-                !live_out_placement ||
-                live_out_placement->kind != VALUE_SSA_ALLOCATED_VALUE_PLACEMENT_COLOR ||
-                live_out_placement->machine_register_id >= bank->register_count) {
-                continue;
+        if (machine_ir_branch_alias_protection_enabled()) {
+            for (value_id = 0; value_id < machine_view->value_count; ++value_id) {
+                if (!live_out_row[value_id] || slots[value_id] != (size_t)-1 ||
+                    !machine_ir_branch_live_out_value_has_register_alias(
+                        machine_view, bank, live_out_row, value_id)) {
+                    continue;
+                }
+                slots[value_id] = next_spill_slot++;
             }
-            slots[value_id] = next_spill_slot++;
         }
         if (block->terminator.as.branch.condition.kind != VALUE_SSA_VALUE_ID) {
             continue;
@@ -488,6 +531,7 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
                 function->locals[local_index].is_parameter,
                 NULL,
                 error)) {
+            free(protected_spill_slots);
             machine_ir_function_free(out_function);
             return 0;
         }

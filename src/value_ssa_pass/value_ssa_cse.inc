@@ -195,7 +195,10 @@ static int value_ssa_redundant_binary_enter_block(const ValueSsaFunction *functi
         ValueSsaValueRef existing;
 
         if (instruction->kind != VALUE_SSA_INSTR_BINARY ||
-            !value_ssa_binary_op_is_removable_dead_def(instruction->as.binary.op)) {
+            !value_ssa_binary_op_is_safe_reusable_pure_binary(
+                instruction->as.binary.op,
+                instruction->as.binary.lhs,
+                instruction->as.binary.rhs)) {
             continue;
         }
 

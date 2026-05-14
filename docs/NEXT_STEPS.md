@@ -41,6 +41,9 @@
   - `03_sort1` / `03_sort3`: reclosed
   - `lava-test/lava_test/kmp.sy`: reclosed
   - `lv8`, `lv9`, `autotest -riscv`, `autotest -perf`: green
+  - latest full logged course perf rerun on `2026-05-13`: green (`130/130`)
+  - the earlier `brainfuck-*` perf compile-crash pair is reclosed on the
+    live tree
 - Current active remaining pressure is mainly perf / timeout oriented:
   - public perf:
     - `03_sort2.sy -> RUN_TIMEOUT`
@@ -165,6 +168,956 @@
     swept directly instead of returning `SKIP` for missing outputs.
 
 ## Current Active Slice
+
+- 2026-05-12 optimization-plan checkpoint for the current user-directed round:
+  this round is now explicitly driven by the following maintained plan, and it
+  should be treated as the active authority until it is either closed or
+  superseded by a later dated note here.
+ 1. `void call` pointless-code cleanup
+     - audit all remaining `void call`-adjacent no-op materialization such as
+       synthetic zero-result temps, dead result placeholders, or other
+       compatibility-only code that survives after semantic validation already
+       guarantees `SEMA-CALL-007` (`void` call results are not used in value
+       contexts)
+     - current status: **in progress**
+     - current kept closure inside this item:
+       `lower_ir` no longer appends a synthetic `tmp = 0` after `void call`,
+       and the lower-IR verifier now accepts unused temp-id gaps while still
+       rejecting real use-before-def
+  2. in-repo regression surface realignment
+     - keep `make test` usable by updating stale dump/report expectations that
+       no longer match the live implementation, but only when the runtime /
+       semantic behavior is still correct and the mismatch is purely an old
+       output-shape assertion
+     - current status: **in progress**
+     - current narrowed tail:
+       the earlier wide `make test` red surface has already shrunk to a small
+       set of `machine_select` report/query expectation mismatches after the
+       `compiler-driver`, `lower-ir`, and `machine_ir` stale expectations were
+       realigned
+     - current 2026-05-12 restamp:
+       `test-compiler-driver`, `test-lower-ir-regression`, and
+       `test-lower-ir-verifier` are green again on the live tree; the
+       remaining in-repo red surface is still a stale `machine_select`
+       dump-expectation cleanup family rather than a newly confirmed
+       implementation regression
+     - same-day perf-side experiment note:
+       a first late `stack store/reload -> mv` peephole in
+       `compiler_driver.c` was tried and then backed out again because it
+       interfered with the existing final-text rewrite surface before earning
+       a trustworthy correctness proof
+     - later same-day selected-IR experiment note:
+       a very conservative same-block slot-load forwarding cleanup was added
+       in `machine_select` (`load_local/load_global` reuses only when no
+       intervening `call`, no `store_indirect`, no same-slot store, and no
+       redefinition of the earlier loaded result appears in the same block).
+       Course functional recheck stayed green on this baseline, but the first
+       static hotspot evidence is not yet encouraging:
+       `06_mv1` stayed flat in instruction-line count while `09_spmv1` grew
+       versus the older local snapshot, so this line remains provisional
+     - 2026-05-13 follow-up:
+       focused runtime checks then confirmed that the slot-load cleanup is
+       “safe but mixed” rather than the main hotspot answer:
+       `06_mv1`, `07_mv2`, and `13_fft1` improved, but `09_spmv1` regressed
+       and `11_spmv3` also drifted slightly slower. Current authority is
+       therefore to stop treating slot-load forwarding as the primary perf
+       line.
+     - 2026-05-13 `brainfuck` regression re-localization follow-up:
+       the older allocator suspicion was rechecked and the real gap was
+       narrowed into `machine_ir` lowering instead. Direct old-vs-current
+       allocator dumps show `get_bf_char`, `read_program`, and
+       `run_program` still leaving allocation as a color-only result, but
+       the later `machine_ir` protected call-crossing spill path had grown
+       the visible `spills=` count on the hot witness. After narrowing that
+       protected-spill shape and rebuilding, the course-style
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` runtime for
+       `18_brainfuck-bootstrap` / `19_brainfuck-calculator` is back to about
+       `13.702s` / `24.194s`, and a full `autotest -riscv -t /opt/bin/testcases
+       /workspaces/compiler_lab` rerun is green again (`130/130`). Current
+       authority is therefore that the main `brainfuck` regression is now
+       materially reclosed on the live tree; future perf work should rotate
+       back to the remaining witnesses rather than continuing to blame the
+       allocator mainline for this one.
+     - 2026-05-13 newer selected-IR follow-up:
+       a separate very conservative same-block repeated register
+       pure-expression reuse cleanup was added in `machine_select`.
+       Course `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` stayed
+       green again, `make test-compiler-driver` stayed green, and the `spmv1`
+       textual regression introduced by the slot-load experiment was partly
+       repaired: the repeated `lw t6, 68/72(sp)` + `slli` pair disappeared and
+       `09_spmv1` returned from `200` instruction lines to `196`. Runtime
+       evidence after that repair is now also better than the immediately
+       previous baseline: `06_mv1` improved again, `09_spmv1` recovered part
+       of the earlier regression, and `13_fft1` improved further. The line is
+       still not enough to beat the older historical `spmv1` baseline, but it
+       currently looks more justifiable than the earlier slot-load cleanup
+       itself and should be kept while the next pass attacks the remaining
+       `spmv1` address/index chain directly.
+     - later 2026-05-13 repeated-load follow-up:
+       one more attempted refinement then replaced the later repeated
+       same-block `load_indirect` with a direct `copy` of the earlier load
+       result. Although that removed the visible `68/72(sp)` spill+reload
+       pair, it made `spmv1` materially worse by reintroducing repeated shift
+       work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
+       attempt has now been backed out. Current authority after rollback is:
+       keep the commutative repeated pure-expression reuse,
+       do not keep the direct repeated-load-to-copy rewrite,
+       and continue from the restored `194`-instruction `spmv1` baseline.
+     - later 2026-05-13 pass-isolation follow-up:
+       one more focused A/B run then split the likely selected-side causes of
+       the remaining `spmv1` slowdown. Disabling
+       `MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR` barely changed the result,
+       while disabling `MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS`
+       restored the older `196`-instruction form and, on that focused run,
+       actually came back faster than the current `194`-instruction default.
+       Current authority is therefore to concentrate the next diagnosis round
+       on the `forward_same_block_indirect_loads` cleanup itself rather than
+       on the later `reuse_spill_pure_expr` cleanup.
+     - later 2026-05-13 unique-predecessor slot-load retry:
+       one more very narrow selected-side experiment then tried
+       unique-predecessor cross-block `load_local/load_global` forwarding
+       when the predecessor had just fixed the same slot with a direct
+       `store_local/store_global` value.
+       The result was useful mainly as a negative datapoint:
+       the line stayed correctness-green
+       (`make test-machine-select` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)),
+       but the local hotspot witnesses stayed exactly flat after explicit
+       rebuild:
+       `fft1 = 544` asm lines,
+       `mv1 = 249` asm lines,
+       `spmv1 = 253` asm lines.
+       Current authority is therefore to keep this retry backed out and to
+       treat it as another **no-payoff selected-side slot-load branch**,
+       rather than as the next mainline optimization target.
+     - 2026-05-14 follow-up on the same selected-side line:
+       I tried one narrower variant that admitted `load_local/load_global`
+       into the cross-block unique-predecessor pure-expression reuse set.
+       Rebuild + regression stayed green (`make test-compiler-driver`,
+       `lv8`, `lv9`), but the measured hotspot witnesses did not improve:
+       `06_mv1` stayed around `12.7s`, `09_spmv1` stayed around `15.0s`,
+       and `13_fft1` stayed around `8.2s`. Current authority is therefore to
+       back this variant out again and return to the stronger
+       source/selected-shape hotspots instead of widening this branch further.
+  3. optimization-pass expansion is now explicitly in scope for the current
+     perf round, not only tiny cleanup tweaks
+     - newly explicit candidate passes:
+       helper inlining, bounded loop unrolling, loop peeling, loop-invariant
+       pure-call hoisting, hotspot-specific address/index CSE, light constant-
+       argument specialization, induction/strength-reduction cleanup, and
+       late backend redundant-code cleanup
+     - current priority order:
+       first helper inlining and address/index-strength cleanup on measured
+       witnesses (`fft1`, `spmv1`, `mv1`), then bounded loop transforms only
+       if earlier smaller passes do not move the real hotspot enough
+     - keep this witness-driven: every new pass needs a concrete hot testcase
+       and must survive the normal `lv1-lv9` correctness gate before it is
+       treated as kept work
+     - rebuild-discipline reminder for this round:
+       never run `make compiler` in parallel with witness execution,
+       dump-tool reads, asm diffs, `autotest`, or profiling commands;
+       rebuild first, wait for completion, then validate serially
+     - semantic-safety reminder for this round:
+       be conservative around trap-sensitive arithmetic such as `div/mod`
+       only until the invalid-input case is discharged on the optimized path;
+       after that, treat `div/mod` reuse/CSE as an intended major optimization
+       direction rather than as a forbidden zone
+     - newly explicit optimization authority:
+       repeated `div/mod` and `div`-derived address/index chains are now a
+       first-class optimization target for this round, especially on `fft1`
+       and similar hotspot witnesses
+     - newly explicit sibling subtask on that same line:
+       add semantic-safe constant folding for `div/mod/shift`, since the
+       current fold path still intentionally skips those ops entirely
+  4. 2026-05-13 broad perf-regression closure
+     - a full logged rerun of `autotest -perf /workspaces/compiler_lab`
+       is now green again: `130/130`
+     - this closes the temporary course perf blocker that had turned out to
+       be a lower-IR verifier / terminator-payload bug rather than a runtime
+       hotspot issue
+     - concrete closure note:
+       `perf/18_brainfuck-bootstrap` and
+       `perf/19_brainfuck-calculator` both pass after the lower-IR fix
+     - next mainline after this closure:
+       return to measured optimization work on the hotspot witnesses
+       (`fft1`, `spmv1`, `mv1`, and third-party perf cases), using the newly
+       explicit candidate-pass menu from `docs/OPTIMIZATION_PLAN.md`
+     - later 2026-05-13 safeguard follow-up:
+       one more attempted narrowing on `forward_same_block_indirect_loads`
+       tried to refuse rewrites when the earlier load result would need to be
+       preserved across an intervening redefinition. That simply restored the
+       older `196`-instruction `spmv1` form and slowed the focused run to
+       roughly `16.74s`, so the safeguard was backed out immediately.
+       Current authority after rollback remains:
+       keep the commutative pure-expression reuse,
+       keep the existing indirect-load forwarding pass,
+       and continue from the restored safer baseline instead of this failed
+       narrower variant.
+     - later 2026-05-13 infrastructure follow-up:
+       the cleanup layer now has the first missing primitive for a real third
+       strategy: a block-local `insert op before index` helper has been added
+       to `machine_select_cleanup`. A first attempt to immediately use that
+       helper for the `spmv1` repeated-load hotspot was intentionally *not*
+       kept, and the worktree has already been restored to the same safer
+       baseline (`spmv1` back at `196` instruction lines,
+       `make test-compiler-driver` PASS). Current authority is therefore:
+       the helper is ready, but the actual "preserve register result + insert
+       copy" hotspot rewrite should only land once it is complete enough to be
+       verified end-to-end, not as another half-finished intermediate variant.
+     - later 2026-05-13 termination-diagnosis follow-up:
+       one more preserve-register attempt was then tried and also backed out.
+       The useful kept diagnosis from that round is:
+       `timeout ... env MACHINE_SELECT_TRACE_TIMING=1 build/dump_machine_stage select 04_spmv1.sy`
+       still timed out on the default path **before** any
+       `cleanup-forward-same-block-indirect-loads` completion marker,
+       while the same command with
+       `MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS=1`
+       completed immediately. That experiment also exposed one concrete local
+       bug in the first preserve-copy draft: after inserting a block-local
+       copy, the code initially rewrote the wrong op because the insertion
+       shifted `op_index`. That index bug was fixed during diagnosis, but the
+       overall preserve-register variant was still backed out because the
+       default `forward_same_block_indirect_loads` line remained the active
+       timeout surface on the real `spmv1` witness. Current authority after
+       rollback is therefore:
+       keep the worktree on the older safe baseline,
+       treat `forward_same_block_indirect_loads` as the active hotspot /
+       non-termination diagnosis surface,
+       and require a real termination check on `04_spmv1.sy` before keeping
+       any future preserve-copy variant.
+     - later 2026-05-13 fresh-tool rebuild follow-up:
+       that nontermination suspicion was then rechecked after explicitly
+       rebuilding the helper binaries themselves
+       (`build/dump_machine_stage` and `build/machine_select/machine_select_test`),
+       and the earlier timeout conclusion turned out to be stale-tool noise.
+       Fresh runs on the live tree show both:
+       `build/dump_machine_stage select 04_spmv1.sy`
+       and the same command with
+       `MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS=1`
+       complete immediately again. The active issue is therefore back to a
+       shape/perf problem inside `forward_same_block_indirect_loads`, not a
+     - later 2026-05-13 final-text constant-reuse follow-up:
+       one already-implemented final-text peephole,
+       `compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(...)`,
+       was wired into the live preview-text optimization chain. After a clean
+       rebuild, `13_fft1` dropped from `544` asm lines to `542` while
+       `04_spmv1` and `02_mv1` stayed unchanged at `253` / `249` lines.
+       Correctness rechecks stayed green (`make test-compiler-driver`,
+       `autotest -riscv -s lv8`, `autotest -riscv -s lv9`), so this is now a
+       small kept `fft1` win before rotating back to the heavier hotspot
+       families.
+  5. 2026-05-13 `fft1` default-fast-path structural cleanup
+     - the default indirect-memory `ValueSSA` fast path had been missing the
+       already-proven repeated pure internal call reuse cleanup, so the
+       default `fft1` mainline could still keep duplicate same-block
+       `multiply(w, w)` calls in `fft bb.5`
+     - wiring that cleanup into the indirect-memory fast path is now landed
+       and verified after explicit rebuild of both the compiler and helper
+       dump tools
+     - concrete witness effect:
+       in `fft bb.5`, the second `multiply(w, w)` disappears; the second
+       recursive `fft(...)` now reuses the first multiply result directly
+       instead of recomputing it
+     - downstream emitted-text effect is smaller than the selected-side
+       cleanup itself but still real:
+       the `fft` stack frame drops from `112` bytes to `96` bytes, while the
+       whole-program static instruction count remains at the current
+       `476`-instruction plateau
+     - correctness restamp:
+       `make test-compiler-driver` PASS and course
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` PASS
+     - next immediate mainline after this closure:
+       stay on `fft1`, but rotate from duplicate-call reuse to the remaining
+       `bb.10` address/index materialization (`div` / `mul` / `add` chains)
+       since that is now the sharper witness than the already-closed
+       `bb.5` duplicate-call site
+     - later 2026-05-13 perf-only follow-up:
+       a stale helper-binary rerun briefly made `spmv1` look like it still
+       contained the old repeated `load_indirect` pair, but that was just an
+       old `build/dump_middle_stage` artifact. After explicitly rebuilding
+       the helper, the real remaining repeat on the live `-perf` path turned
+       out to be `fft1`'s duplicate `power(3, (mod - 1) / d)` call in
+       `main`, and the new perf-only same-block pure-call reuse sweep now
+       removes it. The kept witness effect is small but real:
+       `13_fft1` drops from `547` lines to `544`, and `call power` drops from
+       `5` to `4`. Course `lv8` / `lv9` stayed green after the rebuild.
+     - later 2026-05-13 `mv1` perf probe:
+       one follow-up rereread then rotated to `06_mv1`, which still sits near
+       the front of the course-perf runtime list. A conservative perf-only
+       simple-loop load-hoist probe was added so loop-invariant
+       `load_local` / `load_global` values in a simple single-body loop may
+       be cloned into the preheader and reused in the body. The immediate
+       payoff is only modest: the emitted `06_mv1` line count does not drop,
+       but the front `res[i] = 0` loop now reuses its hoisted base instead of
+       reloading it inside the loop. Current authority is to keep this as a
+       small safe step, not as the final `mv1` hotspot closure. Course `lv8`
+       / `lv9` stayed green after the rebuild.
+     - later 2026-05-13 fresh old-vs-current perf compare:
+       a direct rerun against the old compiler clarified the current runtime
+       picture. The current tree is not generally worse on the witnesses we
+       care about now: `13_fft1` improved very substantially
+       (`20.176s -> 9.514s`), `06_mv1` improved modestly
+       (`15.108s -> 14.692s`), `09_spmv1` stayed effectively flat, and
+       `19_brainfuck-calculator` remained the heaviest witness without a
+       meaningful regression relative to the old compiler. Current authority
+       after that compare is to keep treating `fft1` plus nearby `mv1`
+       dynamic-reuse work as the most productive active slice before
+       reopening `brainfuck-calculator`.
+  6. 2026-05-13 semantic-safe `div/mod/shift` constant-fold reopen
+     - a first conservative ValueSSA fold implementation is now landed for
+       `div/mod/shift`, using the same safety boundaries already encoded in
+       the interpreter-facing arithmetic rules
+     - kept safety boundary:
+       do not fold `/0`, `INT_MIN / -1`, `INT_MIN % -1`, invalid shift counts,
+       or left-shift of negative values
+     - focused external recheck after rebuild is green:
+       `make test-compiler-driver` PASS and course
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` PASS
+     - the re-exposed internal red surface was confirmed to be older
+       default-path expectation drift rather than a new semantic bug in the
+       fresh fold rules
+     - kept expectation realignment:
+       `VALUE-SSA-CONVERT-DEFAULT-FOLD`,
+       `VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL`, and
+       `VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM` now reflect
+       the current intended split between default-path behavior and the older
+       canonicalized/direct references
+     - closure evidence:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS, and course
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` PASS
+     - next immediate follow-up:
+       rotate back to hotspot optimization work on `fft1 bb.10`, now that the
+       semantic-safe `div/mod/shift` fold line and its stale expectation tail
+       are both closed enough for this round
+     - later 2026-05-14 perf simple-loop invariant-arithmetic follow-up:
+       one new narrow perf-side extension is now landed on top of the earlier
+       simple-loop invariant-load hoist: inside the same already-proven
+       simple-loop shapes, loop-invariant `mov` / `binary` values may now
+       also be cloned into the preheader and replaced by loop-local `mov`
+       uses. This is intentionally still a small structural extension of the
+       existing hoist machinery, not a broad LICM framework. A focused
+       regression (`VALUE-SSA-PERF-HOTSPOT-LOOP-INVARIANT-BINARY`) now locks
+       the basic behavior. Current closure evidence on the live tree:
+       `make test-value-ssa-regression` PASS,
+       `make compiler` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Real runtime comparison against the older `koopa-compiler.zip` baseline
+       on the same course-style `compiler -> clang -> ld.lld -> qemu-riscv32-static`
+       flow also still moves in the right direction:
+       `06_mv1` improves from about `14.123s` to `13.902s`,
+       `09_spmv1` improves from about `15.429s` to `15.173s`,
+       while the already-strong `13_fft1` line stays far ahead
+       (`~21.182s -> ~9.681s`).
+       Current authority is therefore to keep this as a correctness-green perf
+       structural step, treat the targeted `mv1` / `spmv1` runtime movement as
+       real despite slightly larger static text, and only then decide whether
+       to widen the transform further.
+     - later same-day `spmv1` / `mv1` local-driven widening follow-up:
+       two narrower extensions were then tested and are **not** kept as active
+       mainline directions:
+       `1)` allowing ordinary scalar local loads into the perf simple-loop
+       invariant hoist, and
+       `2)` allowing those ordinary scalar locals only inside the invariant
+       proof for indirect-load addresses.
+       Both variants stayed correctness-green on
+       `make test-value-ssa-regression`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`,
+       but the measured runtime did not justify them.
+       The broader scalar-local version regressed all three sampled witnesses,
+       and the narrower indirect-address-only variant still did not actually
+       eliminate the intended `spmv1` `b[i] - 1` hot-path recomputation.
+       Fresh course-style reruns on the narrowed variant landed around
+       `06_mv1 ~= 14.052s`,
+       `09_spmv1 ~= 15.475s`,
+       `13_fft1 ~= 9.585s`.
+       Current authority is therefore to stop widening the generic perf
+       `ValueSSA` hoist line for this family.
+     - later same-day old/current selected-shape compare follow-up:
+       direct selected dumps for `spmv1` and `mv1` now indicate that the
+       remaining difference is not just one missed arithmetic fold. The
+       current tree tends to preload/cache more locals and carry more
+       block-local structural scaffolding in hot blocks, while the older tree
+       materializes some addresses more directly inside the same blocks.
+       Concrete current hotspots remain
+       `spmv bb.8/bb.11`
+       and
+       `mv bb.10/bb.11`,
+       which still contain repeated same-root `load_indirect` families plus
+       extra local/cache carriers. Current authority is therefore to rotate
+       the next optimization round away from generic `ValueSSA` loop hoisting
+       and toward targeted `machine_select` / backend cleanup on those exact
+       selected-shape witnesses.
+     - later same-day downstream-stage cross-check correction:
+       after comparing old/current `select -> emit -> bytes -> final asm`
+       on `spmv1` / `mv1`, the simplest size-based explanation did not hold
+       up. The current tree is actually at least as compact as the older tree
+       on those downstream artifacts, while runtime stays roughly tied:
+       `06_mv1` current `~23.388s` vs old `~23.796s`,
+       `09_spmv1` current `~25.314s` vs old `~25.313s`,
+       and `13_fft1` still strongly favors the current tree
+       (`~16.092s` vs `~34.351s`) on the same measurement flow.
+       Current authority is therefore to stop over-prioritizing `mv1` /
+       `spmv1` downstream shrink work merely because some local selected
+       blocks look structurally different, and to rotate the next perf round
+       back toward witnesses whose runtime still offers clearer upside.
+  7. 2026-05-13 semantic-safe `div/mod/shift` reuse/CSE payoff
+     - after the safe fold checkpoint, the same arithmetic line was widened
+       one careful step further: repeated safe `div/mod/shift` expressions may
+       now participate in redundant-binary / same-block identical-run reuse
+     - important boundary:
+       this is a reuse/CSE-only widening, not a broad dead-def-elimination
+       relaxation for dangerous arithmetic
+     - concrete witness payoff on `fft1`:
+       final static instruction count now drops from `476` to `470`
+     - current interpretation of the gain:
+       the first real runtime-facing payoff of the new `div/mod` line lands in
+       `fft bb.10`, where repeated `div`-derived address/index work is now
+       shorter in the final emitted text
+     - correctness restamp:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS, and course
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` PASS
+     - next immediate follow-up:
+       stay on `fft1 bb.10` and see whether one more narrow address/index
+       cleanup can compound on top of the new safe `div` reuse baseline
+       currently reproduced nontermination bug.
+     - later 2026-05-13 kept narrow guard follow-up:
+       one narrower selected-side fix is now kept on top of that clarified
+       baseline. `forward_same_block_indirect_loads` now skips the
+       spill-forcing rewrite when the earlier repeated `load_indirect` result
+       is already consumed by a small reusable pure expression before the
+       later same-address load. This specifically avoids the harmful
+       `spill.8/spill.9 -> alui.2 -> ...` shape on the `spmv` hotspot while
+       leaving the broader repeated-load forwarding line intact.
+       Fresh local evidence on the rebuilt tools/binaries:
+       default `04_spmv1.sy` `-perf` output returns to `279` assembly lines
+       (back in line with the old `SKIP_FORWARD` shape rather than the
+       `277`-line spill-forced shape),
+       the hot loop no longer prints the `sw/lw 68(sp)` / `sw/lw 72(sp)`
+       save-reload pair,
+       and a quick direct qemu micro-run came back around
+       `run_default ~= 0.0216s` versus
+       `run_skip ~= 0.0176s`.
+       Correctness gate after this kept guard reclosed:
+       `make test-compiler-driver` PASS,
+       `lv1` PASS, `lv3` PASS, `lv4` PASS, `lv5` PASS, `lv6` PASS,
+       `lv7` PASS, `lv8` PASS, `lv9` PASS.
+     - later 2026-05-13 next-hotspot rerank + kept indirect-store/load line:
+       one fresh rebuilt local reranking then moved the front-most quick
+       course-perf pressure away from `spmv`: in the current micro-check,
+       `00_bitset2.sy` was heavier than `01_mm1.sy`, and both were heavier
+       than the now-repaired `04_spmv1.sy`.
+       A new kept narrow cleanup is now active for that line:
+       same-block `store_indirect(addr, value)` followed by a later
+       same-address `load_indirect addr` may forward the stored value
+       directly when there is no intervening call, no potentially aliasing
+       memory write, and no redefinition/clobber of the stored value.
+       Current kept local evidence after that change:
+       `00_bitset2.sy` now drops from the older local `372`-line shape to
+       about `362` lines and runs around `0.0042s` in the quick qemu
+       micro-check; `01_mm1.sy` stays around `327` lines / `0.0038s`; and
+       `04_spmv1.sy` stays around `279` lines / `0.0034s`.
+       A deeper selected-stage witness also confirms the optimization is
+       landing where expected: on `00_bitset2.sy`, the selected `set`
+       function drops from roughly `145` ops to roughly `125` ops because the
+       initial same-block `store_indirect` ladder is now forwarded directly
+       into later same-address `load_indirect` uses instead of round-tripping
+       through immediate reload chains.
+       Correctness recheck is also green so far on this state:
+       `make test-compiler-driver` PASS and course
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8` have rerun PASS.
+       The remaining required confirmation for this exact kept line is the
+       final fresh `lv9` restamp after the current rerun chain finishes.
+     - later 2026-05-13 mm1 follow-up:
+       that final `lv9` restamp has now also reclosed green, so the current
+       kept lines (`spmv` repeated-load guard and `bitset2` same-block
+       indirect-store/load forwarding) are both sitting on a fully green
+       course correctness baseline again.
+       One attempted next-step reopen on `mm1` was then tried and backed out:
+       a unique-predecessor cross-block `store_local/store_locali ->
+       load_local` forwarding pass produced no selected-shape change and no
+       local perf movement, and it has already been removed again.
+       To avoid reopening that same dead end by memory alone, the new helper
+       `tools/analyze_machine_select_loop_slot_candidates.py` is now the
+       first required preflight for this line. Fresh runs of that tool against
+       the current `mm1` and `bitset2` selected dumps both returned
+       `<none>`, meaning the current selected form does **not** actually
+       expose the simple unique-predecessor slot-carry pairs that the backed-
+       out cross-block experiment expected. Current authority is therefore:
+       do not reopen cross-block slot forwarding for `mm1` until a stronger
+       witness is built; the next useful `mm1` diagnosis should start from
+       the real selected/address-formation shape, not from the stale
+       assumption that plain `store_local -> load_local` pairs still survive
+       there.
+     - later 2026-05-13 mm1 shape reread follow-up:
+       one more direct selected/asm reread then tightened that conclusion
+       further. The hot `mm` body is dominated by repeated matrix address
+       construction (`slli 12`, `slli 2`, row-base `add`, and three separate
+       `lw` roots before the final `mul` / `add` / `sw`), while both loop-slot
+       candidate tools still report `<none>`. Current authority is therefore:
+       the next useful `mm1` tooling should pivot to address-carrier reuse /
+       matrix-row addressing, not another local-slot forwarding pass.
+     - later 2026-05-13 mm1 address-pattern follow-up:
+       one new dedicated helper,
+       `tools/analyze_machine_select_mm_address_patterns.py`,
+       now makes that address-side conclusion more concrete. Fresh runs show
+       `bitset2` still has dense same-block `alui.2(...,4)` and same-address
+       indirect-memory staircases, which matches why the kept indirect
+       store/load forwarding helped there. `mm1` is different: the hot
+       `mm bb.16` block exposes only a few distinct row/column carriers such
+       as `alui.2(local:4,4096)`, `alui.2(local:6,4096)`,
+       `alui.2(spill.2,4)`, and the composed indirect roots built from them.
+       Current authority is therefore:
+       if the `mm1` line reopens, it should reopen as a deliberately narrow
+       row-base / matrix-address-carrier reuse experiment, not as a generic
+       `alui`, `load`, or slot-forwarding cleanup family.
+     - later 2026-05-13 mm1 row-base probe follow-up:
+       one even narrower helper,
+       `tools/analyze_machine_select_row_base_carriers.py`,
+       then tried to count direct repeated `alui.2(...,4096)` row-base
+       carriers with multiple dependent address/load/store uses, and it also
+       returned `<none>` on both the live `mm1` and `bitset2` selected dumps.
+       Current authority is therefore tighter again:
+       the current selected form is already past the point where another tiny
+       cleanup-style `mm1` optimization can be justified just by local
+       carrier-count evidence. Until a stronger reduced witness is built, the
+       `mm1` line should be treated as analysis-blocked rather than as an
+       invitation to keep adding speculative selected cleanups.
+     - later 2026-05-13 third-party shared-sample ranking follow-up:
+       the external perf line has now been opened just enough to produce one
+       first rebuilt cross-suite ranking sample over cases shared by
+       `compiler2021-public`, `indigo`, and `minic-test-cases-2021f`.
+       Current local order on that sample is:
+       `mm1` first (around `0.0041s`, `327` asm lines),
+       then `bitset2` (around `0.0038s..0.0040s`, `362` asm lines),
+       then `spmv1` (around `0.0037s`, `279` asm lines).
+       Current authority is therefore:
+       the shared course/external hotspot really has shifted onto `mm1`,
+       but that line is still analysis-blocked on a stronger address-carrier
+       witness before another code-change pass should be attempted.
+     - later 2026-05-13 third-party private/lava sample follow-up:
+       one additional rebuilt sample over the shared
+       `compiler2021-private` / `lava-test` style cases now makes the next
+       external priority clearer too: the dominant pressure there is compile
+       time, not runtime. Current local sample ordering is roughly:
+       `instruction-combining-*` first (about `15.1s` compile,
+       `~187k` asm lines),
+       then `integer-divide-optimization-*` (about `13.6s` compile,
+       `~26k` asm lines),
+       then `hoist-*` (about `4.1s` compile, `~5.3k` asm lines),
+       while their qemu runtimes stay small.
+       Current authority is therefore:
+       if the next external slice reopens, it should reopen as a compile-time
+       / IR-growth / pass-scaling investigation rather than as a runtime
+       instruction-quality line.
+     - later 2026-05-13 compiler-driver restamp follow-up:
+       after the huge-parameter / compile-time work, `make test-compiler-driver`
+       had reopened red again. A direct live-output reread then showed that
+       the reopened batch was mostly stale expectation shape, not a newly
+       confirmed codegen bug: several tests still hard-coded old register
+       choices, old stack-slot offsets, old block labels, or an older
+       "must fully constant-fold" output shape. Those assertions are now
+       re-anchored to more stable semantic/codegen facts instead
+       (branch/call ordering, presence of the expected compare family,
+       call-span preservation order, and post-call global reload survival),
+       and `make test-compiler-driver` is green again on the live tree.
+       Current authority is therefore:
+       the compiler-driver regression gate is usable again and should no
+       longer be treated as an unresolved blocker before the next perf round.
+     - later 2026-05-13 shared-text no-op + rerank follow-up:
+       one more small shared-text bug is now closed on top of that same green
+       baseline. The preview text exporter had still been pretty-printing
+       `addi rd, rd, 0` as a literal self-move (`mv t6, t6`) instead of
+       eliding the no-op. That exporter case is now fixed and regression-
+       locked in `compiler_driver_test`, and the post-fix gate is fully
+       green again:
+       `make test-compiler-driver` PASS plus course
+       `autotest -riscv -s lv1/lv3/lv4/lv5/lv6/lv7/lv8/lv9`
+       all PASS on the live tree.
+       The same round also refreshed the live runtime hotspot order on the
+       current course perf line: in the new local rerank sample,
+       `fft1` is now heaviest, then `spmv1`, then `mv1`, then `mm1`, then
+       `bitset2`. Current authority is therefore:
+       the next course-perf reread should start from the current
+       `fft1/spmv1/mv1` front instead of assuming the older `bitset/mm`
+       ordering is still the live priority.
+     - later 2026-05-13 recursive pure-call reuse follow-up:
+       one narrower `ValueSSA` refinement on the already-landed repeated pure
+       internal call reuse line is now kept on the live tree. The earlier
+       leaf-only purity check has been widened just enough to admit
+       recursively pure internal helpers too, which matters directly for the
+       real `fft1` witness because the hot loop repeatedly reaches the
+       recursive helper `multiply(...)`. After explicit rebuild-first
+       verification, the current live `fft1` output now shows one fewer
+       `call multiply` (`10 -> 9`) and a matching static count drop
+       (`total_instructions 494 -> 486`). Current correctness restamp on this
+       kept state is fully green again:
+       `make test-compiler-driver` PASS and course
+       `autotest -riscv -s lv1/lv3/lv4/lv5/lv6/lv7/lv8/lv9`
+       all PASS.
+       Current authority is therefore:
+       this is a real local `fft1` win worth keeping, but it should still be
+       treated as a witness-driven extension of the repeated pure-call reuse
+       line rather than as blanket permission to broaden purity/call
+       transforms without the same rebuild-first and gate-first discipline.
+     - later 2026-05-13 pure-call barrier follow-up:
+       one further narrow widening on that same `fft1` line is now also
+       kept. The repeated pure internal call reuse path no longer treats an
+       intervening pure internal call as an automatic blocker, which matters
+       directly for the still-hot `fft` block where `multiply(wn, y)` was
+       being re-materialized again after another pure helper call.
+       Rebuild-first evidence on the live tree:
+       `call multiply` in `13_fft1` drops again from the original `10` all
+       the way to `8`, and `total_instructions` drops from `494` to `476`.
+       Current correctness restamp after this narrower barrier removal is
+       still green:
+       `make test-compiler-driver` PASS and course
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`) plus
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Current authority is therefore:
+       keep this as another witness-driven `fft1` local win on the repeated
+       pure-call reuse line, while still refusing to generalize it into a
+       broad "calls never block pure reuse" claim without the same kind of
+       direct witness-and-gate proof.
+     - later 2026-05-13 safer `fft1` continuation follow-up:
+       one unfinished `machine_bytes` block-local immediate-cache experiment
+       was explicitly backed out instead of being forced through, because the
+       edit had drifted into an unsafe state where preview byte-size
+       accounting and actual byte emission no longer shared the same state
+       machine. After rollback, the live `fft1` witness returned to the known
+       stable `464`-instruction baseline and the local gate reclosed:
+       `make test-value-ssa-regression` PASS and
+       `make test-compiler-driver` PASS.
+     - later 2026-05-13 kept internal-call global-clobber narrowing:
+       the next `fft1` step then stayed on the safer ValueSSA line instead of
+       reopening bytes. Non-address-taken global load forwarding no longer
+       clears every forwarded global across every internal call by default;
+       it now computes a transitive "callee may write global.X" summary and
+       only clears the specific non-address-taken globals that the resolved
+       internal callee family can really write. External/unresolved calls
+       still conservatively clear everything on that line.
+       Concrete live witness payoff:
+       `13_fft1` drops from `total_instructions=464` to
+       `total_instructions=454`.
+       Kept regression evidence on the rebuilt tree:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS, and
+       full `autotest -riscv /workspaces/compiler_lab` PASS (`130/130`).
+       A new focused default-path regression,
+       `VALUE-SSA-CONVERT-DEFAULT-INTERNAL-CALL-PRESERVES-UNWRITTEN-GLOBAL-FORWARD`,
+       now locks the intended shape where an internal helper that does not
+       write `g` must not destroy the forwarded `store_global g, 7` fact.
+     - later 2026-05-13 kept safe-div reuse widening:
+       one more arithmetic-side narrowing is now kept on top of that `454`
+       baseline. Repeated `div/mod/shift` expressions may now participate in
+       redundant-binary reuse even when the operands are not all immediates,
+       provided the transform only reuses an already-evaluated result rather
+       than trying to delete the first dangerous evaluation as dead.
+       Concrete live witness payoff:
+       `13_fft1` drops from `total_instructions=454` to
+       `total_instructions=452`.
+       Direct visible example:
+       `main` now reuses the first `div(998244352, d)` result for the second
+       `power(3, ...)` call instead of rebuilding the same division chain.
+       Kept regression evidence on the rebuilt tree:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS, and
+       full `autotest -riscv /workspaces/compiler_lab` PASS (`130/130`).
+       New focused regression:
+       `VALUE-SSA-ELIMINATE-REDUNDANT-SAFE-DIV-BINARY`.
+     - later 2026-05-13 loop-hoist closure restamp:
+       the earlier loop-invariant pure-call hoist line has now been reclosed
+       as a kept default-path optimization rather than a permanently unkept
+       prototype. The original compiler self-crash turned out to be a real
+       ownership bug in the rebuilt-block transfer path: after moving
+       `rebuilt_preheader.instructions` / `rebuilt_body.instructions` into
+       the real blocks, the temporary blocks had their pointers nulled but
+       their `instruction_count` / `instruction_capacity` fields were not
+       reset, so later `value_ssa_basic_block_free(...)` walked stale counts
+       through `NULL`. With that fix in place, the pass now actually hoists
+       the loop-invariant `power(d, mod-2)` call out of `main`'s final loop
+       in `13_fft1`, and the live default-path witness improves again from
+       `total_instructions=452` to `total_instructions=451`.
+       Reclosed evidence on the rebuilt tree:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS, and
+       full `autotest -riscv /workspaces/compiler_lab` PASS (`130/130`).
+       Current authority is therefore:
+       keep the loop-hoist path on by default, treat `fft1 = 451` as the new
+       stable baseline, and rotate the next hotspot work toward the remaining
+       `spmv1` / `mv1` dynamic-complexity families rather than reopening this
+       same witness only as a crash-diagnosis line.
+     - 2026-05-14 correctness closure inside the optimization round:
+       one fresh course recheck exposed a real default-mainline wrong-code
+       case on `lv9/12_more_arr_params.c`. Narrowing showed this was not the
+       perf-hotspot pass line itself:
+       `COMPILER_USE_PERF_HOTSPOTS=0` still failed,
+       `COMPILER_SIMPLE_BACKEND=1` passed, and
+       `COMPILER_USE_FINAL_TEXT_PEEPHOLES=0` passed.
+       Direct final-asm diff then localized the corruption to the final text
+       peephole layer, where a staged stack argument load was being rewritten
+       into a stale `mv` in a multi-argument array-call witness. The kept fix
+       is to remove
+       `compiler_optimize_riscv_preview_stack_staged_call_args(...)`
+       from the default final-text peephole chain for now. Immediate rechecks
+       after that change are green again:
+       `11_arr_params`, `12_more_arr_params`, and `13_complex_arr_params`
+       all PASS; `make test-compiler-driver` PASS;
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`);
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Current authority is therefore:
+       continue the perf round from this repaired baseline, and treat
+       `stack_staged_call_args` as unsafe until it is rederived with a
+       tighter correctness proof.
+     - 2026-05-14 `spmv1` loop-invariant indirect-load retry:
+       after restoring correctness, one more `spmv1`-focused `ValueSSA`
+       attempt was tried with a much tighter proof than the earlier too-broad
+       indirect-load hoist: only hoist `load_indirect` when the whole address
+       value is loop-invariant and the loop header/body provably contain no
+       aliasing write to that address root. This version stayed
+       correctness-green on the previously sensitive `12_more_arr_params`
+       family, but the runtime result still did not justify keeping the line:
+       local rerun landed around `09_spmv1 ~= 15.28s`, which is slightly
+       worse than the repaired baseline. Current authority is therefore:
+       stop widening the `ValueSSA` indirect-load hoist line for `spmv1`,
+       and rotate back to smaller `machine_select` / final-text hotspot
+       cleanup experiments instead.
+     - 2026-05-14 `spmv1` cleanup-toggle convergence note:
+       the next round then rechecked the remaining `machine_select`
+       cleanup toggles directly on the live `spmv1` witness instead of
+       opening new passes immediately. The result is now fairly clear:
+       disabling `forward_same_block_indirect_loads` is slightly worse, while
+       disabling `reuse_spill_pure_expr` / `reuse_addr_roots` no longer gives
+       meaningful selected-form differences on the live tree. Current
+       authority is therefore that the easy `spmv1` wins in the current
+       selected/final-text cleanup layer are close to exhausted; do not keep
+       grinding those toggles without a new concrete shape win, and be ready
+       to rotate toward `mv1` once the next hotspot rerank still leaves
+       `spmv1` flat.
+     - later 2026-05-13 third-party stage-profile follow-up:
+       one direct `tools/profile_backend_layers.c` probe has now narrowed the
+       front-most compile-time family further. Both
+       `instruction-combining-1.sy` and `instruction-combining-2.sy`
+       lower into the same giant internal selected function shape:
+       one `func` with roughly `30005` selected ops, about `10000`
+       `alui` ops, and about `20004` spill slots, all concentrated in a
+       single block. Current authority is therefore:
+       the next external optimization line is no longer “generic private perf
+       feels slow”, but specifically “why does this giant single-block
+       instruction-combining function explode so hard before/through selected
+       lowering?”
+     - later 2026-05-13 third-party machine-ir/select reread follow-up:
+       one deeper `dump_machine_stage machine-ir/select` pass then tightened
+       that same diagnosis: the giant shape is already present by
+       `machine-ir`, not created late by `machine_select`.
+       On `instruction-combining-1.sy`, `machine-ir` already contains one
+       single `func` block with about `20004` spill slots and a huge repeated
+       `load local.0 -> add 1 -> store local.0` ladder, while
+       `machine_select` mostly mirrors that into about `30005` selected ops.
+       Current authority is therefore:
+       if this external compile-time line reopens for code changes, reopen it
+       at the earlier IR/lowering/SSA formation boundary rather than trying
+       to save the giant shape only with later selected cleanup passes.
+     - later 2026-05-13 third-party source-shape follow-up:
+       one direct reread of `instruction-combining-1/2.sy` now makes that
+       earlier-stage suspicion concrete too: the hot internal `func(...)` is
+       mostly just an enormous straight-line chain of repeated
+       `input = input + 1;` updates. Current authority is therefore:
+       if this line reopens for implementation, the first serious question is
+       no longer “which backend cleanup can shave a few ops?”, but “why does
+       this linear self-update chain survive so literally through lower-IR /
+       SSA / machine-ir formation, and can it be collapsed much earlier before
+       the spill-backed explosion ever happens?”
+     - later 2026-05-13 kept third-party value-ssa fast-path follow-up:
+       one kept earlier-stage fix has now closed the first half of that
+       `instruction-combining-*` explosion. The extreme straight-line
+       `value_ssa` fast path no longer returns the raw direct-build form
+       immediately; it now runs a narrow local cleanup/rename pass first.
+       On `instruction-combining-1.sy`, `value-ssa-default` shrinks from
+       about `30042` instructions
+       (`10014 load_local`, `10011 store_local`) to about `10036`
+       instructions (`10009 binary`, `10 load_local`, `9 store_local`),
+       and the downstream selected `func` shape drops from about
+       `30005` ops / `20004` spill slots to about
+       `10003` ops / `0` spill slots.
+     - later 2026-05-13 kept third-party selected-cleanup follow-up:
+       one second kept fix then closed the next compile-time tier on that same
+       family. Fresh `MACHINE_SELECT_TRACE_TIMING=1` runs showed the current
+       `instruction-combining` cost was no longer in lowering itself, but in
+       `machine_select` pure-cleanup forward/reuse scans spending about `10s`
+       on the remaining giant single-block arithmetic chain. The current tree
+       now recognizes that very narrow hotspot shape
+       (single block, return-only terminator, `4k+` ops, almost entirely
+       `alu/cmp` plus only a tiny number of copy/materialize/load ops) and
+       skips those expensive same-block forward/reuse scans there.
+       Kept local evidence:
+       `instruction-combining-1.sy` total compile time dropped from about
+       `22.8s` to about `11.9s`, `instruction-combining-2.sy` from about
+       `22.6s` to about `12.6s`, and `machine_select` itself fell from about
+       `10s` to near-zero on that family while the selected op count stayed
+       at about `10003`.
+     - current 2026-05-13 third-party authority after those kept steps:
+       the front-most remaining compile-time pressure on the
+       `instruction-combining-*` family is now materially reclosed too.
+       A third kept same-day allocator follow-up added a very narrow cheap
+       path for this giant straight-line value-chain shape, so the old
+       `machine_ir_report ~= 10-11s` pressure is no longer the live status.
+       Fresh local evidence on the kept tree:
+       `instruction-combining-1.sy` now compiles in about `2.8s` total
+       (`machine_ir_report ~= 0.7s`, `machine_select ~= 0.004s`),
+       `instruction-combining-2.sy` in about `2.9s` total
+       (`machine_ir_report ~= 0.68s`, `machine_select ~= 0.004s`),
+       while the selected `func` shape stays stable at about
+       `10003` ops with only `2` spill slots.
+       Current authority is therefore:
+       if the third-party compile-time line keeps moving, rerank the next
+       private/lava witness family after `instruction-combining-*` instead of
+       continuing to treat this family as the active emergency hotspot.
+     - later 2026-05-13 third-party rerank follow-up:
+       that next hotspot is now concrete on the live tree:
+       `integer-divide-optimization-2/3.sy` still sit around `28s` on the
+       local compile-path sample, while `hoist-2.sy` is only about
+       `4.6s` / `4.3s`. Current authority is therefore:
+       the active third-party compile-time mainline is now the
+       `integer-divide-optimization-*` family, not `hoist-*`.
+     - later 2026-05-13 kept huge-parameter value-ssa follow-up:
+       one first kept fix has now reopened that new family on the right axis.
+       `value-ssa-classic` and `value-ssa-memory-full` already knew how to
+       collapse the hot `main bb.5` shape from
+       "1000 identical `mul i,multi`" down to one `mul` plus a repeated-arg
+       call, while the default extreme-straight-line path did not. The
+       current tree now routes the huge-parameter extreme-straight-line family
+       through that same classic canonicalization path.
+       Kept local evidence on the main compiler path:
+       `integer-divide-optimization-2.sy` compile time dropped from about
+       `28.5s` down to about `21.9s`, and `value-ssa-default` now matches the
+       canonicalized hot shape (`ssa.8 = mul ...` followed by
+       `call func(ssa.8, ssa.8, ..., ssa.8)`).
+       Required correctness recheck after this kept step is green so far:
+       `lv8` PASS (`12/12`), `lv9` PASS (`22/22`), and
+       `make test-compiler-driver` PASS.
+     - current 2026-05-13 third-party authority after that kept step:
+       the `integer-divide-optimization-*` family is improved but not yet
+       closed. One remaining diagnostic wrinkle is now explicit:
+       `build/profile_backend_layers` still reports the older pre-collapse
+       selected shape even after the main compiler path has improved, so the
+       next step should first realign that helper surface with the live
+       default compiler path before overfitting another backend change to
+       stale helper evidence.
+  3. course perf runtime ranking and optimization
+     - measure the course `-perf` cases by real runtime first, not only by
+       compile time, and rank hotspots before choosing the next optimization
+       target
+     - optimize the heaviest current runtime witness first, then rerun the
+       same course perf surface to confirm a real speedup
+     - thread-specific optimization reminder now made explicit:
+       do **not** choose the next optimization only by static appearance
+       counts in the emitted text. Use source structure plus emitted code to
+       estimate where the unnecessary **dynamic** complexity is concentrated:
+       loop-invariant work repeated per iteration, helper calls repeated on
+       hot recursive or iterative paths, and address/index chains rebuilt on
+       the steady-state path are higher-priority than a merely repeated cold
+       instruction sequence.
+     - current status: **in progress**
+     - current early runtime ordering from the first live timing sweep:
+       `06_mv1` is the front-most course hotspot, followed by
+       `03_mm1`, `04_mm2`, `05_mm3`, and `02_bitset3`
+     - later 2026-05-13 current kept `fft1` baseline:
+       the active course-perf reread has now produced one newer explicit
+       witness checkpoint on top of the earlier `fft1` line.
+       After rolling back an unsafe bytes-side immediate-cache side branch,
+       the stable `fft1` baseline returned to `total_instructions=464`.
+       The next kept step then narrowed non-address-taken global
+       call-clobbering on the default ValueSSA path, which drops live
+       `13_fft1` further to `total_instructions=454`.
+       The following kept arithmetic reuse round then drops `13_fft1`
+       further to `total_instructions=452`, and the later kept
+       loop-invariant pure-call hoist restamp now drops it once more to
+       `total_instructions=451`.
+       Current authority is therefore:
+       continue from `fft1 = 451` before rotating back to `spmv1/mv1/mm1`.
+     - later 2026-05-13 repeated-indirect-load rerun closure:
+       one more conservative `ValueSSA` sequencing refinement is now kept on
+       the default indirect-memory fast path:
+       after the first `simplify_trivial_values(...)`, rerun
+       `value_ssa_bridge_forward_same_block_repeated_indirect_loads(...)`
+       once more before the later pure-call / loop-hoist cleanup steps.
+       The practical effect is that the first simplification wave can expose a
+       second wave of same-block repeated indirect loads that were not yet
+       provably identical enough during the first forward pass.
+       Concrete live witness payoff:
+       `09_spmv1` drops from `total_instructions=196` to
+       `total_instructions=190`.
+       At the same time, the current `fft1` course-hotspot win is preserved:
+       `13_fft1` stays at `total_instructions=451`.
+       Recheck evidence on the rebuilt tree:
+       `make test-value-ssa-regression` PASS and
+       `make test-compiler-driver` PASS.
+       Current authority is therefore:
+       keep the rerun in the default path, treat
+       `spmv1 = 190` and `fft1 = 451` as the new paired course-perf
+       baselines, and rotate the next hotspot work toward `mv1` plus the
+       third-party perf tails.
+  4. third-party perf ranking and optimization
+     - for third-party perf cases that run reliably on the local machine, use
+       real runtime
+     - for cases whose local runtime is badly distorted by memory pressure or
+       host overhead, fall back to static instruction counts / hot-op counts /
+       repeated-load-store-address patterns as the local optimization metric
+     - current status: **pending**
+  5. correctness gate for every kept edit chunk
+     - required after each substantial code edit:
+       course `lv1-lv9`
+     - preferred whenever practical in the same round:
+       `make test`, course `-perf`, relevant third-party suites, and the
+       curated `/tmp` witness pool after removing or ignoring any stale-oracle
+       samples
+     - repository workflow memory for this specific round:
+       **do not commit repeatedly**; hold local edits until the user
+       explicitly asks for a commit checkpoint
+     - current 2026-05-12 restamp:
+       course functional suites are green again on the current baseline:
+       `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9`
+       - accompanying targeted in-repo checks also green on this same
+         baseline:
+         `make test-compiler-driver`,
+         `make test-lower-ir-regression`,
+         `make test-lower-ir-verifier`
+       - one unfinished late-text optimization experiment
+         (`stack store/reload -> mv` in `compiler_driver.c`) was backed out
+         before this restamp because it had not yet reached a trustworthy
+         correctness state
+       - later same-day rollback recheck after that experiment confirmed the
+         restored baseline remained green:
+         course `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9`
+         all passed again, and `make test-compiler-driver` returned to PASS
+       - current same-block slot-load cleanup experiment also passed that same
+         course functional gate and kept `make test-compiler-driver` green;
+         one full `autotest -perf -t /opt/bin/testcases/perf
+         /workspaces/compiler_lab` sweep was started afterward and is still
+         in flight as the next evidence source for whether that cleanup is
+         actually worth keeping
+     - later 2026-05-13 rechecks also kept the newer same-block register
+       pure-expression reuse cleanup green on that same course functional
+       gate; current hotspot authority is therefore to keep correctness
+       closed and continue perf work on the remaining `spmv` address/index
+       chain, not to reopen front-end/lowering correctness
+       - the backed-out direct repeated-load-to-copy refinement was also
+         rechecked on rollback: `make test-compiler-driver` returned to PASS
+         again and the quick course slice (`lv1`, `lv8`, `lv9`) stayed green,
+       confirming the worktree is back on the safer commutative-reuse
+       baseline
+       - later 2026-05-13 newest `fft1` recheck restamp:
+         after the safer bytes rollback plus the kept internal-call
+         global-clobber narrowing, the rebuilt tree is green on the relevant
+         current gates:
+         `make test-value-ssa-regression` PASS,
+         `make test-compiler-driver` PASS, and
+         full `autotest -riscv /workspaces/compiler_lab` PASS (`130/130`)
 
 - Current multi-round implementation focus is now the following ordered line,
   and it should be treated as the default mainline until these items are
@@ -6224,3 +7177,4 @@ The execution log is intentionally retained below them as historical record, not
 - 2026-05-06: One more follow-up on that same residual line clarified what *didn't* move yet, which is still useful execution memory for the next round. I tried a small state-aware must-return scaffold on compound statements and then rebuilt the real CLI before rechecking the targeted repros, but the observed behavior did not change: the current strict-mode residual still rejects the same pure local-state-fed loop family (`int b=1; while(b<2){...}`, `int b=1; for(;b<2;...){...}`, `int b=0; b=1; while(b<2){...}`, `int b=0; b=1; for(;b<2;...){...}`) plus the alias-fed outer-loop variant. Current authority is therefore sharper than before: the remaining strict issue is not just "nested loops with conditions" in general, and it is not solved by a shallow compound-level must-return helper alone; the next useful slice must explicitly address local declaration/assignment state as input to later loop-condition proofs.
 - 2026-05-06: A final rebuild-and-rerun in this round changed the remaining boundary one more time in a way that matters for the next implementation slice. After rebuilding the real CLI and rechecking the same local-state-fed loop cases directly through `build/compiler --enforce-all-paths-return-check`, the alias-fed outer-loop variant stopped reproducing `SEMA-CF-001`, and the still-red simple local-state cases now fail one layer later with `IR-LOWER-009` / `LOWER-IR-042` ("function body does not terminate on all lowered paths"). Current authority is therefore that the next useful work on this family should move out of `src/semantic/semantic_core_flow.inc` and into the canonical-IR / lower-IR fallthrough analysis path (`src/ir/ir_lower_stmt.inc`, `src/ir/ir_global_dep.inc`, and the matching lowering-entry checks), because semantic analysis is already starting to accept more of these shapes while the downstream lowering-flow contract still lags behind.
 - 2026-05-06: That IR-lowering residual has now materially advanced instead of remaining only a diagnosis. The canonical IR lowering path now has a first narrow local-state-aware truthiness slice for `while` / `for` termination shaping: scalar-local declarations with constant initializers now record current known values for lowering flow, direct scalar-local stores now update or clear that known-value metadata, and the `while` / `for` lowering flow checks now reuse that metadata when deciding whether a loop condition is already provably true/false. Focused CLI repros that previously failed at `IR-LOWER-009` now compile successfully under `--enforce-all-paths-return-check`, including `int b=1; while(b<2){ if(b){ return 2; } }`, `int b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, `int b=0; b=1; while(b<2){ if(b){ return 2; } }`, `int b=0; b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, and the alias-fed outer-loop variant. That same family is now also regression-locked at the user-facing entrypoint through `tests/compiler/compiler_driver_test.c` (`test_compiler_handles_strict_local_state_loop_returns`). Current authority is therefore that the old "simple local declaration/assignment state feeding later loop conditions" residual is no longer open on the CLI path, and the next remaining strict/default work should return to the still-open hidden/default compatibility line or any deeper canonical-IR / lower-IR cases that survive beyond this first scalar-local slice.
+- 2026-05-14: I ran one explicit optimization experiment on the current course-perf mainline and then deliberately backed it out again after correctness failed. The experiment reordered local slots at `ValueSSA -> MachineIR` entry so scalar locals would come before giant local arrays, specifically to shrink repeated stack offsets in `perf/19_brainfuck-calculator.c` (`run_program`'s `return_address_top` / loop-state path). The local timing signal was real enough to record: a direct `build/compiler -perf -> clang -> ld.lld -> qemu-riscv32-static` rerun of `19_brainfuck-calculator` dropped into the low-`30s` locally from the previously remembered `42s+` tier. However, the implementation was not semantically correct: both `19_brainfuck-calculator` and `18_brainfuck-bootstrap` produced wrong output (`brainfuck-calculator` still printed the leading `13267800` but lost the trailing newline + `0` line). I therefore fully reverted the local-slot remap before ending the chunk. Kept follow-ups from the same investigation: `machine_ir` dump support now prints `addr local/global`, `load_indirect`, and `store_indirect` explicitly instead of `<unknown>`, `make test-machine-ir` is green again after restamping old output-shape assertions, and the rebuilt mainline is back to correctness-green on the course gates (`autotest -riscv -s lv8` PASS `12/12`, `autotest -riscv -s lv9` PASS `22/22`). Current authority is therefore: the “hot scalar locals before giant local arrays” idea remains a plausible future perf direction, but the just-tried implementation is **not** a keeper and should only be reopened after tracing exactly which downstream layer breaks the remapped local-slot semantics.

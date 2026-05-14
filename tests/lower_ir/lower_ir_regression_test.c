@@ -2825,6 +2825,25 @@ static int test_lower_ir_lowers_multiple_runtime_global_initializers_after_branc
         "int main(){return c[0]+c[1];}\n");
 }
 
+static int test_lower_ir_omits_synthetic_zero_result_after_void_call_statement(void) {
+    return expect_lowered_source_dump("LOWER-IR-VOID-CALL-STMT-NO-SYNTHETIC-ZERO",
+        "void touch(){ putint(1); }\n"
+        "int main(){ touch(); return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func touch() {\n"
+        "  bb.0:\n"
+        "    call putint(1)\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    call touch()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
 static int test_lower_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items(void) {
     return expect_lowered_source_dump("LOWER-IR-LOCAL-ARRAY-NESTED-SCALAR-MIX",
         "int main(){ int a[4]={{1,2},3}; return a[0]+a[1]*10+a[2]*100+a[3]*1000; }\n",
@@ -2926,6 +2945,7 @@ int main(void) {
     ok &= test_lower_ir_lowers_program_initializer_fallback();
     ok &= test_lower_ir_lowers_runtime_global_array_initializer_with_short_circuit_and_calls();
     ok &= test_lower_ir_lowers_multiple_runtime_global_initializers_after_branchy_helper_growth();
+    ok &= test_lower_ir_omits_synthetic_zero_result_after_void_call_statement();
     ok &= test_lower_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items();
     ok &= test_lower_ir_accepts_2d_array_initializer_mixing_nested_and_scalar_items();
 

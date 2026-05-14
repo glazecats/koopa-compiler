@@ -5,6 +5,11 @@
 - Before starting work, read `AGENTS.md`.
 - Then read `docs/ir-conventions.md`.
 - Then read `docs/NEXT_STEPS.md`.
+- If the active target in this thread is the current optimization-focused
+  round (`void call` cleanup / `make test` expectation realignment / course
+  perf / third-party perf), then also read `docs/OPTIMIZATION_PLAN.md`
+  before making changes. Treat that file as the compact active-plan authority
+  for this optimization line.
 - If the active target in this thread is the still-open hidden runtime
   **RE/segmentation-fault** line, then also read
   `docs/RUNTIME_RE_SEGFAULT_PLAN.md` before making changes. Treat that file
@@ -58,6 +63,9 @@
   1. `AGENTS.md`
   2. `docs/ir-conventions.md`
   3. `docs/NEXT_STEPS.md`
+- If the active line is the current optimization-focused round, then read
+  `docs/OPTIMIZATION_PLAN.md` immediately after `docs/NEXT_STEPS.md` and use
+  it as the compact continuation file for that line.
 - If the active line is the hidden runtime-RE / generated-program segfault
   hunt, then read `docs/RUNTIME_RE_SEGFAULT_PLAN.md` immediately after
   `docs/NEXT_STEPS.md` and use it as the compact continuation file for that
@@ -110,6 +118,10 @@
 - `AGENTS.md` defines agent roles, startup rules, and scope boundaries.
 - `docs/ir-conventions.md` is working memory for current engineering facts and safety/convention notes.
 - `docs/NEXT_STEPS.md` is the roadmap, execution log, and current-plan authority.
+- `docs/OPTIMIZATION_PLAN.md` is the compact active-plan authority for the
+  current optimization-focused round (`void call` cleanup / `make test`
+  realignment / course perf / third-party perf). Keep it in sync with
+  `docs/NEXT_STEPS.md` when this line is active.
 - `docs/RUNTIME_RE_SEGFAULT_PLAN.md` is the compact active-plan authority for
   the current hidden runtime-RE / generated-program segfault investigation
   line. Keep it in sync with `docs/NEXT_STEPS.md` when this line is active.

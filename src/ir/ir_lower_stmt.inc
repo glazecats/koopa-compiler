@@ -36,12 +36,12 @@ static const AstExpression *statement_get_condition_expression(const AstStatemen
 }
 
 typedef struct {
-    const char *names[64];
-    size_t lengths[64];
-    unsigned char known[64];
-    long long values[64];
+    const char *names[256];
+    size_t lengths[256];
+    unsigned char known[256];
+    long long values[256];
     size_t count;
-    size_t scope_offsets[32];
+    size_t scope_offsets[256];
     size_t scope_count;
     int overflowed;
 } IrLowerFlowState;
@@ -1169,6 +1169,12 @@ static int ir_try_eval_condition_truthiness_with_scope(const IrLowerContext *ctx
     if (ctx && expr && ctx->loop_targets.count == 0u) {
         ir_lower_flow_state_init(&state);
         if (!ir_lower_flow_state_import_scope(ctx, &state)) {
+            if (ctx && ctx->error) {
+                ir_set_error(ctx->error,
+                    expr->line,
+                    expr->column,
+                    "IR-INT-079: failed to import scoped flow facts for condition truthiness evaluation");
+            }
             return 0;
         }
         if (ir_lower_flow_state_eval_expr(ctx, expr, &state, &truthy)) {

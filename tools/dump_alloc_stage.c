@@ -1,13 +1,10 @@
 #include "ir.h"
 #include "lexer.h"
 #include "lower_ir.h"
-#include "machine/bytes.h"
-#include "machine/emit.h"
-#include "machine/ir.h"
-#include "machine/select.h"
 #include "parser.h"
 #include "semantic.h"
 #include "value_ssa.h"
+#include "value_ssa_alloc.h"
 #include "value_ssa_pass.h"
 
 #include <stdio.h>
@@ -15,13 +12,10 @@
 #include <string.h>
 
 #define TOOL_COLOR_BUDGET 8u
-#define TOOL_MACHINE_REGISTER_COUNT 8u
 
 typedef enum {
-    TOOL_STAGE_MACHINE_IR = 0,
-    TOOL_STAGE_SELECT,
-    TOOL_STAGE_EMIT,
-    TOOL_STAGE_BYTES,
+    TOOL_STAGE_INITIAL = 0,
+    TOOL_STAGE_FINAL,
 } ToolStage;
 
 static char *tool_read_file(const char *path) {
@@ -63,34 +57,25 @@ static char *tool_read_file(const char *path) {
 }
 
 static void tool_print_usage(const char *argv0) {
-    fprintf(stderr, "usage: %s <machine-ir|select|emit|bytes> <input.sy>\n", argv0);
+    fprintf(stderr, "usage: %s <initial|final> <input.sy-or-c>\n", argv0);
 }
 
 static int tool_parse_stage(const char *text, ToolStage *out_stage) {
     if (!text || !out_stage) {
         return 0;
     }
-    if (strcmp(text, "machine-ir") == 0) {
-        *out_stage = TOOL_STAGE_MACHINE_IR;
+    if (strcmp(text, "initial") == 0) {
+        *out_stage = TOOL_STAGE_INITIAL;
         return 1;
     }
-    if (strcmp(text, "select") == 0) {
-        *out_stage = TOOL_STAGE_SELECT;
-        return 1;
-    }
-    if (strcmp(text, "emit") == 0) {
-        *out_stage = TOOL_STAGE_EMIT;
-        return 1;
-    }
-    if (strcmp(text, "bytes") == 0) {
-        *out_stage = TOOL_STAGE_BYTES;
+    if (strcmp(text, "final") == 0) {
+        *out_stage = TOOL_STAGE_FINAL;
         return 1;
     }
     return 0;
 }
 
-static int tool_build_machine_ir_report(const char *source_path,
-    MachineIrAllocateRewriteReport *out_report) {
+static int tool_build_value_ssa_program(const char *source_path, ValueSsaProgram *out_program) {
     char *source = NULL;
     TokenArray tokens;
     AstProgram ast;
@@ -103,16 +88,13 @@ static int tool_build_machine_ir_report(const char *source_path,
     LowerIrProgram lower_program;
     LowerIrError lower_error;
     LowerIrOptions lower_options;
-    ValueSsaProgram value_program;
     ValueSsaError value_error;
-    MachineIrError machine_ir_error;
     int ok = 0;
 
     lexer_init_tokens(&tokens);
     ast_program_init(&ast);
     ir_program_init(&ir_program);
     lower_ir_program_init(&lower_program);
-    value_ssa_program_init(&value_program);
     memset(&parser_error, 0, sizeof(parser_error));
     memset(&semantic_error, 0, sizeof(semantic_error));
     memset(&semantic_options, 0, sizeof(semantic_options));
@@ -121,7 +103,6 @@ static int tool_build_machine_ir_report(const char *source_path,
     memset(&lower_error, 0, sizeof(lower_error));
     memset(&lower_options, 0, sizeof(lower_options));
     memset(&value_error, 0, sizeof(value_error));
-    memset(&machine_ir_error, 0, sizeof(machine_ir_error));
 
     semantic_options.skip_all_paths_return_check = 1;
     ir_options.allow_implicit_fallthrough_return = 1;
@@ -138,14 +119,8 @@ static int tool_build_machine_ir_report(const char *source_path,
         !semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) ||
         !ir_lower_program(&ast, &ir_options, &ir_program, &ir_error) ||
         !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
-        !value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) ||
-        !value_ssa_optimize_perf_hotspots(&value_program, &value_error) ||
-        !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
-            &value_program,
-            TOOL_COLOR_BUDGET,
-            TOOL_MACHINE_REGISTER_COUNT,
-            out_report,
-            &machine_ir_error)) {
+        !value_ssa_build_default_from_lower_ir(&lower_program, out_program, &value_error) ||
+        !value_ssa_optimize_perf_hotspots(out_program, &value_error)) {
         fprintf(stderr, "pipeline failed for %s\n", source_path ? source_path : "<null>");
         goto cleanup;
     }
@@ -154,7 +129,6 @@ static int tool_build_machine_ir_report(const char *source_path,
 
 cleanup:
     free(source);
-    value_ssa_program_free(&value_program);
     lower_ir_program_free(&lower_program);
     ir_program_free(&ir_program);
     ast_program_free(&ast);
@@ -164,7 +138,11 @@ cleanup:
 
 int main(int argc, char **argv) {
     ToolStage stage;
-    MachineIrAllocateRewriteReport machine_report;
+    ValueSsaProgram program;
+    ValueSsaProgramAllocationResult result;
+    ValueSsaAllocateRewriteStats stats;
+    ValueSsaAllocationPrep prep;
+    ValueSsaError error;
     char *text = NULL;
     int ok = 0;
 
@@ -177,66 +155,55 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    machine_ir_allocate_rewrite_report_init(&machine_report);
-    if (!tool_build_machine_ir_report(argv[2], &machine_report)) {
-        machine_ir_allocate_rewrite_report_free(&machine_report);
+    value_ssa_program_init(&program);
+    value_ssa_program_allocation_result_init(&result);
+    value_ssa_allocate_rewrite_stats_init(&stats);
+    value_ssa_allocation_prep_init(&prep);
+    memset(&error, 0, sizeof(error));
+
+    if (!tool_build_value_ssa_program(argv[2], &program)) {
+        value_ssa_program_free(&program);
         return 1;
     }
 
     switch (stage) {
-        case TOOL_STAGE_MACHINE_IR: {
-            MachineIrError error;
-
-            memset(&error, 0, sizeof(error));
-            ok = machine_ir_dump_allocate_rewrite_report(&machine_report, &text, &error);
+        case TOOL_STAGE_INITIAL:
+            ok = value_ssa_allocate_program(&program, TOOL_COLOR_BUDGET, &result, &error) &&
+                value_ssa_dump_program_allocation_result(&program, &result, &text, &error);
             break;
-        }
-        case TOOL_STAGE_SELECT: {
-            MachineSelectError error;
-
-            memset(&error, 0, sizeof(error));
-            ok = machine_select_dump_report_from_machine_ir_report(&machine_report, &text, &error);
+        case TOOL_STAGE_FINAL:
+            ok = value_ssa_allocate_and_rewrite_program_single_block_spills_with_stats(
+                    &program, TOOL_COLOR_BUDGET, &result, &stats, &error) &&
+                value_ssa_dump_program_allocation_result(&program, &result, &text, &error);
             break;
-        }
-        case TOOL_STAGE_EMIT: {
-            MachineEmitProgram emit_program;
-            MachineEmitError error;
-
-            machine_emit_program_init(&emit_program);
-            memset(&error, 0, sizeof(error));
-            ok = machine_emit_build_program_from_machine_ir_report(&machine_report, &emit_program, &error) &&
-                machine_emit_dump_program(&emit_program, &text, &error);
-            machine_emit_program_free(&emit_program);
-            break;
-        }
-        case TOOL_STAGE_BYTES: {
-            MachineBytesReport report;
-            MachineBytesError error;
-
-            machine_bytes_report_init(&report);
-            memset(&error, 0, sizeof(error));
-            ok = machine_bytes_build_report_from_machine_ir_report_with_profile(
-                    &machine_report,
-                    MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW,
-                    &report,
-                    &error) &&
-                machine_bytes_dump_report(&report, &text, &error);
-            machine_bytes_report_free(&report);
-            break;
-        }
         default:
             ok = 0;
             break;
     }
 
-    if (!ok || !text) {
-        free(text);
-        machine_ir_allocate_rewrite_report_free(&machine_report);
-        return 1;
+    if (ok && text) {
+        fputs(text, stdout);
     }
 
-    fputs(text, stdout);
+    for (size_t function_index = 0; function_index < program.function_count; ++function_index) {
+        const ValueSsaFunction *function = &program.functions[function_index];
+        char *prep_text = NULL;
+
+        if (!function->has_body) {
+            continue;
+        }
+        if (!value_ssa_compute_allocation_prep(function, NULL, NULL, NULL, NULL, &prep, &error)) {
+            continue;
+        }
+        if (value_ssa_dump_allocation_prep(function, &prep, &prep_text, &error)) {
+            fprintf(stderr, "%s", prep_text);
+        }
+        free(prep_text);
+        value_ssa_allocation_prep_free(&prep);
+    }
+
     free(text);
-    machine_ir_allocate_rewrite_report_free(&machine_report);
-    return 0;
+    value_ssa_program_allocation_result_free(&result);
+    value_ssa_program_free(&program);
+    return ok ? 0 : 1;
 }

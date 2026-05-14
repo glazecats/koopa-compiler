@@ -132,7 +132,10 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
                 return 0;
             }
             for (op_index = 0; op_index < src_block->block.op_count; ++op_index) {
-                byte_count += machine_bytes_op_encoded_size_for_profile(profile, dest_function, &src_block->block.ops[op_index]);
+                byte_count += machine_bytes_op_encoded_size_for_profile(
+                    profile,
+                    dest_function,
+                    &src_block->block.ops[op_index]);
             }
             byte_count += machine_bytes_terminator_encoded_size_for_profile(profile, dest_function, &src_block->block.terminator);
             dest_block->start_byte_offset = running_offset;

@@ -153,11 +153,37 @@ static void value_ssa_alloc_trace_timing(const char *stage, double elapsed_s);
 static void value_ssa_alloc_trace_function_timing(const char *function_name,
     const char *stage,
     double elapsed_s);
+static int value_ssa_alloc_env_flag_enabled(const char *name);
+static int value_ssa_alloc_skip_call_heavy_rewrite_rollback_enabled(void);
+static int value_ssa_alloc_skip_shared_spill_call_guard_enabled(void);
+static int value_ssa_alloc_skip_shared_spill_reload_reuse_guard_enabled(void);
 
 static int value_ssa_alloc_trace_enabled(void) {
     const char *flag = getenv("VALUE_SSA_TRACE_TIMING");
 
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int value_ssa_alloc_env_flag_enabled(const char *name) {
+    const char *flag;
+
+    if (!name || name[0] == '\0') {
+        return 0;
+    }
+    flag = getenv(name);
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int value_ssa_alloc_skip_call_heavy_rewrite_rollback_enabled(void) {
+    return value_ssa_alloc_env_flag_enabled("VALUE_SSA_ALLOC_SKIP_CALL_HEAVY_REWRITE_ROLLBACK");
+}
+
+static int value_ssa_alloc_skip_shared_spill_call_guard_enabled(void) {
+    return value_ssa_alloc_env_flag_enabled("VALUE_SSA_ALLOC_SKIP_SHARED_SPILL_CALL_GUARD");
+}
+
+static int value_ssa_alloc_skip_shared_spill_reload_reuse_guard_enabled(void) {
+    return value_ssa_alloc_env_flag_enabled("VALUE_SSA_ALLOC_SKIP_SHARED_SPILL_RELOAD_REUSE_GUARD");
 }
 
 static double value_ssa_alloc_now_s(void) {

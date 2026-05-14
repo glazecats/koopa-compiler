@@ -50,6 +50,7 @@ MACHINE_TIMELINE_BUILD_DIR := $(BUILD_DIR)/machine_timeline
 MACHINE_LOG_BUILD_DIR := $(BUILD_DIR)/machine_log
 MACHINE_JOURNAL_BUILD_DIR := $(BUILD_DIR)/machine_journal
 COMPILER_TEST_BUILD_DIR := $(BUILD_DIR)/compiler_tests
+TOOLS_BUILD_DIR := $(BUILD_DIR)/tools
 
 LEXER_TEST_BIN := $(LEXER_BUILD_DIR)/lexer_test
 PARSER_TEST_BIN := $(PARSER_BUILD_DIR)/parser_test
@@ -109,6 +110,12 @@ MEMORY_SSA_REGRESSION_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_regression_test
 MEMORY_SSA_VERIFIER_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_verifier_test
 MEMORY_SSA_ANALYSIS_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_analysis_test
 MEMORY_SSA_PASS_BIN := $(MEMORY_SSA_BUILD_DIR)/memory_ssa_pass_test
+DUMP_MACHINE_STAGE_BIN := $(TOOLS_BUILD_DIR)/dump_machine_stage
+DUMP_MIDDLE_STAGE_BIN := $(TOOLS_BUILD_DIR)/dump_middle_stage
+DUMP_ALLOC_STAGE_BIN := $(TOOLS_BUILD_DIR)/dump_alloc_stage
+PROFILE_BACKEND_LAYERS_BIN := $(TOOLS_BUILD_DIR)/profile_backend_layers
+PROFILE_COMPILER_STAGES_BIN := $(TOOLS_BUILD_DIR)/profile_compiler_stages
+DIAG_ALLOCATOR_STAGES_BIN := $(TOOLS_BUILD_DIR)/diag_allocator_stages
 COMPILER_COMMON_LIB := $(COMMON_LIB_DIR)/libcompiler_common.a
 
 LEXER_TEST_INPUT := tests/lexer/test.c
@@ -402,7 +409,7 @@ TEST_TARGETS := \
 	test-memory-ssa-analysis \
 	test-memory-ssa-pass
 
-.PHONY: all check dirs force lexer parser compiler test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-compiler-driver test-compiler-cli test-compiler-asm test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all check dirs force lexer parser compiler tools dump-machine-stage dump-middle-stage dump-alloc-stage profile-backend-layers profile-compiler-stages diag-allocator-stages test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-compiler-driver test-compiler-cli test-compiler-asm test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -422,7 +429,7 @@ check: test
 force:
 
 dirs:
-	@mkdir -p $(COMMON_LIB_DIR) $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR) $(IR_BUILD_DIR) $(LOWER_IR_BUILD_DIR) $(VALUE_SSA_BUILD_DIR) $(MEMORY_SSA_BUILD_DIR) $(MACHINE_IR_BUILD_DIR) $(MACHINE_SELECT_BUILD_DIR) $(MACHINE_LAYOUT_BUILD_DIR) $(MACHINE_EMIT_BUILD_DIR) $(MACHINE_ENCODE_BUILD_DIR) $(MACHINE_BYTES_BUILD_DIR) $(MACHINE_OBJECT_BUILD_DIR) $(MACHINE_RELOC_BUILD_DIR) $(MACHINE_CONTAINER_BUILD_DIR) $(MACHINE_ELF_BUILD_DIR) $(MACHINE_IMAGE_BUILD_DIR) $(MACHINE_EXEC_BUILD_DIR) $(MACHINE_LOAD_BUILD_DIR) $(MACHINE_RUNTIME_BUILD_DIR) $(MACHINE_LAUNCH_BUILD_DIR) $(MACHINE_STEP_BUILD_DIR) $(MACHINE_DECODE_BUILD_DIR) $(MACHINE_PAYLOAD_DECODE_BUILD_DIR) $(MACHINE_INTERP_BUILD_DIR) $(MACHINE_TRANSITION_BUILD_DIR) $(MACHINE_STATE_BUILD_DIR) $(MACHINE_MUTATION_BUILD_DIR) $(MACHINE_WRITEBACK_BUILD_DIR) $(MACHINE_COMMIT_BUILD_DIR) $(MACHINE_APPLY_BUILD_DIR) $(MACHINE_OBSERVE_BUILD_DIR) $(MACHINE_DELTA_BUILD_DIR) $(MACHINE_TRACE_BUILD_DIR) $(MACHINE_EVENT_BUILD_DIR) $(MACHINE_OUTCOME_BUILD_DIR) $(MACHINE_HISTORY_BUILD_DIR) $(MACHINE_TIMELINE_BUILD_DIR) $(MACHINE_LOG_BUILD_DIR) $(MACHINE_JOURNAL_BUILD_DIR) $(COMPILER_TEST_BUILD_DIR)
+	@mkdir -p $(COMMON_LIB_DIR) $(LEXER_BUILD_DIR) $(PARSER_BUILD_DIR) $(SEMANTIC_BUILD_DIR) $(IR_BUILD_DIR) $(LOWER_IR_BUILD_DIR) $(VALUE_SSA_BUILD_DIR) $(MEMORY_SSA_BUILD_DIR) $(MACHINE_IR_BUILD_DIR) $(MACHINE_SELECT_BUILD_DIR) $(MACHINE_LAYOUT_BUILD_DIR) $(MACHINE_EMIT_BUILD_DIR) $(MACHINE_ENCODE_BUILD_DIR) $(MACHINE_BYTES_BUILD_DIR) $(MACHINE_OBJECT_BUILD_DIR) $(MACHINE_RELOC_BUILD_DIR) $(MACHINE_CONTAINER_BUILD_DIR) $(MACHINE_ELF_BUILD_DIR) $(MACHINE_IMAGE_BUILD_DIR) $(MACHINE_EXEC_BUILD_DIR) $(MACHINE_LOAD_BUILD_DIR) $(MACHINE_RUNTIME_BUILD_DIR) $(MACHINE_LAUNCH_BUILD_DIR) $(MACHINE_STEP_BUILD_DIR) $(MACHINE_DECODE_BUILD_DIR) $(MACHINE_PAYLOAD_DECODE_BUILD_DIR) $(MACHINE_INTERP_BUILD_DIR) $(MACHINE_TRANSITION_BUILD_DIR) $(MACHINE_STATE_BUILD_DIR) $(MACHINE_MUTATION_BUILD_DIR) $(MACHINE_WRITEBACK_BUILD_DIR) $(MACHINE_COMMIT_BUILD_DIR) $(MACHINE_APPLY_BUILD_DIR) $(MACHINE_OBSERVE_BUILD_DIR) $(MACHINE_DELTA_BUILD_DIR) $(MACHINE_TRACE_BUILD_DIR) $(MACHINE_EVENT_BUILD_DIR) $(MACHINE_OUTCOME_BUILD_DIR) $(MACHINE_HISTORY_BUILD_DIR) $(MACHINE_TIMELINE_BUILD_DIR) $(MACHINE_LOG_BUILD_DIR) $(MACHINE_JOURNAL_BUILD_DIR) $(COMPILER_TEST_BUILD_DIR) $(TOOLS_BUILD_DIR)
 
 $(COMMON_OBJ_DIR)/%.o: src/%.c $(COMPILER_COMMON_BUILD_DEPS) | dirs
 	@mkdir -p $(dir $@)
@@ -614,6 +621,38 @@ $(COMPILER_BIN): force src/compiler/main.c $(COMPILER_COMMON_LIB) include/compil
 
 $(COMPILER_DRIVER_TEST_BIN): tests/compiler/compiler_driver_test.c $(COMPILER_COMMON_LIB) include/compiler.h | dirs
 	$(TEST_LINK_CMD)
+
+$(DUMP_MACHINE_STAGE_BIN): tools/dump_machine_stage.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/dump_machine_stage.c $(COMPILER_COMMON_LIB) -o $@
+
+$(DUMP_MIDDLE_STAGE_BIN): tools/dump_middle_stage.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/dump_middle_stage.c $(COMPILER_COMMON_LIB) -o $@
+
+$(DUMP_ALLOC_STAGE_BIN): tools/dump_alloc_stage.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/dump_alloc_stage.c $(COMPILER_COMMON_LIB) -o $@
+
+$(PROFILE_BACKEND_LAYERS_BIN): tools/profile_backend_layers.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/profile_backend_layers.c $(COMPILER_COMMON_LIB) -o $@
+
+$(PROFILE_COMPILER_STAGES_BIN): tools/profile_compiler_stages.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/profile_compiler_stages.c $(COMPILER_COMMON_LIB) -o $@
+
+$(DIAG_ALLOCATOR_STAGES_BIN): tools/diag_allocator_stages.c $(COMPILER_COMMON_LIB) $(COMPILER_COMMON_BUILD_DEPS) | dirs
+	$(CC) $(CFLAGS) tools/diag_allocator_stages.c $(COMPILER_COMMON_LIB) -o $@
+
+tools: $(DUMP_MACHINE_STAGE_BIN) $(DUMP_MIDDLE_STAGE_BIN) $(DUMP_ALLOC_STAGE_BIN) $(PROFILE_BACKEND_LAYERS_BIN) $(PROFILE_COMPILER_STAGES_BIN) $(DIAG_ALLOCATOR_STAGES_BIN)
+
+dump-machine-stage: $(DUMP_MACHINE_STAGE_BIN)
+
+dump-middle-stage: $(DUMP_MIDDLE_STAGE_BIN)
+
+dump-alloc-stage: $(DUMP_ALLOC_STAGE_BIN)
+
+profile-backend-layers: $(PROFILE_BACKEND_LAYERS_BIN)
+
+profile-compiler-stages: $(PROFILE_COMPILER_STAGES_BIN)
+
+diag-allocator-stages: $(DIAG_ALLOCATOR_STAGES_BIN)
 
 test-lexer: $(LEXER_TEST_BIN)
 	@echo "[lexer] running $(LEXER_TEST_INPUT)"

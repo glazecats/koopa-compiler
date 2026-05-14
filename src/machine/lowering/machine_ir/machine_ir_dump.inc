@@ -242,12 +242,33 @@ int machine_ir_dump_program(const MachineIrProgram *program,
                             goto oom;
                         }
                         break;
+                    case MACHINE_IR_INSTR_ADDR_LOCAL:
+                    case MACHINE_IR_INSTR_ADDR_GLOBAL:
+                        if (!machine_ir_append_format(&builder, "addr ") ||
+                            !machine_ir_append_slot(&builder, instruction->as.addr_slot)) {
+                            goto oom;
+                        }
+                        break;
                     case MACHINE_IR_INSTR_STORE_LOCAL:
                     case MACHINE_IR_INSTR_STORE_GLOBAL:
                         if (!machine_ir_append_format(&builder, "store ") ||
                             !machine_ir_append_slot(&builder, instruction->as.store.slot) ||
                             !machine_ir_append_format(&builder, ", ") ||
                             !machine_ir_append_operand(&builder, program, instruction->as.store.value)) {
+                            goto oom;
+                        }
+                        break;
+                    case MACHINE_IR_INSTR_LOAD_INDIRECT:
+                        if (!machine_ir_append_format(&builder, "load_indirect ") ||
+                            !machine_ir_append_operand(&builder, program, instruction->as.load_indirect_addr)) {
+                            goto oom;
+                        }
+                        break;
+                    case MACHINE_IR_INSTR_STORE_INDIRECT:
+                        if (!machine_ir_append_format(&builder, "store_indirect ") ||
+                            !machine_ir_append_operand(&builder, program, instruction->as.store_indirect.addr) ||
+                            !machine_ir_append_format(&builder, ", ") ||
+                            !machine_ir_append_operand(&builder, program, instruction->as.store_indirect.value)) {
                             goto oom;
                         }
                         break;

@@ -4,6 +4,8 @@
 #include "value_ssa_pass.c"
 #else
 
+#include <limits.h>
+
 typedef enum {
     VALUE_SSA_FOLD_RESOLVE_UNVISITED = 0,
     VALUE_SSA_FOLD_RESOLVE_VISITING,
@@ -143,9 +145,29 @@ static int value_ssa_try_fold_binary_immediates(ValueSsaBinaryOp op,
         result = lhs32 >= rhs32 ? 1 : 0;
         break;
     case VALUE_SSA_BINARY_DIV:
+        if (rhs32 == 0 || (lhs32 == INT32_MIN && rhs32 == -1)) {
+            return 0;
+        }
+        result = value_ssa_normalize_sysy_int_value((long long)(lhs32 / rhs32));
+        break;
     case VALUE_SSA_BINARY_MOD:
+        if (rhs32 == 0 || (lhs32 == INT32_MIN && rhs32 == -1)) {
+            return 0;
+        }
+        result = value_ssa_normalize_sysy_int_value((long long)(lhs32 % rhs32));
+        break;
     case VALUE_SSA_BINARY_SHIFT_LEFT:
+        if (rhs32 < 0 || rhs32 >= 32 || lhs32 < 0) {
+            return 0;
+        }
+        result = value_ssa_normalize_sysy_int_value((long long)((uint32_t)lhs32 << (uint32_t)rhs32));
+        break;
     case VALUE_SSA_BINARY_SHIFT_RIGHT:
+        if (rhs32 < 0 || rhs32 >= 32) {
+            return 0;
+        }
+        result = value_ssa_normalize_sysy_int_value((long long)(lhs32 >> rhs32));
+        break;
     default:
         return 0;
     }

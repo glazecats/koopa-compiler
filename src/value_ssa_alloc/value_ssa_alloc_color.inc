@@ -557,6 +557,94 @@ static int value_ssa_alloc_run_full_step(const ValueSsaFunction *function,
     return 1;
 }
 
+static int value_ssa_alloc_function_is_large_straight_line_chain_hotspot(const ValueSsaFunction *function) {
+    const ValueSsaBasicBlock *block;
+    size_t instruction_index;
+    size_t load_count = 0u;
+
+    if (!function || !function->has_body || function->block_count != 1u || function->next_value_id < 4096u) {
+        return 0;
+    }
+
+    block = &function->blocks[0];
+    if (block->phi_count != 0u || block->instruction_count < 4096u) {
+        return 0;
+    }
+    switch (block->terminator.kind) {
+        case VALUE_SSA_TERM_RETURN:
+            break;
+        default:
+            return 0;
+    }
+
+    for (instruction_index = 0u; instruction_index < block->instruction_count; ++instruction_index) {
+        const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+        switch (instruction->kind) {
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                ++load_count;
+                break;
+            case VALUE_SSA_INSTR_MOV:
+            case VALUE_SSA_INSTR_BINARY:
+                break;
+            default:
+                return 0;
+        }
+    }
+
+    return load_count <= 32u;
+}
+
+static int value_ssa_alloc_try_large_straight_line_chain_fast_allocate(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *def_use,
+    size_t color_budget,
+    ValueSsaAllocationResult *result,
+    ValueSsaError *error) {
+    size_t value_id;
+    size_t next_spill_slot = 0u;
+
+    if (!function || !def_use || !result) {
+        value_ssa_alloc_set_error(error, 0, 0, "VALUE-SSA-ALLOC-248: invalid straight-line fast allocation contract");
+        return 0;
+    }
+    if (!value_ssa_alloc_prepare_result(result, function->next_value_id, color_budget, error)) {
+        return 0;
+    }
+    if (function->name) {
+        result->function_name = value_ssa_alloc_strdup(function->name);
+        if (!result->function_name) {
+            value_ssa_allocation_result_free(result);
+            value_ssa_alloc_set_error(
+                error, 0, 0, "VALUE-SSA-ALLOC-249: out of memory copying straight-line fast allocation function name");
+            return 0;
+        }
+    }
+
+    for (value_id = 0u; value_id < function->next_value_id; ++value_id) {
+        size_t use_count = def_use->use_counts ? def_use->use_counts[value_id] : 0u;
+
+        if (use_count <= 1u && color_budget > 0u) {
+            result->has_color[value_id] = 1u;
+            result->colors[value_id] = 0u;
+            result->spill_flags[value_id] = 0u;
+            result->spill_confirmed_flags[value_id] = 0u;
+            result->spill_intended_flags[value_id] = 0u;
+            result->spill_slots[value_id] = (size_t)-1;
+        } else {
+            result->has_color[value_id] = 0u;
+            result->colors[value_id] = (size_t)-1;
+            result->spill_flags[value_id] = 1u;
+            result->spill_confirmed_flags[value_id] = 1u;
+            result->spill_intended_flags[value_id] = 1u;
+            result->spill_slots[value_id] = next_spill_slot++;
+        }
+        result->spill_priorities[value_id] = use_count;
+    }
+    result->spill_slot_count = next_spill_slot;
+    return 1;
+}
+
 static int value_ssa_alloc_entry_step_completed_or_cleanup(ValueSsaAllocationResult *result,
     const ValueSsaAllocationEntryStepResult *entry_step,
     ValueSsaError *error) {
@@ -703,6 +791,9 @@ static int value_ssa_alloc_run_rewrite_loop_step(ValueSsaProgram *program,
             ValueSsaFunction *function = &program->functions[function_index];
 
             if (!function->has_body || !rewritten_functions[function_index]) {
+                continue;
+            }
+            if (value_ssa_alloc_skip_call_heavy_rewrite_rollback_enabled()) {
                 continue;
             }
             if (!value_ssa_alloc_function_has_call_instruction(function)) {
@@ -964,6 +1055,16 @@ int value_ssa_allocate_function(const ValueSsaFunction *function,
     value_ssa_alloc_full_step_result_init(&full_step);
     value_ssa_alloc_entry_step_result_init(&fallback_entry);
     value_ssa_allocator_coalesce_analysis_init(&identity_coalesce);
+
+    if (value_ssa_alloc_function_is_large_straight_line_chain_hotspot(function)) {
+        if (!value_ssa_compute_def_use_analysis(function, &artifacts.def_use, error) ||
+            !value_ssa_alloc_try_large_straight_line_chain_fast_allocate(
+                function, &artifacts.def_use, color_budget, result, error)) {
+            goto cleanup;
+        }
+        ok = 1;
+        goto cleanup;
+    }
 
     if (!value_ssa_alloc_run_full_step(function,
             color_budget,

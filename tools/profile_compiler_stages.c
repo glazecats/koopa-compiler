@@ -197,6 +197,15 @@ int main(int argc, char **argv) {
     }
 
     t0 = tool_now_s();
+    ok = value_ssa_optimize_perf_hotspots(&value_program, &value_error);
+    t1 = tool_now_s();
+    printf("value_ssa_perf_hotspots %.3f\n", t1 - t0);
+    measured_sum += t1 - t0;
+    if (!ok) {
+        goto cleanup;
+    }
+
+    t0 = tool_now_s();
     ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
         &value_program,
         TOOL_COLOR_BUDGET,

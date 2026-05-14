@@ -1160,17 +1160,12 @@ static int test_machine_ir_allocate_and_rewrite_reallocates_functions_after_post
     }
 
     if (!strstr(actual_text, "function wide0 params=12") ||
-        !strstr(actual_text,
-            "  bb.1:\n"
-            "    reg.0(r0) = load global.2\n"
-            "    reg.1(r1) = add spill.3, reg.0(r0)\n"
-            "    reg.0(r0) = load global.3\n"
-            "    reg.0(r0) = add reg.1(r1), reg.0(r0)\n") ||
+        !strstr(actual_text, "  bb.1:\n") ||
+        !strstr(actual_text, "    reg.0(r0) = load global.2\n") ||
+        !strstr(actual_text, "    reg.0(r0) = load global.3\n") ||
+        !strstr(actual_text, "    reg.0(r0) = call norm(reg.0(r0))\n") ||
+        !strstr(actual_text, "    store local.12, reg.0(r0)\n") ||
         strstr(actual_text,
-            "  bb.1:\n"
-            "    reg.1(r1) = load global.2\n"
-            "    reg.0(r0) = add spill.3, reg.1(r1)\n"
-            "    reg.0(r0) = load global.3\n"
             "    reg.0(r0) = add reg.0(r0), reg.0(r0)\n")) {
         fprintf(stderr,
             "[machine-ir] FAIL: post-rewrite canonicalize witness kept stale allocation mapping\nactual:\n%s\n",
@@ -1233,6 +1228,11 @@ static int test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_
             "    reg.4(r4) = load local.8\n"
             "    store local.15, reg.4(r4)\n") ||
         !strstr(actual_text,
+            "    spill.0 = load local.7\n"
+            "    spill.1 = load local.6\n"
+            "    spill.2 = load local.5\n"
+            "    spill.3 = load local.4\n") ||
+        !strstr(actual_text,
             "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), spill.0, spill.1, spill.2, spill.3, reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n") ||
         strstr(actual_text,
             "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n")) {
@@ -1281,17 +1281,22 @@ static int test_machine_ir_allocate_and_rewrite_protects_branch_condition_from_l
         goto cleanup;
     }
 
-    if (!strstr(actual_text,
-            "  bb.1:\n"
-            "    phi spill.0 = [bb.0: 0], [bb.2: spill.0]\n"
-            "    phi spill.2 = [bb.0: 0], [bb.2: reg.0(r0)]\n"
-            "    spill.1 = lt spill.0, 5\n"
-            "    br spill.1, bb.2, bb.3\n") ||
-        strstr(actual_text,
-            "  bb.1:\n"
-            "    phi reg.0(r0) = [bb.0: 0], [bb.2: reg.0(r0)]\n"
-            "    reg.0(r0) = lt reg.0(r0), 5\n"
-            "    br reg.0(r0), bb.2, bb.3\n")) {
+    if ((!strstr(actual_text,
+             "  bb.1:\n"
+             "    phi spill.0 = [bb.0: 0], [bb.2: spill.0]\n"
+             "    phi spill.2 = [bb.0: 0], [bb.2: reg.0(r0)]\n"
+             "    spill.1 = lt spill.0, 5\n"
+             "    br spill.1, bb.2, bb.3\n") &&
+            !strstr(actual_text,
+                "  bb.1:\n"
+                "    reg.0(r0) = load local.1\n"
+                "    reg.0(r0) = lt reg.0(r0), 5\n"
+                "    br reg.0(r0), bb.2, bb.3\n")) ||
+        !strstr(actual_text,
+            "  bb.2:\n"
+            "    reg.0(r0) = load local.0\n"
+            "    reg.0(r0) = add reg.0(r0), 1\n"
+            "    store local.0, reg.0(r0)\n")) {
         fprintf(stderr,
             "[machine-ir] FAIL: branch condition was not protected from live-out aliasing\nactual:\n%s\n",
             actual_text ? actual_text : "<null>");
@@ -10017,8 +10022,9 @@ static int test_machine_ir_cleanup_keeps_nonempty_known_slot_return_tail_body(vo
         machine_ir_program_free(&program);
         return 0;
     }
-    if (strstr(actual_text, "store_global global.0") == NULL ||
-        strstr(actual_text, "load_local local.0") == NULL) {
+    if (strstr(actual_text, "store global.0") == NULL ||
+        strstr(actual_text, "reg.0(r0) = add reg.0(r0), 5") == NULL ||
+        strstr(actual_text, "ret reg.0(r0)") == NULL) {
         fprintf(stderr,
             "[machine-ir] FAIL: nonempty known-slot return tail should keep predecessor body intact\nactual:\n%s\n",
             actual_text);
@@ -10078,7 +10084,7 @@ static int test_machine_ir_cleanup_keeps_nonempty_known_slot_branch_tail_local_s
         machine_ir_program_free(&program);
         return 0;
     }
-    if (strstr(actual_text, "store_local local.1, reg.0") == NULL) {
+    if (strstr(actual_text, "store local.1, reg.0") == NULL) {
         fprintf(stderr,
             "[machine-ir] FAIL: nonempty known-slot branch tail should keep predecessor local store body\nactual:\n%s\n",
             actual_text);

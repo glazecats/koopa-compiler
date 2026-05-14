@@ -222,6 +222,8 @@ static int machine_select_cleanup_reuse_internal_pure_calls_program(MachineSelec
     MachineSelectError *error);
 static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(MachineSelectProgram *program,
     MachineSelectError *error);
+static int machine_select_cleanup_reuse_unique_predecessor_small_pure_exprs_program(MachineSelectProgram *program,
+    MachineSelectError *error);
 static int machine_select_cleanup_forward_same_block_indirect_loads_program(MachineSelectProgram *program);
 static int machine_select_cleanup_reuse_spill_pure_expr_program(MachineSelectProgram *program);
 static int machine_select_op_is_small_reusable_pure_expr(const MachineSelectOp *op);
@@ -1743,6 +1745,28 @@ static size_t machine_select_count_visible_result_uses_in_block(const MachineSel
     return use_count;
 }
 
+static int machine_select_result_has_later_uses_before_explicit_redefinition(
+    const MachineSelectBasicBlock *block,
+    size_t producer_index,
+    MachineSelectOperand result) {
+    size_t op_index;
+
+    if (!block || producer_index >= block->op_count) {
+        return 0;
+    }
+
+    for (op_index = producer_index + 1u; op_index < block->op_count; ++op_index) {
+        if (machine_select_count_op_result_uses(&block->ops[op_index], result) != 0u) {
+            return 1;
+        }
+        if (machine_select_op_redefines_result(&block->ops[op_index], result)) {
+            return 0;
+        }
+    }
+
+    return machine_select_count_term_result_uses(&block->terminator, result) != 0u;
+}
+
 static int machine_select_cleanup_op_writes_memory(const MachineSelectOp *op) {
     if (!op) {
         return 0;
@@ -2514,6 +2538,143 @@ static int machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(Ma
     }
 
     machine_select_call_effect_summary_free(&summary);
+    return changed;
+}
+
+static int machine_select_cleanup_reuse_unique_predecessor_small_pure_exprs_in_function(
+    MachineSelectProgram *program,
+    MachineSelectFunction *function,
+    MachineSelectError *error) {
+    size_t *predecessor_counts = NULL;
+    size_t block_index;
+    int changed = 0;
+
+    (void)error;
+
+    if (!program || !function) {
+        return 0;
+    }
+    if (!machine_select_cleanup_compute_predecessor_counts(function, &predecessor_counts, NULL)) {
+        return 0;
+    }
+
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        MachineSelectBasicBlock *block = &function->blocks[block_index];
+        MachineSelectBasicBlock *predecessor_block = NULL;
+        size_t predecessor_block_id = (size_t)-1;
+        size_t op_index;
+
+        if (predecessor_counts[block_index] != 1u ||
+            !machine_select_cleanup_find_unique_predecessor_block(
+                function, block_index, predecessor_counts, &predecessor_block_id) ||
+            predecessor_block_id >= function->block_count) {
+            continue;
+        }
+        predecessor_block = &function->blocks[predecessor_block_id];
+
+        for (op_index = 0u; op_index < block->op_count; ++op_index) {
+            MachineSelectOp *op = &block->ops[op_index];
+            size_t prev_index;
+            size_t arg_index;
+
+            if (!op->has_result ||
+                !machine_select_op_is_small_reusable_pure_expr(op)) {
+                continue;
+            }
+
+            for (prev_index = predecessor_block->op_count; prev_index > 0u; --prev_index) {
+                MachineSelectOp *prev = &predecessor_block->ops[prev_index - 1u];
+                size_t scan_index;
+                int invalidated = 0;
+
+                if (!prev->has_result ||
+                    !machine_select_op_is_small_reusable_pure_expr(prev) ||
+                    !machine_select_ops_compute_same_small_reusable_pure_expr_in_block(
+                        predecessor_block, prev_index - 1u, block, op_index, 0u)) {
+                    continue;
+                }
+
+                for (scan_index = prev_index; scan_index < predecessor_block->op_count; ++scan_index) {
+                    MachineSelectOp *scan = &predecessor_block->ops[scan_index];
+
+                    if (machine_select_op_is_call(scan) ||
+                        machine_select_op_redefines_result(scan, prev->result) ||
+                        machine_select_op_clobbers_operand_via_call(program, function, scan, prev->result)) {
+                        invalidated = 1;
+                        break;
+                    }
+                    for (arg_index = 0u; arg_index < 2u; ++arg_index) {
+                        MachineSelectOperand arg = arg_index == 0u ? prev->as.copy_value : prev->as.binary.lhs;
+
+                        if (machine_select_op_redefines_result(scan, arg) ||
+                            machine_select_op_clobbers_operand_via_call(program, function, scan, arg)) {
+                            invalidated = 1;
+                            break;
+                        }
+                    }
+                    if (invalidated) {
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    continue;
+                }
+
+                for (scan_index = 0u; scan_index < op_index; ++scan_index) {
+                    MachineSelectOp *scan = &block->ops[scan_index];
+
+                    if (machine_select_op_is_call(scan) ||
+                        machine_select_op_redefines_result(scan, prev->result) ||
+                        machine_select_op_clobbers_operand_via_call(program, function, scan, prev->result)) {
+                        invalidated = 1;
+                        break;
+                    }
+                }
+                if (invalidated) {
+                    continue;
+                }
+
+                if (machine_select_operands_equal(op->result, prev->result)) {
+                    machine_select_remove_op_at(block, op_index);
+                } else {
+                    MachineSelectOperand current_result = op->result;
+
+                    machine_select_op_free(op);
+                    memset(op, 0, sizeof(*op));
+                    op->kind = MACHINE_SELECT_OP_COPY;
+                    op->has_result = 1;
+                    op->result = current_result;
+                    op->as.copy_value = prev->result;
+                    machine_select_cleanup_op_shape(op);
+                }
+                changed = 1;
+                break;
+            }
+        }
+    }
+
+    free(predecessor_counts);
+    return changed;
+}
+
+static int machine_select_cleanup_reuse_unique_predecessor_small_pure_exprs_program(MachineSelectProgram *program,
+    MachineSelectError *error) {
+    size_t function_index;
+    int changed = 0;
+
+    (void)error;
+
+    if (!program) {
+        return 0;
+    }
+
+    for (function_index = 0u; function_index < program->function_count; ++function_index) {
+        if (machine_select_cleanup_reuse_unique_predecessor_small_pure_exprs_in_function(
+                program, &program->functions[function_index], error)) {
+            changed = 1;
+        }
+    }
+
     return changed;
 }
 
@@ -3502,6 +3663,21 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
         return 0;
     }
 
+    if (!machine_select_skip_cleanup_reuse_unique_predecessor_pure_calls_enabled()) {
+        int cross_block_call_changed =
+            machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(program, error);
+
+        if (cross_block_call_changed < 0) {
+            return -1;
+        }
+        if (cross_block_call_changed) {
+            changed = 1;
+        }
+    }
+    if (machine_select_cleanup_reuse_unique_predecessor_small_pure_exprs_program(program, error)) {
+        changed = 1;
+    }
+
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         MachineSelectFunction *function = &program->functions[function_index];
         int function_changed = 1;
@@ -3699,6 +3875,10 @@ static int machine_select_cleanup_forward_trivial_defs_in_block(const MachineSel
             total_uses = machine_select_count_visible_result_uses_in_block(
                 program, function, block, op_index - 1, op->result, &redefined_before_terminator);
             if (total_uses == 0) {
+                if (machine_select_result_has_later_uses_before_explicit_redefinition(
+                        block, op_index - 1u, op->result)) {
+                    continue;
+                }
                 continue;
             }
             if (!redefined_before_terminator &&
@@ -3818,6 +3998,10 @@ static int machine_select_cleanup_remove_dead_defs_in_block(MachineSelectFunctio
             total_uses = machine_select_count_visible_result_uses_in_block(
                 program, function, block, op_index - 1, op->result, &redefined_before_terminator);
             if (total_uses != 0) {
+                continue;
+            }
+            if (machine_select_result_has_later_uses_before_explicit_redefinition(
+                    block, op_index - 1u, op->result)) {
                 continue;
             }
             if (preserve_edge_copy) {

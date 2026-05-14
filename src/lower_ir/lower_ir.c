@@ -726,6 +726,7 @@ int lower_ir_block_set_void_return(LowerIrBasicBlock *block, LowerIrError *error
     block->has_terminator = 1;
     block->terminator.kind = LOWER_IR_TERM_RETURN;
     block->terminator.has_return_value = 0;
+    memset(&block->terminator.as, 0, sizeof(block->terminator.as));
     return 1;
 }
 
@@ -747,6 +748,7 @@ int lower_ir_block_set_jump(LowerIrBasicBlock *block,
 
     block->has_terminator = 1;
     block->terminator.kind = LOWER_IR_TERM_JUMP;
+    memset(&block->terminator.as, 0, sizeof(block->terminator.as));
     block->terminator.as.jump_target = target_block_id;
     return 1;
 }
@@ -771,6 +773,7 @@ int lower_ir_block_set_branch(LowerIrBasicBlock *block,
 
     block->has_terminator = 1;
     block->terminator.kind = LOWER_IR_TERM_BRANCH;
+    memset(&block->terminator.as, 0, sizeof(block->terminator.as));
     block->terminator.as.branch.condition = condition;
     block->terminator.as.branch.then_target = then_target;
     block->terminator.as.branch.else_target = else_target;

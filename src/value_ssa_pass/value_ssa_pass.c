@@ -18,6 +18,9 @@ static void value_ssa_instruction_free(ValueSsaInstruction *instruction);
 static void value_ssa_phi_free(ValueSsaPhi *phi);
 static void value_ssa_basic_block_free(ValueSsaBasicBlock *block);
 static int value_ssa_binary_op_is_removable_dead_def(ValueSsaBinaryOp op);
+static int value_ssa_binary_op_is_safe_reusable_pure_binary(ValueSsaBinaryOp op,
+    ValueSsaValueRef lhs,
+    ValueSsaValueRef rhs);
 static int value_ssa_instruction_has_side_effects(ValueSsaInstructionKind kind);
 static int value_ssa_instruction_is_removable_dead_def(const ValueSsaInstruction *instruction);
 static int value_ssa_value_refs_equal(ValueSsaValueRef lhs, ValueSsaValueRef rhs);
@@ -191,6 +194,45 @@ static int value_ssa_binary_op_is_removable_dead_def(ValueSsaBinaryOp op) {
     case VALUE_SSA_BINARY_MOD:
     case VALUE_SSA_BINARY_SHIFT_LEFT:
     case VALUE_SSA_BINARY_SHIFT_RIGHT:
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static int value_ssa_binary_op_is_safe_reusable_pure_binary(ValueSsaBinaryOp op,
+    ValueSsaValueRef lhs,
+    ValueSsaValueRef rhs) {
+    int32_t rhs32;
+
+    (void)lhs;
+
+    if (value_ssa_binary_op_is_removable_dead_def(op)) {
+        return 1;
+    }
+
+    switch (op) {
+    case VALUE_SSA_BINARY_DIV:
+    case VALUE_SSA_BINARY_MOD:
+        if (rhs.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+            rhs32 = (int32_t)value_ssa_normalize_sysy_int_value(rhs.immediate);
+            if (rhs32 == 0) {
+                return 0;
+            }
+        }
+        return 1;
+    case VALUE_SSA_BINARY_SHIFT_LEFT:
+        if (rhs.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+            rhs32 = (int32_t)value_ssa_normalize_sysy_int_value(rhs.immediate);
+            return rhs32 >= 0 && rhs32 < 32;
+        }
+        return 1;
+    case VALUE_SSA_BINARY_SHIFT_RIGHT:
+        if (rhs.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+            rhs32 = (int32_t)value_ssa_normalize_sysy_int_value(rhs.immediate);
+            return rhs32 >= 0 && rhs32 < 32;
+        }
+        return 1;
     default:
         return 0;
     }

@@ -610,6 +610,29 @@ static int test_lower_ir_verifier_rejects_hidden_store_result_fake_temp_definiti
     return ok;
 }
 
+static int test_lower_ir_verifier_accepts_unused_temp_id_gap(void) {
+    LowerIrProgram program;
+    LowerIrError error;
+    int ok;
+
+    if (!build_valid_program(&program, &error)) {
+        return 0;
+    }
+
+    program.functions[0].next_temp_id = 3;
+    ok = lower_ir_verify_program(&program, &error);
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-verify] FAIL: LOWER-IR-VERIFY-UNUSED-TEMP-ID-GAP rejected at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+    }
+
+    lower_ir_program_free(&program);
+    return ok;
+}
+
 static int test_lower_ir_verifier_accepts_join_temp_multi_definition(void) {
     LowerIrProgram program;
     LowerIrError error;
@@ -1190,6 +1213,7 @@ int main(void) {
     ok &= test_lower_ir_verifier_rejects_store_indirect_inputs_use_before_definition();
     ok &= test_lower_ir_verifier_rejects_duplicate_temp_definition_in_block();
     ok &= test_lower_ir_verifier_rejects_hidden_store_result_fake_temp_definition();
+    ok &= test_lower_ir_verifier_accepts_unused_temp_id_gap();
     ok &= test_lower_ir_verifier_accepts_join_temp_multi_definition();
     ok &= test_lower_ir_verifier_rejects_declaration_with_extra_nonparameter_local();
     ok &= test_lower_ir_verifier_rejects_declaration_with_temp_state();

@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     MachineEmitError emit_error;
     MachineBytesReport bytes_report;
     MachineBytesError bytes_error;
+    SemanticOptions semantic_options;
     MachineSelectFunctionSummary select_summary;
     size_t select_function_count = 0;
     size_t function_index;
@@ -94,6 +95,7 @@ int main(int argc, char **argv) {
     memset(&layout_error, 0, sizeof(layout_error));
     memset(&emit_error, 0, sizeof(emit_error));
     memset(&bytes_error, 0, sizeof(bytes_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
 
     lexer_init_tokens(&tokens);
     ast_program_init(&ast);
@@ -111,12 +113,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "failed to read %s\n", path);
         return 1;
     }
+    semantic_options.skip_all_paths_return_check = 1;
+
     if (!lexer_tokenize(source, &tokens) ||
         !parser_parse_translation_unit_ast(&tokens, &ast, &parser_error) ||
-        !semantic_analyze_program(&ast, &semantic_error) ||
+        !semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) ||
         !ir_lower_program(&ast, NULL, &ir_program, &ir_error) ||
         !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
         !value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) ||
+        !value_ssa_optimize_perf_hotspots(&value_program, &value_error) ||
         !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
             &value_program, 8u, 8u, &machine_report, &machine_ir_error) ||
         !machine_select_build_program_from_machine_ir_report(&machine_report, &select_program, &select_error) ||

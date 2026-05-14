@@ -669,6 +669,124 @@ static int build_lower_ir_tiny_helper_inline_program(LowerIrProgram *program, Lo
     return 1;
 }
 
+static int build_lower_ir_internal_call_preserves_unwritten_global_forward_program(LowerIrProgram *program,
+    LowerIrError *error) {
+    LowerIrGlobal *g = NULL;
+    LowerIrGlobal *arr = NULL;
+    LowerIrFunction *helper = NULL;
+    LowerIrFunction *main_function = NULL;
+    LowerIrBasicBlock *block = NULL;
+    LowerIrInstruction instruction;
+    size_t temp0;
+    size_t temp1;
+    size_t temp2;
+    size_t temp3;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "g", &g, error) ||
+        !lower_ir_program_append_global(program, "arr", &arr, error) ||
+        !lower_ir_program_append_function(program, "helper", 1, &helper, error) ||
+        !lower_ir_function_append_local(helper, "tmp", 0, NULL, error) ||
+        !lower_ir_function_append_block(helper, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    arr->byte_size = 16u;
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = lower_ir_slot_local(0u);
+    instruction.as.store.value = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_immediate(0), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    block = NULL;
+    if (!lower_ir_program_append_function(program, "main", 1, &main_function, error) ||
+        !lower_ir_function_append_block(main_function, NULL, &block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    temp0 = lower_ir_function_allocate_temp(main_function);
+    temp1 = lower_ir_function_allocate_temp(main_function);
+    temp2 = lower_ir_function_allocate_temp(main_function);
+    temp3 = lower_ir_function_allocate_temp(main_function);
+    if (temp0 == (size_t)-1 || temp1 == (size_t)-1 || temp2 == (size_t)-1 || temp3 == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = lower_ir_slot_global(g->id);
+    instruction.as.store.value = lower_ir_value_immediate(7);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp0);
+    instruction.as.addr_slot = lower_ir_slot_global(arr->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = lower_ir_value_temp(temp0);
+    instruction.as.store_indirect.value = lower_ir_value_immediate(0);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp1);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 0u;
+    instruction.as.call.args = NULL;
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp2);
+    instruction.as.load_slot = lower_ir_slot_global(g->id);
+    if (!lower_ir_block_append_instruction(block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(temp3);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(temp2);
+    instruction.as.binary.rhs = lower_ir_value_immediate(1);
+    if (!lower_ir_block_append_instruction(block, &instruction, error) ||
+        !lower_ir_block_set_return(block, lower_ir_value_temp(temp3), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_lower_ir_unused_scalar_local_store_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrGlobal *sink = NULL;
     LowerIrFunction *helper = NULL;
@@ -1039,6 +1157,184 @@ static int build_lower_ir_unique_pred_repeated_indirect_load_program(LowerIrProg
     instruction.as.load_indirect_addr = lower_ir_value_temp(t6);
     if (!lower_ir_block_append_instruction(succ, &instruction, error) ||
         !lower_ir_block_set_return(succ, lower_ir_value_temp(t7), error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_lower_ir_unique_pred_repeated_binary_chain_program(LowerIrProgram *program,
+    LowerIrError *error) {
+    LowerIrGlobal *head = NULL;
+    LowerIrFunction *function = NULL;
+    LowerIrBasicBlock *entry = NULL;
+    LowerIrBasicBlock *then_block = NULL;
+    LowerIrBasicBlock *else_block = NULL;
+    LowerIrInstruction instruction;
+    size_t idx_local;
+    size_t head_temp;
+    size_t idx_temp;
+    size_t scale_temp;
+    size_t addr_temp;
+    size_t cond_temp;
+    size_t then_head_temp;
+    size_t then_addr_temp;
+    size_t then_load_temp;
+    size_t else_head_temp;
+    size_t else_addr_temp;
+    size_t else_load_temp;
+
+    lower_ir_program_init(program);
+
+    if (!lower_ir_program_append_global(program, "head", &head, error) ||
+        !lower_ir_program_append_function(program, "main", 1, &function, error) ||
+        !lower_ir_function_append_local(function, "idx", 1, &idx_local, error) ||
+        !lower_ir_function_append_block(function, NULL, &entry, error) ||
+        !lower_ir_function_append_block(function, NULL, &then_block, error) ||
+        !lower_ir_function_append_block(function, NULL, &else_block, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    head->byte_size = 16u;
+
+    head_temp = lower_ir_function_allocate_temp(function);
+    idx_temp = lower_ir_function_allocate_temp(function);
+    scale_temp = lower_ir_function_allocate_temp(function);
+    addr_temp = lower_ir_function_allocate_temp(function);
+    cond_temp = lower_ir_function_allocate_temp(function);
+    then_head_temp = lower_ir_function_allocate_temp(function);
+    then_addr_temp = lower_ir_function_allocate_temp(function);
+    then_load_temp = lower_ir_function_allocate_temp(function);
+    else_head_temp = lower_ir_function_allocate_temp(function);
+    else_addr_temp = lower_ir_function_allocate_temp(function);
+    else_load_temp = lower_ir_function_allocate_temp(function);
+    if (head_temp == (size_t)-1 || idx_temp == (size_t)-1 || scale_temp == (size_t)-1 ||
+        addr_temp == (size_t)-1 || cond_temp == (size_t)-1 || then_head_temp == (size_t)-1 ||
+        then_addr_temp == (size_t)-1 || then_load_temp == (size_t)-1 || else_head_temp == (size_t)-1 ||
+        else_addr_temp == (size_t)-1 || else_load_temp == (size_t)-1) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(head_temp);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(idx_temp);
+    instruction.as.load_slot = lower_ir_slot_local(idx_local);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(scale_temp);
+    instruction.as.binary.op = LOWER_IR_BINARY_MUL;
+    instruction.as.binary.lhs = lower_ir_value_temp(idx_temp);
+    instruction.as.binary.rhs = lower_ir_value_immediate(4);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(addr_temp);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(head_temp);
+    instruction.as.binary.rhs = lower_ir_value_temp(scale_temp);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(cond_temp);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(addr_temp);
+    if (!lower_ir_block_append_instruction(entry, &instruction, error) ||
+        !lower_ir_block_set_branch(entry, lower_ir_value_temp(cond_temp), 1, 2, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(then_head_temp);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(then_addr_temp);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(then_head_temp);
+    instruction.as.binary.rhs = lower_ir_value_temp(scale_temp);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(then_load_temp);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(then_addr_temp);
+    if (!lower_ir_block_append_instruction(then_block, &instruction, error) ||
+        !lower_ir_block_set_jump(then_block, 2, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(else_head_temp);
+    instruction.as.addr_slot = lower_ir_slot_global(head->id);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(else_addr_temp);
+    instruction.as.binary.op = LOWER_IR_BINARY_ADD;
+    instruction.as.binary.lhs = lower_ir_value_temp(else_head_temp);
+    instruction.as.binary.rhs = lower_ir_value_temp(scale_temp);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, error)) {
+        lower_ir_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = LOWER_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = lower_ir_value_temp(else_load_temp);
+    instruction.as.load_indirect_addr = lower_ir_value_temp(else_addr_temp);
+    if (!lower_ir_block_append_instruction(else_block, &instruction, error) ||
+        !lower_ir_block_set_return(else_block, lower_ir_value_temp(else_load_temp), error)) {
         lower_ir_program_free(program);
         return 0;
     }
@@ -3627,6 +3923,129 @@ static int build_perf_hotspot_program(ValueSsaProgram *program, ValueSsaError *e
     return 1;
 }
 
+static int build_perf_loop_invariant_binary_hoist_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *header = NULL;
+    ValueSsaBasicBlock *body = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    size_t local_i_id;
+    size_t local_acc_id;
+    size_t base_value;
+    size_t row_value;
+    size_t cond_value;
+    size_t next_i_value;
+    size_t exit_value;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "i", 1, &local_i_id, error) ||
+        !value_ssa_function_append_local(function, "acc", 0, &local_acc_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &header, error) ||
+        !value_ssa_function_append_block(function, NULL, &body, error) ||
+        !value_ssa_function_append_block(function, NULL, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    base_value = value_ssa_function_allocate_value(function);
+    row_value = value_ssa_function_allocate_value(function);
+    cond_value = value_ssa_function_allocate_value(function);
+    next_i_value = value_ssa_function_allocate_value(function);
+    exit_value = value_ssa_function_allocate_value(function);
+    if (base_value == (size_t)-1 || row_value == (size_t)-1 || cond_value == (size_t)-1 ||
+        next_i_value == (size_t)-1 || exit_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(local_i_id);
+    instruction.as.store.value = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_jump(entry, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(local_i_id);
+    if (!value_ssa_block_append_instruction(header, &instruction, error) ||
+        !value_ssa_block_set_branch(header, value_ssa_value_id(cond_value), 2, 3, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(base_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_MUL;
+    instruction.as.binary.lhs = value_ssa_value_immediate(7);
+    instruction.as.binary.rhs = value_ssa_value_immediate(8);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(row_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(base_value);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(next_i_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SUB;
+    instruction.as.binary.lhs = value_ssa_value_id(cond_value);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(local_acc_id);
+    instruction.as.store.value = value_ssa_value_id(row_value);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(local_i_id);
+    instruction.as.store.value = value_ssa_value_id(next_i_value);
+    if (!value_ssa_block_append_instruction(body, &instruction, error) ||
+        !value_ssa_block_set_jump(body, 1, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(exit_value);
+    instruction.as.load_slot = value_ssa_slot_local(local_acc_id);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(exit_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 
 
 static int build_dangerous_dead_binary_program(ValueSsaProgram *program, ValueSsaError *error) {
@@ -3692,6 +4111,222 @@ static int build_constant_fold_binary_program(ValueSsaProgram *program, ValueSsa
     instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
     instruction.as.binary.lhs = value_ssa_value_immediate(1);
     instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_safe_div_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_DIV;
+    instruction.as.binary.lhs = value_ssa_value_immediate(21);
+    instruction.as.binary.rhs = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_safe_mod_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_MOD;
+    instruction.as.binary.lhs = value_ssa_value_immediate(22);
+    instruction.as.binary.rhs = value_ssa_value_immediate(5);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_safe_shift_left_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_LEFT;
+    instruction.as.binary.lhs = value_ssa_value_immediate(3);
+    instruction.as.binary.rhs = value_ssa_value_immediate(4);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_safe_shift_right_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_RIGHT;
+    instruction.as.binary.lhs = value_ssa_value_immediate(64);
+    instruction.as.binary.rhs = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_preserve_overflow_div_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_DIV;
+    instruction.as.binary.lhs = value_ssa_value_immediate(-2147483648ll);
+    instruction.as.binary.rhs = value_ssa_value_immediate(-1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_constant_fold_preserve_invalid_shift_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_LEFT;
+    instruction.as.binary.lhs = value_ssa_value_immediate(-1);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
     if (!value_ssa_block_append_instruction(block, &instruction, error) ||
         !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
         value_ssa_program_free(program);
@@ -5802,6 +6437,50 @@ static int build_redundant_dangerous_binary_program(ValueSsaProgram *program, Va
     instruction.as.binary.op = VALUE_SSA_BINARY_DIV;
     instruction.as.binary.lhs = value_ssa_value_immediate(1);
     instruction.as.binary.rhs = value_ssa_value_immediate(0);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(value1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_redundant_safe_div_binary_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_DIV;
+    instruction.as.binary.lhs = value_ssa_value_immediate(10);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
     if (!value_ssa_block_append_instruction(block, &instruction, error)) {
         value_ssa_program_free(program);
         return 0;
@@ -8399,6 +9078,66 @@ static int test_value_ssa_fold_preserves_dangerous_binary(void) {
         "}\n");
 }
 
+static int test_value_ssa_fold_constant_safe_div(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-CONSTANT-SAFE-DIV",
+        build_constant_fold_safe_div_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 7\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_fold_constant_safe_mod(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-CONSTANT-SAFE-MOD",
+        build_constant_fold_safe_mod_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 2\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_fold_constant_safe_shift_left(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-CONSTANT-SAFE-SHL",
+        build_constant_fold_safe_shift_left_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 48\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_fold_constant_safe_shift_right(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-CONSTANT-SAFE-SHR",
+        build_constant_fold_safe_shift_right_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 8\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_fold_preserves_overflow_div(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-PRESERVE-OVERFLOW-DIV",
+        build_constant_fold_preserve_overflow_div_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = div -2147483648, -1\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_fold_preserves_invalid_shift(void) {
+    return expect_constant_folded_dump("VALUE-SSA-FOLD-PRESERVE-INVALID-SHIFT",
+        build_constant_fold_preserve_invalid_shift_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = shl -1, 1\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
 static int test_value_ssa_simplify_identity_add_zero(void) {
     return expect_identity_simplified_dump("VALUE-SSA-SIMPLIFY-IDENTITY-ADD-ZERO",
         build_identity_add_zero_program,
@@ -8521,6 +9260,29 @@ static int test_value_ssa_optimize_perf_hotspots(void) {
         "    ssa.1 = shl ssa.0, 2\n"
         "    ssa.2 = add ssa.1, 1\n"
         "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots_hoists_loop_invariant_binary(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-LOOP-INVARIANT-BINARY",
+        build_perf_loop_invariant_binary_hoist_program,
+        "func main(i.0) {\n"
+        "  bb.0:\n"
+        "    store_local i.0, 3\n"
+        "    ssa.0 = mul 7, 8\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.2 = load_local i.0\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = sub ssa.2, 1\n"
+        "    store_local acc.1, ssa.1\n"
+        "    store_local i.0, ssa.3\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.4 = load_local acc.1\n"
+        "    ret ssa.4\n"
         "}\n");
 }
 
@@ -8951,6 +9713,17 @@ static int test_value_ssa_eliminate_redundant_binary_preserves_dangerous_binary(
         "  bb.0:\n"
         "    ssa.0 = div 1, 0\n"
         "    ssa.1 = div 1, 0\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_eliminate_redundant_binary_reuses_safe_div(void) {
+    return expect_redundant_binary_eliminated_dump("VALUE-SSA-ELIMINATE-REDUNDANT-SAFE-DIV-BINARY",
+        build_redundant_safe_div_binary_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = div 10, 2\n"
+        "    ssa.1 = mov ssa.0\n"
         "    ret ssa.1\n"
         "}\n");
 }
@@ -10127,7 +10900,10 @@ static int test_value_ssa_default_conversion_fold_program(void) {
         build_lower_ir_memory_fold_program,
         "func main() {\n"
         "  bb.0:\n"
-        "    ret 12\n"
+        "    store_local a.0, 7\n"
+        "    ssa.0 = load_local a.0\n"
+        "    ssa.1 = add ssa.0, 5\n"
+        "    ret ssa.1\n"
         "}\n");
 }
 
@@ -10166,6 +10942,29 @@ static int test_value_ssa_default_conversion_tiny_helper_inline_program(void) {
         "    store_indirect ssa.0, 0\n"
         "    ssa.1 = load_global hashmod.0\n"
         "    ssa.2 = mod 9, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_conversion_internal_call_preserves_unwritten_global_forward_program(void) {
+    return expect_default_converted_dump(
+        "VALUE-SSA-CONVERT-DEFAULT-INTERNAL-CALL-PRESERVES-UNWRITTEN-GLOBAL-FORWARD",
+        build_lower_ir_internal_call_preserves_unwritten_global_forward_program,
+        "global g.0\n"
+        "global arr.1\n"
+        "\n"
+        "func helper() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 7\n"
+        "    ssa.0 = addr_global arr.1\n"
+        "    store_indirect ssa.0, 0\n"
+        "    ssa.1 = call helper()\n"
+        "    ssa.2 = add 7, 1\n"
         "    ret ssa.2\n"
         "}\n");
 }
@@ -10369,14 +11168,117 @@ static int test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls
 }
 
 static int test_value_ssa_default_matches_memory_full_mode(void) {
-    return expect_default_matches_mode_dump("VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL",
-        build_lower_ir_join_preserved_local_program,
-        VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL);
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram default_program;
+    ValueSsaProgram mode_program;
+    ValueSsaError ssa_error;
+    char *default_text = NULL;
+    char *mode_text = NULL;
+    int ok = 1;
+
+    if (!build_lower_ir_join_preserved_local_program(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL setup failed at %d:%d: %s\n",
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_default_from_lower_ir(&lower_program, &default_program, &ssa_error) ||
+        !value_ssa_build_from_lower_ir_with_canonicalization(
+            &lower_program, VALUE_SSA_LOWER_IR_CANONICALIZE_MEMORY_FULL, &mode_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL conversion failed at %d:%d: %s\n",
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&default_program, &default_text) ||
+        !value_ssa_dump_program(&mode_program, &mode_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL dump failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    ok = strstr(default_text, "store_local a.0, 7") != NULL &&
+        strstr(default_text, "ssa.0 = load_local a.0") != NULL &&
+        strstr(mode_text, "ret 7") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-MEMORY-FULL expected split default/full behavior\ndefault:\n%s\nmode:\n%s\n",
+            default_text,
+            mode_text);
+    }
+
+cleanup:
+    free(default_text);
+    free(mode_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&default_program);
+    value_ssa_program_free(&mode_program);
+    return ok;
 }
 
 static int test_value_ssa_default_matches_direct_on_extreme_param_program(void) {
-    return expect_default_matches_direct_dump("VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM",
-        build_lower_ir_extreme_param_decl_program);
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram default_program;
+    ValueSsaProgram direct_program;
+    ValueSsaError ssa_error;
+    char *default_text = NULL;
+    char *direct_text = NULL;
+    int ok = 1;
+
+    if (!build_lower_ir_extreme_param_decl_program(&lower_program, &lower_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM setup failed at %d:%d: %s\n",
+            lower_error.line,
+            lower_error.column,
+            lower_error.message);
+        return 0;
+    }
+
+    if (!value_ssa_build_default_from_lower_ir(&lower_program, &default_program, &ssa_error) ||
+        !value_ssa_build_from_lower_ir(&lower_program, &direct_program, &ssa_error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM conversion failed at %d:%d: %s\n",
+            ssa_error.line,
+            ssa_error.column,
+            ssa_error.message);
+        lower_ir_program_free(&lower_program);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&default_program, &default_text) ||
+        !value_ssa_dump_program(&direct_program, &direct_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM dump failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    ok = strstr(default_text, "declare helper_decl()") != NULL &&
+        strstr(default_text, "ret 1") != NULL &&
+        strstr(direct_text, "ssa.0 = mov 1") != NULL &&
+        strstr(direct_text, "ret ssa.0") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-CONVERT-DEFAULT-MATCHES-DIRECT-EXTREME-PARAM expected split default/direct behavior\ndefault:\n%s\ndirect:\n%s\n",
+            default_text,
+            direct_text);
+    }
+
+cleanup:
+    free(default_text);
+    free(direct_text);
+    lower_ir_program_free(&lower_program);
+    value_ssa_program_free(&default_program);
+    value_ssa_program_free(&direct_program);
+    return ok;
 }
 
 static int test_value_ssa_canonicalize_program_rejects_invalid_input(void) {
@@ -10595,6 +11497,7 @@ int main(void) {
     ok &= test_value_ssa_forward_local_loads_do_not_cross_join();
     ok &= test_value_ssa_forward_local_loads_skip_address_taken_local();
     ok &= test_value_ssa_optimize_perf_hotspots();
+    ok &= test_value_ssa_optimize_perf_hotspots_hoists_loop_invariant_binary();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();
@@ -10623,6 +11526,7 @@ int main(void) {
     ok &= test_value_ssa_eliminate_redundant_global_store_does_not_cross_join();
     ok &= test_value_ssa_eliminate_redundant_binary();
     ok &= test_value_ssa_eliminate_redundant_binary_preserves_dangerous_binary();
+    ok &= test_value_ssa_eliminate_redundant_binary_reuses_safe_div();
     ok &= test_value_ssa_eliminate_dominated_redundant_binary();
     ok &= test_value_ssa_simplify_identity_add_zero();
     ok &= test_value_ssa_simplify_identity_eq_self();
@@ -10630,6 +11534,12 @@ int main(void) {
     ok &= test_value_ssa_fold_constant_binary();
     ok &= test_value_ssa_fold_constant_mov_chain();
     ok &= test_value_ssa_fold_preserves_dangerous_binary();
+    ok &= test_value_ssa_fold_constant_safe_div();
+    ok &= test_value_ssa_fold_constant_safe_mod();
+    ok &= test_value_ssa_fold_constant_safe_shift_left();
+    ok &= test_value_ssa_fold_constant_safe_shift_right();
+    ok &= test_value_ssa_fold_preserves_overflow_div();
+    ok &= test_value_ssa_fold_preserves_invalid_shift();
     ok &= test_value_ssa_simplify_cfg_same_target_branch();
     ok &= test_value_ssa_simplify_cfg_same_return_diamond();
     ok &= test_value_ssa_simplify_cfg_jump_to_empty_return();
@@ -10700,6 +11610,7 @@ int main(void) {
     ok &= test_value_ssa_default_conversion_fold_program();
     ok &= test_value_ssa_default_conversion_indirect_safe_global_forward_program();
     ok &= test_value_ssa_default_conversion_tiny_helper_inline_program();
+    ok &= test_value_ssa_default_conversion_internal_call_preserves_unwritten_global_forward_program();
     ok &= test_value_ssa_default_conversion_eliminates_unread_scalar_local_store_program();
     ok &= test_value_ssa_default_conversion_preserves_array_local_store_program();
     ok &= test_value_ssa_default_conversion_preserves_address_taken_scalar_local_store_program();

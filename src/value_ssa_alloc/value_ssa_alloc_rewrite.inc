@@ -1762,7 +1762,9 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
                     }
                 }
             }
-            if (has_shared_spill_slots && (function->block_count > 1u || function_has_call)) {
+            if (has_shared_spill_slots &&
+                !value_ssa_alloc_skip_shared_spill_call_guard_enabled() &&
+                (function->block_count > 1u || function_has_call)) {
                 free(shared_spill_slots);
                 continue;
             }
@@ -1780,7 +1782,8 @@ static int value_ssa_alloc_rewrite_program_rewriteable_spills(ValueSsaProgram *p
             if (!rewriteable) {
                 continue;
             }
-            if (shared_spill_slots &&
+            if (!value_ssa_alloc_skip_shared_spill_reload_reuse_guard_enabled() &&
+                shared_spill_slots &&
                 function_result->spill_slots[value_id] != (size_t)-1 &&
                 function_result->spill_slots[value_id] < function_result->spill_slot_count &&
                 shared_spill_slots[function_result->spill_slots[value_id]]) {

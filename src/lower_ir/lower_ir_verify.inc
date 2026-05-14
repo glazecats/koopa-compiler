@@ -4,6 +4,12 @@
 #include "lower_ir.c"
 #else
 
+static int lower_ir_verify_trace_enabled(void) {
+    const char *flag = getenv("LOWER_IR_VERIFY_TRACE");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int lower_ir_verify_value_ref(LowerIrValueRef value,
     size_t next_temp_id,
     const char *role,
@@ -224,6 +230,7 @@ static int lower_ir_verify_internal_initializer_call_policy(const LowerIrFunctio
 static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, LowerIrError *error) {
     size_t *temp_definition_counts = NULL;
     size_t *temp_last_definition_block = NULL;
+    unsigned char *temp_is_used = NULL;
     size_t i;
 
     if (!function) {
@@ -236,9 +243,11 @@ static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, Low
 
     temp_definition_counts = (size_t *)calloc(function->next_temp_id, sizeof(size_t));
     temp_last_definition_block = (size_t *)malloc(function->next_temp_id * sizeof(size_t));
-    if (!temp_definition_counts || !temp_last_definition_block) {
+    temp_is_used = (unsigned char *)calloc(function->next_temp_id, sizeof(unsigned char));
+    if (!temp_definition_counts || !temp_last_definition_block || !temp_is_used) {
         free(temp_definition_counts);
         free(temp_last_definition_block);
+        free(temp_is_used);
         lower_ir_set_error(error,
             0,
             0,
@@ -256,6 +265,7 @@ static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, Low
         if (block->instruction_count > 0 && !block->instructions) {
             free(temp_definition_counts);
             free(temp_last_definition_block);
+            free(temp_is_used);
             lower_ir_set_error(error,
                 0,
                 0,
@@ -271,9 +281,26 @@ static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, Low
             if (instruction->has_result && instruction->result.kind == LOWER_IR_VALUE_TEMP) {
                 size_t temp_id = instruction->result.temp_id;
 
+                if (temp_id >= function->next_temp_id) {
+                    free(temp_definition_counts);
+                    free(temp_last_definition_block);
+                    free(temp_is_used);
+                    lower_ir_set_error(error,
+                        0,
+                        0,
+                        "LOWER-IR-VERIFY-070: function '%s' result temp.%zu exceeds next_temp_id=%zu in bb.%zu instr.%zu",
+                        function->name ? function->name : "<anon>",
+                        temp_id,
+                        function->next_temp_id,
+                        block->id,
+                        j);
+                    return 0;
+                }
+
                 if (temp_last_definition_block[temp_id] == block->id) {
                     free(temp_definition_counts);
                     free(temp_last_definition_block);
+                    free(temp_is_used);
                     lower_ir_set_error(error,
                         0,
                         0,
@@ -287,13 +314,234 @@ static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, Low
                 temp_definition_counts[temp_id] += 1;
                 temp_last_definition_block[temp_id] = block->id;
             }
+
+            switch (instruction->kind) {
+                case LOWER_IR_INSTR_MOV:
+                    if (instruction->as.mov_value.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.mov_value.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-071: function '%s' mov uses temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.mov_value.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.mov_value.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_INSTR_BINARY:
+                    if (instruction->as.binary.lhs.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.binary.lhs.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-072: function '%s' binary lhs temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.binary.lhs.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.binary.lhs.temp_id] = 1;
+                    }
+                    if (instruction->as.binary.rhs.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.binary.rhs.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-073: function '%s' binary rhs temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.binary.rhs.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.binary.rhs.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_INSTR_CALL: {
+                    size_t arg_index;
+
+                    for (arg_index = 0; arg_index < instruction->as.call.arg_count; ++arg_index) {
+                        if (instruction->as.call.args[arg_index].kind == LOWER_IR_VALUE_TEMP) {
+                            if (instruction->as.call.args[arg_index].temp_id >= function->next_temp_id) {
+                                free(temp_definition_counts);
+                                free(temp_last_definition_block);
+                                free(temp_is_used);
+                                lower_ir_set_error(error,
+                                    0,
+                                    0,
+                                    "LOWER-IR-VERIFY-074: function '%s' call arg temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu arg.%zu",
+                                    function->name ? function->name : "<anon>",
+                                    instruction->as.call.args[arg_index].temp_id,
+                                    function->next_temp_id,
+                                    block->id,
+                                    j,
+                                    arg_index);
+                                return 0;
+                            }
+                            temp_is_used[instruction->as.call.args[arg_index].temp_id] = 1;
+                        }
+                    }
+                    break;
+                }
+                case LOWER_IR_INSTR_LOAD_LOCAL:
+                case LOWER_IR_INSTR_LOAD_GLOBAL:
+                case LOWER_IR_INSTR_ADDR_LOCAL:
+                case LOWER_IR_INSTR_ADDR_GLOBAL:
+                    break;
+                case LOWER_IR_INSTR_LOAD_INDIRECT:
+                    if (instruction->as.load_indirect_addr.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.load_indirect_addr.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-075: function '%s' load_indirect addr temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.load_indirect_addr.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.load_indirect_addr.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_INSTR_STORE_LOCAL:
+                case LOWER_IR_INSTR_STORE_GLOBAL:
+                    if (instruction->as.store.value.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.store.value.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-076: function '%s' store value temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.store.value.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.store.value.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_INSTR_STORE_INDIRECT:
+                    if (instruction->as.store_indirect.addr.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.store_indirect.addr.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-077: function '%s' store_indirect addr temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.store_indirect.addr.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.store_indirect.addr.temp_id] = 1;
+                    }
+                    if (instruction->as.store_indirect.value.kind == LOWER_IR_VALUE_TEMP) {
+                        if (instruction->as.store_indirect.value.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-078: function '%s' store_indirect value temp.%zu beyond next_temp_id=%zu in bb.%zu instr.%zu",
+                                function->name ? function->name : "<anon>",
+                                instruction->as.store_indirect.value.temp_id,
+                                function->next_temp_id,
+                                block->id,
+                                j);
+                            return 0;
+                        }
+                        temp_is_used[instruction->as.store_indirect.value.temp_id] = 1;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (block->has_terminator) {
+            switch (block->terminator.kind) {
+                case LOWER_IR_TERM_RETURN:
+                    if (block->terminator.has_return_value &&
+                        block->terminator.as.return_value.kind == LOWER_IR_VALUE_TEMP) {
+                        if (block->terminator.as.return_value.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-079: function '%s' return temp.%zu beyond next_temp_id=%zu in bb.%zu",
+                                function->name ? function->name : "<anon>",
+                                block->terminator.as.return_value.temp_id,
+                                function->next_temp_id,
+                                block->id);
+                            return 0;
+                        }
+                        temp_is_used[block->terminator.as.return_value.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_TERM_BRANCH:
+                    if (block->terminator.as.branch.condition.kind == LOWER_IR_VALUE_TEMP) {
+                        if (block->terminator.as.branch.condition.temp_id >= function->next_temp_id) {
+                            free(temp_definition_counts);
+                            free(temp_last_definition_block);
+                            free(temp_is_used);
+                            lower_ir_set_error(error,
+                                0,
+                                0,
+                                "LOWER-IR-VERIFY-080: function '%s' branch condition temp.%zu beyond next_temp_id=%zu in bb.%zu",
+                                function->name ? function->name : "<anon>",
+                                block->terminator.as.branch.condition.temp_id,
+                                function->next_temp_id,
+                                block->id);
+                            return 0;
+                        }
+                        temp_is_used[block->terminator.as.branch.condition.temp_id] = 1;
+                    }
+                    break;
+                case LOWER_IR_TERM_JUMP:
+                default:
+                    break;
+            }
         }
     }
 
     for (i = 0; i < function->next_temp_id; ++i) {
-        if (temp_definition_counts[i] == 0) {
+        if (temp_is_used[i] && temp_definition_counts[i] == 0) {
             free(temp_definition_counts);
             free(temp_last_definition_block);
+            free(temp_is_used);
             lower_ir_set_error(error,
                 0,
                 0,
@@ -306,6 +554,7 @@ static int lower_ir_verify_temp_definitions(const LowerIrFunction *function, Low
 
     free(temp_definition_counts);
     free(temp_last_definition_block);
+    free(temp_is_used);
     return 1;
 }
 
@@ -1396,6 +1645,17 @@ int lower_ir_verify_program(const LowerIrProgram *program, LowerIrError *error) 
     for (i = 0; i < program->function_count; ++i) {
         const LowerIrFunction *function = &program->functions[i];
 
+        if (lower_ir_verify_trace_enabled()) {
+            fprintf(stderr,
+                "[lower-ir-verify-trace] function[%zu] name=%s has_body=%d locals=%zu blocks=%zu next_temp=%zu\n",
+                i,
+                function->name ? function->name : "<anon>",
+                function->has_body,
+                function->local_count,
+                function->block_count,
+                function->next_temp_id);
+        }
+
         if (!function->name || function->name[0] == '\0') {
             lower_ir_set_error(error,
                 0,
@@ -1542,6 +1802,14 @@ int lower_ir_verify_program(const LowerIrProgram *program, LowerIrError *error) 
             const LowerIrBasicBlock *block = &function->blocks[j];
             size_t k;
 
+            if (lower_ir_verify_trace_enabled()) {
+                fprintf(stderr,
+                    "[lower-ir-verify-trace]   block[%zu] instrs=%zu has_term=%d\n",
+                    j,
+                    block->instruction_count,
+                    block->has_terminator);
+            }
+
             if (block->id != j) {
                 lower_ir_set_error(error,
                     0,
@@ -1573,6 +1841,15 @@ int lower_ir_verify_program(const LowerIrProgram *program, LowerIrError *error) 
             }
 
             for (k = 0; k < block->instruction_count; ++k) {
+                if (lower_ir_verify_trace_enabled() &&
+                    ((k % 128u) == 0u || k + 1u == block->instruction_count)) {
+                    fprintf(stderr,
+                        "[lower-ir-verify-trace]     instr[%zu/%zu] kind=%d has_result=%d\n",
+                        k,
+                        block->instruction_count,
+                        (int)block->instructions[k].kind,
+                        block->instructions[k].has_result);
+                }
                 if (!lower_ir_verify_instruction(program, function, block, k, &block->instructions[k], error)) {
                     return 0;
                 }
@@ -1590,8 +1867,13 @@ int lower_ir_verify_program(const LowerIrProgram *program, LowerIrError *error) 
             }
         }
 
+        if (lower_ir_verify_trace_enabled()) {
+            fprintf(stderr, "[lower-ir-verify-trace]   temp-definitions\n");
+        }
         if (!lower_ir_verify_temp_definitions(function, error) ||
+            (lower_ir_verify_trace_enabled() ? (fprintf(stderr, "[lower-ir-verify-trace]   temp-availability\n"), 0) : 0) ||
             !lower_ir_verify_temp_availability(function, error) ||
+            (lower_ir_verify_trace_enabled() ? (fprintf(stderr, "[lower-ir-verify-trace]   reachability\n"), 0) : 0) ||
             !lower_ir_verify_reachability(function, error)) {
             return 0;
         }

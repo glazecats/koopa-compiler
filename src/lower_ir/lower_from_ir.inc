@@ -4,6 +4,12 @@
 #include "lower_ir.c"
 #else
 
+static int lower_ir_trace_enabled(void) {
+    const char *flag = getenv("LOWER_IR_TRACE");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static LowerIrBinaryOp lower_ir_binary_op_from_ir(IrBinaryOp op) {
     return (LowerIrBinaryOp)op;
 }
@@ -41,25 +47,6 @@ static int lower_ir_call_returns_void(const IrProgram *program, const IrInstruct
         return callee->return_type == AST_FUNCTION_RETURN_VOID;
     }
     return 0;
-}
-
-static int lower_ir_append_call_result_zero_definition(LowerIrFunction *out_function,
-    LowerIrBasicBlock *out_block,
-    size_t temp_id,
-    LowerIrError *error) {
-    LowerIrInstruction lowered_instruction;
-
-    if (!out_function || !out_block) {
-        lower_ir_set_error(error, 0, 0, "LOWER-IR-042: invalid void-call result synthesis contract");
-        return 0;
-    }
-
-    memset(&lowered_instruction, 0, sizeof(lowered_instruction));
-    lowered_instruction.kind = LOWER_IR_INSTR_MOV;
-    lowered_instruction.has_result = 1;
-    lowered_instruction.result = lower_ir_value_temp(temp_id);
-    lowered_instruction.as.mov_value = lower_ir_value_immediate(0);
-    return lower_ir_block_append_instruction(out_block, &lowered_instruction, error);
 }
 
 static int lower_ir_lower_value_ref(const IrValueRef *value,
@@ -243,13 +230,6 @@ static int lower_ir_lower_instruction(const IrInstruction *instruction,
             return 0;
         }
 
-        if (!lowered_instruction.has_result &&
-            !lower_ir_append_call_result_zero_definition(out_function, out_block, instruction->result.id, error)) {
-            free(lowered_instruction.as.call.args);
-            lowered_instruction.as.call.args = NULL;
-            return 0;
-        }
-
         free(lowered_instruction.as.call.args);
         lowered_instruction.as.call.args = NULL;
         return 1;
@@ -402,6 +382,17 @@ int lower_ir_lower_from_ir(const IrProgram *program,
         size_t local_index;
         size_t block_index;
 
+        if (lower_ir_trace_enabled()) {
+            fprintf(stderr,
+                "[lower-ir-trace] function[%zu] name=%s has_body=%d locals=%zu blocks=%zu next_temp=%zu\n",
+                function_index,
+                source_function->name ? source_function->name : "<anon>",
+                source_function->has_body,
+                source_function->local_count,
+                source_function->block_count,
+                source_function->next_temp_id);
+        }
+
         if (!lower_ir_program_append_function(out_program,
                 source_function->name,
                 source_function->has_body,
@@ -413,6 +404,16 @@ int lower_ir_lower_from_ir(const IrProgram *program,
 
         for (local_index = 0; local_index < source_function->local_count; ++local_index) {
             const IrLocal *source_local = &source_function->locals[local_index];
+
+            if (lower_ir_trace_enabled() && ((local_index % 64u) == 0u || local_index + 1u == source_function->local_count)) {
+                fprintf(stderr,
+                    "[lower-ir-trace]   local[%zu/%zu] name=%s is_param=%d array_rank=%zu\n",
+                    local_index,
+                    source_function->local_count,
+                    source_local->source_name ? source_local->source_name : "<null>",
+                    source_local->is_parameter,
+                    source_local->array_rank);
+            }
 
             if (!lower_ir_function_append_local(target_function,
                     source_local->source_name,
@@ -430,6 +431,12 @@ int lower_ir_lower_from_ir(const IrProgram *program,
         }
 
         for (block_index = 0; block_index < source_function->block_count; ++block_index) {
+            if (lower_ir_trace_enabled()) {
+                fprintf(stderr,
+                    "[lower-ir-trace]   append-block[%zu/%zu]\n",
+                    block_index,
+                    source_function->block_count);
+            }
             if (!lower_ir_function_append_block(target_function, NULL, NULL, error)) {
                 lower_ir_program_free(out_program);
                 return 0;
@@ -443,9 +450,25 @@ int lower_ir_lower_from_ir(const IrProgram *program,
             LowerIrBasicBlock *target_block = &target_function->blocks[block_index];
             size_t instruction_index;
 
+            if (lower_ir_trace_enabled()) {
+                fprintf(stderr,
+                    "[lower-ir-trace]   lower-block[%zu] instrs=%zu has_term=%d\n",
+                    block_index,
+                    source_block->instruction_count,
+                    source_block->has_terminator);
+            }
+
             for (instruction_index = 0;
                  instruction_index < source_block->instruction_count;
                  ++instruction_index) {
+                if (lower_ir_trace_enabled() &&
+                    ((instruction_index % 128u) == 0u || instruction_index + 1u == source_block->instruction_count)) {
+                    fprintf(stderr,
+                        "[lower-ir-trace]     instr[%zu/%zu] kind=%d\n",
+                        instruction_index,
+                        source_block->instruction_count,
+                        (int)source_block->instructions[instruction_index].kind);
+                }
                 if (!lower_ir_lower_instruction(&source_block->instructions[instruction_index],
                         program,
                         target_function,

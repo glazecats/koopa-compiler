@@ -31,6 +31,16 @@ static int machine_ir_trace_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_ir_env_flag_enabled(const char *name) {
+    const char *flag;
+
+    if (!name || name[0] == '\0') {
+        return 0;
+    }
+    flag = getenv(name);
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_ir_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 
