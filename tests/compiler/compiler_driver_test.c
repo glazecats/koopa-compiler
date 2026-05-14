@@ -492,8 +492,10 @@ int compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(char **io
 int compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(char **io_text);
 int compiler_test_optimize_riscv_preview_stack_staged_call_args(char **io_text);
 int compiler_test_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(char **io_text);
+int compiler_test_optimize_riscv_preview_forward_store_copy_source(char **io_text);
 int compiler_test_optimize_riscv_preview_indexed_local_base_offsets(char **io_text);
 int compiler_test_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
+int compiler_test_optimize_riscv_preview_store_jump_increment_tails(char **io_text);
 
 static int test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1(void) {
     static const char *source_text =
@@ -603,6 +605,65 @@ static int test_compiler_replaces_same_block_temp_stack_reload_with_mv(void) {
         !text ||
         strstr(text, "  sw t4, 36(sp)\n  mv t6, t4\n  add a0, t6, a1\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: same-block temp stack reload should be replaced with mv when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_forwards_store_copy_source(void) {
+    static const char *source_text =
+        "  mv t4, a3\n"
+        "  lui t6, 0x1\n"
+        "  addi t6, t6, -2016\n"
+        "  add t6, sp, t6\n"
+        "  sw t4, 0(t6)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: forward-store-copy-source regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_forward_store_copy_source(&text) ||
+        !text ||
+        strstr(text,
+            "  lui t6, 0x1\n"
+            "  addi t6, t6, -2016\n"
+            "  add t6, sp, t6\n"
+            "  sw a3, 0(t6)\n") == NULL ||
+        strstr(text, "  mv t4, a3\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: store-copy source should be forwarded into the final sw when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_forward_store_copy_source_across_copy_use(void) {
+    static const char *source_text =
+        "  mv t4, a3\n"
+        "  add a0, t4, a1\n"
+        "  sw t4, 0(t6)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: forward-store-copy-source use-barrier regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_forward_store_copy_source(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: store-copy source should stay unchanged when the copied reg is used before the store\n");
         ok = 0;
     }
 
@@ -2169,6 +2230,8 @@ int main(void) {
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_both_args_reload_same_slot();
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0();
     ok &= test_compiler_replaces_same_block_temp_stack_reload_with_mv();
+    ok &= test_compiler_forwards_store_copy_source();
+    ok &= test_compiler_does_not_forward_store_copy_source_across_copy_use();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();

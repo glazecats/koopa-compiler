@@ -359,6 +359,155 @@
        `brainfuck` perf checkpoint and continue the next round on the
        remaining repeated global-address / indirect-index chains inside
        `run_program`.
+     - later 2026-05-14 `brainfuck` branch-join local-forward retry, not kept:
+       I added three new `ValueSSA` regression witnesses around
+       unique-predecessor / branch-join recomputed indirect-load shapes after
+       local updates, then tried a narrow join-slot forwarding rule so a
+       branch-join block could reuse an idom predecessor's updated scalar
+       local instead of reloading the local again.
+       The rule did hit the intended `run_program` scan-loop SSA shape:
+       in `perf/19_brainfuck-calculator`, `bb.20` stopped rebuilding
+       `program + ip * 4` from a fresh `load_local ip.0` and instead reused
+       the earlier `ssa.47` load result from `bb.17`.
+       However, the real runtime result was clearly worse on the same local
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
+       `18_brainfuck-bootstrap = 11961 ms`,
+       `19_brainfuck-calculator = 15026 ms`.
+       I therefore fully backed out the join-slot forwarding rule and kept
+       only the stronger regression coverage, with the branch-join
+       recomputed-local witness restamped to the current conservative
+       default-conversion shape.
+       Current authority is therefore:
+       this specific `branch-join local-forward` line is **not** the next
+       profitable runtime path for `brainfuck`; keep the new tests, but move
+       the next perf round back to other hotspot directions such as stack /
+       slot-layout pressure or deeper downstream load-address cost.
+     - later 2026-05-14 `machine-bytes` final local-offset remap retry, not kept:
+       I then tried the most conservative form of the earlier slot-layout
+       idea: no local-id remap in `ValueSSA` or `MachineIR`, only a final
+       RV32 preview local-slot offset remap in `machine_bytes`, scoped to the
+       known hot `run_program` shape (`function->name == "run_program"` and
+       `local_count == 520`).
+       The remap kept the `return_address[512]` family contiguous but moved
+       the hottest scalar locals near the frame base:
+       `ip/read_head/input_head/return_address_top/code/val/loop`.
+       Safety gates on the live tree stayed green after backing the experiment
+       out:
+       `make test-machine-bytes` PASS and `make test-compiler-driver` PASS.
+       However, the real runtime result was again clearly worse on the same
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
+       `19_brainfuck-calculator = 14390 ms`,
+       `18_brainfuck-bootstrap = 11307 ms`
+       versus the current stable checkpoint near
+       `12365 ms / 9547 ms`.
+       I therefore fully reverted this final-offset remap too.
+       Current authority is therefore:
+       "make a few hot scalar locals closer by final stack-offset remap" is
+       also **not** currently paying off on the live `brainfuck` witnesses,
+       even when the implementation avoids semantic-risky local-id changes.
+     - later 2026-05-14 final-text `run_program_25` tail-fold retry, not kept:
+       I also tried one even narrower downstream optimization in
+       `compiler_driver` final-text peepholes: detect the repeated
+       `run_program_25` shape where many branches first save the current `ip`
+       through a dedicated stack slot and a shared tail block then reloads
+       that slot, computes `ip + 1`, stores it to the loop-carried `ip`
+       slot, and branches back to the loop header.
+       The targeted text transform was able to pass a focused text-pattern
+       regression after refinement, but the real runtime result was still
+       clearly worse on the same local
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
+       `19_brainfuck-calculator = 14041 ms`,
+       `18_brainfuck-bootstrap = 11321 ms`.
+       I therefore fully reverted that final-text tail-fold too.
+       Current authority is therefore:
+       the open `brainfuck` runtime tail is **not** currently closing through
+       small final-text control-flow reshaping around the shared `ip+1`
+       ladder either.
+     - later 2026-05-14 `spmv/mv` parameter-load hoist retries, not kept:
+       I first tried a `ValueSSA` perf-hotspot widening that hoisted
+       immutable parameter `load_local` operations to function entry, because
+       the live `spmv` / `mv` dumps still showed repeated parameter-local
+       reloads (`xptr`, `yidx`, `vals`, `b`, `x`, `A`) around hot loops.
+       That pass-level idea was easy to regression-lock, but the real witness
+       reread showed it did **not** actually change the current
+       `spmv1` / `mv1` machine-facing hot shapes on the live tree, so it did
+       not earn a runtime measurement round.
+       I then tried a narrower natural-loop-preheader variant so only loop
+       bodies would reuse a preheader-hoisted parameter load instead of a
+       function-entry-wide live range. Before any speedup was proven, that
+       version reopened focused verifier/regression churn on the synthetic
+       witness and was therefore fully backed out too.
+       Current authority is therefore:
+       both parameter-load-hoist retries are **not kept**; continue the next
+       `spmv/mv` round from the stable implementation and rotate back to
+       witness-direct lines such as address/index-chain reuse that visibly
+       reach the live selected hot blocks.
+     - later 2026-05-14 final-text stack-reload-to-`mv` pipeline retry, not kept:
+       I noticed one existing final-text peephole was implemented but never
+       actually called on the live RISC-V text path:
+       `compiler_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(...)`.
+       After wiring it in, the generated `spmv1` / `mv1` hot blocks changed
+       exactly where expected: several hot-path pairs like
+       `sw t4, slot(sp)` + `lw t6, slot(sp)` became `sw ...` + `mv t6, t4`.
+       However, the real witness timings did not produce a trustworthy net
+       win on the same course-style
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path.
+       First, the wider version clearly hurt the `brainfuck` witnesses; then I
+       narrowed the peephole so it would skip `lw -> slli/mul` address-chain
+       starts while still preserving the old safe `sw; lw; add` regression and
+       the branch-side `spmv/mv` matches.
+       The narrowed version stayed green on
+       `make test-compiler-driver`, but the 4-case ms-precision rerun still
+       did not give a convincing net gain:
+       `06_mv1 = 13780.051 ms`,
+       `09_spmv1 = 15365.625 ms`,
+       `18_brainfuck-bootstrap = 12249.894 ms`,
+       `19_brainfuck-calculator = 22233.816 ms`.
+       Current authority is therefore:
+       this text-side stack-reload-to-`mv` pipeline retry is also **not kept**;
+       revert it and move the next measured round back to other hotspot lines
+       that can show a clearer runtime win than this mixed small-text cleanup.
+     - later 2026-05-14 final-text `mv -> sw` store-copy forwarding, kept:
+       After backing out the weaker stack-reload text experiment, I switched to
+       a narrower final-text cleanup that directly hits the current
+       `brainfuck` hot tails under the **correct** perf route
+       (`build/compiler -perf` on `/opt/bin/testcases/perf`).
+       The kept rewrite is:
+       if the final text contains
+       `mv tmp, src`
+       followed later in the same straight-line region by
+       `sw tmp, off(base)`,
+       and the copied register is neither used nor redefined in between, then
+       rewrite the store to `sw src, off(base)` and delete the dead `mv`.
+       On the live `brainfuck` witness this removed many repeated
+       `mv t4, a3 ; ... ; sw t4, 0(t6)` tails in `run_program`, plus a smaller
+       `read_program` counter-update copy/store pair.
+       Stability restamp on the live tree is green:
+       `make test-compiler-driver` PASS (with new positive/barrier text tests),
+       `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`).
+       Using the user-provided formal perf script shape on the correct course
+       perf tree, the first baseline-vs-candidate A/B came back:
+       baseline
+       `06_mv1 = 13759.886 ms`,
+       `09_spmv1 = 14444.082 ms`,
+       `18_brainfuck-bootstrap = 10862.166 ms`,
+       `19_brainfuck-calculator = 13481.985 ms`;
+       candidate
+       `06_mv1 = 12872.978 ms`,
+       `09_spmv1 = 13353.902 ms`,
+       `18_brainfuck-bootstrap = 10471.140 ms`,
+       `19_brainfuck-calculator = 13571.081 ms`.
+       One immediate confirmation rerun on the same candidate path stayed in
+       the same general band and did not reopen correctness:
+       `06_mv1 = 13681.072 ms`,
+       `09_spmv1 = 15289.049 ms`,
+       `18_brainfuck-bootstrap = 10598.447 ms`,
+       `19_brainfuck-calculator = 13373.254 ms`.
+       Current authority is therefore:
+       keep this as a small but real runtime-facing text cleanup and treat it
+       as the next stable local optimization checkpoint before continuing to
+       larger hotspot work.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:
