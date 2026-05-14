@@ -382,6 +382,33 @@
        profitable runtime path for `brainfuck`; keep the new tests, but move
        the next perf round back to other hotspot directions such as stack /
        slot-layout pressure or deeper downstream load-address cost.
+     - later 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
+       I then tried a slightly broader `ValueSSA` perf-hotspot loop-shape
+       admission aimed directly at the live `mv1` / `spmv1` inner hotspots:
+       recognize one single-header / single-latch loop shape with an
+       internal `if/else` diamond before the backedge, so the existing
+       invariant-hoist line could also touch `mv1`'s
+       `bb.7 -> bb.8 -> bb.10/bb.11 -> bb.12 -> bb.7` family instead of only
+       the earlier simpler two-block loops.
+       The experiment was useful mainly as another negative datapoint:
+       the tree stayed restorable and `make test-value-ssa-regression` still
+       passed after rebuilding, but the real user-required perf path
+       (`build/compiler -perf` -> `clang -target riscv32` -> `ld.lld` ->
+       `qemu-riscv32-static`) got worse on the same four key witnesses:
+       `06_mv1 = 12993.163 ms`,
+       `09_spmv1 = 14009.724 ms`,
+       `18_brainfuck-bootstrap = 10859.586 ms`,
+       `19_brainfuck-calculator = 13499.647 ms`.
+       I therefore fully backed the widening out again. The restored stable
+       local rerun after rollback is back near:
+       `06_mv1 = 13118.050 ms`,
+       `09_spmv1 = 13504.149 ms`,
+       `18_brainfuck-bootstrap = 10487.893 ms`,
+       `19_brainfuck-calculator = 13467.015 ms`.
+       Current authority is therefore:
+       do not spend another round widening this `diamond-loop hoist` branch
+       without a much stronger code-level reason. It changed static selected
+       shape, but that was not a runtime win on the formal course perf path.
      - later 2026-05-14 `machine-bytes` final local-offset remap retry, not kept:
        I then tried the most conservative form of the earlier slot-layout
        idea: no local-id remap in `ValueSSA` or `MachineIR`, only a final
@@ -589,6 +616,36 @@
        keep this as another stable runtime-facing text cleanup and use it as
        the new checkpoint before reopening larger `ValueSSA` / selected-IR
        hotspot work.
+     - later 2026-05-14 indexed-local-base-offset pipeline enablement, kept:
+       from that checkpoint, I then enabled one already-audited final-text
+       peephole in the live pipeline rather than inventing a new rewrite:
+       `compiler_optimize_riscv_preview_indexed_local_base_offsets(...)`.
+       The rule folds
+       `addi t6, sp, K` (or `mv t6, sp`) plus
+       `add addr, t6, idx ; lw/sw ..., 0(addr)`
+       into
+       `add addr, sp, idx ; lw/sw ..., K(addr)`
+       when the existing safety guards hold (no label/control barrier, no
+       `sp` redefinition, no stack-slot overwrite, and `idx != t6`).
+       This line was already regression-locked in
+       `tests/compiler/compiler_driver_test.c`; this round simply made it
+       live on the real final-text path. Stability restamp on the live tree is
+       green again: `make test-compiler-driver` PASS, `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`). The user-required formal 4-case perf rerun then
+       came back:
+       baseline
+       `06_mv1 = 13118.050 ms`,
+       `09_spmv1 = 13504.149 ms`,
+       `18_brainfuck-bootstrap = 10487.893 ms`,
+       `19_brainfuck-calculator = 13467.015 ms`;
+       candidate
+       `06_mv1 = 12415.351 ms`,
+       `09_spmv1 = 13460.767 ms`,
+       `18_brainfuck-bootstrap = 10474.370 ms`,
+       `19_brainfuck-calculator = 13385.143 ms`,
+       for an aggregate gain of about `841 ms`. Current authority is therefore:
+       keep this as another small but real final-text runtime cleanup and use
+       it as the new stable checkpoint before the next hotspot round.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

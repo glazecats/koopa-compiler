@@ -258,6 +258,37 @@
       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
       `18_brainfuck-bootstrap ~= 11803 ms`,
       `19_brainfuck-calculator ~= 20388 ms`
+  - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
+    - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
+      existing loop-invariant hoist line to recognize one extra loop shape:
+      a single-header loop with a single latch and one internal `if/else`
+      diamond before the backedge, motivated directly by the live
+      `06_mv1` inner `bb.7 -> bb.8 -> bb.10/bb.11 -> bb.12 -> bb.7`
+      hotspot and the similar `spmv1` inner loops.
+    - The implementation stayed regression-green after rollback-level
+      rebuilds (`make test-value-ssa-regression` PASS), and one diagnostic
+      profile pass even showed a smaller selected-op count on `mv`.
+      However, the real user-required perf path
+      (`build/compiler -perf` -> `clang -target riscv32` -> `ld.lld` ->
+      `qemu-riscv32-static`) was clearly worse on the same four key cases,
+      so the widening is **not** a keep:
+      `06_mv1 ~= 12993.163 ms`,
+      `09_spmv1 ~= 14009.724 ms`,
+      `18_brainfuck-bootstrap ~= 10859.586 ms`,
+      `19_brainfuck-calculator ~= 13499.647 ms`.
+    - After backing the widening out and rebuilding, the restored stable
+      local rerun returned to about:
+      `06_mv1 ~= 13118.050 ms`,
+      `09_spmv1 ~= 13504.149 ms`,
+      `18_brainfuck-bootstrap ~= 10487.893 ms`,
+      `19_brainfuck-calculator ~= 13467.015 ms`.
+    - Current authority:
+      do not reopen this `diamond-loop hoist` branch without much stronger
+      evidence. It is another example that shrinking selected/SSA work
+      inside `mv1`'s inner loop is not automatically a runtime win on the
+      full course perf path. Prefer the next round on more concrete address /
+      recurrence reuse or lower final-text cost rather than broader loop
+      shape admission.
   - Current 2026-05-14 `spmv/mv` parameter-load hoist retries, not kept:
     - I first tried a `ValueSSA` perf-hotspot widening that hoisted immutable
       parameter `load_local` operations to function entry, aiming to cut the
@@ -431,6 +462,44 @@
       keep this as another stable runtime-facing text cleanup and use it as
       the new checkpoint before reopening larger `ValueSSA` / selected-IR
       hotspot work
+  - Current 2026-05-14 indexed-local-base-offset pipeline enablement, kept:
+    - from that checkpoint, I then enabled one already-audited final-text
+      peephole in the live pipeline:
+      `compiler_optimize_riscv_preview_indexed_local_base_offsets(...)`
+    - specific rule:
+      when final text contains a temporary stack-base materialization like
+      `addi t6, sp, K` (or `mv t6, sp` for zero offset), followed within the
+      same straight-line region by
+      `add addr, t6, idx ; lw/sw ..., 0(addr)`,
+      rewrite it into
+      `add addr, sp, idx ; lw/sw ..., K(addr)`
+      when the existing safety guards already locked by tests hold
+      (no label/control barrier, no `sp` redefinition, no stack-slot
+      overwrite, and `idx != t6`)
+    - rationale for this keep:
+      this was not a new speculative transform; it already had focused
+      positive and negative regression coverage in
+      `tests/compiler/compiler_driver_test.c`, but it had not yet been wired
+      into the live final-text peephole pipeline
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`)
+    - same-command formal perf rerun on the user-provided 4-case path gave:
+      baseline
+      `06_mv1 ~= 13118.050 ms`,
+      `09_spmv1 ~= 13504.149 ms`,
+      `18_brainfuck-bootstrap ~= 10487.893 ms`,
+      `19_brainfuck-calculator ~= 13467.015 ms`;
+      candidate
+      `06_mv1 ~= 12415.351 ms`,
+      `09_spmv1 ~= 13460.767 ms`,
+      `18_brainfuck-bootstrap ~= 10474.370 ms`,
+      `19_brainfuck-calculator ~= 13385.143 ms`.
+      Aggregate result is net positive by about `841 ms` across the 4-case set
+    - current authority:
+      keep this as another small but real runtime-facing final-text cleanup
+      and use it as the new stable checkpoint before the next hotspot round
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come

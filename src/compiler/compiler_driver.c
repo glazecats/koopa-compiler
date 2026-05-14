@@ -5084,6 +5084,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
+            !compiler_optimize_riscv_preview_indexed_local_base_offsets(out_text) ||
             !compiler_optimize_riscv_preview_forward_store_copy_source(out_text) ||
             !compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(out_text) ||
             !compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(out_text) ||
