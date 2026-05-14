@@ -263,6 +263,33 @@
       barrier, then continue measuring whether further dynamic wins should come
       from the `program[ip]` scan-loop repeated-load family or from a separate
       proof-backed removal of dead local-array zero-initialization
+  - Later 2026-05-14 `brainfuck` function-entry scalar-global hoist follow-up:
+    - one narrower kept `ValueSSA` perf-hotspot expansion now targets repeated
+      `load_global` of stable scalar globals at function scope, rather than
+      another broad loop transform
+    - kept rule:
+      when a function has no calls and no instruction in the function can
+      alias-write a given 4-byte global slot, repeated `load_global` of that
+      slot are hoisted to function entry and later loads are rewritten to
+      reuse the single hoisted SSA value
+    - concrete live-tree motivation:
+      `run_program` in the `brainfuck` witnesses was still reloading
+      `program_length` / `input_length` in hot loops even though the function
+      itself never calls out and does not write those globals
+    - regression evidence:
+      `make test-value-ssa-regression` PASS with new positive/barrier perf
+      regressions,
+      `make test-compiler-driver` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`)
+    - current same-environment runtime evidence through the full
+      `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
+      `18_brainfuck-bootstrap ~= 9547 ms`,
+      `19_brainfuck-calculator ~= 12365 ms`
+    - current authority:
+      keep this as the latest stable `brainfuck` checkpoint and continue the
+      next measured round on repeated global-address / indirect-index chains
+      that still survive in `run_program`
   - Current 2026-05-13 final-text constant-reuse follow-up:
     - one already-implemented final-text peephole,
       `compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(...)`,

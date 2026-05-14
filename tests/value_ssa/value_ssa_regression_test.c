@@ -4314,6 +4314,159 @@ static int build_perf_loop_invariant_binary_hoist_program(ValueSsaProgram *progr
     return 1;
 }
 
+static int build_perf_function_entry_global_hoist_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+    size_t value2;
+    size_t value3;
+    size_t value4;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    global->byte_size = 4u;
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    value2 = value_ssa_function_allocate_value(function);
+    value3 = value_ssa_function_allocate_value(function);
+    value4 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1 || value2 == (size_t)-1 || value3 == (size_t)-1 ||
+        value4 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value2);
+    instruction.as.load_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value3);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value2);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value4);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(value1);
+    instruction.as.binary.rhs = value_ssa_value_id(value3);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value4), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_perf_function_entry_global_hoist_blocked_by_store_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t value0;
+    size_t value1;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    global->byte_size = 4u;
+
+    value0 = value_ssa_function_allocate_value(function);
+    value1 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1 || value1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(global->id);
+    instruction.as.store.value = value_ssa_value_immediate(9);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value1);
+    instruction.as.load_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value1), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 
 
 static int build_dangerous_dead_binary_program(ValueSsaProgram *program, ValueSsaError *error) {
@@ -9554,6 +9707,35 @@ static int test_value_ssa_optimize_perf_hotspots_hoists_loop_invariant_binary(vo
         "}\n");
 }
 
+static int test_value_ssa_optimize_perf_hotspots_hoists_function_entry_global_load(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-FUNCTION-ENTRY-GLOBAL",
+        build_perf_function_entry_global_hoist_program,
+        "global g.0\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    ssa.2 = add ssa.0, 2\n"
+        "    ssa.3 = add ssa.1, ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots_does_not_hoist_global_load_across_store(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-FUNCTION-ENTRY-GLOBAL-STORE-BARRIER",
+        build_perf_function_entry_global_hoist_blocked_by_store_program,
+        "global g.0\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    store_global g.0, 9\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
 static int test_value_ssa_forward_global_loads_after_store(void) {
     return expect_global_load_forwarded_dump("VALUE-SSA-FORWARD-GLOBAL-LOAD-AFTER-STORE",
         build_global_store_load_forward_program,
@@ -11808,6 +11990,8 @@ int main(void) {
     ok &= test_value_ssa_forward_local_loads_skip_address_taken_local();
     ok &= test_value_ssa_optimize_perf_hotspots();
     ok &= test_value_ssa_optimize_perf_hotspots_hoists_loop_invariant_binary();
+    ok &= test_value_ssa_optimize_perf_hotspots_hoists_function_entry_global_load();
+    ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_global_load_across_store();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();

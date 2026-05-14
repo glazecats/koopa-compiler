@@ -333,6 +333,32 @@
        `2)` a proof-backed higher-level removal of dead local-array
        zero-initialization, but **not** on static-code-size-only loop
        compression.
+     - later 2026-05-14 `brainfuck` function-entry scalar-global hoist:
+       one narrower kept `ValueSSA` perf-hotspot expansion then targeted the
+       same `brainfuck` mainline more directly than another broad loop
+       transform. The kept rule hoists repeated `load_global` of the same
+       4-byte scalar global to function entry when the current function has no
+       calls and no instruction in the function can alias-write that global;
+       later loads are rewritten to reuse that one hoisted SSA value.
+       This directly hits the current `run_program` shape where stable globals
+       such as `program_length` / `input_length` were still being reloaded
+       inside hot loops even though the function itself never calls out and
+       does not write those slots.
+       Current correctness restamp on the live tree:
+       `make test-value-ssa-regression` PASS (with new positive/barrier perf
+       regressions),
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Same-environment runtime spot checks through the full
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path now measure
+       roughly
+       `18_brainfuck-bootstrap = 9547 ms` and
+       `19_brainfuck-calculator = 12365 ms`.
+       Current authority is therefore to keep this as the new stable
+       `brainfuck` perf checkpoint and continue the next round on the
+       remaining repeated global-address / indirect-index chains inside
+       `run_program`.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:
