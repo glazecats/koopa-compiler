@@ -724,6 +724,7 @@ static int value_ssa_perf_find_simple_branch_body_loop(const ValueSsaFunction *f
     return 1;
 }
 
+
 static int value_ssa_perf_loop_preserves_local_slot(const ValueSsaFunction *function,
     const ValueSsaPerfSimpleLoop *loop,
     size_t slot_id) {

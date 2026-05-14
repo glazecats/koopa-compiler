@@ -16,6 +16,7 @@
 #include "semantic.h"
 #include "value_ssa.h"
 #include "value_ssa_pass.h"
+#include "memory_ssa_pass.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -5724,6 +5725,12 @@ int compiler_compile_source_text_with_options(const char *source,
     if (!ok) {
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
+    }
+    if (mode == COMPILER_MODE_PERF) {
+        if (!memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error)) {
+            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+            goto cleanup;
+        }
     }
     if (compiler_use_perf_hotspots_enabled()) {
         if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {

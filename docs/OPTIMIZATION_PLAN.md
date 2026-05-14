@@ -239,6 +239,30 @@
       back this variant out and return to the stronger hotspot-specific
       address/index or call-structure lines instead of widening this branch
       further
+  - Current 2026-05-14 `ValueSSA` unique-predecessor indirect-load follow-up:
+    - one narrower kept fix reduced over-conservatism in the existing
+      unique-predecessor `load_indirect` forwarding line
+    - specific repair:
+      the pass no longer treats every intervening `store_local` /
+      `store_global` / `store_indirect` as an unconditional barrier; it now
+      reuses the same alias check already used by the same-block indirect-load
+      forwarding path, so non-aliasing scalar-local stores no longer block a
+      repeated global/other non-aliasing indirect load
+    - regression evidence on the live tree:
+      `make test-value-ssa-regression` PASS, including a new regression that
+      locks unique-predecessor repeated indirect-load reuse across an
+      intervening non-aliasing scalar-local store;
+      course `lv1`, `lv3`, `lv4`, `lv5`, `lv6`, `lv7`, `lv8`, `lv9` all PASS
+      (`lv2` is absent in the local testcase tree and therefore not a signal)
+    - current same-environment runtime evidence through the full
+      `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
+      `18_brainfuck-bootstrap ~= 11803 ms`,
+      `19_brainfuck-calculator ~= 20388 ms`
+    - current authority:
+      keep this fix as a correctness-green narrowing of a real over-conservative
+      barrier, then continue measuring whether further dynamic wins should come
+      from the `program[ip]` scan-loop repeated-load family or from a separate
+      proof-backed removal of dead local-array zero-initialization
   - Current 2026-05-13 final-text constant-reuse follow-up:
     - one already-implemented final-text peephole,
       `compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(...)`,

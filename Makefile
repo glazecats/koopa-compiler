@@ -444,7 +444,7 @@ lexer: $(LEXER_TEST_BIN)
 
 parser: $(PARSER_TEST_BIN)
 
-compiler: $(COMPILER_BIN)
+compiler: $(COMPILER_BIN) tools
 
 $(LEXER_TEST_BIN): src/lexer/lexer.c tests/lexer/lexer_test.c include/lexer.h | dirs
 	$(TEST_LINK_CMD)

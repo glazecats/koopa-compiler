@@ -300,6 +300,39 @@
        and `13_fft1` stayed around `8.2s`. Current authority is therefore to
        back this variant out again and return to the stronger
        source/selected-shape hotspots instead of widening this branch further.
+     - 2026-05-14 later `ValueSSA` indirect-load follow-up:
+       one smaller kept narrowing then repaired the existing
+       unique-predecessor repeated `load_indirect` forwarding line instead of
+       broadening generic pure-expression reuse again. The old logic had been
+       treating every intervening `store_local/store_global/store_indirect`
+       as a hard barrier even when the store could not alias the loaded
+       address; the kept fix now reuses the same alias test already used by
+       same-block repeated indirect-load forwarding, so non-aliasing scalar
+       local stores no longer block a repeated indirect load from the same
+       global/other proven-non-aliasing root. New regression coverage now
+       locks that exact case in `value_ssa_regression_test.c`. Current
+       correctness restamp on the live tree:
+       `make test-value-ssa-regression` PASS,
+       `lv1` PASS (`7/7`),
+       `lv3` PASS (`28/28`),
+       `lv4` PASS (`14/14`),
+       `lv5` PASS (`7/7`),
+       `lv6` PASS (`8/8`),
+       `lv7` PASS (`12/12`),
+       plus the already rerun `lv8` / `lv9` PASS.
+       (`lv2` is not present under the local `/opt/bin/testcases` tree, so the
+       earlier `lv2` command failure was just "no test cases found", not a
+       compiler regression.) Same-environment runtime spot checks through the
+       full `compiler -> clang -> ld.lld -> qemu-riscv32-static` path now
+       measure roughly
+       `18_brainfuck-bootstrap = 11803 ms` and
+       `19_brainfuck-calculator = 20388 ms`.
+       Current authority is therefore to keep this narrowing as a green
+       over-conservatism fix, then continue the next perf round on either:
+       `1)` the `program[ip]` scan-loop repeated-load family, or
+       `2)` a proof-backed higher-level removal of dead local-array
+       zero-initialization, but **not** on static-code-size-only loop
+       compression.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:
