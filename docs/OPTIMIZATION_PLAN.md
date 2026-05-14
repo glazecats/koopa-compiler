@@ -351,6 +351,46 @@
       universal win on every single single-run witness, but the formal A/B
       comparison against the restored baseline is strong enough to treat it as
       a stable kept checkpoint
+  - Current 2026-05-14 final-text dead jump-seed move removal, kept:
+    - from the new stable text-cleanup baseline, I then added one even
+      narrower branch-tail cleanup aimed at the hottest `brainfuck`
+      `run_program` dispatch tails under the correct course-perf route
+      (`build/compiler -perf` on `/opt/bin/testcases/perf`)
+    - specific rule:
+      when final text contains
+      `mv reg, src`
+      followed later in the same straight-line region by an unconditional
+      `j target`,
+      and the target block redefines `reg` before any use, drop the dead
+      seed move
+    - this directly removed repeated shapes like
+      `mv a0, a3 ; sw a3, 0(t6) ; j .Lrun_program_25`
+      and the same pattern in adjacent `run_program` tails, while a barrier
+      regression keeps the move when the target block actually uses the value
+      before redefining it
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS with new positive/barrier text tests,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`)
+    - same-command A/B under the user-provided formal perf script shape gave:
+      baseline
+      `06_mv1 ~= 13759.886 ms`,
+      `09_spmv1 ~= 14444.082 ms`,
+      `18_brainfuck-bootstrap ~= 10862.166 ms`,
+      `19_brainfuck-calculator ~= 13481.985 ms`
+      candidate
+      `06_mv1 ~= 13093.687 ms`,
+      `09_spmv1 ~= 13569.223 ms`,
+      `18_brainfuck-bootstrap ~= 10900.765 ms`,
+      `19_brainfuck-calculator ~= 13649.472 ms`
+      for an aggregate improvement of about `1335 ms` across the 4-case set
+    - focused 18/19 rerun on the same candidate path also stayed in-family and
+      correctness-green:
+      `18_brainfuck-bootstrap ~= 10480.788 ms`,
+      `19_brainfuck-calculator ~= 13202.328 ms`
+    - current authority:
+      keep this as another small but real text-side runtime cleanup and treat
+      it as the next stable checkpoint before reopening larger hotspot lines
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come

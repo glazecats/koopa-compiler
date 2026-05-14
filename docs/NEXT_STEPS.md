@@ -508,6 +508,46 @@
        keep this as a small but real runtime-facing text cleanup and treat it
        as the next stable local optimization checkpoint before continuing to
        larger hotspot work.
+     - later 2026-05-14 final-text dead jump-seed move removal, kept:
+       From that new stable text-cleanup baseline, I then added one even
+       narrower branch-tail cleanup aimed at the hottest `brainfuck`
+       `run_program` dispatch tails under the correct course-perf route
+       (`build/compiler -perf` on `/opt/bin/testcases/perf`).
+       The kept rewrite is:
+       when the final text contains
+       `mv reg, src`
+       followed later in the same straight-line region by an unconditional
+       `j target`,
+       and the target block redefines `reg` before any use, delete that dead
+       seed move.
+       This directly removed repeated tails like
+       `mv a0, a3 ; sw a3, 0(t6) ; j .Lrun_program_25`
+       and the same pattern in adjacent `run_program` branches, while a new
+       barrier regression keeps the move when the target block actually uses
+       the value first.
+       Stability restamp on the live tree is green:
+       `make test-compiler-driver` PASS,
+       `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`).
+       Using the same formal perf script shape as the restored baseline, the
+       baseline-vs-candidate comparison came back:
+       baseline
+       `06_mv1 = 13759.886 ms`,
+       `09_spmv1 = 14444.082 ms`,
+       `18_brainfuck-bootstrap = 10862.166 ms`,
+       `19_brainfuck-calculator = 13481.985 ms`;
+       candidate
+       `06_mv1 = 13093.687 ms`,
+       `09_spmv1 = 13569.223 ms`,
+       `18_brainfuck-bootstrap = 10900.765 ms`,
+       `19_brainfuck-calculator = 13649.472 ms`.
+       Aggregate result is still net positive by about `1335 ms` across the
+       4-case set, and a focused 18/19 rerun stayed in-family and green:
+       `18_brainfuck-bootstrap = 10480.788 ms`,
+       `19_brainfuck-calculator = 13202.328 ms`.
+       Current authority is therefore:
+       keep this as another small but real runtime-facing text cleanup and use
+       it as the next stable checkpoint before reopening bigger hotspot work.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

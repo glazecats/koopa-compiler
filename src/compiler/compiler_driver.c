@@ -278,6 +278,7 @@ static int compiler_optimize_riscv_preview_tail_calls(char **io_text);
 static int compiler_optimize_riscv_preview_mul_by_four(char **io_text);
 static int compiler_optimize_riscv_preview_sub_by_one(char **io_text);
 static int compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
+static int compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text);
 static int compiler_riscv_preview_reg_is_call_clobbered(const char *reg_name);
 static int compiler_riscv_preview_line_is_call_like(const char *line);
 static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name);
@@ -1955,6 +1956,17 @@ static int compiler_riscv_preview_line_is_control_transfer_barrier(const char *l
     return strcmp(tokens[0], "jal") == 0 && token_count >= 2u && strcmp(tokens[1], "zero") == 0;
 }
 
+static int compiler_riscv_preview_line_is_unconditional_jump(
+    const char *line,
+    char *target,
+    size_t target_size) {
+    if (!line || !target || target_size == 0u) {
+        return 0;
+    }
+    target[0] = '\0';
+    return sscanf(line, "  j %31s", target) == 1;
+}
+
 static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name) {
     char tokens[8][32];
     size_t token_count = 0u;
@@ -3604,6 +3616,165 @@ int compiler_test_optimize_riscv_preview_forward_store_copy_source(char **io_tex
     return compiler_optimize_riscv_preview_forward_store_copy_source(io_text);
 }
 
+int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text) {
+    return compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(io_text);
+}
+
+static int compiler_riscv_preview_target_redefines_reg_before_use(
+    char **lines,
+    size_t line_count,
+    const char *target_label,
+    const char *reg_name) {
+    char label_text[64];
+    size_t index;
+
+    if (!lines || !target_label || !reg_name || reg_name[0] == '\0') {
+        return 0;
+    }
+    if (snprintf(label_text, sizeof(label_text), "%s:", target_label) < 0) {
+        return 0;
+    }
+
+    for (index = 0u; index < line_count; ++index) {
+        const char *line = lines[index];
+
+        if (!line || strcmp(line, label_text) != 0) {
+            continue;
+        }
+
+        for (++index; index < line_count; ++index) {
+            line = lines[index];
+            if (!line) {
+                continue;
+            }
+            if (compiler_riscv_preview_line_is_label(line)) {
+                return 0;
+            }
+            if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
+                return 1;
+            }
+            if (compiler_riscv_preview_line_uses_reg(line, reg_name)) {
+                return 0;
+            }
+            if (compiler_riscv_preview_line_is_control_transfer_barrier(line)) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
+static int compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char move_rd[32];
+        char move_rs[32];
+        size_t scan_index;
+        int removed = 0;
+
+        if (compiler_riscv_preview_line_is_mv_reg(lines[index], move_rd, sizeof(move_rd), move_rs, sizeof(move_rs))) {
+            for (scan_index = index + 1u; scan_index < line_count; ++scan_index) {
+                char jump_target[32];
+
+                if (compiler_riscv_preview_line_is_label(lines[scan_index])) {
+                    break;
+                }
+                if (compiler_riscv_preview_line_defines_reg(lines[scan_index], move_rd) ||
+                    compiler_riscv_preview_line_uses_reg(lines[scan_index], move_rd)) {
+                    break;
+                }
+                if (!compiler_riscv_preview_line_is_unconditional_jump(
+                        lines[scan_index], jump_target, sizeof(jump_target))) {
+                    if (compiler_riscv_preview_line_is_control_transfer_barrier(lines[scan_index])) {
+                        break;
+                    }
+                    continue;
+                }
+                if (!compiler_riscv_preview_target_redefines_reg_before_use(
+                        lines, line_count, jump_target, move_rd)) {
+                    break;
+                }
+
+                for (++index; index <= scan_index; ++index) {
+                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                        goto cleanup;
+                    }
+                }
+                removed = 1;
+                break;
+            }
+        }
+
+        if (removed) {
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
 static int compiler_optimize_riscv_preview_indexed_local_base_offsets(char **io_text) {
     char *text = NULL;
     char *copy = NULL;
@@ -4812,6 +4983,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
             !compiler_optimize_riscv_preview_forward_store_copy_source(out_text) ||
+            !compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(out_text) ||
             !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text))) {
         compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
         ok = 0;

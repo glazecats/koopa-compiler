@@ -493,6 +493,7 @@ int compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(char **
 int compiler_test_optimize_riscv_preview_stack_staged_call_args(char **io_text);
 int compiler_test_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(char **io_text);
 int compiler_test_optimize_riscv_preview_forward_store_copy_source(char **io_text);
+int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text);
 int compiler_test_optimize_riscv_preview_indexed_local_base_offsets(char **io_text);
 int compiler_test_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
 int compiler_test_optimize_riscv_preview_store_jump_increment_tails(char **io_text);
@@ -664,6 +665,69 @@ static int test_compiler_does_not_forward_store_copy_source_across_copy_use(void
         !text ||
         strstr(text, source_text) == NULL) {
         fprintf(stderr, "[compiler] FAIL: store-copy source should stay unchanged when the copied reg is used before the store\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_removes_dead_jump_seed_move(void) {
+    static const char *source_text =
+        "  mv a0, a3\n"
+        "  sw a3, 0(t6)\n"
+        "  j .Ltail\n"
+        ".Ltail:\n"
+        "  lw t6, 0(t4)\n"
+        "  addi a0, t6, 1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: dead-jump-seed-move regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(&text) ||
+        !text ||
+        strstr(text, "  mv a0, a3\n") != NULL ||
+        strstr(text,
+            "  sw a3, 0(t6)\n"
+            "  j .Ltail\n"
+            ".Ltail:\n"
+            "  lw t6, 0(t4)\n"
+            "  addi a0, t6, 1\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: dead jump seed move should be removed when target redefines the register before use\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_remove_jump_seed_move_when_target_uses_it_first(void) {
+    static const char *source_text =
+        "  mv a0, a3\n"
+        "  j .Ltail\n"
+        ".Ltail:\n"
+        "  add a1, a0, a2\n"
+        "  addi a0, zero, 1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: dead-jump-seed-move target-use regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: jump seed move should stay when the target block uses the register before redefining it\n");
         ok = 0;
     }
 
@@ -2232,6 +2296,8 @@ int main(void) {
     ok &= test_compiler_replaces_same_block_temp_stack_reload_with_mv();
     ok &= test_compiler_forwards_store_copy_source();
     ok &= test_compiler_does_not_forward_store_copy_source_across_copy_use();
+    ok &= test_compiler_removes_dead_jump_seed_move();
+    ok &= test_compiler_does_not_remove_jump_seed_move_when_target_uses_it_first();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
