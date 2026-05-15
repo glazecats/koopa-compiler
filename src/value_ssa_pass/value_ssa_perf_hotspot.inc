@@ -358,6 +358,173 @@ cleanup:
     return value_ssa_verify_program(program, error);
 }
 
+static int value_ssa_perf_hoist_function_entry_global_addrs(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-303: invalid perf entry-global-addr hoist contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaBasicBlock rebuilt_entry;
+        ValueSsaBasicBlock *entry = NULL;
+        size_t *addr_use_counts = NULL;
+        ValueSsaValueRef *hoisted_values = NULL;
+        size_t global_index;
+        size_t block_index;
+        int changed_function = 0;
+        int ok = 1;
+
+        if (!function->has_body || function->block_count == 0u || value_ssa_perf_function_has_calls(function)) {
+            continue;
+        }
+
+        entry = &function->blocks[0];
+        if (!entry->has_terminator || program->global_count == 0u) {
+            continue;
+        }
+
+        memset(&rebuilt_entry, 0, sizeof(rebuilt_entry));
+        rebuilt_entry.id = entry->id;
+        addr_use_counts = (size_t *)calloc(program->global_count, sizeof(size_t));
+        hoisted_values = (ValueSsaValueRef *)calloc(program->global_count, sizeof(ValueSsaValueRef));
+        if (!addr_use_counts || !hoisted_values) {
+            ok = 0;
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-304: out of memory preparing perf entry-global-addr hoist");
+            goto cleanup;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t slot_id;
+
+                if (instruction->kind != VALUE_SSA_INSTR_ADDR_GLOBAL ||
+                    !instruction->has_result ||
+                    instruction->result.kind != VALUE_SSA_VALUE_ID) {
+                    continue;
+                }
+
+                slot_id = instruction->as.addr_slot.id;
+                if (slot_id < program->global_count) {
+                    ++addr_use_counts[slot_id];
+                }
+            }
+        }
+
+        for (global_index = 0; global_index < program->global_count; ++global_index) {
+            ValueSsaInstruction hoisted_addr;
+
+            if (addr_use_counts[global_index] <= 1u) {
+                continue;
+            }
+
+            memset(&hoisted_addr, 0, sizeof(hoisted_addr));
+            hoisted_addr.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+            hoisted_addr.has_result = 1;
+            hoisted_addr.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+            hoisted_addr.as.addr_slot = value_ssa_slot_global(global_index);
+            if (hoisted_addr.result.value_id == (size_t)-1 ||
+                !value_ssa_block_append_instruction(&rebuilt_entry, &hoisted_addr, error)) {
+                ok = 0;
+                goto cleanup;
+            }
+            hoisted_values[global_index] = hoisted_addr.result;
+        }
+
+        for (block_index = 0; block_index < entry->instruction_count && ok; ++block_index) {
+            const ValueSsaInstruction *instruction = &entry->instructions[block_index];
+            ValueSsaInstruction replacement;
+            size_t slot_id;
+
+            if (instruction->kind == VALUE_SSA_INSTR_ADDR_GLOBAL &&
+                instruction->has_result &&
+                instruction->result.kind == VALUE_SSA_VALUE_ID) {
+                slot_id = instruction->as.addr_slot.id;
+                if (slot_id < program->global_count &&
+                    hoisted_values[slot_id].kind == VALUE_SSA_VALUE_ID) {
+                    memset(&replacement, 0, sizeof(replacement));
+                    replacement.kind = VALUE_SSA_INSTR_MOV;
+                    replacement.has_result = 1;
+                    replacement.result = instruction->result;
+                    replacement.as.mov_value = hoisted_values[slot_id];
+                    if (!value_ssa_block_append_instruction(&rebuilt_entry, &replacement, error)) {
+                        ok = 0;
+                        goto cleanup;
+                    }
+                    changed_function = 1;
+                    continue;
+                }
+            }
+
+            if (!value_ssa_block_append_instruction(&rebuilt_entry, instruction, error)) {
+                ok = 0;
+                goto cleanup;
+            }
+        }
+
+        for (block_index = 1; block_index < function->block_count && ok; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t slot_id;
+
+                if (instruction->kind != VALUE_SSA_INSTR_ADDR_GLOBAL ||
+                    !instruction->has_result ||
+                    instruction->result.kind != VALUE_SSA_VALUE_ID) {
+                    continue;
+                }
+
+                slot_id = instruction->as.addr_slot.id;
+                if (slot_id >= program->global_count || hoisted_values[slot_id].kind != VALUE_SSA_VALUE_ID) {
+                    continue;
+                }
+
+                instruction->kind = VALUE_SSA_INSTR_MOV;
+                instruction->as.mov_value = hoisted_values[slot_id];
+                changed_function = 1;
+            }
+        }
+
+        if (ok && changed_function) {
+            rebuilt_entry.has_terminator = entry->has_terminator;
+            rebuilt_entry.terminator = entry->terminator;
+            free(entry->instructions);
+            entry->instructions = rebuilt_entry.instructions;
+            entry->instruction_count = rebuilt_entry.instruction_count;
+            entry->instruction_capacity = rebuilt_entry.instruction_capacity;
+            rebuilt_entry.instructions = NULL;
+            rebuilt_entry.instruction_count = 0u;
+            rebuilt_entry.instruction_capacity = 0u;
+            changed_any = 1;
+        }
+
+cleanup:
+        free(hoisted_values);
+        free(addr_use_counts);
+        free(rebuilt_entry.instructions);
+        if (!ok) {
+            return 0;
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_perf_function_is_pure_internal_call_candidate(const ValueSsaProgram *program,
     const ValueSsaFunction *function,
     const unsigned char *readonly_globals) {
@@ -2672,6 +2839,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_hoist_function_entry_global_loads(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_hoist_function_entry_global_addrs(program, error)) {
         free(foldable_globals);
         return 0;
     }

@@ -893,6 +893,152 @@
       keep this as the next stable checkpoint and continue future `spmv1`
       diagnosis from the real perf-mode middle/selected diagnostics rather
       than from older partial tool pipelines.
+    - later 2026-05-15 allocator induction-phi priority retry, not kept:
+      from that new stable point, I then tried one very small allocator-side
+      retry instead of a new SSA transform: give simple two-input phi values
+      an extra worklist-priority bonus so the hot `spmv1` inner-loop `j`
+      carrier would be less likely to spill.
+      The shape change looked attractive in isolation:
+      `spmv` machine-ir dropped from `4` spills to `3`,
+      the inner-loop `j` carrier moved back into a register,
+      and the final text lost the visible per-iteration `lw/sw 40(sp)` pair.
+      But the formal base-vs-head A/B against stable base `02ca2e6` still
+      said not to keep it:
+      2-run averages
+      `06_mv1 = 12282.364 -> 12142.418 ms`,
+      `09_spmv1 = 12888.093 -> 12990.524 ms`,
+      `18_brainfuck-bootstrap = 10079.928 -> 10163.340 ms`,
+      `19_brainfuck-calculator = 12779.840 -> 12718.500 ms`.
+      Since the primary `spmv1` witness regressed and one `brainfuck`
+      witness regressed too, this allocator-priority tweak is fully backed out
+      again and must not be treated as a checkpoint.
+    - later 2026-05-15 perf-hotspot tail cleanup retry, not kept:
+      I then tried one more seemingly low-risk follow-up instead of a new
+      transform: after `value_ssa_optimize_perf_hotspots(...)`, append one
+      tiny cleanup tail so the pass could clean up any repeated `shl/add`
+      chains it had just exposed itself.
+      This also did not earn a keep. The broader version including
+      `simplify_cfg` immediately reopened compiler-driver correctness
+      witnesses, and even the narrower no-CFG variant still changed existing
+      perf-hotspot regression surfaces in nontrivial ways rather than only
+      harmless dump shape. Since it was not clearly correctness-transparent, I
+      backed it out before spending a formal runtime A/B on it.
+      Current authority:
+      do not append a generic cleanup tail after perf-hotspot optimization for
+      now; keep future retries narrower and witness-specific.
+    - later same-day narrower perf-hotspot tail cleanup retry, still not kept:
+      I then retried the same idea in its narrowest plausible form:
+      after the current perf-hotspot pass, run only
+      `simplify-trivial-values`,
+      `eliminate-redundant-binaries`,
+      `simplify-trivial-values`,
+      and `eliminate-dead-value-defs`,
+      with no `simplify_cfg`.
+      This version was carried through the full keep gate:
+      `make test-compiler-driver` PASS,
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      But the formal base-vs-head A/B against stable base `02ca2e6` still
+      said not to keep it:
+      2-run averages
+      `06_mv1 = 12211.699 -> 12171.947 ms`,
+      `09_spmv1 = 12808.431 -> 12878.602 ms`,
+      `18_brainfuck-bootstrap = 10113.022 -> 10024.841 ms`,
+      `19_brainfuck-calculator = 12606.295 -> 12676.281 ms`.
+      Since `spmv1` and `19_brainfuck-calculator` both moved the wrong way,
+      this narrower cleanup tail is also fully backed out and must not be
+      treated as a candidate checkpoint.
+    - later same-day final-text `sw; lw; add` direct-forwarding retry, not kept:
+      I also tried one more even narrower final-text peephole aimed directly
+      at the current `spmv1` hot loops instead of reopening the broader
+      `same_block_temp_stack_reload_to_mv` pipeline:
+      if the text contained
+      `sw tmp, off(sp)`
+      followed later in the same straight-line region by
+      `lw tmp2, off(sp)`
+      used only by the immediately following `add`,
+      rewrite that pair to feed the original `tmp` straight into the `add`
+      and delete the reload.
+      This did exactly hit the intended witness shape:
+      in both hot inner `spmv1` loops the repeated
+      `sw t4, 44(sp) ; ... ; lw t6, 44(sp) ; add a0, t6, a0`
+      chain became
+      `sw t4, 44(sp) ; ... ; add a0, t4, a0`.
+      Correctness also reclosed after fixing one parser bug in the local
+      add-pattern matcher:
+      `make test-compiler-driver` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      But the formal base-vs-head A/B against stable base `02ca2e6` still did
+      not justify keeping it:
+      `06_mv1 = 12224.879 -> 12281.625 ms`,
+      `09_spmv1 = 12947.067 -> 12641.190 ms`,
+      `18_brainfuck-bootstrap = 10365.890 -> 10412.735 ms`,
+      `19_brainfuck-calculator = 12827.724 -> 12896.701 ms`.
+      Since only the targeted `spmv1` witness improved while `mv1` and both
+      `brainfuck` witnesses regressed, this narrower direct-forwarding text
+      rule is also fully backed out and should not be treated as a candidate
+      checkpoint.
+    - later 2026-05-15 `brainfuck` late-text rerank follow-up, not kept:
+      I then rotated back to the current `brainfuck` hotspot family and first
+      corrected the A/B reference point itself: one earlier local probe had
+      accidentally used a stale detached binary under
+      `/tmp/compilerlab-base-02ca2e6/`, so I rebuilt a fresh clean worktree at
+      the actual stable checkpoint `02ca2e6` before re-measuring.
+      That rebuilt base came back in the expected band:
+      2-run averages
+      `18_brainfuck-bootstrap = 10546.470 ms`,
+      `19_brainfuck-calculator = 13146.206 ms`.
+      Against that corrected base, the reopened late-text `run_program`
+      global-base cache still did not earn a keep even after narrowing it to
+      repeated `program` / `tape` bases only:
+      `18_brainfuck-bootstrap = 10114.686 -> 10155.177 ms`,
+      `19_brainfuck-calculator = 12493.591 -> 12634.620 ms`.
+      I then tried a different hotspot-specific late-text pass to keep the hot
+      `read_head` stack slot in `t4`, but that line also proved unsafe:
+      detailed pipeline tracing showed it only became eligible after earlier
+      cleanup removed transient `t4` uses, and once wired into the real emit
+      path it clobbered unrelated `t4` carrier shapes (`ra` / `s11` save text
+      and jump-seed temporaries) and produced obviously wrong `run_program`
+      text. That pass was fully backed out before any keep attempt.
+      Current authority:
+      keep using a freshly rebuilt clean detached `02ca2e6` worktree as the
+      required baseline for this perf branch, and do not reopen either the
+      late-text global-base cache or the naive `read_head -> t4` cache without
+      a much stronger ownership/liveness proof than the current text-only
+      matcher has.
+    - later 2026-05-15 `ValueSSA` function-entry `addr_global` hoist, kept:
+      I then opened one new SSA-side pass aimed at the same repeated-base
+      family, but earlier in the pipeline and with a tighter contract than the
+      rejected late-text experiments:
+      in no-call functions, if the same `addr_global` slot is materialized
+      more than once, hoist one canonical `addr_global` into the function
+      entry block and rewrite the later occurrences to reuse that SSA value.
+      New regression coverage now locks both:
+      `VALUE-SSA-PERF-HOTSPOT-FUNCTION-ENTRY-GLOBAL-ADDR`
+      and
+      `VALUE-SSA-PERF-HOTSPOT-FUNCTION-ENTRY-GLOBAL-ADDR-SINGLE-USE`.
+      Correctness restamp:
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      Witness-shape proof on the live tree:
+      in `19_brainfuck-calculator`'s perf-side SSA dump,
+      `run_program` now keeps one entry-materialized
+      `program/tape/output/input` address root instead of rebuilding those
+      `addr_global` values repeatedly in the later dispatch chain.
+      Formal 2-run A/B against the rebuilt clean `02ca2e6` base on the
+      standard four-case route came back:
+      `06_mv1 = 12686.337 -> 12502.406 ms`,
+      `09_spmv1 = 13169.011 -> 13276.529 ms`,
+      `18_brainfuck-bootstrap = 10351.675 -> 10159.178 ms`,
+      `19_brainfuck-calculator = 12970.587 -> 12922.690 ms`.
+      Current authority:
+      keep this pass as the new stable checkpoint.
+      The small `09_spmv1` drift is currently treated as noise because this
+      pass does not materially touch the hot `spmv()` body itself, while both
+      targeted `brainfuck` witnesses and `mv1` improved on the same formal A/B.
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come
