@@ -1062,6 +1062,30 @@
       fully backed out and the repository returned to stable checkpoint
       `637f32a`.
     - later same-day `spmv`-specific parameter-local load hoist, kept:
+      I then retried the same load/use-pressure idea in a tighter
+      witness-specific form:
+      only for the hot `spmv(...)` helper, if a parameter local is not
+      address-taken and is never overwritten by `store_local`, hoist one
+      canonical entry `load_local` and rewrite the later loads to reuse it.
+      This hit the intended witness shape directly:
+      the perf-side SSA dump for `09_spmv1` now keeps one entry load each for
+      `n/xptr/yidx/vals/b/x` instead of reloading those parameter locals later
+      in the loop body.
+      Correctness restamp:
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      Formal 2-run four-case A/B against stable base `5a6e98c` came back:
+      `06_mv1 = 12705.254 -> 12391.479 ms`,
+      `09_spmv1 = 13465.945 -> 13127.652 ms`,
+      `18_brainfuck-bootstrap = 10104.830 -> 10209.549 ms`,
+      `19_brainfuck-calculator = 12949.530 -> 12857.970 ms`.
+      Current authority:
+      keep this `spmv`-specific parameter-local load hoist as the new stable
+      checkpoint. It materially improves the intended `mv1/spmv1` pressure
+      surface and still comes back net positive on the standard four-case
+      route despite a small `18_brainfuck-bootstrap` regression.
+    - later same-day `spmv`-specific parameter-local load hoist, kept:
       I then retried the same load/use-pressure line in a much narrower
       witness-specific form:
       only for the hot `spmv(...)` helper, if a parameter local is not
