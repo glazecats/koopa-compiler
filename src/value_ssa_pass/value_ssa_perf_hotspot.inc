@@ -1087,6 +1087,64 @@ static int value_ssa_perf_parameter_pointer_pair_proven_non_alias(const ValueSsa
     return pair_matrix[lhs_id * param_count + rhs_id] != 0u;
 }
 
+static int value_ssa_perf_same_pure_address_value(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef lhs,
+    ValueSsaValueRef rhs,
+    unsigned depth) {
+    ValueSsaInstruction *lhs_def;
+    ValueSsaInstruction *rhs_def;
+
+    if (depth > 8u) {
+        return 0;
+    }
+    if (value_ssa_value_refs_equal(lhs, rhs)) {
+        return 1;
+    }
+    if (!function || !analysis || lhs.kind != VALUE_SSA_VALUE_ID || rhs.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    lhs_def = value_ssa_pass_lookup_instruction_definition(function, analysis, lhs.value_id);
+    rhs_def = value_ssa_pass_lookup_instruction_definition(function, analysis, rhs.value_id);
+    if (!lhs_def || !rhs_def || lhs_def->kind != rhs_def->kind) {
+        return 0;
+    }
+
+    switch (lhs_def->kind) {
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
+        return lhs_def->as.addr_slot.kind == rhs_def->as.addr_slot.kind &&
+            lhs_def->as.addr_slot.id == rhs_def->as.addr_slot.id;
+    case VALUE_SSA_INSTR_LOAD_LOCAL:
+        return lhs_def->as.load_slot.kind == rhs_def->as.load_slot.kind &&
+            lhs_def->as.load_slot.id == rhs_def->as.load_slot.id;
+    case VALUE_SSA_INSTR_LOAD_GLOBAL:
+        return lhs_def->as.load_slot.kind == rhs_def->as.load_slot.kind &&
+            lhs_def->as.load_slot.id == rhs_def->as.load_slot.id;
+    case VALUE_SSA_INSTR_MOV:
+        return value_ssa_perf_same_pure_address_value(
+            function, analysis, lhs_def->as.mov_value, rhs_def->as.mov_value, depth + 1u);
+    case VALUE_SSA_INSTR_BINARY:
+        if (lhs_def->as.binary.op != rhs_def->as.binary.op) {
+            return 0;
+        }
+        if (value_ssa_perf_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.lhs, rhs_def->as.binary.lhs, depth + 1u) &&
+            value_ssa_perf_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.rhs, rhs_def->as.binary.rhs, depth + 1u)) {
+            return 1;
+        }
+        return lhs_def->as.binary.op == VALUE_SSA_BINARY_ADD &&
+            value_ssa_perf_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.lhs, rhs_def->as.binary.rhs, depth + 1u) &&
+            value_ssa_perf_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.rhs, rhs_def->as.binary.lhs, depth + 1u);
+    default:
+        return 0;
+    }
+}
+
 static int value_ssa_perf_find_simple_single_body_loop(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t header_id,
@@ -1779,6 +1837,47 @@ static int value_ssa_perf_loop_instructions_preserve_indirect_load(const ValueSs
 
     for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
         if (!value_ssa_perf_store_cannot_alias_loaded_address(
+                function,
+                analysis,
+                parameter_pointer_non_alias_pairs,
+                load_root,
+                &block->instructions[instruction_index])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int value_ssa_perf_instruction_preserves_indirect_load(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const unsigned char *parameter_pointer_non_alias_pairs,
+    const ValueSsaPerfAddressRoot *load_root,
+    const ValueSsaInstruction *instruction) {
+    if (!instruction || instruction->kind == VALUE_SSA_INSTR_CALL) {
+        return 0;
+    }
+
+    return value_ssa_perf_store_cannot_alias_loaded_address(
+        function, analysis, parameter_pointer_non_alias_pairs, load_root, instruction);
+}
+
+static int value_ssa_perf_instruction_range_preserves_indirect_load(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaBasicBlock *block,
+    size_t start_index,
+    size_t end_index,
+    const unsigned char *parameter_pointer_non_alias_pairs,
+    const ValueSsaPerfAddressRoot *load_root) {
+    size_t instruction_index;
+
+    if (!function || !analysis || !block || !load_root ||
+        start_index > end_index || end_index > block->instruction_count) {
+        return 0;
+    }
+
+    for (instruction_index = start_index; instruction_index < end_index; ++instruction_index) {
+        if (!value_ssa_perf_instruction_preserves_indirect_load(
                 function,
                 analysis,
                 parameter_pointer_non_alias_pairs,
@@ -2963,6 +3062,221 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
     return value_ssa_verify_program(program, error);
 }
 
+static int value_ssa_perf_reuse_spmv_loop_exit_indirect_loads(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    unsigned char *readonly_globals = NULL;
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-307: invalid perf spmv loop-exit reuse contract");
+        return 0;
+    }
+
+    readonly_globals = (unsigned char *)calloc(program->global_count ? program->global_count : 1u, sizeof(unsigned char));
+    if (!readonly_globals) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-308: out of memory preparing perf spmv loop-exit reuse globals");
+        return 0;
+    }
+    if (!value_ssa_perf_collect_readonly_scalar_globals(program, readonly_globals)) {
+        free(readonly_globals);
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-309: failed collecting perf spmv loop-exit reuse globals");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaCfgAnalysis cfg;
+        ValueSsaDefUseAnalysis def_use;
+        unsigned char *address_taken_locals = NULL;
+        unsigned char *parameter_pointer_non_alias_pairs = NULL;
+        size_t header_id;
+        int changed_function = 0;
+
+        if (!function->has_body || !function->name || strcmp(function->name, "spmv") != 0 ||
+            value_ssa_perf_function_has_calls(function)) {
+            continue;
+        }
+
+        value_ssa_cfg_analysis_init(&cfg);
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_cfg_analysis(function, &cfg, error) ||
+            !value_ssa_compute_def_use_analysis(function, &def_use, error)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_cfg_analysis_free(&cfg);
+            free(readonly_globals);
+            return 0;
+        }
+
+        if (function->local_count > 0u) {
+            address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+        }
+        if (function->parameter_count > 0u) {
+            parameter_pointer_non_alias_pairs = (unsigned char *)calloc(
+                function->parameter_count * function->parameter_count,
+                sizeof(unsigned char));
+        }
+        if ((function->local_count > 0u && !address_taken_locals) ||
+            (function->parameter_count > 0u && !parameter_pointer_non_alias_pairs)) {
+            free(parameter_pointer_non_alias_pairs);
+            free(address_taken_locals);
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_cfg_analysis_free(&cfg);
+            free(readonly_globals);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-310: out of memory preparing perf spmv loop-exit reuse state");
+            return 0;
+        }
+        if (address_taken_locals &&
+            !value_ssa_perf_collect_address_taken_locals(function, address_taken_locals)) {
+            free(parameter_pointer_non_alias_pairs);
+            free(address_taken_locals);
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_cfg_analysis_free(&cfg);
+            free(readonly_globals);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-311: failed collecting perf spmv address-taken locals");
+            return 0;
+        }
+        if (parameter_pointer_non_alias_pairs &&
+            !value_ssa_perf_collect_non_alias_parameter_pointer_pairs(
+                program, function, parameter_pointer_non_alias_pairs)) {
+            free(parameter_pointer_non_alias_pairs);
+            free(address_taken_locals);
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_cfg_analysis_free(&cfg);
+            free(readonly_globals);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-312: failed collecting perf spmv parameter non-alias pairs");
+            return 0;
+        }
+
+        for (header_id = 0; header_id < function->block_count; ++header_id) {
+            ValueSsaPerfSimpleLoop loop;
+            ValueSsaBasicBlock *preheader;
+            ValueSsaBasicBlock *exit_block;
+            size_t exit_instruction_index;
+            int loop_matches = 0;
+
+            if (value_ssa_perf_find_phi_header_single_body_loop(function, &cfg, header_id, &loop) ||
+                value_ssa_perf_find_simple_single_body_loop(function, &cfg, header_id, &loop) ||
+                value_ssa_perf_find_simple_branch_body_loop(function, &cfg, header_id, &loop)) {
+                loop_matches = 1;
+            }
+            if (!loop_matches ||
+                loop.preheader_id >= function->block_count ||
+                loop.header_id >= function->block_count ||
+                loop.body_id >= function->block_count ||
+                loop.exit_id >= function->block_count ||
+                !cfg.dominates[loop.preheader_id * function->block_count + loop.exit_id]) {
+                continue;
+            }
+
+            preheader = &function->blocks[loop.preheader_id];
+            exit_block = &function->blocks[loop.exit_id];
+            if (preheader->instruction_count == 0u || exit_block->instruction_count == 0u) {
+                continue;
+            }
+
+            for (exit_instruction_index = 0; exit_instruction_index < exit_block->instruction_count; ++exit_instruction_index) {
+                ValueSsaInstruction *exit_instruction = &exit_block->instructions[exit_instruction_index];
+                ValueSsaPerfAddressRoot exit_load_root;
+                size_t preheader_instruction_index;
+
+                if (exit_instruction->kind != VALUE_SSA_INSTR_LOAD_INDIRECT ||
+                    !exit_instruction->has_result ||
+                    exit_instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                    !value_ssa_perf_value_is_loop_invariant_for_indirect_addr(
+                        program,
+                        function,
+                        &def_use,
+                        readonly_globals,
+                        address_taken_locals,
+                        &loop,
+                        exit_instruction->as.load_indirect_addr,
+                        0u) ||
+                    !value_ssa_perf_extract_address_root(
+                        function, &def_use, exit_instruction->as.load_indirect_addr, &exit_load_root, 0u) ||
+                    !value_ssa_perf_loop_instructions_preserve_indirect_load(
+                        function,
+                        &def_use,
+                        &function->blocks[loop.header_id],
+                        parameter_pointer_non_alias_pairs,
+                        &exit_load_root) ||
+                    !value_ssa_perf_loop_instructions_preserve_indirect_load(
+                        function,
+                        &def_use,
+                        &function->blocks[loop.body_id],
+                        parameter_pointer_non_alias_pairs,
+                        &exit_load_root) ||
+                    !value_ssa_perf_instruction_range_preserves_indirect_load(
+                        function,
+                        &def_use,
+                        exit_block,
+                        0u,
+                        exit_instruction_index,
+                        parameter_pointer_non_alias_pairs,
+                        &exit_load_root)) {
+                    continue;
+                }
+
+                for (preheader_instruction_index = preheader->instruction_count; preheader_instruction_index > 0u; --preheader_instruction_index) {
+                    ValueSsaInstruction *preheader_instruction = &preheader->instructions[preheader_instruction_index - 1u];
+                    ValueSsaPerfAddressRoot preheader_load_root;
+
+                    if (preheader_instruction->kind != VALUE_SSA_INSTR_LOAD_INDIRECT ||
+                        !preheader_instruction->has_result ||
+                        preheader_instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                        !value_ssa_perf_same_pure_address_value(
+                            function,
+                            &def_use,
+                            preheader_instruction->as.load_indirect_addr,
+                            exit_instruction->as.load_indirect_addr,
+                            0u) ||
+                        !value_ssa_perf_extract_address_root(
+                            function,
+                            &def_use,
+                            preheader_instruction->as.load_indirect_addr,
+                            &preheader_load_root,
+                            0u) ||
+                        !value_ssa_perf_instruction_range_preserves_indirect_load(
+                            function,
+                            &def_use,
+                            preheader,
+                            preheader_instruction_index,
+                            preheader->instruction_count,
+                            parameter_pointer_non_alias_pairs,
+                            &preheader_load_root)) {
+                        continue;
+                    }
+
+                    exit_instruction->kind = VALUE_SSA_INSTR_MOV;
+                    exit_instruction->as.mov_value = preheader_instruction->result;
+                    changed_function = 1;
+                    changed_any = 1;
+                    break;
+                }
+            }
+        }
+
+        free(parameter_pointer_non_alias_pairs);
+        free(address_taken_locals);
+        value_ssa_def_use_analysis_free(&def_use);
+        value_ssa_cfg_analysis_free(&cfg);
+
+        if (changed_function) {
+            --function_index;
+        }
+    }
+
+    free(readonly_globals);
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *error) {
     unsigned char *foldable_globals = NULL;
     size_t function_index;
@@ -3028,6 +3342,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_hoist_spmv_parameter_local_loads(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_reuse_spmv_loop_exit_indirect_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }

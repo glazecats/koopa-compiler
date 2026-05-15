@@ -333,6 +333,30 @@
        `2)` a proof-backed higher-level removal of dead local-array
        zero-initialization, but **not** on static-code-size-only loop
        compression.
+     - 2026-05-15 `spmv` sibling-loop load-reuse follow-up:
+       one new narrow kept `ValueSSA` perf-hotspot pass now reuses a
+       preheader-computed sibling-loop bound load across the immediately
+       following `spmv` loop boundary instead of reloading the same
+       `xptr[i]` shape again in the second sibling loop preheader.
+       New regression coverage now locks this exact witness in
+       `value_ssa_regression_test.c`. Current correctness restamp on the live
+       tree is green:
+       `make test-value-ssa-regression` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Real witness proof on rebuilt perf SSA now shows `09_spmv1` seeding the
+       second sibling loop phi from the earlier `ssa.15` instead of reloading
+       `xptr[i]` inside `bb.9`.
+       Formal A/B against stable base `23a3805`, using the required full
+       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path and 2-run
+       averages on the rebuilt live compiler, came back net positive:
+       `06_mv1 = 13021.512 -> 12267.411 ms`,
+       `09_spmv1 = 13202.139 -> 12952.297 ms`,
+       `18_brainfuck-bootstrap = 10198.919 -> 10133.901 ms`,
+       `19_brainfuck-calculator = 12679.479 -> 12786.321 ms`.
+       Current authority is therefore to keep this pass, checkpoint it, and
+       continue the next perf round from this new stable base rather than
+       backing it out.
      - later 2026-05-14 `brainfuck` function-entry scalar-global hoist:
        one narrower kept `ValueSSA` perf-hotspot expansion then targeted the
        same `brainfuck` mainline more directly than another broad loop

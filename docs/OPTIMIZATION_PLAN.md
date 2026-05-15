@@ -258,6 +258,35 @@
       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
       `18_brainfuck-bootstrap ~= 11803 ms`,
       `19_brainfuck-calculator ~= 20388 ms`
+  - Current 2026-05-15 `spmv` sibling-loop load-reuse follow-up:
+    - one new narrow kept `ValueSSA` perf-hotspot pass now targets the real
+      `spmv1` witness more directly than late text scheduling:
+      when one `spmv` sibling loop preheader already computes an invariant
+      `load_indirect` such as `xptr[i]`, and the immediately following exit
+      block recomputes the same address before entering the next sibling
+      loop, the later repeated load is rewritten to reuse the earlier value
+      if the existing non-alias proofs show the intervening loop body cannot
+      clobber that address
+    - new regression coverage now locks that exact shape in
+      `tests/value_ssa/value_ssa_regression_test.c`
+    - current correctness restamp on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - real witness proof on rebuilt perf SSA:
+      `09_spmv1` no longer reloads `xptr[i]` in the second sibling loop
+      preheader; the second loop now seeds its phi directly from the earlier
+      `ssa.15`
+    - formal A/B against stable base `23a3805`, 2-run averages:
+      `06_mv1 = 13021.512 -> 12267.411 ms`,
+      `09_spmv1 = 13202.139 -> 12952.297 ms`,
+      `18_brainfuck-bootstrap = 10198.919 -> 10133.901 ms`,
+      `19_brainfuck-calculator = 12679.479 -> 12786.321 ms`
+    - current authority:
+      keep this pass and use it as the new stable base for the next
+      `spmv`-side optimization round; the next most promising reopen is still
+      hotspot-specific address/index recurrence cleanup, especially the
+      remaining repeated `xptr[i+1]` and exit-block shift/address scaffolding
   - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
     - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
       existing loop-invariant hoist line to recognize one extra loop shape:
