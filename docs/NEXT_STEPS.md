@@ -357,6 +357,26 @@
        Current authority is therefore to keep this pass, checkpoint it, and
        continue the next perf round from this new stable base rather than
        backing it out.
+     - later 2026-05-15 hotspot-function parameter-local hoist widening:
+       because OJ timing now shows `13_fft1` / `14_fft2` as the more urgent
+       heavy witnesses, I widened the earlier kept parameter-local hoist rule
+       from only `spmv` to a still-narrow whitelist of
+       `multiply`, `power`, `fft`, and `MemMove`.
+       New regression coverage now locks both that a `power`-style witness
+       should hoist and that an unrelated non-whitelisted helper should stay
+       unchanged. Current correctness restamp on the live tree is green:
+       `make test-value-ssa-regression` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Formal A/B against stable base `36472bc`, 2-run averages on the
+       rebuilt live compiler, came back net positive:
+       `09_spmv1 = 13031.040 -> 12969.290 ms`,
+       `13_fft1 = 8530.714 -> 8421.641 ms`,
+       `14_fft2 = 8050.651 -> 7985.201 ms`,
+       `18_brainfuck-bootstrap = 10169.882 -> 10170.917 ms`,
+       `19_brainfuck-calculator = 12735.192 -> 12669.357 ms`.
+       Current authority is therefore to keep this widening, checkpoint it,
+       and use it as the new stable base for the next OJ-directed perf round.
      - later 2026-05-14 `brainfuck` function-entry scalar-global hoist:
        one narrower kept `ValueSSA` perf-hotspot expansion then targeted the
        same `brainfuck` mainline more directly than another broad loop

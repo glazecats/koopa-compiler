@@ -4831,6 +4831,133 @@ static int build_perf_spmv_parameter_local_load_store_barrier_program(ValueSsaPr
     return 1;
 }
 
+static int build_perf_power_parameter_local_load_hoist_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t a_local_id;
+    size_t b_local_id;
+    size_t v0;
+    size_t v1;
+    size_t v2;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "power", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "a", 1, &a_local_id, error) ||
+        !value_ssa_function_append_local(function, "b", 1, &b_local_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    v0 = value_ssa_function_allocate_value(function);
+    v1 = value_ssa_function_allocate_value(function);
+    v2 = value_ssa_function_allocate_value(function);
+    if (v0 == (size_t)-1 || v1 == (size_t)-1 || v2 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v0);
+    instruction.as.load_slot = value_ssa_slot_local(a_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v1);
+    instruction.as.load_slot = value_ssa_slot_local(b_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v2);
+    instruction.as.load_slot = value_ssa_slot_local(a_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v1);
+    instruction.as.binary.rhs = value_ssa_value_id(v2);
+    if (instruction.result.value_id == (size_t)-1 ||
+        !value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, instruction.result, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_perf_non_hot_parameter_local_load_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t a_local_id;
+    size_t v0;
+    size_t v1;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "helper", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "a", 1, &a_local_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    v0 = value_ssa_function_allocate_value(function);
+    v1 = value_ssa_function_allocate_value(function);
+    if (v0 == (size_t)-1 || v1 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v0);
+    instruction.as.load_slot = value_ssa_slot_local(a_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v1);
+    instruction.as.load_slot = value_ssa_slot_local(a_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v0);
+    instruction.as.binary.rhs = value_ssa_value_id(v1);
+    if (instruction.result.value_id == (size_t)-1 ||
+        !value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, instruction.result, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_perf_spmv_loop_exit_indirect_load_reuse_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaGlobal *xptr_global = NULL;
     ValueSsaGlobal *x_global = NULL;
@@ -10557,6 +10684,30 @@ static int test_value_ssa_optimize_perf_hotspots_does_not_hoist_spmv_parameter_l
         "}\n");
 }
 
+static int test_value_ssa_optimize_perf_hotspots_hoists_power_parameter_local_loads(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-POWER-PARAMETER-LOCAL",
+        build_perf_power_parameter_local_load_hoist_program,
+        "func power(a.0, b.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local a.0\n"
+        "    ssa.1 = load_local b.1\n"
+        "    ssa.2 = add ssa.1, ssa.0\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots_does_not_hoist_non_hot_parameter_local_loads(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-NON-HOT-PARAMETER-LOCAL",
+        build_perf_non_hot_parameter_local_load_program,
+        "func helper(a.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local a.0\n"
+        "    ssa.1 = load_local a.0\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ret ssa.2\n"
+        "}\n");
+}
+
 static int test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads(void) {
     return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-SPMV-LOOP-EXIT-INDIRECT",
         build_perf_spmv_loop_exit_indirect_load_reuse_program,
@@ -12866,6 +13017,8 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_single_use_global_addr();
     ok &= test_value_ssa_optimize_perf_hotspots_hoists_spmv_parameter_local_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_spmv_parameter_local_load_across_store();
+    ok &= test_value_ssa_optimize_perf_hotspots_hoists_power_parameter_local_loads();
+    ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_non_hot_parameter_local_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();

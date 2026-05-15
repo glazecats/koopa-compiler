@@ -287,6 +287,33 @@
       `spmv`-side optimization round; the next most promising reopen is still
       hotspot-specific address/index recurrence cleanup, especially the
       remaining repeated `xptr[i+1]` and exit-block shift/address scaffolding
+  - Current 2026-05-15 hotspot-function parameter-local hoist widening:
+    - the earlier kept parameter-local hoist rule was originally scoped only
+      to `spmv`; this round widens that exact rule, still under a narrow
+      whitelist, to the current OJ-heavy recursive/call-intensive witnesses
+      `multiply`, `power`, `fft`, and `MemMove`
+    - landing reason:
+      OJ timing now shows `13_fft1` / `14_fft2` dominating more than local
+      `spmv`, so the active target shifted from only one `spmv` witness to
+      the shared recursive FFT helper family
+    - regression coverage now locks both sides of the boundary:
+      `power`-style parameter-local hoisting is expected to trigger, while an
+      unrelated non-whitelisted helper still must not change
+    - current correctness restamp on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - formal A/B against stable base `36472bc`, 2-run averages:
+      `09_spmv1 = 13031.040 -> 12969.290 ms`,
+      `13_fft1 = 8530.714 -> 8421.641 ms`,
+      `14_fft2 = 8050.651 -> 7985.201 ms`,
+      `18_brainfuck-bootstrap = 10169.882 -> 10170.917 ms`,
+      `19_brainfuck-calculator = 12735.192 -> 12669.357 ms`
+    - current authority:
+      keep this widening as the new stable base; the next promising FFT-side
+      reopen is no longer just parameter-slot traffic, but deeper hotspot
+      recurrence cleanup such as repeated `multiply(w, w)` / `power(...)`
+      structure and loop-local address/index recurrence shaping inside `fft`
   - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
     - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
       existing loop-invariant hoist line to recognize one extra loop shape:

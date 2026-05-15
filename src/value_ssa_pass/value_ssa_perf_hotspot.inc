@@ -525,12 +525,24 @@ cleanup:
     return value_ssa_verify_program(program, error);
 }
 
-static int value_ssa_perf_hoist_spmv_parameter_local_loads(ValueSsaProgram *program, ValueSsaError *error) {
+static int value_ssa_perf_function_is_hot_parameter_local_hoist_candidate(const ValueSsaFunction *function) {
+    if (!function || !function->name) {
+        return 0;
+    }
+
+    return strcmp(function->name, "spmv") == 0 ||
+        strcmp(function->name, "multiply") == 0 ||
+        strcmp(function->name, "power") == 0 ||
+        strcmp(function->name, "fft") == 0 ||
+        strcmp(function->name, "MemMove") == 0;
+}
+
+static int value_ssa_perf_hoist_hot_parameter_local_loads(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
     int changed_any = 0;
 
     if (!program) {
-        value_ssa_set_error(error, 0, 0, "VALUE-SSA-305: invalid perf spmv parameter-load hoist contract");
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-305: invalid perf hotspot parameter-load hoist contract");
         return 0;
     }
 
@@ -547,7 +559,7 @@ static int value_ssa_perf_hoist_spmv_parameter_local_loads(ValueSsaProgram *prog
         int ok = 1;
 
         if (!function->has_body || function->block_count == 0u || function->local_count == 0u ||
-            !function->name || strcmp(function->name, "spmv") != 0) {
+            !value_ssa_perf_function_is_hot_parameter_local_hoist_candidate(function)) {
             continue;
         }
 
@@ -563,7 +575,7 @@ static int value_ssa_perf_hoist_spmv_parameter_local_loads(ValueSsaProgram *prog
         hoisted_values = (ValueSsaValueRef *)calloc(function->local_count, sizeof(ValueSsaValueRef));
         if (!address_taken_locals || !eligible_locals || !hoisted_values) {
             ok = 0;
-            value_ssa_set_error(error, 0, 0, "VALUE-SSA-306: out of memory preparing perf spmv parameter-load hoist");
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-306: out of memory preparing perf hotspot parameter-load hoist");
             goto cleanup;
         }
         if (!value_ssa_collect_address_taken_locals(function, address_taken_locals)) {
@@ -3341,7 +3353,7 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
-    if (!value_ssa_perf_hoist_spmv_parameter_local_loads(program, error)) {
+    if (!value_ssa_perf_hoist_hot_parameter_local_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }
