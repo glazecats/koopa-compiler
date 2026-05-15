@@ -718,6 +718,183 @@ cleanup:
     return value_ssa_verify_program(program, error);
 }
 
+static int value_ssa_perf_binary_is_add_one_of_value(const ValueSsaInstruction *instruction,
+    size_t value_id) {
+    if (!instruction || instruction->kind != VALUE_SSA_INSTR_BINARY ||
+        instruction->as.binary.op != VALUE_SSA_BINARY_ADD) {
+        return 0;
+    }
+
+    return (instruction->as.binary.lhs.kind == VALUE_SSA_VALUE_ID &&
+            instruction->as.binary.lhs.value_id == value_id &&
+            instruction->as.binary.rhs.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+            instruction->as.binary.rhs.immediate == 1) ||
+        (instruction->as.binary.rhs.kind == VALUE_SSA_VALUE_ID &&
+            instruction->as.binary.rhs.value_id == value_id &&
+            instruction->as.binary.lhs.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+            instruction->as.binary.lhs.immediate == 1);
+}
+
+static int value_ssa_perf_mark_non_negative_zero_based_inductions(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    unsigned char *non_negative_values) {
+    size_t block_index;
+
+    if (!function || !analysis || !non_negative_values) {
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        size_t phi_index;
+
+        for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+            const ValueSsaPhi *phi = &block->phis[phi_index];
+            size_t input_index;
+            size_t increment_value_id = (size_t)-1;
+            int saw_zero_seed = 0;
+
+            if (phi->result_id >= function->next_value_id || phi->input_count != 2u) {
+                continue;
+            }
+
+            for (input_index = 0; input_index < phi->input_count; ++input_index) {
+                if (phi->inputs[input_index].value.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+                    phi->inputs[input_index].value.immediate == 0) {
+                    saw_zero_seed = 1;
+                } else if (phi->inputs[input_index].value.kind == VALUE_SSA_VALUE_ID) {
+                    increment_value_id = phi->inputs[input_index].value.value_id;
+                }
+            }
+
+            if (!saw_zero_seed || increment_value_id == (size_t)-1 ||
+                increment_value_id >= analysis->value_count || !analysis->has_def[increment_value_id]) {
+                continue;
+            }
+
+            {
+                ValueSsaInstruction *increment_definition = value_ssa_pass_lookup_instruction_definition(
+                    function, analysis, increment_value_id);
+
+                if (!increment_definition ||
+                    !value_ssa_perf_binary_is_add_one_of_value(increment_definition, phi->result_id)) {
+                    continue;
+                }
+            }
+
+            non_negative_values[phi->result_id] = 1u;
+            non_negative_values[increment_value_id] = 1u;
+        }
+    }
+
+    return 1;
+}
+
+static int value_ssa_perf_strength_reduce_non_negative_induction_divmods(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    size_t function_index;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-313: invalid perf induction div/mod reduction contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaDefUseAnalysis def_use;
+        unsigned char *non_negative_values = NULL;
+        size_t block_index;
+        int changed_function = 0;
+
+        if (!function->has_body || function->next_value_id == 0u) {
+            continue;
+        }
+
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_def_use_analysis(function, &def_use, error)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            return 0;
+        }
+
+        non_negative_values = (unsigned char *)calloc(function->next_value_id, sizeof(unsigned char));
+        if (!non_negative_values) {
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-314: out of memory preparing perf induction div/mod reduction");
+            return 0;
+        }
+        if (!value_ssa_perf_mark_non_negative_zero_based_inductions(function, &def_use, non_negative_values)) {
+            free(non_negative_values);
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-315: failed collecting non-negative induction values");
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                long long divisor;
+                unsigned shift = 0u;
+                unsigned long long bits;
+
+                if (instruction->kind != VALUE_SSA_INSTR_BINARY ||
+                    instruction->as.binary.lhs.kind != VALUE_SSA_VALUE_ID ||
+                    instruction->as.binary.lhs.value_id >= function->next_value_id ||
+                    !non_negative_values[instruction->as.binary.lhs.value_id] ||
+                    instruction->as.binary.rhs.kind != VALUE_SSA_VALUE_IMMEDIATE) {
+                    continue;
+                }
+
+                if (instruction->as.binary.op != VALUE_SSA_BINARY_DIV &&
+                    instruction->as.binary.op != VALUE_SSA_BINARY_MOD) {
+                    continue;
+                }
+
+                divisor = instruction->as.binary.rhs.immediate;
+                if (divisor <= 0) {
+                    continue;
+                }
+
+                bits = (unsigned long long)divisor;
+                if ((bits & (bits - 1u)) != 0u) {
+                    continue;
+                }
+                while ((1ull << shift) != bits) {
+                    ++shift;
+                    if (shift >= 31u) {
+                        break;
+                    }
+                }
+                if ((1ull << shift) != bits) {
+                    continue;
+                }
+
+                if (instruction->as.binary.op == VALUE_SSA_BINARY_DIV) {
+                    instruction->as.binary.op = VALUE_SSA_BINARY_SHIFT_RIGHT;
+                    instruction->as.binary.rhs = value_ssa_value_immediate((long long)shift);
+                } else {
+                    instruction->as.binary.op = VALUE_SSA_BINARY_BIT_AND;
+                    instruction->as.binary.rhs = value_ssa_value_immediate((long long)(bits - 1u));
+                }
+                changed_function = 1;
+            }
+        }
+
+        free(non_negative_values);
+        value_ssa_def_use_analysis_free(&def_use);
+
+        if (changed_function &&
+            (!value_ssa_simplify_trivial_values(program, error) ||
+                !value_ssa_eliminate_dead_value_defs(program, error))) {
+            return 0;
+        }
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_perf_function_is_pure_internal_call_candidate(const ValueSsaProgram *program,
     const ValueSsaFunction *function,
     const unsigned char *readonly_globals) {
@@ -3354,6 +3531,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_hoist_hot_parameter_local_loads(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_strength_reduce_non_negative_induction_divmods(program, error)) {
         free(foldable_globals);
         return 0;
     }

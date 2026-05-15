@@ -377,6 +377,30 @@
        `19_brainfuck-calculator = 12735.192 -> 12669.357 ms`.
        Current authority is therefore to keep this widening, checkpoint it,
        and use it as the new stable base for the next OJ-directed perf round.
+     - later 2026-05-15 zero-based induction `/2` and `%2` reduction:
+       one new `ValueSSA` perf-hotspot pass now recognizes zero-based
+       induction values of the form `phi [0, add(phi, 1)]` and safely rewrites
+       `/ 2` and `% 2` on that induction into `shr 1` and `and 1`.
+       This is intentionally narrower than a broad signed div/mod fold:
+       the transform only fires when non-negativity comes directly from the
+       induction structure itself. New regression coverage locks that exact
+       reduction witness. Current correctness restamp on the live tree is
+       green:
+       `make test-value-ssa-regression` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Real witness proof in final rebuilt `fft` text now exists:
+       the split loop emits `andi` / `srli` for the loop index instead of
+       `rem ... , 2` / `div ... , 2`.
+       Formal A/B against stable base `ce19b44`, 2-run averages, came back
+       net positive:
+       `09_spmv1 = 12975.430 -> 12962.063 ms`,
+       `13_fft1 = 8482.970 -> 8394.327 ms`,
+       `14_fft2 = 7991.156 -> 7926.880 ms`,
+       `18_brainfuck-bootstrap = 10163.566 -> 10081.508 ms`,
+       `19_brainfuck-calculator = 12632.099 -> 12656.517 ms`.
+       Current authority is therefore to keep this pass and use it as the new
+       stable base for the next FFT-directed perf round.
      - later 2026-05-14 `brainfuck` function-entry scalar-global hoist:
        one narrower kept `ValueSSA` perf-hotspot expansion then targeted the
        same `brainfuck` mainline more directly than another broad loop

@@ -314,6 +314,33 @@
       reopen is no longer just parameter-slot traffic, but deeper hotspot
       recurrence cleanup such as repeated `multiply(w, w)` / `power(...)`
       structure and loop-local address/index recurrence shaping inside `fft`
+  - Current 2026-05-15 zero-based induction `/2` and `%2` reduction:
+    - one new `ValueSSA` perf-hotspot pass now recognizes zero-based
+      induction values of the form
+      `phi [0, add(phi, 1)]` and safely rewrites uses of that induction in
+      `/ 2` and `% 2` into `shr 1` and `and 1`
+    - this is deliberately narrower than a general div/mod folding pass:
+      it only fires when the dividend is structurally proven non-negative by
+      the induction shape itself, so it avoids broad assumptions about
+      parameter sign
+    - real witness proof on the rebuilt `fft` path now exists in final text:
+      the first split loop uses `andi` / `srli` for the loop index instead of
+      `rem ... , 2` / `div ... , 2`
+    - current correctness restamp on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - formal A/B against stable base `ce19b44`, 2-run averages:
+      `09_spmv1 = 12975.430 -> 12962.063 ms`,
+      `13_fft1 = 8482.970 -> 8394.327 ms`,
+      `14_fft2 = 7991.156 -> 7926.880 ms`,
+      `18_brainfuck-bootstrap = 10163.566 -> 10081.508 ms`,
+      `19_brainfuck-calculator = 12632.099 -> 12656.517 ms`
+    - current authority:
+      keep this pass as the new stable base; the next most promising
+      FFT-directed reopen is still the remaining invariant `n / 2` and
+      recurrence/address-chain work around `fft`'s split loop and butterfly
+      loop, rather than reopening the already-kept zero-based induction line
   - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
     - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
       existing loop-invariant hoist line to recognize one extra loop shape:
