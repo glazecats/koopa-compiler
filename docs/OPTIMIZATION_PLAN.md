@@ -799,6 +799,39 @@
       keep this as the latest stable backend perf checkpoint and use it as
       the next baseline before reopening the remaining `spmv1` / full-course
       hotspot ranking work
+  - Current 2026-05-15 branch-bound stack-reload-to-`mv`, kept:
+    - after backing out the broader net-negative `ValueSSA` experiment, the
+      next round returned to one much narrower final-text cleanup aimed at
+      the hottest remaining `spmv` / `mv` loop-bound scaffolding
+    - kept rule:
+      inside one basic block, when
+      `sw temp, off(sp)` is followed later by
+      `lw temp2, off(sp)` whose only immediate purpose is the next
+      conditional branch, and there is no label, no control barrier, no `sp`
+      change, and no intervening write back to the same stack slot, rewrite
+      that reload into `mv temp2, temp`
+    - rationale for the keep:
+      this directly hits real `spmv1` loop-bound tails such as
+      `sw t4, 36(sp) ; ... ; lw t5, 36(sp) ; blt a0, t5, ...`
+      without reopening the broader and previously mixed
+      `same_block_temp_stack_reload_to_mv` line
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS with new positive/negative branch-bound
+      reload tests,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`)
+    - repeated A/B evidence against stable base `fa5293a`:
+      focused `06_mv1` / `09_spmv1` 3-run averages:
+      `06_mv1` `12327.925 -> 12252.140 ms`,
+      `09_spmv1` `13254.820 -> 13245.739 ms`;
+      focused `18_brainfuck-bootstrap` / `19_brainfuck-calculator` 2-run
+      averages:
+      `18_brainfuck-bootstrap` `10305.307 -> 10194.291 ms`,
+      `19_brainfuck-calculator` `12762.888 -> 12737.759 ms`
+    - current authority:
+      keep this as another small-but-real runtime-facing final-text cleanup
+      and use it as the new stable checkpoint before the next `spmv1`
+      hotspot round
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come

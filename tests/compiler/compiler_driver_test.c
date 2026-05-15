@@ -492,6 +492,7 @@ int compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(char **io
 int compiler_test_optimize_riscv_preview_repeated_indexed_addr_sequences(char **io_text);
 int compiler_test_optimize_riscv_preview_stack_staged_call_args(char **io_text);
 int compiler_test_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(char **io_text);
+int compiler_test_optimize_riscv_preview_branch_bound_stack_reload_to_mv(char **io_text);
 int compiler_test_optimize_riscv_preview_forward_store_copy_source(char **io_text);
 int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text);
 int compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(char **io_text);
@@ -607,6 +608,59 @@ static int test_compiler_replaces_same_block_temp_stack_reload_with_mv(void) {
         !text ||
         strstr(text, "  sw t4, 36(sp)\n  mv t6, t4\n  add a0, t6, a1\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: same-block temp stack reload should be replaced with mv when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_replaces_branch_bound_stack_reload_with_mv(void) {
+    static const char *source_text =
+        "  sw t4, 36(sp)\n"
+        "  lw t5, 36(sp)\n"
+        "  blt a0, t5, .Lloop\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: branch-bound stack-reload regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_branch_bound_stack_reload_to_mv(&text) ||
+        !text ||
+        strstr(text, "  sw t4, 36(sp)\n  mv t5, t4\n  blt a0, t5, .Lloop\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: branch-bound stack reload should be replaced with mv when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_replace_branch_bound_stack_reload_across_slot_overwrite(void) {
+    static const char *source_text =
+        "  sw t4, 36(sp)\n"
+        "  sw t3, 36(sp)\n"
+        "  lw t5, 36(sp)\n"
+        "  blt a0, t5, .Lloop\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: branch-bound stack-reload overwrite regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_branch_bound_stack_reload_to_mv(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: branch-bound stack reload should stay unchanged across slot overwrite\n");
         ok = 0;
     }
 
@@ -2403,6 +2457,8 @@ int main(void) {
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_both_args_reload_same_slot();
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0();
     ok &= test_compiler_replaces_same_block_temp_stack_reload_with_mv();
+    ok &= test_compiler_replaces_branch_bound_stack_reload_with_mv();
+    ok &= test_compiler_does_not_replace_branch_bound_stack_reload_across_slot_overwrite();
     ok &= test_compiler_forwards_store_copy_source();
     ok &= test_compiler_does_not_forward_store_copy_source_across_copy_use();
     ok &= test_compiler_removes_dead_jump_seed_move();

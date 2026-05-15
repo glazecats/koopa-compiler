@@ -969,6 +969,39 @@
        witnesses improved. Current authority is therefore:
        keep this as the latest stable perf checkpoint before the next hotspot
        rerank / reopen.
+     - later 2026-05-15 branch-bound stack-reload-to-`mv`, kept:
+       after the next rerank reconfirmed `09_spmv1` at the front of the live
+       course-perf pressure, I first tried a broader `ValueSSA` path for
+       stronger loop-invariant indirect-load hoisting, but formal A/B showed
+       it was not worth keeping because `06_mv1` regressed more than
+       `09_spmv1` improved. Following the version-management rule for
+       hard-to-justify experiments, I returned to stable `fa5293a` and
+       reopened a much narrower final-text line instead: if one block stores a
+       temp register to `off(sp)`, later reloads the same slot into another
+       temp, and the reload feeds the very next conditional branch with no
+       label/control barrier/`sp` mutation/same-slot overwrite in between,
+       rewrite that reload to `mv`. This directly hits real `spmv1`
+       loop-bound shapes such as
+       `sw t4, 36(sp) ; ... ; lw t5, 36(sp) ; blt a0, t5, ...`
+       while avoiding the wider same-block reload family that had already
+       shown more mixed behavior earlier in the thread. Fresh stability restamp
+       on the live tree is green:
+       `make test-compiler-driver` PASS with new positive/negative branch-bound
+       reload tests,
+       `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`).
+       Repeated A/B against stable base `fa5293a` then came back net positive
+       on both the immediate target pair and the previously sensitive
+       `brainfuck` pair:
+       3-run averages
+       `06_mv1 = 12327.925 -> 12252.140 ms`,
+       `09_spmv1 = 13254.820 -> 13245.739 ms`;
+       2-run averages
+       `18_brainfuck-bootstrap = 10305.307 -> 10194.291 ms`,
+       `19_brainfuck-calculator = 12762.888 -> 12737.759 ms`.
+       Current authority is therefore:
+       keep this as the next stable perf checkpoint before reopening the next
+       `spmv1` / full-course hotspot round.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:
