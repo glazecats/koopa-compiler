@@ -1225,6 +1225,58 @@
      `brainfuck` witnesses improved and `mv1` also improved, so the small
      `spmv1` drift is currently treated as noise rather than as a reason to
      back the pass out.
+   - later same-day function-entry parameter-local load hoist retry, not kept:
+     I then followed the user-directed “reduce load/use pressure” line and
+     opened one new SSA-side pass for immutable parameter locals:
+     if a parameter local is not address-taken, is never overwritten by
+     `store_local`, and is loaded more than once in one function, hoist one
+     canonical `load_local` into the function entry and rewrite the later
+     loads to reuse that SSA value.
+     Shape proof did exist on the intended witness:
+     in the perf-side SSA dump for `09_spmv1`, the hot `spmv(...)` body
+     collapsed repeated `load_local n/xptr/yidx/vals/b/x` into a small
+     function-entry set.
+     Correctness also reclosed:
+     `make test-value-ssa-regression` PASS,
+     `lv8` PASS (`12/12`),
+     `lv9` PASS (`22/22`).
+     But the formal 2-run four-case A/B against the rebuilt clean `02ca2e6`
+     base still said not to keep it:
+     `06_mv1 = 12873.136 -> 12151.374 ms`,
+     `09_spmv1 = 12881.566 -> 12625.361 ms`,
+     `18_brainfuck-bootstrap = 10084.999 -> 10287.267 ms`,
+     `19_brainfuck-calculator = 12757.705 -> 12993.984 ms`.
+     Since both `brainfuck` witnesses regressed materially, this pass was
+     fully backed out and the repository returned to stable checkpoint
+     `637f32a`. Current authority is:
+     do not reopen the naive function-entry parameter-local load hoist as-is;
+     although it clearly improves the `spmv`-side load pattern, it interacts
+     with the current `brainfuck` line badly enough that it is not a keeper.
+   - later same-day `spmv`-specific parameter-local load hoist, kept:
+     I then retried that same “reduce load/use pressure” idea in a much
+     narrower witness-specific form instead of a broad all-function rule:
+     only for the hot `spmv(...)` helper, if a parameter local is not
+     address-taken and is never overwritten by `store_local`, hoist one entry
+     `load_local` and rewrite the later loads to reuse that SSA value.
+     Shape proof:
+     in the perf-side SSA dump for `09_spmv1`, the hot `spmv(...)` body now
+     keeps just one entry load each for `n/xptr/yidx/vals/b/x` instead of
+     reloading those parameter locals later in the loop body.
+     Correctness recheck:
+     `make test-value-ssa-regression` PASS,
+     `lv8` PASS (`12/12`),
+     `lv9` PASS (`22/22`).
+     Formal 2-run four-case A/B against the rebuilt clean `02ca2e6` base then
+     came back net positive:
+     `06_mv1 = 13214.021 -> 12518.831 ms`,
+     `09_spmv1 = 13315.730 -> 13190.835 ms`,
+     `18_brainfuck-bootstrap = 10407.723 -> 10216.881 ms`,
+     `19_brainfuck-calculator = 13145.882 -> 12729.289 ms`.
+     Current authority:
+     keep this `spmv`-specific parameter-local load hoist as the new stable
+     checkpoint. Unlike the broader all-function retry, this narrower variant
+     improves the intended `spmv` pressure surface without reopening the
+     earlier `brainfuck` regressions.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

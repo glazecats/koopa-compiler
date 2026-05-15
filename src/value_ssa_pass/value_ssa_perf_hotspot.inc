@@ -525,6 +525,187 @@ cleanup:
     return value_ssa_verify_program(program, error);
 }
 
+static int value_ssa_perf_hoist_spmv_parameter_local_loads(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-305: invalid perf spmv parameter-load hoist contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaBasicBlock rebuilt_entry;
+        ValueSsaBasicBlock *entry = NULL;
+        unsigned char *address_taken_locals = NULL;
+        unsigned char *eligible_locals = NULL;
+        ValueSsaValueRef *hoisted_values = NULL;
+        size_t local_index;
+        size_t block_index;
+        int changed_function = 0;
+        int ok = 1;
+
+        if (!function->has_body || function->block_count == 0u || function->local_count == 0u ||
+            !function->name || strcmp(function->name, "spmv") != 0) {
+            continue;
+        }
+
+        entry = &function->blocks[0];
+        if (!entry->has_terminator) {
+            continue;
+        }
+
+        memset(&rebuilt_entry, 0, sizeof(rebuilt_entry));
+        rebuilt_entry.id = entry->id;
+        address_taken_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+        eligible_locals = (unsigned char *)calloc(function->local_count, sizeof(unsigned char));
+        hoisted_values = (ValueSsaValueRef *)calloc(function->local_count, sizeof(ValueSsaValueRef));
+        if (!address_taken_locals || !eligible_locals || !hoisted_values) {
+            ok = 0;
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-306: out of memory preparing perf spmv parameter-load hoist");
+            goto cleanup;
+        }
+        if (!value_ssa_collect_address_taken_locals(function, address_taken_locals)) {
+            ok = 0;
+            value_ssa_set_error(error,
+                0,
+                0,
+                "VALUE-SSA-306: failed collecting address-taken locals in function '%s'",
+                function->name ? function->name : "<anon>");
+            goto cleanup;
+        }
+
+        for (local_index = 0; local_index < function->local_count; ++local_index) {
+            if (function->locals[local_index].is_parameter && !address_taken_locals[local_index]) {
+                eligible_locals[local_index] = 1u;
+            }
+        }
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                if (instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL &&
+                    instruction->as.store.slot.kind == VALUE_SSA_SLOT_LOCAL &&
+                    instruction->as.store.slot.id < function->local_count) {
+                    eligible_locals[instruction->as.store.slot.id] = 0u;
+                }
+            }
+        }
+
+        for (local_index = 0; local_index < function->local_count; ++local_index) {
+            ValueSsaInstruction hoisted_load;
+
+            if (!eligible_locals[local_index]) {
+                continue;
+            }
+
+            memset(&hoisted_load, 0, sizeof(hoisted_load));
+            hoisted_load.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+            hoisted_load.has_result = 1;
+            hoisted_load.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+            hoisted_load.as.load_slot = value_ssa_slot_local(local_index);
+            if (hoisted_load.result.value_id == (size_t)-1 ||
+                !value_ssa_block_append_instruction(&rebuilt_entry, &hoisted_load, error)) {
+                ok = 0;
+                goto cleanup;
+            }
+            hoisted_values[local_index] = hoisted_load.result;
+        }
+
+        for (block_index = 0; block_index < entry->instruction_count && ok; ++block_index) {
+            const ValueSsaInstruction *instruction = &entry->instructions[block_index];
+            ValueSsaInstruction replacement;
+            size_t slot_id;
+
+            if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+                instruction->has_result &&
+                instruction->result.kind == VALUE_SSA_VALUE_ID &&
+                instruction->as.load_slot.kind == VALUE_SSA_SLOT_LOCAL) {
+                slot_id = instruction->as.load_slot.id;
+                if (slot_id < function->local_count &&
+                    hoisted_values[slot_id].kind == VALUE_SSA_VALUE_ID) {
+                    memset(&replacement, 0, sizeof(replacement));
+                    replacement.kind = VALUE_SSA_INSTR_MOV;
+                    replacement.has_result = 1;
+                    replacement.result = instruction->result;
+                    replacement.as.mov_value = hoisted_values[slot_id];
+                    if (!value_ssa_block_append_instruction(&rebuilt_entry, &replacement, error)) {
+                        ok = 0;
+                        goto cleanup;
+                    }
+                    changed_function = 1;
+                    continue;
+                }
+            }
+
+            if (!value_ssa_block_append_instruction(&rebuilt_entry, instruction, error)) {
+                ok = 0;
+                goto cleanup;
+            }
+        }
+
+        for (block_index = 1; block_index < function->block_count && ok; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t slot_id;
+
+                if (instruction->kind != VALUE_SSA_INSTR_LOAD_LOCAL ||
+                    !instruction->has_result ||
+                    instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                    instruction->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL) {
+                    continue;
+                }
+
+                slot_id = instruction->as.load_slot.id;
+                if (slot_id >= function->local_count || hoisted_values[slot_id].kind != VALUE_SSA_VALUE_ID) {
+                    continue;
+                }
+
+                instruction->kind = VALUE_SSA_INSTR_MOV;
+                instruction->as.mov_value = hoisted_values[slot_id];
+                changed_function = 1;
+            }
+        }
+
+        if (ok && changed_function) {
+            rebuilt_entry.has_terminator = entry->has_terminator;
+            rebuilt_entry.terminator = entry->terminator;
+            free(entry->instructions);
+            entry->instructions = rebuilt_entry.instructions;
+            entry->instruction_count = rebuilt_entry.instruction_count;
+            entry->instruction_capacity = rebuilt_entry.instruction_capacity;
+            rebuilt_entry.instructions = NULL;
+            rebuilt_entry.instruction_count = 0u;
+            rebuilt_entry.instruction_capacity = 0u;
+            changed_any = 1;
+        }
+
+cleanup:
+        free(hoisted_values);
+        free(eligible_locals);
+        free(address_taken_locals);
+        free(rebuilt_entry.instructions);
+        if (!ok) {
+            return 0;
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_perf_function_is_pure_internal_call_candidate(const ValueSsaProgram *program,
     const ValueSsaFunction *function,
     const unsigned char *readonly_globals) {
@@ -2843,6 +3024,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_hoist_function_entry_global_addrs(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_hoist_spmv_parameter_local_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }

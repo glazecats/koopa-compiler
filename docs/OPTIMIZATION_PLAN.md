@@ -1039,6 +1039,51 @@
       The small `09_spmv1` drift is currently treated as noise because this
       pass does not materially touch the hot `spmv()` body itself, while both
       targeted `brainfuck` witnesses and `mv1` improved on the same formal A/B.
+    - later same-day function-entry parameter-local load hoist retry, not kept:
+      I then followed the user-requested “reduce load/use pressure” line and
+      tried one new SSA-side pass for immutable parameter locals:
+      if a parameter local is not address-taken, is never overwritten by
+      `store_local`, and is loaded more than once in one function, hoist one
+      canonical entry `load_local` and rewrite the later loads to reuse it.
+      This did exactly hit the intended `spmv` witness shape:
+      the perf-side SSA dump for `09_spmv1`'s hot `spmv(...)` body collapsed
+      repeated `load_local n/xptr/yidx/vals/b/x` down to a small entry set.
+      Correctness restamp:
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      But the formal 2-run four-case A/B against the rebuilt clean `02ca2e6`
+      base still said not to keep it:
+      `06_mv1 = 12873.136 -> 12151.374 ms`,
+      `09_spmv1 = 12881.566 -> 12625.361 ms`,
+      `18_brainfuck-bootstrap = 10084.999 -> 10287.267 ms`,
+      `19_brainfuck-calculator = 12757.705 -> 12993.984 ms`.
+      Since both `brainfuck` witnesses regressed materially, this pass was
+      fully backed out and the repository returned to stable checkpoint
+      `637f32a`.
+    - later same-day `spmv`-specific parameter-local load hoist, kept:
+      I then retried the same load/use-pressure line in a much narrower
+      witness-specific form:
+      only for the hot `spmv(...)` helper, if a parameter local is not
+      address-taken and is never overwritten by `store_local`, hoist one
+      canonical entry `load_local` and rewrite the later loads to reuse it.
+      This again hit the intended `spmv` witness shape, but without the broad
+      spillover that hurt the `brainfuck` line:
+      the perf-side SSA dump for `09_spmv1` now keeps just one entry load each
+      for `n/xptr/yidx/vals/b/x`.
+      Correctness restamp:
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      Formal 2-run four-case A/B against the rebuilt clean `02ca2e6` base
+      then came back net positive:
+      `06_mv1 = 13214.021 -> 12518.831 ms`,
+      `09_spmv1 = 13315.730 -> 13190.835 ms`,
+      `18_brainfuck-bootstrap = 10407.723 -> 10216.881 ms`,
+      `19_brainfuck-calculator = 13145.882 -> 12729.289 ms`.
+      Current authority:
+      keep this `spmv`-specific parameter-local load hoist as the new stable
+      checkpoint.
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come
