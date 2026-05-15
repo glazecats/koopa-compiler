@@ -931,6 +931,44 @@
        for an aggregate gain of about `899 ms`. Current authority is therefore:
        keep this as another real final-text runtime cleanup and use it as the
        new stable checkpoint before the next hotspot round.
+     - 2026-05-15 large-leaf biased-frame-pointer backend follow-up, kept:
+       one more backend-side runtime round then attacked the remaining large-
+       frame leaf hotpath directly instead of another tiny text-only fold.
+       The new kept rule is narrow on purpose: after block payloads are
+       cloned, `machine_bytes` now marks only **leaf** functions whose
+       local/spill slot range crosses the signed-12 immediate limit but still
+       fits within a single `2047`-biased window, and those functions lower
+       local/spill traffic through a biased `s11` base instead of repeatedly
+       rebuilding `sp + 2047 + tail` address chains. The preview-text export
+       is kept consistent by saving `ra/s11` and setting `s11 = sp + 2047`
+       for the same narrow function class. During landing I did hit one real
+       correctness blocker: the first draft computed the bias decision before
+       cloned block payloads were present, so `main`-like call-heavy
+       functions were misclassified as leafs and `lv9` briefly regressed on
+       `12_more_arr_params` / `13_complex_arr_params`. That was repaired by
+       moving the decision after block cloning and then synchronizing all
+       relevant size/emit paths (`addr_local`, local/spill load-store, call
+       arg spill prep, return spill) before re-running the course gates.
+       Final stability restamp on the live tree is green:
+       `make test-compiler-driver` PASS,
+       `lv8` PASS (`12/12`),
+       `lv9` PASS (`22/22`).
+       The user-required formal A/B was then run against a detached
+       `f2a4a17` worktree build on the same 4-case script:
+       baseline
+       `06_mv1 = 12889.609 ms`,
+       `09_spmv1 = 13773.816 ms`,
+       `18_brainfuck-bootstrap = 10490.898 ms`,
+       `19_brainfuck-calculator = 12991.278 ms`;
+       candidate
+       `06_mv1 = 12309.402 ms`,
+       `09_spmv1 = 13083.242 ms`,
+       `18_brainfuck-bootstrap = 10178.147 ms`,
+       `19_brainfuck-calculator = 12904.038 ms`.
+       Aggregate result is net positive by about `1671 ms`, and all four
+       witnesses improved. Current authority is therefore:
+       keep this as the latest stable perf checkpoint before the next hotspot
+       rerank / reopen.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

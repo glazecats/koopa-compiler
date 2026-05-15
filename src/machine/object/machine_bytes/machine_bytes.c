@@ -142,12 +142,14 @@ static size_t machine_bytes_riscv_emit_store_to_base(
 static size_t machine_bytes_riscv_load_from_stack_size(long long stack_byte_offset);
 static size_t machine_bytes_riscv_store_to_stack_size(long long stack_byte_offset);
 static size_t machine_bytes_riscv_emit_load_from_stack(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     uint32_t rd,
     long long stack_byte_offset,
     uint32_t base_scratch);
 static size_t machine_bytes_riscv_emit_store_to_stack(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     uint32_t rs,
@@ -200,11 +202,14 @@ static uint32_t machine_bytes_riscv_scratch_register(void);
 static uint32_t machine_bytes_riscv_secondary_scratch_register(void);
 static uint32_t machine_bytes_riscv_map_register_id(size_t machine_register_id);
 static uint32_t machine_bytes_riscv_map_operand_register(const MachineEmitOperand *operand);
-static uint32_t machine_bytes_riscv_slot_base_register(const MachineEmitSlotRef *slot);
 static long long machine_bytes_riscv_slot_offset(const MachineEmitSlotRef *slot);
 static long long machine_bytes_riscv_spill_slot_offset(
     const MachineBytesFunction *function,
     size_t spill_slot);
+static int machine_bytes_function_has_call(const MachineBytesFunction *function);
+static int machine_bytes_function_should_use_biased_frame_pointer(const MachineBytesFunction *function);
+static uint32_t machine_bytes_riscv_stack_base_register(const MachineBytesFunction *function);
+static long long machine_bytes_riscv_stack_slot_offset(const MachineBytesFunction *function, long long slot_offset);
 static int machine_bytes_riscv_can_encode_alu_imm_word(const MachineEmitOp *op);
 static int machine_bytes_riscv_can_encode_compare_branch_imm_word(const MachineEmitTerminator *terminator);
 static size_t machine_bytes_riscv_cmp_core_size(MachineIrBinaryOp op);
@@ -864,10 +869,14 @@ static size_t machine_bytes_op_encoded_size_for_profile(
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_ADDR_LOCAL:
                 return (machine_bytes_riscv_is_signed_12_immediate(
-                            machine_bytes_riscv_slot_offset(&op->as.addr_slot))
+                            machine_bytes_riscv_stack_slot_offset(
+                                function,
+                                machine_bytes_riscv_slot_offset(&op->as.addr_slot)))
                         ? 4u
                         : machine_bytes_riscv_materialize_size(
-                              machine_bytes_riscv_slot_offset(&op->as.addr_slot)) +
+                              machine_bytes_riscv_stack_slot_offset(
+                                  function,
+                                  machine_bytes_riscv_slot_offset(&op->as.addr_slot))) +
                             4u) +
                     machine_bytes_riscv_writeback_result_size(
                         function,
@@ -881,7 +890,9 @@ static size_t machine_bytes_op_encoded_size_for_profile(
                         machine_bytes_riscv_result_register(&op->result));
             case MACHINE_SELECT_OP_LOAD_LOCAL:
                 return machine_bytes_riscv_load_from_base_size(
-                        machine_bytes_riscv_slot_offset(&op->as.load_slot)) +
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.load_slot))) +
                     machine_bytes_riscv_writeback_result_size(
                         function,
                         &op->result,
@@ -894,7 +905,9 @@ static size_t machine_bytes_op_encoded_size_for_profile(
             case MACHINE_SELECT_OP_STORE_LOCAL:
                 return machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value) +
                     machine_bytes_riscv_store_to_base_size(
-                        machine_bytes_riscv_slot_offset(&op->as.store.slot));
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.store.slot)));
             case MACHINE_SELECT_OP_STORE_GLOBAL:
                 return machine_bytes_riscv_prepare_operand_size(function, &op->as.store.value) + 8u;
             case MACHINE_SELECT_OP_STORE_LOCAL_IMM:
@@ -902,7 +915,9 @@ static size_t machine_bytes_op_encoded_size_for_profile(
                         ? 0u
                         : machine_bytes_riscv_materialize_size(op->as.store.value.immediate)) +
                     machine_bytes_riscv_store_to_base_size(
-                        machine_bytes_riscv_slot_offset(&op->as.store.slot));
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.store.slot)));
             case MACHINE_SELECT_OP_STORE_GLOBAL_IMM:
                 return (machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate)
                         ? 0u
@@ -999,7 +1014,9 @@ static size_t machine_bytes_terminator_encoded_size_for_profile(
                 return machine_bytes_riscv_materialize_size(terminator->as.return_value.immediate) + 4u;
             case MACHINE_LAYOUT_TERM_RETURN_SPILL:
                 return machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(function, terminator->as.return_value.spill_slot)) + 4u;
+                    machine_bytes_riscv_stack_slot_offset(
+                        function,
+                        machine_bytes_riscv_spill_slot_offset(function, terminator->as.return_value.spill_slot))) + 4u;
             case MACHINE_LAYOUT_TERM_BRANCH:
                 return machine_bytes_riscv_prepare_operand_size(function, &terminator->as.branch.condition) + 8u;
             case MACHINE_LAYOUT_TERM_BRANCH_FALLTHROUGH:
@@ -1280,6 +1297,7 @@ static size_t machine_bytes_riscv_emit_register_call_args(
                     bytes, offset, target_reg, arg->immediate);
             } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                 offset += machine_bytes_riscv_emit_load_from_stack(
+                    function,
                     bytes,
                     offset,
                     target_reg,
@@ -1395,7 +1413,9 @@ static size_t machine_bytes_riscv_register_call_args_size(
                 size += machine_bytes_riscv_materialize_size(arg->immediate);
             } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                 size += machine_bytes_riscv_load_from_stack_size(
-                    machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes);
+                    machine_bytes_riscv_stack_slot_offset(
+                        function,
+                        machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes));
             } else {
                 uint32_t source_reg = source_regs[ready_index];
 
@@ -1543,21 +1563,35 @@ static size_t machine_bytes_riscv_store_to_stack_size(long long stack_byte_offse
 }
 
 static size_t machine_bytes_riscv_emit_load_from_stack(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     uint32_t rd,
     long long stack_byte_offset,
     uint32_t base_scratch) {
-    return machine_bytes_riscv_emit_load_from_base(bytes, offset, rd, 2u, stack_byte_offset, base_scratch);
+    return machine_bytes_riscv_emit_load_from_base(
+        bytes,
+        offset,
+        rd,
+        machine_bytes_riscv_stack_base_register(function),
+        machine_bytes_riscv_stack_slot_offset(function, stack_byte_offset),
+        base_scratch);
 }
 
 static size_t machine_bytes_riscv_emit_store_to_stack(
+    const MachineBytesFunction *function,
     unsigned char *bytes,
     size_t offset,
     uint32_t rs,
     long long stack_byte_offset,
     uint32_t base_scratch) {
-    return machine_bytes_riscv_emit_store_to_base(bytes, offset, 2u, rs, stack_byte_offset, base_scratch);
+    return machine_bytes_riscv_emit_store_to_base(
+        bytes,
+        offset,
+        machine_bytes_riscv_stack_base_register(function),
+        rs,
+        machine_bytes_riscv_stack_slot_offset(function, stack_byte_offset),
+        base_scratch);
 }
 
 static uint32_t machine_bytes_riscv_result_scratch_register(void) {
@@ -1605,7 +1639,9 @@ static size_t machine_bytes_riscv_prepare_operand_size(
                 : machine_bytes_riscv_materialize_size(operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot));
+                machine_bytes_riscv_stack_slot_offset(
+                    function,
+                    machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot)));
         case MACHINE_SELECT_OPERAND_REGISTER:
         case MACHINE_SELECT_OPERAND_NONE:
         default:
@@ -1631,6 +1667,7 @@ static size_t machine_bytes_riscv_emit_prepare_operand(
                 bytes, offset, scratch_reg, operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_emit_load_from_stack(
+                function,
                 bytes,
                 offset,
                 scratch_reg,
@@ -1654,7 +1691,9 @@ static size_t machine_bytes_riscv_move_operand_to_register_size(
             return machine_bytes_riscv_materialize_size(operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot));
+                machine_bytes_riscv_stack_slot_offset(
+                    function,
+                    machine_bytes_riscv_spill_slot_offset(function, operand->spill_slot)));
         case MACHINE_SELECT_OPERAND_REGISTER:
             return 4u;
         case MACHINE_SELECT_OPERAND_NONE:
@@ -1683,6 +1722,7 @@ static size_t machine_bytes_riscv_emit_move_operand_to_register(
                 bytes, offset, target_reg, operand->immediate);
         case MACHINE_SELECT_OPERAND_SPILL_SLOT:
             return machine_bytes_riscv_emit_load_from_stack(
+                function,
                 bytes,
                 offset,
                 target_reg,
@@ -1724,6 +1764,7 @@ static size_t machine_bytes_riscv_emit_writeback_result(
     }
     if (result->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
         return machine_bytes_riscv_emit_store_to_stack(
+            function,
             bytes,
             offset,
             produced_reg,
@@ -1750,7 +1791,9 @@ static size_t machine_bytes_riscv_writeback_result_size(
     }
     if (result->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
         return machine_bytes_riscv_store_to_stack_size(
-            machine_bytes_riscv_spill_slot_offset(function, result->spill_slot));
+            machine_bytes_riscv_stack_slot_offset(
+                function,
+                machine_bytes_riscv_spill_slot_offset(function, result->spill_slot)));
     }
     if (result->kind == MACHINE_SELECT_OPERAND_REGISTER &&
         machine_bytes_riscv_map_register_id(result->machine_register_id) != produced_reg) {
@@ -1779,13 +1822,6 @@ static uint32_t machine_bytes_riscv_map_operand_register(const MachineEmitOperan
     }
 }
 
-static uint32_t machine_bytes_riscv_slot_base_register(const MachineEmitSlotRef *slot) {
-    if (!slot) {
-        return 0u;
-    }
-    return slot->kind == MACHINE_SELECT_SLOT_GLOBAL ? 3u : 2u;
-}
-
 static long long machine_bytes_riscv_slot_offset(const MachineEmitSlotRef *slot) {
     if (!slot) {
         return 0;
@@ -1802,6 +1838,57 @@ static long long machine_bytes_riscv_spill_slot_offset(
         spill_base = function->local_count;
     }
     return (long long)((spill_base + spill_slot) * 4u);
+}
+
+static int machine_bytes_function_has_call(const MachineBytesFunction *function) {
+    size_t block_index;
+
+    if (!function) {
+        return 0;
+    }
+    for (block_index = 0u; block_index < function->block_count; ++block_index) {
+        const MachineBytesBlock *block = &function->blocks[block_index];
+        size_t op_index;
+
+        for (op_index = 0u; op_index < block->block.op_count; ++op_index) {
+            if (machine_bytes_op_has_call_payload(block->block.ops[op_index].kind)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int machine_bytes_function_should_use_biased_frame_pointer(const MachineBytesFunction *function) {
+    long long max_slot_offset = 0;
+
+    if (!function || !function->has_body || machine_bytes_function_has_call(function)) {
+        return 0;
+    }
+
+    if (function->local_count > 0u) {
+        max_slot_offset = (long long)((function->local_count - 1u) * 4u);
+    }
+    if (function->spill_slot_count > 0u) {
+        long long max_spill_offset = (long long)((function->local_count + function->spill_slot_count - 1u) * 4u);
+
+        if (max_spill_offset > max_slot_offset) {
+            max_slot_offset = max_spill_offset;
+        }
+    }
+
+    return max_slot_offset > 2047ll && max_slot_offset <= 4094ll;
+}
+
+static uint32_t machine_bytes_riscv_stack_base_register(const MachineBytesFunction *function) {
+    return (function && function->uses_biased_frame_pointer) ? 27u : 2u;
+}
+
+static long long machine_bytes_riscv_stack_slot_offset(const MachineBytesFunction *function, long long slot_offset) {
+    if (function && function->uses_biased_frame_pointer) {
+        return slot_offset - 2047ll;
+    }
+    return slot_offset;
 }
 
 static size_t machine_bytes_riscv_call_setup_size(
@@ -1828,7 +1915,9 @@ static size_t machine_bytes_riscv_call_setup_size(
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
             size += machine_bytes_riscv_load_from_stack_size(
-                machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes);
+                machine_bytes_riscv_stack_slot_offset(
+                    function,
+                    machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes));
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
         } else {
             size += machine_bytes_riscv_store_to_stack_size(stack_byte_offset);
@@ -1858,7 +1947,9 @@ static size_t machine_bytes_riscv_call_result_size(
     }
     if (op->result.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
         return size + machine_bytes_riscv_store_to_stack_size(
-            machine_bytes_riscv_spill_slot_offset(function, op->result.spill_slot));
+            machine_bytes_riscv_stack_slot_offset(
+                function,
+                machine_bytes_riscv_spill_slot_offset(function, op->result.spill_slot)));
     }
     return size;
 }
@@ -2505,13 +2596,16 @@ static int machine_bytes_write_block_bytes_for_profile(
                 }
                 case MACHINE_SELECT_OP_ADDR_LOCAL: {
                     uint32_t result_reg = machine_bytes_riscv_result_register(&op->result);
-                    long long slot_offset = machine_bytes_riscv_slot_offset(&op->as.addr_slot);
+                    long long slot_offset = machine_bytes_riscv_stack_slot_offset(
+                        function,
+                        machine_bytes_riscv_slot_offset(&op->as.addr_slot));
+                    uint32_t base_reg = machine_bytes_riscv_stack_base_register(function);
 
                     if (machine_bytes_riscv_is_signed_12_immediate(slot_offset)) {
                         machine_bytes_write_u32_le(
                             dest_block->bytes,
                             byte_index,
-                            machine_bytes_riscv_encode_i_type(0x13u, result_reg, 0x0u, 2u, slot_offset));
+                            machine_bytes_riscv_encode_i_type(0x13u, result_reg, 0x0u, base_reg, slot_offset));
                         byte_index += 4u;
                     } else {
                         byte_index += machine_bytes_riscv_emit_materialize_immediate(
@@ -2519,7 +2613,13 @@ static int machine_bytes_write_block_bytes_for_profile(
                         machine_bytes_write_u32_le(
                             dest_block->bytes,
                             byte_index,
-                            machine_bytes_riscv_encode_r_type(0x33u, result_reg, 0x0u, 2u, result_reg, 0x00u));
+                            machine_bytes_riscv_encode_r_type(
+                                0x33u,
+                                result_reg,
+                                0x0u,
+                                base_reg,
+                                result_reg,
+                                0x00u));
                         byte_index += 4u;
                     }
                     byte_index += machine_bytes_riscv_emit_writeback_result(
@@ -2684,8 +2784,10 @@ static int machine_bytes_write_block_bytes_for_profile(
                         dest_block->bytes,
                         byte_index,
                         result_reg,
-                        machine_bytes_riscv_slot_base_register(&op->as.load_slot),
-                        machine_bytes_riscv_slot_offset(&op->as.load_slot),
+                        machine_bytes_riscv_stack_base_register(function),
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.load_slot)),
                         machine_bytes_riscv_secondary_scratch_register());
                     byte_index += machine_bytes_riscv_emit_writeback_result(
                         function, dest_block->bytes, byte_index, &op->result, result_reg);
@@ -2719,9 +2821,11 @@ static int machine_bytes_write_block_bytes_for_profile(
                     byte_index += machine_bytes_riscv_emit_store_to_base(
                         dest_block->bytes,
                         byte_index,
-                        machine_bytes_riscv_slot_base_register(&op->as.store.slot),
+                        machine_bytes_riscv_stack_base_register(function),
                         value_reg,
-                        machine_bytes_riscv_slot_offset(&op->as.store.slot),
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.store.slot)),
                         machine_bytes_riscv_secondary_scratch_register());
                     break;
                 }
@@ -2753,9 +2857,11 @@ static int machine_bytes_write_block_bytes_for_profile(
                     byte_index += machine_bytes_riscv_emit_store_to_base(
                         dest_block->bytes,
                         byte_index,
-                        machine_bytes_riscv_slot_base_register(&op->as.store.slot),
+                        machine_bytes_riscv_stack_base_register(function),
                         machine_bytes_riscv_immediate_uses_zero_register(op->as.store.value.immediate) ? 0u : 31u,
-                        machine_bytes_riscv_slot_offset(&op->as.store.slot),
+                        machine_bytes_riscv_stack_slot_offset(
+                            function,
+                            machine_bytes_riscv_slot_offset(&op->as.store.slot)),
                         machine_bytes_riscv_secondary_scratch_register());
                     break;
                 case MACHINE_SELECT_OP_STORE_GLOBAL_IMM: {
@@ -2846,6 +2952,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 machine_bytes_riscv_secondary_scratch_register(),
                                 arg->immediate);
                             byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                function,
                                 dest_block->bytes,
                                 byte_index,
                                 machine_bytes_riscv_secondary_scratch_register(),
@@ -2853,12 +2960,14 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 machine_bytes_riscv_scratch_register());
                         } else if (arg->kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                             byte_index += machine_bytes_riscv_emit_load_from_stack(
+                                function,
                                 dest_block->bytes,
                                 byte_index,
                                 machine_bytes_riscv_secondary_scratch_register(),
                                 machine_bytes_riscv_spill_slot_offset(function, arg->spill_slot) + (long long)stack_arg_bytes,
                                 machine_bytes_riscv_scratch_register());
                             byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                function,
                                 dest_block->bytes,
                                 byte_index,
                                 machine_bytes_riscv_secondary_scratch_register(),
@@ -2866,6 +2975,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                                 machine_bytes_riscv_scratch_register());
                         } else {
                             byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                function,
                                 dest_block->bytes,
                                 byte_index,
                                 machine_bytes_riscv_map_operand_register(arg),
@@ -2919,6 +3029,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                             }
                         } else if (op->result.kind == MACHINE_SELECT_OPERAND_SPILL_SLOT) {
                             byte_index += machine_bytes_riscv_emit_store_to_stack(
+                                function,
                                 dest_block->bytes,
                                 byte_index,
                                 10u,
@@ -2966,6 +3077,7 @@ static int machine_bytes_write_block_bytes_for_profile(
                 break;
             case MACHINE_LAYOUT_TERM_RETURN_SPILL:
                 byte_index += machine_bytes_riscv_emit_load_from_stack(
+                    function,
                     dest_block->bytes,
                     byte_index,
                     10u,

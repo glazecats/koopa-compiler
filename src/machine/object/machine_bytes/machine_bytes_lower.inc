@@ -122,8 +122,6 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
         for (block_index = 0; block_index < src_function->block_count; ++block_index) {
             const MachineEncodeBlock *src_block = &src_function->blocks[block_index];
             MachineBytesBlock *dest_block = &dest_function->blocks[block_index];
-            size_t op_index;
-            size_t byte_count = 0;
 
             if (!machine_bytes_clone_block_payload(dest_block, src_block)) {
                 machine_bytes_set_error(error, 0, 0, "MACHINE-BYTES-308: out of memory cloning encoded block");
@@ -131,6 +129,17 @@ int machine_bytes_lower_program_from_machine_encode_with_profile(const MachineEn
                 machine_bytes_program_free(out_program);
                 return 0;
             }
+        }
+
+        dest_function->uses_biased_frame_pointer =
+            machine_bytes_function_should_use_biased_frame_pointer(dest_function);
+
+        for (block_index = 0; block_index < src_function->block_count; ++block_index) {
+            const MachineEncodeBlock *src_block = &src_function->blocks[block_index];
+            MachineBytesBlock *dest_block = &dest_function->blocks[block_index];
+            size_t op_index;
+            size_t byte_count = 0;
+
             for (op_index = 0; op_index < src_block->block.op_count; ++op_index) {
                 byte_count += machine_bytes_op_encoded_size_for_profile(
                     profile,

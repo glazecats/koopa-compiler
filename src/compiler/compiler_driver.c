@@ -299,6 +299,7 @@ static int compiler_append_riscv_preview_instruction(
     size_t call_save_area_offset,
     int save_caller_regs_around_call);
 static MachineBytesTargetProfile compiler_backend_profile_for_mode(CompilerMode mode);
+static int compiler_preview_should_use_biased_s11(size_t local_count, size_t spill_slot_count, size_t call_count);
 int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteReport *report,
     CompilerMode mode,
     char **out_text,
@@ -322,6 +323,15 @@ static void compiler_copy_stage_error(CompilerError *error,
     int column,
     const char *message) {
     compiler_set_error(error, line, column, message ? message : "unknown compiler stage failure");
+}
+
+static int compiler_preview_should_use_biased_s11(size_t local_count, size_t spill_slot_count, size_t call_count) {
+    size_t total_slots = local_count + spill_slot_count;
+
+    if (call_count > 0u || total_slots == 0u) {
+        return 0;
+    }
+    return ((total_slots - 1u) * 4u) > 2047u && ((total_slots - 1u) * 4u) <= 4094u;
 }
 
 static void compiler_builder_init(CompilerStringBuilder *builder) {
@@ -4917,6 +4927,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
         size_t call_save_area_offset = 0u;
         int frame_restores_ra = 0;
         int save_caller_regs_around_call = 0;
+        int use_biased_s11 = 0;
         size_t block_index;
 
         if (!machine_bytes_report_get_function(&bytes_report, function_index, &function) || !function ||
@@ -4942,6 +4953,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             continue;
         }
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
+        use_biased_s11 = compiler_preview_should_use_biased_s11(local_count, spill_slot_count, function_summary->call_count);
         frame_bytes = local_storage_bytes > parameter_count * 4u
             ? local_storage_bytes
             : parameter_count * 4u;
@@ -4953,11 +4965,15 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             frame_bytes += 4u;   /* ra */
             frame_bytes += 4u;   /* s11 */
             frame_restores_ra = 1;
+        } else if (use_biased_s11) {
+            frame_bytes += 4u;   /* ra */
+            frame_bytes += 4u;   /* s11 */
+            frame_restores_ra = 1;
         }
         if (frame_bytes > 0u && (frame_bytes % 16u) != 0u) {
             frame_bytes = ((frame_bytes + 15u) / 16u) * 16u;
         }
-        if (function_summary->call_count > 0u) {
+        if (frame_restores_ra) {
             ra_save_offset = frame_bytes - 4u;
             s11_save_offset = frame_bytes - 8u;
             call_save_area_offset = local_storage_bytes > parameter_count * 4u
@@ -4978,10 +4994,12 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
                 ok = 0;
                 goto cleanup;
             }
-            if (function_summary->call_count > 0u &&
+            if (frame_restores_ra &&
                 (!compiler_append_stack_access(&builder, "sw", "ra", "sp", ra_save_offset, "t6") ||
                     !compiler_append_stack_access(&builder, "sw", "s11", "sp", s11_save_offset, "t6") ||
-                    !compiler_builder_appendf(&builder, "  mv s11, sp\n"))) {
+                    !(use_biased_s11
+                            ? compiler_builder_appendf(&builder, "  li t6, 2047\n  add s11, sp, t6\n")
+                            : compiler_builder_appendf(&builder, "  mv s11, sp\n")))) {
                 compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
                 ok = 0;
                 goto cleanup;

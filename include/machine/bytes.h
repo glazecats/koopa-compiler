@@ -193,6 +193,7 @@ typedef struct {
     size_t parameter_count;
     size_t local_count;
     size_t spill_slot_count;
+    int uses_biased_frame_pointer;
     MachineBytesBlock *blocks;
     size_t block_count;
     size_t block_capacity;

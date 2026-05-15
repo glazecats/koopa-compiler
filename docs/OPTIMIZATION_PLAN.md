@@ -761,6 +761,44 @@
     - current authority:
       keep this as another real final-text runtime cleanup and use it as the
       new stable checkpoint before the next hotspot round
+  - Current 2026-05-15 large-leaf biased-frame-pointer lowering, kept:
+    - one new backend-side narrowing now targets large local/spill frames in
+      **leaf** functions only
+    - kept rule:
+      when a function has no calls and its local/spill slot range crosses the
+      signed-12 immediate limit but still fits within a single `2047`-biased
+      window, `machine_bytes` now lowers local/spill slot traffic through a
+      biased `s11` frame base instead of rebuilding `sp + 2047 + small-tail`
+      materialization chains on the hot path; the preview-text prologue is
+      kept in sync by saving `ra/s11` and setting `s11 = sp + 2047` for that
+      same narrow function class
+    - concrete live-tree motivation:
+      the hot `run_program` body in `perf/19_brainfuck-calculator` was still
+      full of repeated forms such as `addi t6, sp, 2047 ; lw/sw ..., 13/25/33`
+      even after the earlier final-text folds, so the remaining dynamic cost
+      was now clearly in the backend lowering choice rather than in another
+      tiny text-only cleanup
+    - regression restamp on the live tree:
+      `make test-compiler-driver` PASS, `lv8` PASS (`12/12`), `lv9` PASS
+      (`22/22`)
+    - formal base-vs-head A/B on the user-required 4-case path gave:
+      baseline (`f2a4a17` worktree build)
+      `06_mv1 = 12889.609 ms`,
+      `09_spmv1 = 13773.816 ms`,
+      `18_brainfuck-bootstrap = 10490.898 ms`,
+      `19_brainfuck-calculator = 12991.278 ms`;
+      candidate (live tree)
+      `06_mv1 = 12309.402 ms`,
+      `09_spmv1 = 13083.242 ms`,
+      `18_brainfuck-bootstrap = 10178.147 ms`,
+      `19_brainfuck-calculator = 12904.038 ms`.
+      Aggregate result is net positive by about `1671 ms` across the 4-case
+      set, and all four witnesses improved rather than merely shifting the
+      win from one case to another
+    - current authority:
+      keep this as the latest stable backend perf checkpoint and use it as
+      the next baseline before reopening the remaining `spmv1` / full-course
+      hotspot ranking work
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come
