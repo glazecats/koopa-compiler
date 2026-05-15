@@ -1,6 +1,7 @@
 #include "ir.h"
 #include "lexer.h"
 #include "lower_ir.h"
+#include "memory_ssa_pass.h"
 #include "machine/bytes.h"
 #include "machine/emit.h"
 #include "machine/ir.h"
@@ -139,6 +140,8 @@ static int tool_build_machine_ir_report(const char *source_path,
         !ir_lower_program(&ast, &ir_options, &ir_program, &ir_error) ||
         !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
         !value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) ||
+        !memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error) ||
+        !memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error) ||
         !value_ssa_optimize_perf_hotspots(&value_program, &value_error) ||
         !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
             &value_program,

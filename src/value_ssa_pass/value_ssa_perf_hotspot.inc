@@ -2491,14 +2491,6 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                         changed_loop = 1;
                         continue;
                     }
-                    if (phi_header_only) {
-                        if (!value_ssa_block_append_instruction(&rebuilt_body, instruction, error)) {
-                            ok = 0;
-                            break;
-                        }
-                        continue;
-                    }
-
                     if (!value_ssa_perf_try_hoist_loop_invariant_indirect_load(
                             function,
                             program,
@@ -2519,6 +2511,13 @@ static int value_ssa_perf_hoist_simple_loop_invariant_loads(ValueSsaProgram *pro
                     }
                     if (hoisted_indirect) {
                         changed_loop = 1;
+                        continue;
+                    }
+                    if (phi_header_only) {
+                        if (!value_ssa_block_append_instruction(&rebuilt_body, instruction, error)) {
+                            ok = 0;
+                            break;
+                        }
                         continue;
                     }
                 }

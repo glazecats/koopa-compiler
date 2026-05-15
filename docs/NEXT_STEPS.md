@@ -1002,6 +1002,70 @@
        Current authority is therefore:
        keep this as the next stable perf checkpoint before reopening the next
        `spmv1` / full-course hotspot round.
+     - 2026-05-15 narrower ALU-bound reload follow-up, not kept:
+       after that kept branch-bound checkpoint, I tried one more even narrower
+       final-text peephole in the same family: when `sw temp, off(sp)` is
+       followed later in the same block by `lw temp2, off(sp)` and that reload
+       feeds the very next non-control dataflow op (for example
+       `mul a0, temp2, a0`), rewrite the reload to `mv`.
+       The implementation was completed carefully this time:
+       dedicated positive/negative `compiler_driver` tests were added first,
+       `make test-compiler-driver` stayed PASS, and rotated course
+       rechecks stayed green again (`lv8` PASS `12/12`, `lv9` PASS `22/22`).
+       After explicitly rebuilding both the live tree and detached stable base
+       `fcd094a`, the real `spmv1` hot block did show the intended shape
+       change (`sw t4, 48(sp) ; ... ; mv t6, t4 ; mul a0, t6, a0`).
+       However, the required formal A/B against stable base `fcd094a` came
+       back net negative on the user-priority four-case route:
+       2-run averages
+       `06_mv1 = 12529.472 -> 12300.423 ms`,
+       `09_spmv1 = 13145.783 -> 13431.972 ms`,
+       `18_brainfuck-bootstrap = 10091.804 -> 10499.933 ms`,
+       `19_brainfuck-calculator = 12684.745 -> 13226.641 ms`.
+       Since only `mv1` improved while `spmv1` and both `brainfuck` witnesses
+       regressed materially, this line is explicitly backed out again and is
+       **not** a checkpoint. Current authority is:
+     do not keep or recommit the ALU-bound reload-to-`mv` widening; treat it
+     as another measured dead end inside the final-text stack-reload family.
+   - 2026-05-15 `phi-header` inner-loop invariant indirect-load hoist, kept:
+     after backing out the negative final-text widening, I rotated back to the
+     real `spmv1` dynamic hotspot and rechecked the full perf-mode SSA path
+     instead of the older partial diagnostics. That reread exposed a sharper
+     gap: in the second inner `j` loop, the expression `b[i] - 1` was still
+     being reloaded every iteration in the final RISC-V text even though it is
+     invariant inside that inner loop.
+     The root cause was not memory-SSA promotion itself: under the real
+     perf-mode pipeline, `i`/`j` were already in phi form. The actual blocker
+     was inside `value_ssa_perf_hoist_simple_loop_invariant_loads(...)`:
+     for the `phi-header-only` loop shape used by this witness, body-side
+     `load_indirect` candidates were being skipped before the generic
+     invariant-indirect hoist path even had a chance to run.
+     The kept narrowing is therefore very small and targeted:
+     in the body rewrite path, keep trying
+     `value_ssa_perf_try_hoist_loop_invariant_indirect_load(...)`
+     even when the loop is the `phi-header-only` shape, instead of bailing out
+     immediately after the branch-bound special case.
+     Fresh evidence on the live tree:
+     `make test-compiler-driver` PASS,
+     `make test-value-ssa-regression` PASS with a new focused
+     `VALUE-SSA-PERF-HOTSPOT-PHI-HEADER-INDIRECT` regression,
+     `lv8` PASS (`12/12`),
+     `lv9` PASS (`22/22`).
+     Real witness-shape proof also now exists on the rebuilt perf pipeline:
+     the `spmv1` second inner loop no longer emits the per-iteration
+     `lw ... ; addi -1` for `b[i] - 1`; it becomes a loop-external invariant
+     value reused directly by `mul`.
+     Formal A/B against stable base `fcd094a` also came back net positive on
+     the required four-case route:
+     2-run averages
+     `06_mv1 = 12170.751 -> 12159.170 ms`,
+     `09_spmv1 = 13122.147 -> 12822.519 ms`,
+     `18_brainfuck-bootstrap = 10130.854 -> 10084.758 ms`,
+     `19_brainfuck-calculator = 12734.212 -> 12645.697 ms`.
+     Current authority is therefore:
+     keep this as the new stable perf checkpoint and continue the next round
+     from the real perf-mode diagnostics rather than the older partial
+     `dump_machine_stage` / `dump_alloc_stage` path.
   3. optimization-pass expansion is now explicitly in scope for the current
      perf round, not only tiny cleanup tweaks
      - newly explicit candidate passes:

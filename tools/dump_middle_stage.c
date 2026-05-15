@@ -1,6 +1,7 @@
 #include "ir.h"
 #include "lexer.h"
 #include "lower_ir.h"
+#include "memory_ssa_pass.h"
 #include "parser.h"
 #include "semantic.h"
 #include "value_ssa.h"
@@ -18,6 +19,7 @@ typedef enum {
     TOOL_STAGE_VALUE_SSA_MEMORY_VALUE,
     TOOL_STAGE_VALUE_SSA_MEMORY_FULL,
     TOOL_STAGE_VALUE_SSA_DEFAULT,
+    TOOL_STAGE_VALUE_SSA_PERF,
 } ToolStage;
 
 static char *tool_read_file(const char *path) {
@@ -61,7 +63,7 @@ static char *tool_read_file(const char *path) {
 static void tool_print_usage(const char *argv0) {
     fprintf(stderr,
         "usage: %s <ir|lower-ir|value-ssa-direct|value-ssa-classic|value-ssa-memory-value|"
-        "value-ssa-memory-full|value-ssa-default> <input.sy>\n",
+        "value-ssa-memory-full|value-ssa-default|value-ssa-perf> <input.sy>\n",
         argv0);
 }
 
@@ -95,6 +97,10 @@ static int tool_parse_stage(const char *text, ToolStage *out_stage) {
     }
     if (strcmp(text, "value-ssa-default") == 0) {
         *out_stage = TOOL_STAGE_VALUE_SSA_DEFAULT;
+        return 1;
+    }
+    if (strcmp(text, "value-ssa-perf") == 0) {
+        *out_stage = TOOL_STAGE_VALUE_SSA_PERF;
         return 1;
     }
     return 0;
@@ -318,6 +324,12 @@ int main(int argc, char **argv) {
         break;
     case TOOL_STAGE_VALUE_SSA_DEFAULT:
         ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
+        break;
+    case TOOL_STAGE_VALUE_SSA_PERF:
+        ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) &&
+            memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error) &&
+            memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error) &&
+            value_ssa_optimize_perf_hotspots(&value_program, &value_error);
         break;
     default:
         ok = 0;

@@ -832,6 +832,67 @@
       keep this as another small-but-real runtime-facing final-text cleanup
       and use it as the new stable checkpoint before the next `spmv1`
       hotspot round
+    - 2026-05-15 narrower ALU-bound reload follow-up, not kept:
+      I then tried one more even narrower final-text widening in the same
+      stack-reload family: if `sw temp, off(sp)` is followed later in the same
+      block by `lw temp2, off(sp)` and that reload feeds the very next
+      non-control dataflow op such as `mul`, rewrite that reload to `mv`.
+      This time the experiment was completed end-to-end before judging it:
+      the pass was fully wired into the live final-text pipeline, new
+      positive/negative `compiler_driver` tests were added, and
+      `make test-compiler-driver`, `lv8`, and `lv9` all stayed green.
+      After explicitly rebuilding both the live compiler and detached stable
+      base `fcd094a`, the real `spmv1` witness did show the intended shape
+      change (`sw t4, 48(sp)` ... `mv t6, t4` `mul a0, t6, a0`).
+      But the required formal base-vs-head A/B was clearly negative on the
+      four user-priority cases:
+      2-run averages
+      `06_mv1 = 12529.472 -> 12300.423 ms`,
+      `09_spmv1 = 13145.783 -> 13431.972 ms`,
+      `18_brainfuck-bootstrap = 10091.804 -> 10499.933 ms`,
+      `19_brainfuck-calculator = 12684.745 -> 13226.641 ms`.
+      Since only `mv1` improved while the primary `spmv1` witness and both
+      `brainfuck` witnesses regressed materially, this widening is fully
+      backed out again and must not be treated as a candidate checkpoint.
+    - 2026-05-15 `phi-header` inner-loop invariant indirect-load hoist, kept:
+      I then switched back from final-text micro-cleanups to the real
+      perf-mode SSA hotspot and found a cleaner dynamic-complexity target:
+      in `spmv1`'s second inner `j` loop, the value `b[i] - 1` was still
+      being reloaded every iteration even though it is invariant inside that
+      inner loop.
+      The important reread result was that memory-SSA scalar replacement was
+      already doing its job; the missed opportunity lived later in
+      `value_ssa_perf_hoist_simple_loop_invariant_loads(...)`.
+      For the `phi-header-only` loop shape used by this witness, the body-side
+      rewrite path was bailing out before trying the generic invariant
+      `load_indirect` hoist. The kept fix is therefore very narrow:
+      still let body-side `load_indirect` candidates try
+      `value_ssa_perf_try_hoist_loop_invariant_indirect_load(...)`
+      even on `phi-header-only` loops.
+      This now has focused regression coverage via
+      `VALUE-SSA-PERF-HOTSPOT-PHI-HEADER-INDIRECT`, plus the diagnostic tools
+      `dump_middle_stage` and `dump_machine_stage` were updated to mirror the
+      real perf-mode pipeline by including the memory-SSA scalar-replacement
+      passes before `value_ssa_optimize_perf_hotspots(...)`.
+      Real witness-shape proof on the rebuilt tree:
+      the second inner `spmv1` loop no longer emits the per-iteration
+      `lw ... ; addi -1` for `b[i] - 1`; it now reuses a loop-external
+      invariant multiplier directly.
+      Regression restamp:
+      `make test-compiler-driver` PASS,
+      `make test-value-ssa-regression` PASS,
+      `lv8` PASS (`12/12`),
+      `lv9` PASS (`22/22`).
+      Formal base-vs-head A/B against stable base `fcd094a`:
+      2-run averages
+      `06_mv1 = 12170.751 -> 12159.170 ms`,
+      `09_spmv1 = 13122.147 -> 12822.519 ms`,
+      `18_brainfuck-bootstrap = 10130.854 -> 10084.758 ms`,
+      `19_brainfuck-calculator = 12734.212 -> 12645.697 ms`.
+      Current authority:
+      keep this as the next stable checkpoint and continue future `spmv1`
+      diagnosis from the real perf-mode middle/selected diagnostics rather
+      than from older partial tool pipelines.
     - current authority:
       keep this fix as a correctness-green narrowing of a real over-conservative
       barrier, then continue measuring whether further dynamic wins should come
