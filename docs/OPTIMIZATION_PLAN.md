@@ -287,6 +287,44 @@
       `spmv`-side optimization round; the next most promising reopen is still
       hotspot-specific address/index recurrence cleanup, especially the
       remaining repeated `xptr[i+1]` and exit-block shift/address scaffolding
+  - Later 2026-05-16 `run_program` shared-branch local-load hoist follow-up:
+    - one new narrow kept `ValueSSA` perf-hotspot pass now hoists a
+      branch-shared `load_local` out of two unique-predecessor successor
+      blocks and rewrites those child loads to `mov`s from the parent-side
+      shared value
+    - current landing scope is deliberately narrow:
+      only the measured `run_program` family is admitted, and only when both
+      branch successors have the current block as their single idom
+      predecessor and both begin with the same `load_local`
+    - new regression coverage now locks the exact shape in
+      `tests/value_ssa/value_ssa_regression_test.c`
+    - real witness proof on rebuilt perf SSA now exists in the live
+      `19_brainfuck-calculator` pipeline:
+      `bb.30` hoists `load_local read_head.1` before branching to `bb.31` /
+      `bb.32`, and `bb.16` likewise hoists `load_local ip.0` before
+      branching to `bb.17` / `bb.18`
+    - current correctness restamp on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - formal A/B against stable base `ea7771e`, using the required full
+      `compiler -> clang -> ld.lld -> qemu-riscv32-static` path and 2-run
+      averages on the rebuilt live compiler, came back positive on the target
+      witnesses:
+      `18_brainfuck-bootstrap total_ms = 10223.282 -> 9979.221`,
+      `19_brainfuck-calculator total_ms = 12588.673 -> 12515.496`
+      with corresponding run-time averages
+      `10021.937 -> 9823.062 ms` and `12445.625 -> 12359.746 ms`
+    - same-day guard A/B on older witnesses came back near-flat with only
+      noise-sized movement:
+      `06_mv1 total_ms = 12105.337 -> 12114.303`,
+      `09_spmv1 total_ms = 12736.315 -> 12777.610`
+    - current authority:
+      keep this pass as a small but real `brainfuck`-side win; the next
+      nearby reopen should stay in the same narrow family, most likely the
+      remaining `return_address_top.515` shared-branch load under
+      `bb.25` / `bb.26`, rather than widening immediately to generic
+      multi-join local-carrier forwarding
   - Current 2026-05-15 hotspot-function parameter-local hoist widening:
     - the earlier kept parameter-local hoist rule was originally scoped only
       to `spmv`; this round widens that exact rule, still under a narrow

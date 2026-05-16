@@ -347,16 +347,51 @@
        Real witness proof on rebuilt perf SSA now shows `09_spmv1` seeding the
        second sibling loop phi from the earlier `ssa.15` instead of reloading
        `xptr[i]` inside `bb.9`.
-       Formal A/B against stable base `23a3805`, using the required full
-       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path and 2-run
-       averages on the rebuilt live compiler, came back net positive:
-       `06_mv1 = 13021.512 -> 12267.411 ms`,
-       `09_spmv1 = 13202.139 -> 12952.297 ms`,
+     Formal A/B against stable base `23a3805`, using the required full
+     `compiler -> clang -> ld.lld -> qemu-riscv32-static` path and 2-run
+     averages on the rebuilt live compiler, came back net positive:
+     `06_mv1 = 13021.512 -> 12267.411 ms`,
+     `09_spmv1 = 13202.139 -> 12952.297 ms`,
        `18_brainfuck-bootstrap = 10198.919 -> 10133.901 ms`,
-       `19_brainfuck-calculator = 12679.479 -> 12786.321 ms`.
-       Current authority is therefore to keep this pass, checkpoint it, and
-       continue the next perf round from this new stable base rather than
-       backing it out.
+     `19_brainfuck-calculator = 12679.479 -> 12786.321 ms`.
+     Current authority is therefore to keep this pass, checkpoint it, and
+     continue the next perf round from this new stable base rather than
+     backing it out.
+    - later 2026-05-16 `run_program` shared-branch local-load hoist:
+      one more narrow kept `ValueSSA` perf-hotspot pass now hoists a shared
+      `load_local` from two unique-predecessor branch children into the
+      parent branch block, then rewrites the two child loads into `mov`s from
+      that shared parent-side value. This is intentionally much narrower than
+      the older branch-join experiments: it only admits the measured
+      `run_program` witness family and only when both successors are direct
+      single-idom children that begin with the same `load_local`.
+      New regression coverage now locks this shape in
+      `tests/value_ssa/value_ssa_regression_test.c`.
+      Real witness proof on rebuilt `value-ssa-perf` now exists in the live
+      `19_brainfuck-calculator` pipeline:
+      `bb.30` hoists `load_local read_head.1` before `bb.31` / `bb.32`, and
+      `bb.16` likewise hoists `load_local ip.0` before `bb.17` / `bb.18`.
+      Current correctness restamp is green:
+      `make test-value-ssa-regression` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+      Formal A/B against stable base `ea7771e`, again on the required full
+      `compiler -> clang -> ld.lld -> qemu-riscv32-static` path and 2-run
+      averages, came back positive on the target `brainfuck` witnesses:
+      `18_brainfuck-bootstrap total_ms = 10223.282 -> 9979.221`,
+      `19_brainfuck-calculator total_ms = 12588.673 -> 12515.496`;
+      run-time averages also improved
+      (`10021.937 -> 9823.062 ms`,
+      `12445.625 -> 12359.746 ms`).
+      Same-day guard A/B on older witnesses stayed effectively flat:
+      `06_mv1 total_ms = 12105.337 -> 12114.303`,
+      `09_spmv1 total_ms = 12736.315 -> 12777.610`.
+      Current authority is therefore to keep this pass as a real small
+      `brainfuck`-side win and use it as the next stable checkpoint; the next
+      nearby reopen should stay in the same narrow family, most likely the
+      remaining `return_address_top.515` shared-branch load under
+      `bb.25` / `bb.26`, rather than reopening broad generic local-slot
+      promotion again.
      - later 2026-05-15 hotspot-function parameter-local hoist widening:
        because OJ timing now shows `13_fft1` / `14_fft2` as the more urgent
        heavy witnesses, I widened the earlier kept parameter-local hoist rule

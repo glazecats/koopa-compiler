@@ -537,6 +537,152 @@ static int value_ssa_perf_function_is_hot_parameter_local_hoist_candidate(const 
         strcmp(function->name, "MemMove") == 0;
 }
 
+static int value_ssa_perf_function_is_hot_shared_branch_local_load_candidate(const ValueSsaFunction *function) {
+    if (!function || !function->name) {
+        return 0;
+    }
+
+    return strcmp(function->name, "run_program") == 0;
+}
+
+static int value_ssa_perf_hoist_shared_branch_successor_local_loads(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-313: invalid perf shared-branch local-load hoist contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaCfgAnalysis cfg;
+        size_t block_index;
+        int changed_function = 0;
+
+        if (!function->has_body || function->block_count == 0u ||
+            !value_ssa_perf_function_is_hot_shared_branch_local_load_candidate(function)) {
+            continue;
+        }
+
+        value_ssa_cfg_analysis_init(&cfg);
+        if (!value_ssa_compute_cfg_analysis(function, &cfg, error)) {
+            value_ssa_cfg_analysis_free(&cfg);
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            ValueSsaBasicBlock rebuilt_block;
+            ValueSsaBasicBlock *then_block = NULL;
+            ValueSsaBasicBlock *else_block = NULL;
+            ValueSsaInstruction *then_instruction = NULL;
+            ValueSsaInstruction *else_instruction = NULL;
+            ValueSsaInstruction hoisted_load;
+            size_t then_id;
+            size_t else_id;
+            size_t slot_id;
+            size_t instruction_index;
+            int ok = 1;
+
+            if (!block->has_terminator || block->terminator.kind != VALUE_SSA_TERM_BRANCH) {
+                continue;
+            }
+
+            then_id = block->terminator.as.branch.then_target;
+            else_id = block->terminator.as.branch.else_target;
+            if (then_id >= function->block_count || else_id >= function->block_count || then_id == else_id) {
+                continue;
+            }
+            if (value_ssa_pass_get_single_idom_predecessor(function, &cfg, then_id) != block_index ||
+                value_ssa_pass_get_single_idom_predecessor(function, &cfg, else_id) != block_index) {
+                continue;
+            }
+
+            then_block = &function->blocks[then_id];
+            else_block = &function->blocks[else_id];
+            if (then_block->instruction_count == 0u || else_block->instruction_count == 0u) {
+                continue;
+            }
+
+            then_instruction = &then_block->instructions[0];
+            else_instruction = &else_block->instructions[0];
+            if (then_instruction->kind != VALUE_SSA_INSTR_LOAD_LOCAL ||
+                else_instruction->kind != VALUE_SSA_INSTR_LOAD_LOCAL ||
+                !then_instruction->has_result ||
+                !else_instruction->has_result ||
+                then_instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                else_instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                then_instruction->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL ||
+                else_instruction->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL ||
+                then_instruction->as.load_slot.id != else_instruction->as.load_slot.id) {
+                continue;
+            }
+
+            slot_id = then_instruction->as.load_slot.id;
+            if (slot_id >= function->local_count) {
+                continue;
+            }
+
+            memset(&rebuilt_block, 0, sizeof(rebuilt_block));
+            rebuilt_block.id = block->id;
+            for (instruction_index = 0; instruction_index < block->instruction_count && ok; ++instruction_index) {
+                if (!value_ssa_block_append_instruction(&rebuilt_block, &block->instructions[instruction_index], error)) {
+                    ok = 0;
+                }
+            }
+
+            memset(&hoisted_load, 0, sizeof(hoisted_load));
+            hoisted_load.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+            hoisted_load.has_result = 1;
+            hoisted_load.result = value_ssa_value_id(value_ssa_function_allocate_value(function));
+            hoisted_load.as.load_slot = value_ssa_slot_local(slot_id);
+            if (ok &&
+                (hoisted_load.result.value_id == (size_t)-1 ||
+                    !value_ssa_block_append_instruction(&rebuilt_block, &hoisted_load, error))) {
+                ok = 0;
+            }
+            if (!ok) {
+                value_ssa_basic_block_free(&rebuilt_block);
+                value_ssa_cfg_analysis_free(&cfg);
+                return 0;
+            }
+
+            rebuilt_block.has_terminator = block->has_terminator;
+            rebuilt_block.terminator = block->terminator;
+            free(block->instructions);
+            block->instructions = rebuilt_block.instructions;
+            block->instruction_count = rebuilt_block.instruction_count;
+            block->instruction_capacity = rebuilt_block.instruction_capacity;
+            rebuilt_block.instructions = NULL;
+            rebuilt_block.instruction_count = 0u;
+            rebuilt_block.instruction_capacity = 0u;
+            value_ssa_basic_block_free(&rebuilt_block);
+
+            then_instruction->kind = VALUE_SSA_INSTR_MOV;
+            then_instruction->as.mov_value = hoisted_load.result;
+            else_instruction->kind = VALUE_SSA_INSTR_MOV;
+            else_instruction->as.mov_value = hoisted_load.result;
+            changed_function = 1;
+            changed_any = 1;
+            break;
+        }
+
+        value_ssa_cfg_analysis_free(&cfg);
+        if (changed_function) {
+            --function_index;
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_perf_hoist_hot_parameter_local_loads(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
     int changed_any = 0;
@@ -3531,6 +3677,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_hoist_hot_parameter_local_loads(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_hoist_shared_branch_successor_local_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }
