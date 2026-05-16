@@ -785,6 +785,31 @@
        this narrower reopen becomes the new stable base, and the next round
        should keep targeting dynamic stack/address scratch traffic rather than
        reopening the rejected broader `% 998244353` text path.
+     - later same-day stricter address-chain gate follow-up:
+       I then tightened that same kept reopen one notch further before
+       checkpointing it: same-block stack reload reuse now explicitly skips
+       reloads whose first immediate next use starts an obvious
+       `slli` / `mul` address chain. This keeps the intended `fft` scratch
+       wins while fencing off the most suspicious address-building shapes
+       behind the older mixed-result version.
+       Correctness recheck stayed green on the live tree:
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Formal isolate A/B against stable base `dfe35d6` also stayed net
+       positive on the combined witness set:
+       route 1:
+       `13_fft1 total_avg_ms = 8387.656 -> 8448.197`,
+       `14_fft2 = 8327.118 -> 7929.808`,
+       `18_brainfuck-bootstrap = 10535.939 -> 10235.797`,
+       `19_brainfuck-calculator = 13022.932 -> 12855.089`
+       route 2:
+       `06_mv1 total_avg_ms = 12878.494 -> 12449.109`,
+       `09_spmv1 = 13393.925 -> 13214.032`.
+       Current authority is therefore still **kept**:
+       this stricter-gated variant is the new stable base, and the older
+       mixed same-block stack-reload idea should now be considered reclosed
+       in its narrower form rather than left as an open negative experiment.
      - later same-day `-perf` memory-full build-route retry, not kept:
        I also tried a broader but still perf-only A/B at the SSA build
        boundary: for `-perf` mode, route the current compiler path through
