@@ -498,6 +498,7 @@ int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_t
 int compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(char **io_text);
 int compiler_test_optimize_riscv_preview_indexed_local_base_offsets(char **io_text);
 int compiler_test_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
+int compiler_test_optimize_riscv_preview_pow2_divmods(char **io_text);
 int compiler_test_optimize_riscv_preview_store_jump_increment_tails(char **io_text);
 
 static int test_compiler_does_not_fold_call_arg_load_swap_when_second_base_is_a1(void) {
@@ -1174,6 +1175,42 @@ static int test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_la
         !text ||
         strstr(text, "  li a1, 1\n  sub a0, a2, a1\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: sub-by-one fold should keep one materialization when the reg is needed past a label\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_rewrites_pow2_div_and_mod(void) {
+    static const char *source_text =
+        "  li t5, 2\n"
+        "  div a0, t6, t5\n"
+        "  li t4, 2\n"
+        "  rem a1, t6, t4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: pow2-divmod regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_pow2_divmods(&text) ||
+        !text ||
+        strstr(text, "  div a0, t6, t5\n") != NULL ||
+        strstr(text, "  rem a1, t6, t4\n") != NULL ||
+        strstr(text, "  srai t4, t6, 31\n") == NULL ||
+        strstr(text, "  andi t4, t4, 1\n") == NULL ||
+        strstr(text, "  add a0, t6, t4\n") == NULL ||
+        strstr(text, "  srai a0, a0, 1\n") == NULL ||
+        strstr(text, "  add t5, t6, t4\n") == NULL ||
+        strstr(text, "  srai t5, t5, 1\n") == NULL ||
+        strstr(text, "  slli t5, t5, 1\n") == NULL ||
+        strstr(text, "  sub a1, t6, t5\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pow2 div/mod rewrite did not trigger as expected\n");
         ok = 0;
     }
 
@@ -2471,6 +2508,7 @@ int main(void) {
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
     ok &= test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label();
+    ok &= test_compiler_rewrites_pow2_div_and_mod();
     ok &= test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base();
     ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_across_call_when_saved_addr_reg_survives_call();

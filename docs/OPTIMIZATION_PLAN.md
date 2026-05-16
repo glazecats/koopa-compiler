@@ -341,6 +341,147 @@
       FFT-directed reopen is still the remaining invariant `n / 2` and
       recurrence/address-chain work around `fft`'s split loop and butterfly
       loop, rather than reopening the already-kept zero-based induction line
+  - Current 2026-05-15 `fft` repeated `n / 2` entry-binary hoist retry:
+    - one narrower `fft`-only perf-hotspot pass was tried to hoist repeated
+      pure entry-available binaries, specifically to share the second
+      `div n, 2` out of the odd split branch
+    - real witness proof did exist on the rebuilt tree:
+      the `fft` emit layer moved `n / 2` into one entry-side `alui.3` result
+      and the odd split branch stopped materializing its own second divide
+    - current authority is **not kept**:
+      formal A/B against stable base `f3dceff`, 2-run averages, came back
+      mixed-to-negative overall:
+      `09_spmv1 = 12958.624 -> 12836.947 ms`,
+      `13_fft1 = 8459.829 -> 8443.662 ms`,
+      `14_fft2 = 7933.939 -> 7981.176 ms`,
+      `18_brainfuck-bootstrap = 10145.079 -> 10308.433 ms`,
+      `19_brainfuck-calculator = 12692.999 -> 12727.215 ms`
+    - therefore this line should stay reverted despite the local `fft1`
+      witness hit; the next reopen should target a different FFT hotspot
+      family with better cross-witness payoff, not this specific entry-binary
+      hoist shape
+  - Current 2026-05-15 `fft` hot global-address hoist across calls retry:
+    - one narrower `fft`-only perf-hotspot pass was tried to hoist repeated
+      `addr_global temp` across calls even though the function itself
+      contains calls, because the address value is pure and the live witness
+      was rebuilding the same base in sibling split branches
+    - real witness proof did exist:
+      the rebuilt final `fft` text moved `lui/addi %hi(temp)` to function
+      entry and removed the sibling-branch re-materialization of `temp`
+    - current authority is **not kept**:
+      more focused 4-run alternating A/B still came back mixed overall:
+      `13_fft1 run_ms = 8390.634 -> 8363.563`,
+      `14_fft2 run_ms = 7876.838 -> 7925.966`,
+      `18_brainfuck-bootstrap run_ms = 10002.248 -> 10008.296`,
+      `19_brainfuck-calculator run_ms = 12568.023 -> 12569.916`
+    - therefore this line should stay reverted too; the next FFT reopen
+      should target a different recurrence/address family instead of more
+      `addr_global temp` hoisting
+  - Current 2026-05-15 `fft` branch-common-prefix hoist retry:
+    - one narrower `fft`-only pass then tried to hoist the common branch
+      prefix around the split loop more structurally, effectively moving the
+      `temp` global base to function entry and sharing it across the split
+      branches
+    - real witness proof did exist in final text:
+      rebuilt `fft` text now materialized `%hi/%lo(temp)` once at entry and
+      both split branches reused that same base register
+    - current authority is **not kept**:
+      formal A/B against stable base `f3dceff`, 2-run averages, still came
+      back mixed overall:
+      `09_spmv1 = 12839.791 -> 12816.210 ms`,
+      `13_fft1 = 8459.219 -> 8448.277 ms`,
+      `14_fft2 = 8002.661 -> 7964.033 ms`,
+      `18_brainfuck-bootstrap = 10140.265 -> 10216.239 ms`,
+      `19_brainfuck-calculator = 12654.185 -> 12702.365 ms`
+    - therefore this line should stay reverted as well; the next FFT reopen
+      should move off split-loop base-address hoisting and target a different
+      hotspot family
+  - Current 2026-05-16 signed `/2` / `%2` helper rewrite, not kept:
+    - one narrower `ValueSSA` perf-hotspot pass was added to rewrite signed
+      division/modulo by powers of two using `shr/and/add/sub`, but only for
+      the real hot recursive helpers `multiply` and `power`
+    - real witness proof did exist on the rebuilt live tree:
+      `13_fft1` `value-ssa-perf` and final asm both showed `multiply` /
+      `power` replacing helper-side `/2` and `%2` with explicit
+      `shr/and/add/sub` sequences
+    - correctness recheck stayed green on the rotated gate:
+      `make test-value-ssa-regression`, `autotest -riscv -s lv8`, and
+      `autotest -riscv -s lv9` all passed
+    - current authority is **not kept**:
+      focused 2-run A/B against stable base `f3dceff` came back mixed and net
+      negative on the required witness set:
+      `09_spmv1 total_avg_ms = 57.995 -> 75.589`,
+      `13_fft1 = 65.235 -> 79.526`,
+      `14_fft2 = 64.956 -> 84.723`,
+      `18_brainfuck-bootstrap = 10039.061 -> 10302.730`,
+      `19_brainfuck-calculator = 12963.269 -> 12643.411`
+      with the runtime-only view similarly mixed:
+      `09_spmv1 run_avg_ms = 3.961 -> 4.281`,
+      `13_fft1 = 4.295 -> 4.165`,
+      `14_fft2 = 4.103 -> 4.377`,
+      `18_brainfuck-bootstrap = 9895.470 -> 10133.047`,
+      `19_brainfuck-calculator = 12810.207 -> 12483.528`
+    - therefore this helper rewrite should stay reverted despite the real FFT
+      witness hit; the next div/mod-directed reopen should either target a
+      different hotspot family or use a lower-cost implementation strategy
+  - Current 2026-05-16 final-text `multiply` double-mod rewrite, not kept:
+    - one narrower final-text peephole was tried in the RISC-V preview text
+      layer to rewrite the hot `multiply` helper shape
+      `add x, x, x ; rem ..., 998244353`
+      into one compare-and-subtract sequence, relying on the recursive helper
+      invariant that the doubled intermediate is already in `[0, 2*mod)`
+    - the rewrite did hit the real witness after rebuild:
+      final `13_fft1` text for `multiply` changed from
+      `add ; rem 998244353`
+      to
+      `add ; li 998244353 ; blt ; sub ; mv`
+    - correctness recheck stayed green on
+      `make test-compiler-driver`, `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8`, and `autotest -riscv -s lv9`
+    - current authority is **not kept**:
+      focused 2-run A/B against stable base `f3dceff` was net negative:
+      `09_spmv1 total_avg_ms = 12761.952 -> 12919.182`,
+      `13_fft1 = 8408.058 -> 9770.914`,
+      `14_fft2 = 7991.015 -> 9553.253`,
+      `18_brainfuck-bootstrap = 10335.737 -> 10272.907`,
+      `19_brainfuck-calculator = 12896.747 -> 12462.066`
+    - therefore this peephole should stay reverted too; the next const
+      div/mod reopen should move away from this specific helper-local
+      `% 998244353` rewrite
+  - Current 2026-05-16 final-text pow2 const `div/mod` rewrite, kept:
+    - one broader final-text peephole is now added for
+      positive power-of-two constant divisors in RISC-V preview text
+    - current scope:
+      it recognizes
+      `li k ; div rd, rs, kreg`
+      and
+      `li k ; rem rd, rs, kreg`
+      for `k = 2^n > 0`
+      and rewrites them into the standard signed round-toward-zero sequence
+      using `srai/andi/add/sub/slli`
+    - this is no longer a one-helper patch:
+      it is a general final-text transform for the current preview lane, even
+      though the strongest measured hits still show up first inside the
+      recursive `multiply/power` FFT helpers
+    - correctness recheck on the live tree is green:
+      `make test-compiler-driver`,
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9` all pass
+    - formal 2-run A/B against stable base `f3dceff` on the corrected real
+      perf-input harness is net positive overall:
+      `09_spmv1 total_avg_ms = 13054.583 -> 13689.408`,
+      `13_fft1 = 8481.889 -> 8453.463`,
+      `14_fft2 = 8130.191 -> 7825.653`,
+      `18_brainfuck-bootstrap = 10529.372 -> 10170.045`,
+      `19_brainfuck-calculator = 12875.170 -> 12709.132`
+      and the combined five-case totals improved by about `223.5 ms`
+      (`run_avg_ms` combined improved by about `341.2 ms`)
+    - current authority:
+      keep this transform as the new live base despite the `spmv1` regression,
+      because the corrected FFT/brainfuck wins outweigh that one loss on the
+      measured route; the next round should try to recover `spmv1` without
+      reopening this pow2 const-div/mod rewrite itself
   - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
     - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
       existing loop-invariant hoist line to recognize one extra loop shape:

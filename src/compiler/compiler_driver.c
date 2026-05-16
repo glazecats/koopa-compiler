@@ -1710,6 +1710,40 @@ static int compiler_riscv_preview_line_is_mul_regs(
     return sscanf(line, "  mul %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
 }
 
+static int compiler_riscv_preview_line_is_div_regs(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    char *rs2,
+    size_t rs2_size) {
+    if (!line || !rd || !rs1 || !rs2 || rd_size == 0u || rs1_size == 0u || rs2_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    rs2[0] = '\0';
+    return sscanf(line, "  div %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
+}
+
+static int compiler_riscv_preview_line_is_rem_regs(
+    const char *line,
+    char *rd,
+    size_t rd_size,
+    char *rs1,
+    size_t rs1_size,
+    char *rs2,
+    size_t rs2_size) {
+    if (!line || !rd || !rs1 || !rs2 || rd_size == 0u || rs1_size == 0u || rs2_size == 0u) {
+        return 0;
+    }
+    rd[0] = '\0';
+    rs1[0] = '\0';
+    rs2[0] = '\0';
+    return sscanf(line, "  rem %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
+}
+
 static int compiler_riscv_preview_line_is_sub_regs(
     const char *line,
     char *rd,
@@ -2506,6 +2540,136 @@ cleanup:
 
 int compiler_test_optimize_riscv_preview_sub_by_one(char **io_text) {
     return compiler_optimize_riscv_preview_sub_by_one(io_text);
+}
+
+static int compiler_optimize_riscv_preview_pow2_divmods(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    if (!strstr(text, "\n  div ") && !strstr(text, "\n  rem ")) {
+        return 1;
+    }
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char imm_reg[32];
+        int imm_value = 0;
+        unsigned shift = 0u;
+        unsigned long long bits = 0u;
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_loads_immediate(lines[index], imm_reg, sizeof(imm_reg), &imm_value) &&
+            imm_value > 0) {
+            bits = (unsigned long long)(unsigned int)imm_value;
+            if ((bits & (bits - 1u)) == 0u) {
+                while ((1ull << shift) != bits) {
+                    ++shift;
+                    if (shift >= 31u) {
+                        break;
+                    }
+                }
+            } else {
+                shift = 31u;
+            }
+
+            if (shift < 31u) {
+                char rd[32], rs1[32], rs2[32];
+
+                if (compiler_riscv_preview_line_is_div_regs(
+                        lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
+                    strcmp(rs2, imm_reg) == 0 &&
+                    strcmp(rd, "t4") != 0) {
+                    if (!compiler_builder_appendf(&builder, "  srai t4, %s, 31\n", rs1) ||
+                        !compiler_builder_appendf(&builder, "  andi t4, t4, %llu\n", bits - 1u) ||
+                        !compiler_builder_appendf(&builder, "  add %s, %s, t4\n", rd, rs1) ||
+                        !compiler_builder_appendf(&builder, "  srai %s, %s, %u\n", rd, rd, shift)) {
+                        goto cleanup;
+                    }
+                    index += 2u;
+                    continue;
+                }
+
+                if (compiler_riscv_preview_line_is_rem_regs(
+                        lines[index + 1u], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
+                    strcmp(rs2, imm_reg) == 0 &&
+                    strcmp(rd, "t4") != 0 &&
+                    strcmp(rd, "t5") != 0) {
+                    if (!compiler_builder_appendf(&builder, "  srai t4, %s, 31\n", rs1) ||
+                        !compiler_builder_appendf(&builder, "  andi t4, t4, %llu\n", bits - 1u) ||
+                        !compiler_builder_appendf(&builder, "  add t5, %s, t4\n", rs1) ||
+                        !compiler_builder_appendf(&builder, "  srai t5, t5, %u\n", shift) ||
+                        !compiler_builder_appendf(&builder, "  slli t5, t5, %u\n", shift) ||
+                        !compiler_builder_appendf(&builder, "  sub %s, %s, t5\n", rd, rs1)) {
+                        goto cleanup;
+                    }
+                    index += 2u;
+                    continue;
+                }
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+int compiler_test_optimize_riscv_preview_pow2_divmods(char **io_text) {
+    return compiler_optimize_riscv_preview_pow2_divmods(io_text);
 }
 
 static int compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text) {
@@ -5379,6 +5543,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(out_text) ||
             !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
             !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
+            !compiler_optimize_riscv_preview_pow2_divmods(out_text) ||
             !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
