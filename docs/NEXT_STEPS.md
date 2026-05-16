@@ -755,6 +755,36 @@
        do **not** wire `same_block_temp_stack_reload_to_mv` back into the
        default final-text pipeline unless a later narrower version turns this
        mixed result into a clear positive one on the combined witness set.
+     - later 2026-05-16 narrowed same-block stack-reload-to-`mv` reopen:
+       I then revisited that exact same line, but with one much tighter gate
+       instead of simply re-enabling the older broad version. The reopened
+       pass still reuses same-block `sw temp, off(sp)` -> later
+       `lw temp2, off(sp)` when the slot stays untouched, but it now skips
+       reloads whose first next use immediately starts an obvious
+       `slli` / `mul` address chain. That keeps the intended `fft` scratch
+       wins while avoiding the address-building shapes that had previously
+       dominated the negative `brainfuck/spmv` result.
+       Correctness restamp on the live tree stayed green:
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Formal A/B against stable base `dfe35d6` came back net positive on
+       both the broad route and the older negative-hotspot pair:
+       route 1:
+       `13_fft1 total_avg_ms = 8387.656 -> 8448.197`,
+       `14_fft2 = 8327.118 -> 7929.808`,
+       `18_brainfuck-bootstrap = 10535.939 -> 10235.797`,
+       `19_brainfuck-calculator = 13022.932 -> 12855.089`
+       route 2:
+       `06_mv1 total_avg_ms = 12878.494 -> 12449.109`,
+       `09_spmv1 = 13393.925 -> 13214.032`.
+       Although `13_fft1` regressed a little on this isolated rerun, the
+       combined witness set is now clearly net positive and, importantly, the
+       old `06/09/18/19` negative cluster did not reopen.
+       Current authority is therefore **kept**:
+       this narrower reopen becomes the new stable base, and the next round
+       should keep targeting dynamic stack/address scratch traffic rather than
+       reopening the rejected broader `% 998244353` text path.
      - later same-day `-perf` memory-full build-route retry, not kept:
        I also tried a broader but still perf-only A/B at the SSA build
        boundary: for `-perf` mode, route the current compiler path through

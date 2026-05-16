@@ -634,6 +634,38 @@
       fully back out this pipeline retry too; the text-side stack-reload-to-`mv`
       rule is not currently earning a stable runtime win on the active witness
       set, even after narrowing away the obvious `brainfuck` address-chain tail
+  - Current 2026-05-16 narrowed same-block stack-reload-to-`mv` reopen, kept:
+    - I reopened that older text-side line, but only with a stricter gate:
+      keep the existing same-block `sw temp, off(sp) ... lw temp2, off(sp)`
+      reuse proof, while explicitly skipping reloads whose first next use
+      starts an obvious `slli` / `mul` address chain
+    - landing reason:
+      the already-kept adjacent scratch fold had shown that narrow stack
+      scratch reuse can pay off, while the older unkept version of this pass
+      was still too broad and let `brainfuck` / `spmv` address-chain cases
+      dominate the result
+    - current correctness restamp on the live tree:
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - real witness proof on rebuilt text:
+      the narrowed pass still preserves the intended `fft` scratch wins such
+      as `sw t4, 32(sp) ; lw t6, 32(sp)` -> `sw ... ; mv t6, t4`, while
+      avoiding the most suspicious immediate `lw -> slli/mul` address-chain
+      starts that had previously contaminated the runtime result
+    - formal A/B against stable base `dfe35d6`, 2-run averages:
+      first route:
+      `13_fft1 total_avg_ms = 8387.656 -> 8448.197`,
+      `14_fft2 = 8327.118 -> 7929.808`,
+      `18_brainfuck-bootstrap = 10535.939 -> 10235.797`,
+      `19_brainfuck-calculator = 13022.932 -> 12855.089`
+      hotspot recheck:
+      `06_mv1 total_avg_ms = 12878.494 -> 12449.109`,
+      `09_spmv1 = 13393.925 -> 13214.032`
+    - current authority:
+      keep this narrower reopen as the new stable base; the next mainline
+      should continue shrinking dynamic stack/address scratch traffic rather
+      than reopening the already-rejected broader `% 998244353` text path
   - Current 2026-05-14 `-perf` memory-full SSA-route retry, not kept:
     - I also tested one broader perf-only route swap at the SSA build
       boundary: for `-perf`, temporarily use

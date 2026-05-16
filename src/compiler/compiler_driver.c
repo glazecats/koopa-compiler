@@ -3766,6 +3766,33 @@ static int compiler_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(ch
                     !compiler_riscv_preview_is_temp_reg_name(load_reg)) {
                     continue;
                 }
+                if (scan_index + 1u < line_count) {
+                    char next_rd[32];
+                    char next_rs1[32];
+                    char next_rs2[32];
+                    unsigned shift_imm = 0u;
+
+                    if ((compiler_riscv_preview_line_is_slli_imm(
+                             lines[scan_index + 1u],
+                             next_rd,
+                             sizeof(next_rd),
+                             next_rs1,
+                             sizeof(next_rs1),
+                             &shift_imm) &&
+                            strcmp(next_rs1, load_reg) == 0) ||
+                        (compiler_riscv_preview_line_is_mul_regs(
+                             lines[scan_index + 1u],
+                             next_rd,
+                             sizeof(next_rd),
+                             next_rs1,
+                             sizeof(next_rs1),
+                             next_rs2,
+                             sizeof(next_rs2)) &&
+                            (strcmp(next_rs1, load_reg) == 0 ||
+                                strcmp(next_rs2, load_reg) == 0))) {
+                        continue;
+                    }
+                }
 
                 if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
                     goto cleanup;
@@ -5640,6 +5667,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
             !compiler_optimize_riscv_preview_pow2_divmods(out_text) ||
             !compiler_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(out_text) ||
+            !compiler_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(out_text) ||
             !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
