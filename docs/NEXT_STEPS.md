@@ -526,6 +526,55 @@
        despite the `spmv1` regression, this transform should become the new
        live base, and the next round should try to recover `spmv1` without
        backing this one out.
+     - later 2026-05-16 broader final-text positive const `div/mod` rewrite:
+       I then widened that same final-text line from `2^n` divisors to
+       general positive constant divisors using the standard signed
+       magic-number scheme (`mulh` + shift + sign correction, with remainder
+       reconstructed from quotient * divisor). This did hit real witnesses:
+       rebuilt `00_bitset1/01_bitset2` final text replaced `/30` and `%30`
+       with the expected explicit magic-number sequences. Correctness recheck
+       stayed green on
+       `make test-compiler-driver`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`.
+       However, focused 2-run A/B against stable base `f3dceff` came back net
+       negative overall on the corrected real-input route:
+       `00_bitset1 total_avg_ms = 1047.330 -> 1168.127`,
+       `01_bitset2 = 2031.234 -> 2185.857`,
+       `02_bitset3 = 3012.158 -> 3205.137`,
+       `13_fft1 = 8373.160 -> 8552.833`,
+       `14_fft2 = 7883.130 -> 7994.110`,
+       `18_brainfuck-bootstrap = 10060.509 -> 10394.439`,
+       `19_brainfuck-calculator = 12868.615 -> 12498.631`.
+       Current authority is therefore **not kept**:
+       this broader magic-number version should be reverted back out, and the
+       next const-div/mod-directed reopen should use a narrower cost model or
+       a more selective target family rather than applying the rewrite this
+       broadly.
+     - later 2026-05-16 adjacent stack store/reload fold:
+       I then changed angle and tried a much narrower final-text cleanup
+       instead of another broad arithmetic rewrite. The new pass only touches
+       the safest local scratch shape:
+       adjacent `sw temp, off(sp)` followed immediately by
+       `lw temp2, off(sp)` on the same stack slot, rewriting that pair to
+       either `mv temp2, temp` or deleting the self-reload entirely.
+       This directly hits the live `fft1` hot loop, where rebuilt text now
+       folds both `sw t4, 32(sp) ; lw t6, 32(sp)` and
+       `sw t4, 76(sp) ; lw t6, 76(sp)` into direct register reuse.
+       Correctness restamp on the live tree stayed green:
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Formal A/B against stable base `b0c153e`, 2-run averages, also came
+       back net positive on the required four-case route:
+       `13_fft1 total_avg_ms = 8190.267 -> 8121.798`,
+       `14_fft2 = 7735.168 -> 7706.878`,
+       `18_brainfuck-bootstrap = 10080.707 -> 10056.946`,
+       `19_brainfuck-calculator = 12612.716 -> 12607.351`.
+       Current authority is therefore **kept**:
+       this narrower stack scratch fold becomes the new stable base, and the
+       next hotspot round should stay on deeper dynamic scratch/address
+       cleanup rather than reopening the broader unkept const-div line.
      - later 2026-05-14 `brainfuck` function-entry scalar-global hoist:
        one narrower kept `ValueSSA` perf-hotspot expansion then targeted the
        same `brainfuck` mainline more directly than another broad loop

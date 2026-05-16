@@ -482,6 +482,63 @@
       because the corrected FFT/brainfuck wins outweigh that one loss on the
       measured route; the next round should try to recover `spmv1` without
       reopening this pow2 const-div/mod rewrite itself
+  - Current 2026-05-16 broader final-text positive const `div/mod` rewrite, not kept:
+    - one broader final-text experiment then tried to extend that line from
+      `2^n` divisors to general positive constant divisors using the standard
+      signed magic-number scheme (`mulh` + shift + sign correction, and
+      remainder reconstructed from quotient * divisor)
+    - real witness proof did exist:
+      rebuilt `00_bitset1/01_bitset2` final text replaced `/30` and `%30`
+      with explicit `li magic ; mulh ; add ; srai ; sub` sequences
+    - correctness recheck stayed green on
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+    - current authority is **not kept**:
+      focused 2-run A/B against stable base `f3dceff` came back net negative
+      on the corrected real-input route:
+      `00_bitset1 total_avg_ms = 1047.330 -> 1168.127`,
+      `01_bitset2 = 2031.234 -> 2185.857`,
+      `02_bitset3 = 3012.158 -> 3205.137`,
+      `13_fft1 = 8373.160 -> 8552.833`,
+      `14_fft2 = 7883.130 -> 7994.110`,
+      `18_brainfuck-bootstrap = 10060.509 -> 10394.439`,
+      `19_brainfuck-calculator = 12868.615 -> 12498.631`
+    - therefore this broader magic-number version should stay reverted; the
+      next const-div/mod reopen should use a narrower cost model or a more
+      selective target family instead of applying the rewrite this broadly
+  - Current 2026-05-16 adjacent stack store/reload fold, kept:
+    - one new very narrow final-text pass now targets only the safest local
+      `sw temp, off(sp)` followed immediately by `lw temp2, off(sp)` shape,
+      rewriting it to either `mv temp2, temp` or deleting the self-reload
+      outright
+    - landing reason:
+      the live `fft1` hot loop still contained repeated straight-line
+      `sw slot ; lw same-slot` scratch round-trips on address temps, and this
+      narrower shape is materially safer than the older broader unkept
+      `store/reload -> mv` attempts because it does not cross calls,
+      branches, labels, or unrelated intervening instructions
+    - new regression coverage now locks both kept local shapes in
+      `tests/compiler/compiler_driver_test.c`:
+      adjacent same-slot store/reload into a different temp becomes `mv`,
+      while adjacent self-reload disappears
+    - current correctness restamp on the live tree:
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - real witness proof on rebuilt perf text:
+      `13_fft1`'s hot `fft` loop now folds the repeated
+      `sw t4, 32(sp) ; lw t6, 32(sp)` and
+      `sw t4, 76(sp) ; lw t6, 76(sp)` pairs into direct `mv` reuse
+    - formal A/B against stable base `b0c153e`, 2-run averages:
+      `13_fft1 total_avg_ms = 8190.267 -> 8121.798`,
+      `14_fft2 = 7735.168 -> 7706.878`,
+      `18_brainfuck-bootstrap = 10080.707 -> 10056.946`,
+      `19_brainfuck-calculator = 12612.716 -> 12607.351`
+    - current authority:
+      keep this pass as the new stable base; the next promising reopen stays
+      on dynamic hot-path cleanup, especially deeper `fft` scratch/address
+      traffic and remaining `brainfuck` / `spmv` hotspot structure
   - Current 2026-05-14 `mv1/spmv1` diamond-loop hoist widening, not kept:
     - I tried a narrower `ValueSSA` perf-hotspot widening that taught the
       existing loop-invariant hoist line to recognize one extra loop shape:

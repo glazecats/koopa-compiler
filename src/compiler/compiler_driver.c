@@ -274,6 +274,7 @@ static int compiler_riscv_preview_line_is_restore_from_sp(
     int *out_offset);
 static int compiler_riscv_preview_line_is_addi_sp(const char *line, int *out_delta);
 static int compiler_riscv_preview_line_is_ret(const char *line);
+static int compiler_riscv_preview_is_temp_reg_name(const char *reg_name);
 static int compiler_optimize_riscv_preview_tail_calls(char **io_text);
 static int compiler_optimize_riscv_preview_mul_by_four(char **io_text);
 static int compiler_optimize_riscv_preview_sub_by_one(char **io_text);
@@ -3449,6 +3450,100 @@ int compiler_test_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
     return compiler_optimize_riscv_preview_call_arg_load_swaps(io_text);
 }
 
+static int compiler_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char store_reg[32];
+        char load_reg[32];
+        int store_offset = 0;
+        int load_offset = 0;
+
+        if (index + 1u < line_count &&
+            compiler_riscv_preview_line_is_sw_sp_reg(lines[index], store_reg, sizeof(store_reg), &store_offset) &&
+            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 1u], load_reg, sizeof(load_reg), &load_offset) &&
+            store_offset == load_offset &&
+            compiler_riscv_preview_is_temp_reg_name(store_reg) &&
+            compiler_riscv_preview_is_temp_reg_name(load_reg)) {
+            if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                goto cleanup;
+            }
+            if (strcmp(store_reg, load_reg) != 0) {
+                if (!compiler_builder_appendf(&builder, "  mv %s, %s\n", load_reg, store_reg)) {
+                    goto cleanup;
+                }
+            }
+            index += 2u;
+            continue;
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
+}
+
+int compiler_test_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(char **io_text) {
+    return compiler_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(io_text);
+}
+
 int compiler_test_optimize_riscv_preview_repeated_indexed_addr_triples(char **io_text) {
     return compiler_optimize_riscv_preview_repeated_indexed_addr_triples(io_text);
 }
@@ -5544,6 +5639,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
             !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
             !compiler_optimize_riscv_preview_pow2_divmods(out_text) ||
+            !compiler_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(out_text) ||
             !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
             !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||

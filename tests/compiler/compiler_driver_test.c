@@ -483,6 +483,7 @@ static int test_compiler_folds_call_arg_load_swap_in_text(void) {
 }
 
 int compiler_test_optimize_riscv_preview_call_arg_load_swaps(char **io_text);
+int compiler_test_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(char **io_text);
 int compiler_test_optimize_riscv_preview_tail_calls(char **io_text);
 int compiler_test_optimize_riscv_preview_zero_adds(char **io_text);
 int compiler_test_optimize_riscv_preview_mul_by_four(char **io_text);
@@ -609,6 +610,59 @@ static int test_compiler_replaces_same_block_temp_stack_reload_with_mv(void) {
         !text ||
         strstr(text, "  sw t4, 36(sp)\n  mv t6, t4\n  add a0, t6, a1\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: same-block temp stack reload should be replaced with mv when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_replaces_adjacent_stack_store_reload_with_mv(void) {
+    static const char *source_text =
+        "  sw t4, 36(sp)\n"
+        "  lw t5, 36(sp)\n"
+        "  add a0, t5, a1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: adjacent stack store-reload regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(&text) ||
+        !text ||
+        strstr(text, "  sw t4, 36(sp)\n  mv t5, t4\n  add a0, t5, a1\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: adjacent stack store/reload should become mv when safe\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_removes_adjacent_stack_self_reload(void) {
+    static const char *source_text =
+        "  sw t4, 36(sp)\n"
+        "  lw t4, 36(sp)\n"
+        "  add a0, t4, a1\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: adjacent stack self-reload regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(&text) ||
+        !text ||
+        strstr(text, "  sw t4, 36(sp)\n  add a0, t4, a1\n") == NULL ||
+        strstr(text, "  lw t4, 36(sp)\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: adjacent stack self-reload should disappear when safe\n");
         ok = 0;
     }
 
@@ -2494,6 +2548,8 @@ int main(void) {
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_both_args_reload_same_slot();
     ok &= test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0();
     ok &= test_compiler_replaces_same_block_temp_stack_reload_with_mv();
+    ok &= test_compiler_replaces_adjacent_stack_store_reload_with_mv();
+    ok &= test_compiler_removes_adjacent_stack_self_reload();
     ok &= test_compiler_replaces_branch_bound_stack_reload_with_mv();
     ok &= test_compiler_does_not_replace_branch_bound_stack_reload_across_slot_overwrite();
     ok &= test_compiler_forwards_store_copy_source();
