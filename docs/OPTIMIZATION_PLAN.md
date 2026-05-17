@@ -287,6 +287,184 @@
       `spmv`-side optimization round; the next most promising reopen is still
       hotspot-specific address/index recurrence cleanup, especially the
       remaining repeated `xptr[i+1]` and exit-block shift/address scaffolding
+    - later 2026-05-16 `spmv` following-loop limit-load reuse, not kept:
+      I opened one new narrow `ValueSSA` pass to reuse the first inner-loop
+      preheader's `xptr[i+1]` load as the bound of the immediately following
+      second inner loop, instead of rebuilding the same `shl/add/load` chain
+      again at the second loop entry.
+    - real-shape result:
+      after a pass-order repair, the transform did hit the real
+      `09_spmv1` witness in the live `value-ssa-perf` pipeline.
+      The second loop header stopped rebuilding the exit-block bound load and
+      instead reused the earlier `xptr[i+1]` value directly.
+    - correctness result:
+      the focused synthetic regression was green, and
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`, and
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all stayed green on the experiment.
+    - A/B result:
+      runtime evidence still did not justify keeping it:
+      `09_spmv1 run_ms = 4.903 -> 4.188`,
+      `06_mv1 run_ms = 3.927 -> 4.141`,
+      `18_brainfuck-bootstrap run_ms = 9783.159 -> 9992.860`,
+      `19_brainfuck-calculator run_ms = 12325.499 -> 12541.387`.
+    - current authority:
+      fully back this line out.
+      Treat it as a useful “real witness can be matched” experiment, but not
+      as a kept runtime optimization, and rotate to a different hotspot line.
+    - later same-day `run_program` branch-join `program[ip]` reuse, not kept:
+      I then opened one new narrow `ValueSSA` pass on the `[` skip-loop path
+      in `run_program`: when one branch block already loads `program[ip]`,
+      a single-predecessor side block only mutates an unrelated scalar local,
+      and the downstream join block reloads the same `program[ip]`, the join
+      load is rewritten to reuse the earlier loaded value.
+    - real-shape result:
+      the live `19_brainfuck-calculator` witness did change exactly as
+      intended.
+      The `bb.17 -> bb.19 -> bb.20` skip-loop stopped reloading
+      `program[ip]`, and the final assembly compared the one loaded register
+      against both `']'` and `'['`.
+    - correctness result:
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`, and
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all stayed green on the experiment.
+    - A/B result:
+      runtime still got worse:
+      `19_brainfuck-calculator total_ms = 12490.935 -> 12659.715`,
+      `18_brainfuck-bootstrap total_ms = 10011.961 -> 10135.291`,
+      `09_spmv1 total_ms = 58.069 -> 77.089`,
+      `06_mv1 total_ms = 61.400 -> 73.781`.
+    - current authority:
+      fully back this line out.
+      Treat it as another real-witness-but-negative experiment and rotate the
+      next `run_program` reopen toward shorter-lived `read_head` subtree
+      carriers or address-chain hoists instead of longer-lived loaded-code
+      reuse.
+    - later same-day `run_program` `read_head` address-prefix hoist, not kept:
+      I then reopened the shorter-lived `read_head` subtree line with a new
+      `ValueSSA` pass that hoisted the shared
+      `load_local read_head -> shl 2 -> add tape_base` prefix higher in the
+      BF dispatch chain, first too high (`bb.1`), then retuned to a narrower
+      landing at `bb.7` so the `+ / - / [ / ]` cases could share one
+      `tape[read_head]` address without extending that value through the full
+      top-level interpreter loop.
+    - real-shape result:
+      the live `19_brainfuck-calculator` witness did change exactly as
+      intended.
+      In the retuned version, the `+ / - / [ / ]` cases stopped rebuilding
+      their own `read_head` address chain and reused one shared `ssa.18`
+      carrier rooted at `bb.7`.
+    - correctness result:
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`, and
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all stayed green on the experiment.
+    - A/B result:
+      the formal serial A/B still came back negative against stable base
+      `e9de764`:
+      `19_brainfuck-calculator total_ms = 12360.943 -> 12489.582`,
+      `18_brainfuck-bootstrap total_ms = 10053.622 -> 10088.626`,
+      `09_spmv1 total_ms = 61.704 -> 71.470`,
+      `06_mv1 total_ms = 62.021 -> 73.433`.
+    - current authority:
+      fully back this line out too.
+      Treat the shared-address-prefix hoist family as another measured but
+      non-profitable branch of the `run_program` hotspot work, and prefer the
+      next reopen to look for over-conservative upstream scalar-promotion or
+      a different hotspot entirely.
+    - later same-day `memory_ssa` recursive memory-phi materialization retry, not kept:
+      I then tried the more aggressive upstream route directly inside
+      `memory_ssa_pass_slot_promotion.inc`: when `promote-local-slots` hits a
+      `load_local/load_global` whose memory version is a loop/join phi with
+      unresolved phi inputs, recursively materialize those memory-phi inputs
+      into value-phis instead of stopping after plain
+      `resolve_version_value -> predecessor block equivalent ->
+      dominating equivalent`.
+    - result:
+      this was too aggressive for the current pass invariants.
+      Although it was motivated by the real `run_program/read_head.1`
+      hotspot, the prototype reopened a broad `memory_ssa_pass` regression
+      surface (`VALUE-SSA-071` use-before-def first, then
+      `VALUE-SSA-064` duplicate-def after partial repair), so it never
+      reached a correctness-closed state worth timing.
+    - current authority:
+      fully back this line out.
+      If the upstream `memory_ssa` line is reopened again, prefer a much
+      narrower change:
+      preserve the existing promotion structure and target only the missing
+      **edge-aware expected-version mapping** on the current
+      `loop-carried memory-phi -> predecessor/idom walk` path rather than
+      recursively synthesizing new value-phi carriers.
+    - later 2026-05-17 `mv1` diamond-loop invariant row-base hoist, not kept:
+      After reranking the real course perf surface on the rebuilt live tree,
+      the current top runtime witnesses were
+      `06_mv1 ~= 13033 ms`,
+      `19_brainfuck-calculator ~= 12612 ms`,
+      `09_spmv1 ~= 12548 ms`,
+      with total course runtime around `140.1 s`.
+      I therefore rotated to `06_mv1` first and targeted its hottest inner
+      loop: the `mv(...)` body keeps recomputing `i * 8040` and
+      `A + i*8040` on every `j` iteration even though `i` is invariant
+      across the inner loop.
+    - experiment:
+      I opened a new `ValueSSA` perf pass for a narrow
+      `header -> body-entry -> then/else -> latch -> header` diamond-loop
+      shape, meant to hoist invariant `addr/load/mov/binary` values to the
+      preheader using the existing invariant-clone machinery.
+    - result:
+      the prototype did not reach a correctness-closed state.
+      On the real `06_mv1` witness it destabilized compilation itself
+      (`./build/compiler -perf /opt/bin/testcases/perf/06_mv1.c ...`
+      segfaulted), so it was fully backed out before any A/B timing.
+      Current authority is therefore to not keep this pass and to treat the
+      `mv1` inner-loop row-base line as still open, but needing a smaller,
+      less invasive retry than a fresh diamond-loop CFG framework.
+    - later same-day narrower inner-diamond matcher retry, not kept:
+      I then tried the smaller retry implied by that diagnosis instead of a
+      fresh wide CFG framework:
+      extend the existing perf-hotspot simple-loop matcher just enough to
+      recognize the concrete `mv(...)` shape
+      `header -> side-entry -> then/else -> latch -> header`,
+      so the already-landed invariant-clone machinery could hoist the
+      measured `mul i, 8040` and `A + i*8040` row-base chain out of the hot
+      inner `j` loop.
+    - real-shape result:
+      the narrower retry did reach a correctness-closed state on the live
+      tree.
+      A focused new `value_ssa` regression proved the matcher now hits that
+      exact inner-diamond witness: the invariant `mul` / `add` prefix moved
+      to the loop preheader while the branch-local bodies kept only uses of
+      the hoisted carrier.
+      Rechecks on the experiment were green:
+      `make test-value-ssa-regression` PASS,
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+    - formal A/B result:
+      despite hitting the intended SSA shape, the runtime payoff was not
+      stable enough to keep.
+      First full A/B against the saved stable base showed mixed movement:
+      `06_mv1 total_ms = 12496.038 -> 12273.544`,
+      `09_spmv1 total_ms = 12747.012 -> 12986.066`,
+      `18_brainfuck-bootstrap total_ms = 10194.172 -> 10146.734`,
+      `19_brainfuck-calculator total_ms = 12700.167 -> 12561.926`.
+      I then narrowed the matcher to `mv` only and reran the same 2-run A/B;
+      the kept-direction story still did not hold:
+      `06_mv1 total_ms = 12224.531 -> 12399.992`,
+      `09_spmv1 total_ms = 13006.004 -> 13057.613`,
+      `18_brainfuck-bootstrap total_ms = 10289.156 -> 10188.775`,
+      `19_brainfuck-calculator total_ms = 12779.811 -> 12851.453`.
+    - current authority:
+      fully back this narrower retry out as well.
+      Treat it as a useful proof that the current invariant-clone machinery
+      can be aimed at the `mv1` row-base witness, but not yet as a
+      checkpoint-worthy runtime optimization.
+      The next `mv1` reopen should therefore avoid this exact hoist shape
+      and instead look for a different steady-state win, for example a more
+      direct carried row-base recurrence or a later selected/text cleanup
+      that does not perturb neighboring `spmv` / `brainfuck` witnesses.
   - Later 2026-05-16 `run_program` shared-branch local-load hoist follow-up:
     - one new narrow kept `ValueSSA` perf-hotspot pass now hoists a
       branch-shared `load_local` out of two unique-predecessor successor
@@ -325,6 +503,32 @@
       remaining `return_address_top.515` shared-branch load under
       `bb.25` / `bb.26`, rather than widening immediately to generic
       multi-join local-carrier forwarding
+    - later same-day prefixed shared-branch retry, not kept:
+      I tried widening that same `run_program` shared-branch line so the two
+      successor blocks could each carry a short pure prefix before the shared
+      `load_local`, specifically to hit the live `return_address_top.515`
+      shape under `bb.23 -> bb.25/bb.26`.
+      The widened pass did hit the real `value-ssa-perf` dump exactly as
+      intended, but formal A/B against stable base `e9de764` came back
+      clearly negative:
+      `18_brainfuck-bootstrap total_ms = 9977.483 -> 10038.023`,
+      `19_brainfuck-calculator total_ms = 12461.843 -> 12660.701`.
+      Current authority is therefore to keep this widening fully reverted and
+      not reopen it again unless a materially different safety/profit story
+      appears.
+    - later same-day `read_head` subtree address-chain hoist experiment, not kept:
+      I then opened a fresh `ValueSSA` pass experiment aimed at hoisting the
+      repeated `load_local read_head -> shl 2 -> add tape_base` address chain
+      across the `run_program` dispatch subtree instead of doing more late
+      text cleanup.
+      This line did not reach a stable kept implementation in this round:
+      the prototype was not brought to a correctness-closed state under
+      `make test-value-ssa-regression`, so it has been fully backed out
+      rather than left half-landed.
+      Current authority is to treat that line as an unfinished idea, not as
+      live code; if reopened later, it should start from a smaller isolated
+      witness and should be judged against real `brainfuck` runtime only
+      after the regression surface is green again.
   - Current 2026-05-15 hotspot-function parameter-local hoist widening:
     - the earlier kept parameter-local hoist rule was originally scoped only
       to `spmv`; this round widens that exact rule, still under a narrow
@@ -545,6 +749,44 @@
     - therefore this broader magic-number version should stay reverted; the
       next const-div/mod reopen should use a narrower cost model or a more
       selective target family instead of applying the rewrite this broadly
+  - Current 2026-05-17 narrow final-text `div 998244353` rewrite, kept:
+    - I reopened the rejected general constant-div/mod line in a much
+      narrower form instead of retrying the same broad magic-number pass:
+      only signed `div` by the exact positive constant `998244353` in
+      preview RISC-V text is rewritten, using the short RV32IM reference
+      sequence observed from `clang -O2`
+      (`mulh` + `srli` + `srai` + add-back sign correction).
+    - deliberate scope boundary:
+      this reopen does **not** touch `% 998244353` yet, and it does not
+      generalize to arbitrary constants. The first landing only targets the
+      hot FFT/NTT quotient sites such as `(mod - 1) / d` where the current
+      emitted text still carried raw `div`.
+    - correctness recheck on the live tree is green:
+      `make test-compiler-driver`,
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`,
+      and `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all pass.
+    - focused new regression coverage now locks both sides:
+      the new `compiler_driver` test requires the `div 998244353`
+      text shape to rewrite into the expected `mulh/srli/srai/add` sequence,
+      and a second test keeps the rewrite disabled when scratch register
+      `t3` is needed past a label.
+    - formal 2-run A/B against stable base `/tmp/compiler_baseline_mv1_20260517`
+      on the required real-input harness came back net positive overall on
+      the current FFT/brainfuck guard surface:
+      `09_spmv1 total_ms = 13201.260 -> 12933.194`,
+      `13_fft1 = 8183.915 -> 8063.201`,
+      `14_fft2 = 7635.892 -> 7788.195`,
+      `18_brainfuck-bootstrap = 10047.687 -> 9976.831`,
+      `19_brainfuck-calculator = 12625.505 -> 12518.745`.
+      Combined five-case `total_ms` improved by about `413.1 ms`.
+    - current authority:
+      keep this narrower `div 998244353` rewrite as the new live base.
+      The next arithmetic reopen should treat `% 998244353` as a separate
+      question with its own cost/scratch model, rather than immediately
+      widening this one back into the previously rejected broad
+      constant-div/mod line.
   - Current 2026-05-16 adjacent stack store/reload fold, kept:
     - one new very narrow final-text pass now targets only the safest local
       `sw temp, off(sp)` followed immediately by `lw temp2, off(sp)` shape,

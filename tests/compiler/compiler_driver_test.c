@@ -499,6 +499,7 @@ int compiler_test_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_t
 int compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(char **io_text);
 int compiler_test_optimize_riscv_preview_indexed_local_base_offsets(char **io_text);
 int compiler_test_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
+int compiler_test_optimize_riscv_preview_mod998_divmods(char **io_text);
 int compiler_test_optimize_riscv_preview_pow2_divmods(char **io_text);
 int compiler_test_optimize_riscv_preview_store_jump_increment_tails(char **io_text);
 
@@ -1265,6 +1266,70 @@ static int test_compiler_rewrites_pow2_div_and_mod(void) {
         strstr(text, "  slli t5, t5, 1\n") == NULL ||
         strstr(text, "  sub a1, t6, t5\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: pow2 div/mod rewrite did not trigger as expected\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_rewrites_mod998_div_only(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  div a0, t6, t5\n"
+        "  lui t4, 0x3b800\n"
+        "  addi t4, t4, 1\n"
+        "  rem a1, t6, t4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-divmod regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text ||
+        strstr(text, "  div a0, t6, t5\n") != NULL ||
+        strstr(text, "  rem a1, t6, t4\n") == NULL ||
+        strstr(text, "  lui t3, 70493\n") == NULL ||
+        strstr(text, "  addi t3, t3, -2031\n") == NULL ||
+        strstr(text, "  mulh a0, t6, t3\n") == NULL ||
+        strstr(text, "  srli t3, a0, 31\n") == NULL ||
+        strstr(text, "  srai a0, a0, 26\n") == NULL ||
+        strstr(text, "  add a0, a0, t3\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 div rewrite did not trigger as expected\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_rewrite_mod998_div_when_t3_needed_past_label(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  div a0, t6, t5\n"
+        ".Lkeep_t3:\n"
+        "  add a1, t3, t4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-div live-t3 regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text ||
+        strstr(text, "  div a0, t6, t5\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 div rewrite should stay disabled when t3 is needed past a label\n");
         ok = 0;
     }
 
@@ -2565,6 +2630,8 @@ int main(void) {
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
     ok &= test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label();
     ok &= test_compiler_rewrites_pow2_div_and_mod();
+    ok &= test_compiler_rewrites_mod998_div_only();
+    ok &= test_compiler_does_not_rewrite_mod998_div_when_t3_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base();
     ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_across_call_when_saved_addr_reg_survives_call();
