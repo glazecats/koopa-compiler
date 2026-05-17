@@ -1,6 +1,11 @@
 #include "value_ssa.h"
 #include "value_ssa_pass.h"
 #include "lower_ir.h"
+#include "ir.h"
+#include "lexer.h"
+#include "parser.h"
+#include "semantic.h"
+#include "memory_ssa_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9384,6 +9389,168 @@ cleanup:
     return ok;
 }
 
+static int build_value_ssa_perf_from_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (out_error) {
+            out_error->line = 0;
+            out_error->column = 0;
+            snprintf(out_error->message, sizeof(out_error->message), "invalid source perf build contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+    value_ssa_program_init(out_program);
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_local_slots(out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_global_slots(out_program, out_error) ||
+        !value_ssa_optimize_perf_hotspots(out_program, out_error)) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(out_program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int expect_source_perf_hotspot_dump(const char *case_id,
+    const char *source,
+    const char *expected_text) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    if (!case_id || !source || !expected_text) {
+        return 0;
+    }
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s source perf build failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (strcmp(actual_text, expected_text) != 0) {
+        ok = 0;
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s source perf dump mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text);
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int expect_source_perf_hotspot_fragments(const char *case_id,
+    const char *source,
+    const char *const *fragments,
+    size_t fragment_count) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    const char *cursor = NULL;
+    size_t index;
+
+    if (!case_id || !source || !fragments) {
+        return 0;
+    }
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: %s source perf build failed at %d:%d: %s\n",
+            case_id,
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: %s dump failed\n", case_id);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    cursor = actual_text;
+    for (index = 0; index < fragment_count; ++index) {
+        const char *found = strstr(cursor, fragments[index]);
+
+        if (!found) {
+            fprintf(stderr,
+                "[value-ssa-reg] FAIL: %s missing fragment:\n%s\nactual:\n%s\n",
+                case_id,
+                fragments[index],
+                actual_text);
+            free(actual_text);
+            value_ssa_program_free(&program);
+            return 0;
+        }
+        cursor = found + strlen(fragments[index]);
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return 1;
+}
+
 static int expect_cfg_analysis(const char *case_id,
     int (*builder)(ValueSsaProgram *program, ValueSsaError *error),
     int (*checker)(const ValueSsaProgram *program, const ValueSsaCfgAnalysis *analysis)) {
@@ -11031,6 +11198,106 @@ static int test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_
         "    ssa.2 = call spmv(ssa.0, ssa.1, 3)\n"
         "    ret ssa.2\n"
         "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(void) {
+    static const char *source =
+        "const int mod = 998244353;\n"
+        "int multiply(int a, int b){\n"
+        "  if (b == 0) return 0;\n"
+        "  if (b == 1) return a % mod;\n"
+        "  int cur = multiply(a, b / 2);\n"
+        "  cur = (cur + cur) % mod;\n"
+        "  if (b % 2 == 1) return (a + cur) % mod;\n"
+        "  return cur;\n"
+        "}\n"
+        "int main(){ return multiply(7, 3); }\n";
+
+    return expect_source_perf_hotspot_dump("VALUE-SSA-PERF-HOTSPOT-SOURCE-MULTIPLY-BASELINE",
+        source,
+        "global mod.0 = 998244353\n"
+        "\n"
+        "func multiply(a.0, b.1) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local a.0\n"
+        "    ssa.1 = load_local b.1\n"
+        "    ssa.2 = eq ssa.1, 0\n"
+        "    br ssa.2, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ret 0\n"
+        "  bb.2:\n"
+        "    ssa.3 = eq ssa.1, 1\n"
+        "    br ssa.3, bb.3, bb.4\n"
+        "  bb.3:\n"
+        "    ssa.4 = mod ssa.0, 998244353\n"
+        "    ret ssa.4\n"
+        "  bb.4:\n"
+        "    ssa.5 = div ssa.1, 2\n"
+        "    ssa.6 = call multiply(ssa.0, ssa.5)\n"
+        "    ssa.7 = add ssa.6, ssa.6\n"
+        "    ssa.8 = mod ssa.7, 998244353\n"
+        "    ssa.9 = mod ssa.1, 2\n"
+        "    ssa.10 = eq ssa.9, 1\n"
+        "    br ssa.10, bb.5, bb.6\n"
+        "  bb.5:\n"
+        "    ssa.11 = add ssa.0, ssa.8\n"
+        "    ssa.12 = mod ssa.11, 998244353\n"
+        "    ret ssa.12\n"
+        "  bb.6:\n"
+        "    ret ssa.8\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call multiply(7, 3)\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump(void) {
+    static const char *const fragments[] = {
+        "func fft(arr.0, begin_pos.1, half_n.2, w.3) {\n",
+        "    ssa.13 = call multiply(",
+        "    ssa.14 = add ",
+        "    ssa.15 = ge ",
+        "    ssa.16 = sub 0, ",
+        "    ssa.17 = and ",
+        "    ssa.18 = sub ",
+        "    store_indirect ",
+        "    ssa.19 = sub ",
+        "    ssa.20 = add 998244353, ",
+        "    ssa.21 = ge ",
+        "    ssa.22 = sub 0, ",
+        "    ssa.23 = and ",
+        "    ssa.24 = sub ",
+        "    store_indirect ",
+    };
+    static const char *source =
+        "const int mod = 998244353;\n"
+        "int multiply(int a, int b){\n"
+        "  if (b == 0) return 0;\n"
+        "  if (b == 1) return a % mod;\n"
+        "  int cur = multiply(a, b / 2);\n"
+        "  cur = (cur + cur) % mod;\n"
+        "  if (b % 2 == 1) return (a + cur) % mod;\n"
+        "  return cur;\n"
+        "}\n"
+        "int fft(int arr[], int begin_pos, int half_n, int w){\n"
+        "  int i = 0;\n"
+        "  int wn = w;\n"
+        "  int x = arr[begin_pos + i];\n"
+        "  int y = arr[begin_pos + half_n + i];\n"
+        "  arr[begin_pos + i] = (x + multiply(wn, y)) % mod;\n"
+        "  arr[begin_pos + half_n + i] = (x - multiply(wn, y) + mod) % mod;\n"
+        "  wn = multiply(wn, w);\n"
+        "  return 0;\n"
+        "}\n"
+        "int main(){ int a[2]; return fft(a,0,1,3); }\n";
+
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-FFT-MOD998",
+        source,
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 }
 
 static int test_value_ssa_forward_global_loads_after_store(void) {
@@ -13299,6 +13566,8 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_non_hot_parameter_local_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_reduces_zero_based_induction_divmods();
     ok &= test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();

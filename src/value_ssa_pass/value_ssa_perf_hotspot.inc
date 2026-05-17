@@ -90,6 +90,274 @@ static int value_ssa_try_strength_reduce_mul_pow2(ValueSsaInstruction *instructi
     return 1;
 }
 
+static int value_ssa_perf_value_is_multiply_call(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    unsigned depth) {
+    ValueSsaInstruction *definition = NULL;
+
+    if (!function || !analysis || depth > 8u || value.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        return 0;
+    }
+    if (definition->kind == VALUE_SSA_INSTR_CALL) {
+        return definition->as.call.callee_name &&
+            strcmp(definition->as.call.callee_name, "multiply") == 0;
+    }
+    if (definition->kind == VALUE_SSA_INSTR_MOV) {
+        return value_ssa_perf_value_is_multiply_call(
+            function, analysis, definition->as.mov_value, depth + 1u);
+    }
+    return 0;
+}
+
+static int value_ssa_perf_value_is_mod998_constant(const ValueSsaProgram *program,
+    const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    unsigned depth) {
+    ValueSsaInstruction *definition = NULL;
+
+    if (!program || !function || !analysis || depth > 8u) {
+        return 0;
+    }
+    if (value.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+        return value.immediate == 998244353;
+    }
+    if (value.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        return 0;
+    }
+    if (definition->kind == VALUE_SSA_INSTR_MOV) {
+        return value_ssa_perf_value_is_mod998_constant(
+            program, function, analysis, definition->as.mov_value, depth + 1u);
+    }
+    if (definition->kind == VALUE_SSA_INSTR_LOAD_GLOBAL &&
+        definition->as.load_slot.kind == VALUE_SSA_SLOT_GLOBAL &&
+        definition->as.load_slot.id < program->global_count) {
+        const ValueSsaGlobal *global = &program->globals[definition->as.load_slot.id];
+
+        return global->byte_size == 4u &&
+            global->has_initializer &&
+            !global->has_runtime_initializer &&
+            global->initializer_value == 998244353;
+    }
+    return 0;
+}
+
+static int value_ssa_perf_reduce_mod998_fft_butterfly(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-318: invalid perf mod998 fft butterfly contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaDefUseAnalysis def_use;
+        size_t block_index;
+        int changed_function = 0;
+
+        if (!function->has_body || !function->name || strcmp(function->name, "fft") != 0) {
+            continue;
+        }
+
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_def_use_analysis(function, &def_use, error)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            ValueSsaBasicBlock rebuilt_block;
+            size_t instruction_index;
+            int changed_block = 0;
+            int ok = 1;
+
+            memset(&rebuilt_block, 0, sizeof(rebuilt_block));
+            rebuilt_block.id = block->id;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                ValueSsaInstruction *sum_definition = NULL;
+                ValueSsaInstruction *diff_definition = NULL;
+                ValueSsaValueRef reduced_value = value_ssa_value_immediate(0);
+                int matched = 0;
+
+                if (instruction->kind == VALUE_SSA_INSTR_BINARY &&
+                    instruction->has_result &&
+                    instruction->result.kind == VALUE_SSA_VALUE_ID &&
+                    instruction->as.binary.op == VALUE_SSA_BINARY_MOD &&
+                    instruction->as.binary.lhs.kind == VALUE_SSA_VALUE_ID &&
+                    value_ssa_perf_value_is_mod998_constant(
+                        program, function, &def_use, instruction->as.binary.rhs, 0u)) {
+                    sum_definition = value_ssa_pass_lookup_instruction_definition(
+                        function, &def_use, instruction->as.binary.lhs.value_id);
+                }
+
+                if (sum_definition &&
+                    sum_definition->kind == VALUE_SSA_INSTR_BINARY &&
+                    sum_definition->as.binary.op == VALUE_SSA_BINARY_ADD) {
+                    if (value_ssa_perf_value_is_multiply_call(function, &def_use, sum_definition->as.binary.lhs, 0u) ||
+                        value_ssa_perf_value_is_multiply_call(function, &def_use, sum_definition->as.binary.rhs, 0u)) {
+                        reduced_value = instruction->as.binary.lhs;
+                        matched = 1;
+                    } else if (value_ssa_perf_value_is_mod998_constant(
+                                   program, function, &def_use, sum_definition->as.binary.lhs, 0u) &&
+                               sum_definition->as.binary.rhs.kind == VALUE_SSA_VALUE_ID) {
+                        diff_definition = value_ssa_pass_lookup_instruction_definition(
+                            function, &def_use, sum_definition->as.binary.rhs.value_id);
+                        if (diff_definition &&
+                            diff_definition->kind == VALUE_SSA_INSTR_BINARY &&
+                            diff_definition->as.binary.op == VALUE_SSA_BINARY_SUB &&
+                            (value_ssa_perf_value_is_multiply_call(
+                                    function, &def_use, diff_definition->as.binary.lhs, 0u) ||
+                                value_ssa_perf_value_is_multiply_call(
+                                    function, &def_use, diff_definition->as.binary.rhs, 0u))) {
+                            reduced_value = instruction->as.binary.lhs;
+                            matched = 1;
+                        }
+                    } else if (value_ssa_perf_value_is_mod998_constant(
+                                   program, function, &def_use, sum_definition->as.binary.rhs, 0u) &&
+                               sum_definition->as.binary.lhs.kind == VALUE_SSA_VALUE_ID) {
+                        diff_definition = value_ssa_pass_lookup_instruction_definition(
+                            function, &def_use, sum_definition->as.binary.lhs.value_id);
+                        if (diff_definition &&
+                            diff_definition->kind == VALUE_SSA_INSTR_BINARY &&
+                            diff_definition->as.binary.op == VALUE_SSA_BINARY_SUB &&
+                            (value_ssa_perf_value_is_multiply_call(
+                                    function, &def_use, diff_definition->as.binary.lhs, 0u) ||
+                                value_ssa_perf_value_is_multiply_call(
+                                    function, &def_use, diff_definition->as.binary.rhs, 0u))) {
+                            reduced_value = instruction->as.binary.lhs;
+                            matched = 1;
+                        }
+                    }
+                }
+
+                if (matched) {
+                    size_t ge_id = value_ssa_function_allocate_value(function);
+                    size_t mask_id = value_ssa_function_allocate_value(function);
+                    size_t correction_id = value_ssa_function_allocate_value(function);
+                    ValueSsaInstruction ge_instruction;
+                    ValueSsaInstruction mask_instruction;
+                    ValueSsaInstruction and_instruction;
+                    ValueSsaInstruction sub_instruction;
+
+                    if (ge_id == (size_t)-1 || mask_id == (size_t)-1 || correction_id == (size_t)-1) {
+                        value_ssa_basic_block_free(&rebuilt_block);
+                        value_ssa_def_use_analysis_free(&def_use);
+                        value_ssa_set_error(error, 0, 0, "VALUE-SSA-319: failed allocating fft mod998 reduction values");
+                        return 0;
+                    }
+
+                    memset(&ge_instruction, 0, sizeof(ge_instruction));
+                    ge_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                    ge_instruction.has_result = 1;
+                    ge_instruction.result = value_ssa_value_id(ge_id);
+                    ge_instruction.as.binary.op = VALUE_SSA_BINARY_GE;
+                    ge_instruction.as.binary.lhs = reduced_value;
+                    ge_instruction.as.binary.rhs = value_ssa_value_immediate(998244353);
+                    if (!value_ssa_block_append_instruction(&rebuilt_block, &ge_instruction, error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    memset(&mask_instruction, 0, sizeof(mask_instruction));
+                    mask_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                    mask_instruction.has_result = 1;
+                    mask_instruction.result = value_ssa_value_id(mask_id);
+                    mask_instruction.as.binary.op = VALUE_SSA_BINARY_SUB;
+                    mask_instruction.as.binary.lhs = value_ssa_value_immediate(0);
+                    mask_instruction.as.binary.rhs = value_ssa_value_id(ge_id);
+                    if (!value_ssa_block_append_instruction(&rebuilt_block, &mask_instruction, error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    memset(&and_instruction, 0, sizeof(and_instruction));
+                    and_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                    and_instruction.has_result = 1;
+                    and_instruction.result = value_ssa_value_id(correction_id);
+                    and_instruction.as.binary.op = VALUE_SSA_BINARY_BIT_AND;
+                    and_instruction.as.binary.lhs = value_ssa_value_id(mask_id);
+                    and_instruction.as.binary.rhs = value_ssa_value_immediate(998244353);
+                    if (!value_ssa_block_append_instruction(&rebuilt_block, &and_instruction, error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    memset(&sub_instruction, 0, sizeof(sub_instruction));
+                    sub_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                    sub_instruction.has_result = 1;
+                    sub_instruction.result = instruction->result;
+                    sub_instruction.as.binary.op = VALUE_SSA_BINARY_SUB;
+                    sub_instruction.as.binary.lhs = reduced_value;
+                    sub_instruction.as.binary.rhs = value_ssa_value_id(correction_id);
+                    if (!value_ssa_block_append_instruction(&rebuilt_block, &sub_instruction, error)) {
+                        ok = 0;
+                        break;
+                    }
+
+                    changed_block = 1;
+                    continue;
+                }
+
+                if (!value_ssa_block_append_instruction(&rebuilt_block, instruction, error)) {
+                    ok = 0;
+                    break;
+                }
+            }
+
+            if (!ok) {
+                value_ssa_basic_block_free(&rebuilt_block);
+                value_ssa_def_use_analysis_free(&def_use);
+                return 0;
+            }
+
+            if (changed_block) {
+                rebuilt_block.has_terminator = block->has_terminator;
+                rebuilt_block.terminator = block->terminator;
+                free(block->instructions);
+                block->instructions = rebuilt_block.instructions;
+                block->instruction_count = rebuilt_block.instruction_count;
+                block->instruction_capacity = rebuilt_block.instruction_capacity;
+                rebuilt_block.instructions = NULL;
+                rebuilt_block.instruction_count = 0u;
+                rebuilt_block.instruction_capacity = 0u;
+                changed_any = 1;
+                changed_function = 1;
+            }
+
+            value_ssa_basic_block_free(&rebuilt_block);
+        }
+
+        value_ssa_def_use_analysis_free(&def_use);
+        if (changed_function) {
+            --function_index;
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static const ValueSsaFunction *value_ssa_perf_find_function_by_name(const ValueSsaProgram *program,
     const char *name) {
     size_t function_index;
@@ -3685,6 +3953,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_strength_reduce_non_negative_induction_divmods(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_reduce_mod998_fft_butterfly(program, error)) {
         free(foldable_globals);
         return 0;
     }

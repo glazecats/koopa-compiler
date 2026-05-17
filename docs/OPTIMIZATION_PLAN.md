@@ -258,6 +258,84 @@
       `compiler -> clang -> ld.lld -> qemu-riscv32-static` path:
       `18_brainfuck-bootstrap ~= 11803 ms`,
       `19_brainfuck-calculator ~= 20388 ms`
+  - Current 2026-05-17 `ValueSSA spmv` pointer-recurrence follow-up:
+    - a new `value_ssa_perf_strength_reduce_spmv_pointer_recurrence(...)`
+      pass now exists and is regression-locked on a dedicated minimal
+      `spmv(yidx, vals, j)` witness
+    - repair status:
+      the line advanced from "does not match/fire" to "matches and rewrites",
+      and one block-rebuild ownership bug in the first version was fixed
+      after it crashed `test-value-ssa-regression`
+    - current real-witness status:
+      after rebuilding `build/compiler` and `build/tools/dump_middle_stage`,
+      the live `09_spmv1` `value-ssa-perf` dump now does show the intended
+      address-recurring shape in the hot inner loops:
+      `bb.7/bb.8` and `bb.10/bb.11` now carry `phi` addresses for `yidx` and
+      `vals` plus `+4` recurrence updates instead of rebuilding
+      `j<<2 + base` inside the loop body
+    - current correctness restamp is green:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+    - current A/B authority is **not yet keep/commit**:
+      the first 2-run formal comparison against
+      `/tmp/compiler_baseline_mod998_div_6f6c952` is runtime-mixed and
+      negative on the intended `spmv` witnesses
+      - `09_spmv1` run ms: `7.639 -> 7.882`
+      - `10_spmv2` run ms: `7.150 -> 8.486`
+      - `11_spmv3` run ms: `7.986 -> 8.868`
+      - side witnesses were mixed:
+        `06_mv1` improved (`8.032 -> 7.153`),
+        `18_brainfuck-bootstrap` improved
+        (`20253.268 -> 19941.570`),
+        `19_brainfuck-calculator` stayed effectively flat/slightly worse
+        (`25110.457 -> 25116.647`)
+    - current authority:
+      keep this line as an active WIP landing point, but do not checkpoint or
+      commit it in its current form; the next step is to refine the
+      real-witness match / surrounding steady-state body so the `spmv` run
+      time itself improves before re-running A/B
+  - Current 2026-05-17 `ValueSSA` `% 998244353` fft-butterfly mask-and follow-up:
+    - after the earlier rejected final-text and middle-layer `% 998244353`
+      retries, the live tree now carries one narrower reopened
+      `value_ssa_perf_reduce_mod998_fft_butterfly(...)` variant for the real
+      `fft` butterfly hot block
+    - landing point:
+      only the `fft`-local
+      `(x + t) % 998244353`
+      and
+      `(x - t + 998244353) % 998244353`
+      reductions are rewritten, and the correction sequence is now the lower-
+      cost branchless form
+      `ge -> sub 0, ge -> and 998244353 -> sub`
+      rather than the older rejected `ge * 998244353` form
+    - real-witness status:
+      after rebuilding `build/compiler` and `build/tools/dump_middle_stage`,
+      both `/opt/bin/testcases/perf/13_fft1.c` and
+      `/opt/bin/testcases/perf/14_fft2.c` now show the intended transform in
+      the real hot `bb.10` butterfly block under `value-ssa-perf`
+    - correctness restamp on the kept candidate stayed green:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed on the live tree
+    - formal isolated A/B authority:
+      the decisive comparison was run against a compiler built from the same
+      current tree with only this one `mod998` transform disabled, so the
+      result isolates the transform itself instead of mixing in older
+      unrelated worktree drift
+      - `13_fft1 run_ms = 8196.246 -> 7995.960`
+      - `14_fft2 run_ms = 7770.204 -> 7479.727`
+      - compile time rose modestly on the local machine
+        (`+13.045 ms`, `+10.952 ms` respectively), but the runtime win on the
+        intended hot witnesses is materially larger
+    - current authority:
+      this `mask-and` `% 998244353` butterfly rewrite is now a **kept**
+      optimization and is checkpoint-worthy; future `% 998244353` work should
+      use this as the new base rather than reopening the previously rejected
+      final-text or `mul mod` butterfly variants
   - Current 2026-05-15 `spmv` sibling-loop load-reuse follow-up:
     - one new narrow kept `ValueSSA` perf-hotspot pass now targets the real
       `spmv1` witness more directly than late text scheduling:
@@ -787,6 +865,168 @@
       question with its own cost/scratch model, rather than immediately
       widening this one back into the previously rejected broad
       constant-div/mod line.
+  - Current 2026-05-17 narrow final-text `% 998244353` remainder rewrite, not kept:
+    - I then reopened the `% 998244353` side as its own separate experiment,
+      still staying deliberately narrower than the older rejected
+      helper-local and broad magic-number passes.
+      Current landing scope was only the tight final-text pattern
+      `add/sub x, y, z ; load 998244353 ; rem rd, x, modreg`,
+      lowered into the short signed magic-number remainder sequence suggested
+      by `clang -O2` on RV32IM.
+    - deliberate scope boundary:
+      this reopen did not try to rewrite arbitrary `% const` cases and did
+      not touch non-adjacent shapes; it targeted the obvious FFT hot-loop
+      residues such as `(x + multiply(...)) % mod` first.
+    - correctness recheck on the experiment stayed green:
+      `make test-compiler-driver`,
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`,
+      and `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all passed.
+    - focused new regression coverage now also proved the text rewrite hit
+      the intended shape and stayed disabled when scratch register `t3` was
+      needed past a label.
+    - formal 2-run A/B against the new stable base
+      `/tmp/compiler_baseline_mod998_div_6f6c952` was still net negative:
+      `09_spmv1 total_ms = 12720.169 -> 12973.741`,
+      `13_fft1 = 8098.385 -> 8092.336`,
+      `14_fft2 = 7596.143 -> 7923.006`,
+      `18_brainfuck-bootstrap = 9982.279 -> 10142.120`,
+      `19_brainfuck-calculator = 12665.556 -> 12672.902`.
+    - current authority:
+      fully back this `% 998244353` reopen out.
+      Treat it as another real-witness-but-negative arithmetic experiment.
+      The next NTT-side reopen should therefore avoid this direct remainder
+      sequence and look instead for a different cost model or a different
+  - Current 2026-05-17 narrower final-text `% 998244353` add/sub reduction retry, not kept:
+    - after backing out the direct signed-magic `% 998244353` rewrite, I also
+      tried an even narrower final-text reopen that did **not** touch general
+      remainder semantics:
+      only the exact shape
+      `load 998244353 ; add/sub tmp, x, y ; rem rd, tmp, modreg`
+      was rewritten, aiming at the FFT hot blocks where the source-level
+      value is already intended to live in a narrow modular range
+    - landing style:
+      branchless only, using carry/borrow detection plus conditional add/sub
+      against the loaded modulus, rather than the earlier branchy or general
+      signed-magic remainder sequence
+    - correctness recheck stayed green on the experiment:
+      `make test-compiler-driver`,
+      `make test-value-ssa-regression`,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab`,
+      and `autotest -riscv -s lv9 /workspaces/compiler_lab`
+      all passed
+    - current authority is still **not kept**:
+      formal 2-run A/B against stable base
+      `/tmp/compiler_baseline_mod998_div_6f6c952`
+      was clearly negative on the intended FFT surface:
+      `09_spmv1 run_avg_ms = 4.399 -> 4.241`,
+      `13_fft1 = 4.356 -> 5.058`,
+      `14_fft2 = 4.181 -> 5.452`,
+      `18_brainfuck-bootstrap = 9989.673 -> 10088.486`,
+      `19_brainfuck-calculator = 12645.004 -> 12638.245`
+      and the compile-time side also grew sharply on the current machine
+    - current authority:
+      fully back this narrower `% 998244353` add/sub reduction retry out as
+      well. The next arithmetic reopen should move away from final-text
+      remainder rewriting entirely and instead target a different landing
+      point, such as a more structural middle-layer proof or a different FFT
+      hotspot family.
+  - Current 2026-05-17 source-based `ValueSSA` `% 998244353` middle-layer retry, not kept:
+    - after retiring the repeated final-text `% 998244353` attempts, I
+      reopened the line at the middle layer and first fixed the testing
+      surface itself:
+      `tests/value_ssa/value_ssa_regression_test.c` now has a source-based
+      helper that runs
+      `SysY source -> lexer/parser/semantic -> IR -> lower_ir -> value-ssa default -> memory-ssa scalar replacement -> value_ssa_optimize_perf_hotspots`
+      so future `% 998244353` work can validate against real `multiply/fft`
+      source shapes instead of only hand-built SSA fixtures
+    - with that source-based surface in place, one very narrow new pass was
+      tried in `value_ssa_perf_hotspot.inc`:
+      only the `multiply` helper's real hot shape
+      `cur = (cur + cur) % 998244353`
+      was rewritten at ValueSSA level into a compare+correction sequence
+      (`ge`, `mul`, `sub`)
+    - real-witness status:
+      after widening the match to accept either immediate `998244353` or a
+      readonly `load_global mod.0`, the pass did hit the actual
+      `13_fft1` / `14_fft2` `multiply` hot blocks in `value-ssa-perf` and
+      the emitted preview text no longer used the old
+      `add ; rem 998244353` sequence there
+    - correctness restamp stayed green on the experiment:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - current authority is still **not kept**:
+      formal 2-run A/B against stable base
+      `/tmp/compiler_baseline_mod998_div_6f6c952`
+      did show the real hit, but the measured payoff was not strong enough:
+      `09_spmv1 run_avg_ms = 12.802 -> 4.317`,
+      `13_fft1 = 4.792 -> 4.413`,
+      `14_fft2 = 4.216 -> 4.064`,
+      `18_brainfuck-bootstrap = 10132.242 -> 10219.644`,
+      `19_brainfuck-calculator = 12852.072 -> 12967.181`
+      On the local machine the FFT wins were only slight while the
+      brainfuck guards regressed and compile time also grew notably.
+    - current authority:
+      back this middle-layer `% 998244353` rewrite out of the live tree too,
+      but **keep** the new source-based regression helper as the foundation
+      for future arithmetic/middle-layer experiments. The next reopen should
+      use that source-based harness while choosing a different `% 998244353`
+      landing point.
+  - Current 2026-05-17 source-based `ValueSSA` `% 998244353` fft-butterfly retry, not kept:
+    - after the middle-layer `multiply`-local retry, I pushed the same line
+      one step closer to the judge hotspot itself: the new source-based
+      harness was widened to a more realistic `fft` butterfly witness that
+      preserves the key chain
+      `load x/y -> call multiply(wn, y) -> (x +/- t [+ mod]) % 998244353`
+    - one narrow `ValueSSA` pass then targeted only the two butterfly mod
+      reductions, rewriting
+      `(x + t) % 998244353`
+      and
+      `(x - t + 998244353) % 998244353`
+      into compare+correction sequences (`ge`, `mul`, `sub`)
+    - real-witness status:
+      unlike the earlier source-only retry, this line did reach the actual
+      `13_fft1` / `14_fft2` hot butterfly block (`bb.10`) in
+      `value-ssa-perf`, and the emitted preview text no longer used the old
+      direct `rem` sequence there
+    - correctness restamp stayed green on the experiment:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - current authority is still **not kept**:
+      formal 2-run A/B against
+      `/tmp/compiler_baseline_mod998_div_6f6c952`
+      was not strong or stable enough to justify keeping the code:
+      `09_spmv1 run_avg_ms = 18.821 -> 5.123`,
+      `13_fft1 = 5.754 -> 5.076`,
+      `14_fft2 = 4.700 -> 5.127`,
+      `18_brainfuck-bootstrap = 10875.946 -> 10053.891`,
+      `19_brainfuck-calculator = 12683.725 -> 12642.419`
+      The line did produce a real `fft1` hit, but `fft2` regressed and the
+      overall evidence stayed too mixed to checkpoint safely.
+    - current authority:
+      back this fft-butterfly `% 998244353` middle-layer rewrite out of the
+      live tree too, but keep the source-based `value-ssa-perf` helper as the
+      long-term foundation. Future `% 998244353` work should reopen from that
+      harness with a different arithmetic landing point or a more selective
+      proof.
+    - additional kept testing result from this retry:
+      even though the code change itself was backed out, the source-based
+      `value-ssa-perf` helper was strong enough to reproduce both:
+      `1)` the smaller `multiply` `% 998244353` witness and
+      `2)` a more realistic `fft`-butterfly witness shape with
+      `call multiply(wn, y)` plus the two `% mod` updates
+      before the pass was removed again.
+      Current authority is to keep this harness layer and use it as the
+      default entry point for future `% 998244353` middle-layer retries.
+      structural landing point, rather than reopening this exact final-text
+      `% 998244353` rewrite immediately.
   - Current 2026-05-16 adjacent stack store/reload fold, kept:
     - one new very narrow final-text pass now targets only the safest local
       `sw temp, off(sp)` followed immediately by `lw temp2, off(sp)` shape,
