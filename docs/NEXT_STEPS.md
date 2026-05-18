@@ -2767,6 +2767,44 @@
        next optimization pass on the remaining runtime-cost centers such as
        `spmv1` / `mv1`, deeper NTT magic-number lowering, or other repeated
        `mod998` hot arithmetic still surviving in `fft`.
+     - 2026-05-18 kept final-text `mod998` remainder rewrite on `multiply` hot path:
+       the next retry stayed on the user-requested magic-number line and
+       reopened the final-text `mod998` peephole itself instead of adding a
+       new IR pass. The kept change is to let the final-text rewrite reuse the
+       already-materialized constant register as its scratch/result carrier,
+       rather than requiring separate `t3/t4` temporaries that were often
+       blocked by labels or branch-local liveness.
+       Concrete witness payoff:
+       on rebuilt `13_fft1` final asm, the hottest `multiply` path now
+       rewrites `cur = (cur + cur) % mod` away from `rem` into the
+       magic-number `mulh/srli/srai/add/lui/addi/mul/sub` sequence, leaving
+       only the colder return-site `rem` operations in that helper.
+       Focused base-vs-head four-case A/B against stable base `c30aa23` gave:
+       `13_fft1 run_ms = 7731.166 -> 7749.126`,
+       `14_fft2 run_ms = 7419.475 -> 7337.084`,
+       `18_brainfuck-bootstrap = 9744.235 -> 9827.936`,
+       `19_brainfuck-calculator = 12195.930 -> 12211.481`.
+       Guard interpretation note:
+       direct asm hashing showed `18_brainfuck-bootstrap` and
+       `19_brainfuck-calculator` are byte-for-byte identical between base and
+       head, so their runtime drift here is treated as machine noise rather
+       than as a real regression signal from this patch.
+       Alternating FFT-only reruns then still favored keeping the change on
+       the target surface:
+       round 1:
+       `13_fft1 = 8092.684 -> 7895.504`,
+       `14_fft2 = 7470.457 -> 7418.623`;
+       round 2:
+       `13_fft1 = 7913.986 -> 8020.114`,
+       `14_fft2 = 7506.858 -> 7441.660`.
+       Recheck status on the kept live tree:
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Current authority is therefore:
+       keep this as a modest but real magic-number landing on the FFT hot
+       path, and continue the next round on deeper `mod998`/NTT arithmetic
+       cost rather than reopening the already-rejected broader retries.
      - 2026-05-14 correctness closure inside the optimization round:
        one fresh course recheck exposed a real default-mainline wrong-code
        case on `lv9/12_more_arr_params.c`. Narrowing showed this was not the

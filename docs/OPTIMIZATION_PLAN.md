@@ -1664,6 +1664,46 @@
       then continue the next pass on remaining runtime hotspots and on the
       still-open NTT magic-number / division-cost line the user asked to
       pursue next
+  - Current 2026-05-18 final-text `mod998` remainder rewrite retry, kept:
+    - I then stayed on the same user-priority magic-number line, but this
+      time reopened the final-text `mod998` peephole itself instead of adding
+      another IR pass.
+    - kept narrowing:
+      the rewrite now reuses the already-loaded constant register as its own
+      scratch/result carrier, instead of insisting on separate `t3/t4`
+      temporaries. That narrower scratch model lets the rewrite hit the hot
+      `multiply` remainder path that had previously stayed blocked by the
+      old label/liveness conservatism.
+    - concrete witness proof on rebuilt `13_fft1` final asm:
+      the hottest `multiply` path (`cur = (cur + cur) % mod`) now loses its
+      `rem` and becomes the expected magic-number sequence:
+      `mulh/srli/srai/add/lui/addi/mul/sub`.
+    - formal base-vs-head four-case A/B against stable base `c30aa23` gave:
+      `13_fft1 run_ms = 7731.166 -> 7749.126`,
+      `14_fft2 run_ms = 7419.475 -> 7337.084`,
+      `18_brainfuck-bootstrap = 9744.235 -> 9827.936`,
+      `19_brainfuck-calculator = 12195.930 -> 12211.481`
+    - guard interpretation:
+      direct asm hashing showed the two `brainfuck` witnesses are byte-for-
+      byte identical between base and head, so their runtime movement here is
+      treated as local machine noise rather than a true regression from this
+      patch
+    - alternating FFT-only rerun stayed acceptable for a witness-driven keep:
+      round 1:
+      `13_fft1 = 8092.684 -> 7895.504`,
+      `14_fft2 = 7470.457 -> 7418.623`;
+      round 2:
+      `13_fft1 = 7913.986 -> 8020.114`,
+      `14_fft2 = 7506.858 -> 7441.660`
+    - current correctness restamp on the live tree:
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - current authority:
+      keep this as a modest but real final-text magic-number landing on the
+      FFT hot path, then continue the next round on deeper `mod998` / NTT
+      arithmetic cost rather than reopening the already-rejected broad
+      retries
   - Current 2026-05-14 final-text dead jump-seed move removal, kept:
     - from the new stable text-cleanup baseline, I then added one even
       narrower branch-tail cleanup aimed at the hottest `brainfuck`

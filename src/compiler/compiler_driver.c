@@ -2788,24 +2788,19 @@ static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text) {
                 lines, line_count, index, imm_reg, sizeof(imm_reg), &imm_value, &pattern_len) &&
             index + pattern_len < line_count &&
             imm_value == 998244353 &&
-            strcmp(imm_reg, "t3") != 0 &&
-            strcmp(imm_reg, "t4") != 0 &&
             !compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
-                lines, line_count, index + pattern_len + 1u, "t3") &&
-            !compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
-                lines, line_count, index + pattern_len + 1u, "t4")) {
+                lines, line_count, index + pattern_len + 1u, imm_reg)) {
             if (compiler_riscv_preview_line_is_div_regs(
                     lines[index + pattern_len], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
                 strcmp(rs2, imm_reg) == 0 &&
-                strcmp(rs1, "t3") != 0 &&
-                strcmp(rs1, "t4") != 0 &&
-                strcmp(rd, "t3") != 0) {
-                if (!compiler_builder_appendf(&builder, "  lui t3, 70493\n") ||
-                    !compiler_builder_appendf(&builder, "  addi t3, t3, -2031\n") ||
-                    !compiler_builder_appendf(&builder, "  mulh %s, %s, t3\n", rd, rs1) ||
-                    !compiler_builder_appendf(&builder, "  srli t3, %s, 31\n", rd) ||
+                strcmp(rs1, imm_reg) != 0 &&
+                strcmp(rd, imm_reg) != 0) {
+                if (!compiler_builder_appendf(&builder, "  lui %s, 70493\n", imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  addi %s, %s, -2031\n", imm_reg, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  mulh %s, %s, %s\n", rd, rs1, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  srli %s, %s, 31\n", imm_reg, rd) ||
                     !compiler_builder_appendf(&builder, "  srai %s, %s, 26\n", rd, rd) ||
-                    !compiler_builder_appendf(&builder, "  add %s, %s, t3\n", rd, rd)) {
+                    !compiler_builder_appendf(&builder, "  add %s, %s, %s\n", rd, rd, imm_reg)) {
                     goto cleanup;
                 }
                 index += pattern_len + 1u;
@@ -2815,20 +2810,18 @@ static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text) {
             if (compiler_riscv_preview_line_is_rem_regs(
                     lines[index + pattern_len], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
                 strcmp(rs2, imm_reg) == 0 &&
-                strcmp(rs1, "t3") != 0 &&
-                strcmp(rs1, "t4") != 0 &&
-                strcmp(rd, "t3") != 0 &&
-                strcmp(rd, "t4") != 0) {
-                if (!compiler_builder_appendf(&builder, "  lui t3, 70493\n") ||
-                    !compiler_builder_appendf(&builder, "  addi t3, t3, -2031\n") ||
-                    !compiler_builder_appendf(&builder, "  mulh t4, %s, t3\n", rs1) ||
-                    !compiler_builder_appendf(&builder, "  srli t3, t4, 31\n") ||
-                    !compiler_builder_appendf(&builder, "  srai t4, t4, 26\n") ||
-                    !compiler_builder_appendf(&builder, "  add t4, t4, t3\n") ||
-                    !compiler_builder_appendf(&builder, "  lui t3, 243712\n") ||
-                    !compiler_builder_appendf(&builder, "  addi t3, t3, 1\n") ||
-                    !compiler_builder_appendf(&builder, "  mul t4, t4, t3\n") ||
-                    !compiler_builder_appendf(&builder, "  sub %s, %s, t4\n", rd, rs1)) {
+                strcmp(rs1, imm_reg) != 0 &&
+                strcmp(rd, imm_reg) != 0) {
+                if (!compiler_builder_appendf(&builder, "  lui %s, 70493\n", imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  addi %s, %s, -2031\n", imm_reg, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  mulh %s, %s, %s\n", rd, rs1, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  srli %s, %s, 31\n", imm_reg, rd) ||
+                    !compiler_builder_appendf(&builder, "  srai %s, %s, 26\n", rd, rd) ||
+                    !compiler_builder_appendf(&builder, "  add %s, %s, %s\n", rd, rd, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  lui %s, 243712\n", imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  addi %s, %s, 1\n", imm_reg, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  mul %s, %s, %s\n", rd, rd, imm_reg) ||
+                    !compiler_builder_appendf(&builder, "  sub %s, %s, %s\n", rd, rs1, rd)) {
                     goto cleanup;
                 }
                 index += pattern_len + 1u;

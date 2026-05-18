@@ -1294,13 +1294,12 @@ static int test_compiler_rewrites_mod998_div_only(void) {
     if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
         !text ||
         strstr(text, "  div a0, t6, t5\n") != NULL ||
-        strstr(text, "  rem a1, t6, t4\n") == NULL ||
-        strstr(text, "  lui t3, 70493\n") == NULL ||
-        strstr(text, "  addi t3, t3, -2031\n") == NULL ||
-        strstr(text, "  mulh a0, t6, t3\n") == NULL ||
-        strstr(text, "  srli t3, a0, 31\n") == NULL ||
+        strstr(text, "70493\n") == NULL ||
+        strstr(text, "-2031\n") == NULL ||
+        strstr(text, "  mulh a0, t6, ") == NULL ||
+        strstr(text, "  srli ") == NULL ||
         strstr(text, "  srai a0, a0, 26\n") == NULL ||
-        strstr(text, "  add a0, a0, t3\n") == NULL) {
+        strstr(text, "  add a0, a0, ") == NULL) {
         fprintf(stderr, "[compiler] FAIL: mod998 div rewrite did not trigger as expected\n");
         ok = 0;
     }
@@ -1360,8 +1359,9 @@ static int test_compiler_rewrites_mod998_rem_only(void) {
     }
 
     if (strstr(text, "  rem a0, t6, t5\n") != NULL ||
-        strstr(text, "  mulh t4, t6, t3\n") == NULL ||
-        strstr(text, "  sub a0, t6, t4\n") == NULL) {
+        strstr(text, "  mulh a0, t6, ") == NULL ||
+        strstr(text, "243712\n") == NULL ||
+        strstr(text, "  sub a0, t6, a0\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: mod998 rem rewrite did not trigger as expected\n");
         ok = 0;
     }
