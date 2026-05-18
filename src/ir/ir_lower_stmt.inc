@@ -1333,6 +1333,7 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
             if (initializer_expr) {
                 const AstExpression **initializer_slots = NULL;
                 size_t slot_count = 0u;
+                int compact_applied = 0;
 
                 if (!ir_expand_array_initializer_slots(initializer_expr,
                         stmt->declaration_array_ranks[i],
@@ -1342,6 +1343,21 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                         ctx->error)) {
                     free(array_extents);
                     return 0;
+                }
+                if (!ir_try_emit_compact_large_local_array_initializer(
+                        ctx,
+                        local_id,
+                        initializer_slots,
+                        slot_count,
+                        &compact_applied)) {
+                    free(initializer_slots);
+                    free(array_extents);
+                    return 0;
+                }
+                if (compact_applied) {
+                    free(initializer_slots);
+                    free(array_extents);
+                    continue;
                 }
                 for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
                     IrValueRef slot_value = ir_value_immediate(0);
@@ -2127,6 +2143,152 @@ static int ir_expand_array_initializer_slots(const AstExpression *initializer_ex
 
     *out_slots = slots;
     *out_slot_count = slot_count;
+    return 1;
+}
+
+static int ir_try_emit_compact_large_local_array_initializer(IrLowerContext *ctx,
+    size_t base_local_id,
+    const AstExpression **initializer_slots,
+    size_t slot_count,
+    int *out_applied) {
+    size_t non_zero_count = 0u;
+    size_t first_non_zero_index = 0u;
+    size_t slot_index;
+    size_t loop_index_local_id = (size_t)-1;
+    size_t entry_block_id;
+    size_t header_block_id;
+    size_t body_block_id;
+    size_t exit_block_id;
+    IrValueRef index_local;
+    IrValueRef index_value;
+    IrValueRef compare_value;
+    IrValueRef one_value = ir_value_immediate(1);
+    IrValueRef zero_value = ir_value_immediate(0);
+    IrValueRef slot_count_value;
+    IrValueRef array_base_addr;
+    IrValueRef byte_offset;
+    IrValueRef slot_addr;
+    IrValueRef next_index;
+    size_t temp_id;
+
+    if (out_applied) {
+        *out_applied = 0;
+    }
+    if (!ctx || !initializer_slots || slot_count == 0u) {
+        return 0;
+    }
+
+    if (slot_count < 256u) {
+        return 1;
+    }
+
+    for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+        const AstExpression *slot_expr = initializer_slots[slot_index];
+        long long value = 0;
+
+        if (!slot_expr) {
+            continue;
+        }
+        if (!ir_eval_constant_int_expression(ctx, slot_expr, &value)) {
+            return 1;
+        }
+        value = ir_normalize_sysy_int_value(value);
+        if (value != 0) {
+            if (non_zero_count == 0u) {
+                first_non_zero_index = slot_index;
+            }
+            ++non_zero_count;
+            if (non_zero_count > 8u) {
+                return 1;
+            }
+        }
+    }
+
+    if (non_zero_count == slot_count) {
+        return 1;
+    }
+
+    if (!ir_function_append_local(ctx->function, "__arr_init_i", 0, &loop_index_local_id, ctx->error)) {
+        return 0;
+    }
+    if (!ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+            ctx->function->locals[loop_index_local_id].source_name,
+            loop_index_local_id,
+            IR_LOWER_BINDING_SCALAR_LOCAL,
+            0u,
+            NULL,
+            0,
+            0,
+            0)) {
+        ir_set_error(ctx->error, 0, 0, "IR-INT-077: failed to record compact array-init loop local");
+        return 0;
+    }
+
+    index_local = ir_value_local(loop_index_local_id);
+    entry_block_id = ctx->block_id;
+    if (!ir_emit_mov(ctx, index_local, zero_value) ||
+        !ir_function_append_block(ctx->function, &header_block_id, NULL, ctx->error) ||
+        !ir_function_append_block(ctx->function, &body_block_id, NULL, ctx->error) ||
+        !ir_function_append_block(ctx->function, &exit_block_id, NULL, ctx->error) ||
+        !ir_block_set_jump(ir_function_get_block_mut(ctx->function, entry_block_id), header_block_id, ctx->error)) {
+        return 0;
+    }
+
+    ctx->block_id = header_block_id;
+    ctx->has_block = 1;
+    temp_id = ir_allocate_temp(ctx->function);
+    index_value = ir_value_temp(temp_id);
+    temp_id = ir_allocate_temp(ctx->function);
+    compare_value = ir_value_temp(temp_id);
+    slot_count_value = ir_value_immediate((long long)slot_count);
+    if (!ir_emit_mov(ctx, index_value, index_local) ||
+        !ir_emit_binary(ctx, compare_value, IR_BINARY_LT, index_value, slot_count_value) ||
+        !ir_block_set_branch(ir_lower_current_block(ctx), compare_value, body_block_id, exit_block_id, ctx->error)) {
+        return 0;
+    }
+
+    ctx->block_id = body_block_id;
+    ctx->has_block = 1;
+    temp_id = ir_allocate_temp(ctx->function);
+    array_base_addr = ir_value_temp(temp_id);
+    temp_id = ir_allocate_temp(ctx->function);
+    byte_offset = ir_value_temp(temp_id);
+    temp_id = ir_allocate_temp(ctx->function);
+    slot_addr = ir_value_temp(temp_id);
+    temp_id = ir_allocate_temp(ctx->function);
+    next_index = ir_value_temp(temp_id);
+    if (!ir_emit_addr_local(ctx, array_base_addr, base_local_id) ||
+        !ir_emit_binary(ctx, byte_offset, IR_BINARY_MUL, index_value, ir_value_immediate(4)) ||
+        !ir_emit_binary(ctx, slot_addr, IR_BINARY_ADD, array_base_addr, byte_offset) ||
+        !ir_emit_store_indirect(ctx, slot_addr, zero_value) ||
+        !ir_emit_binary(ctx, next_index, IR_BINARY_ADD, index_value, one_value) ||
+        !ir_emit_mov(ctx, index_local, next_index) ||
+        !ir_block_set_jump(ir_lower_current_block(ctx), header_block_id, ctx->error)) {
+        return 0;
+    }
+
+    ctx->block_id = exit_block_id;
+    ctx->has_block = 1;
+    for (slot_index = 0u; slot_index < slot_count; ++slot_index) {
+        const AstExpression *slot_expr = initializer_slots[slot_index];
+        long long value = 0;
+
+        if (!slot_expr || !ir_eval_constant_int_expression(ctx, slot_expr, &value)) {
+            continue;
+        }
+        value = ir_normalize_sysy_int_value(value);
+        if (value == 0) {
+            continue;
+        }
+        if (!ir_emit_mov(ctx, ir_value_local(base_local_id + slot_index), ir_value_immediate(value))) {
+            return 0;
+        }
+    }
+
+    (void)first_non_zero_index;
+    if (out_applied) {
+        *out_applied = 1;
+    }
     return 1;
 }
 

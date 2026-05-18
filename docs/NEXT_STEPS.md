@@ -333,6 +333,55 @@
        optimization candidate and use it as the new local base for the next
        optimization round; do **not** confuse it with the still-unkept
        `spmv` pointer-recurrence experiment above
+     - later same-day `lv9/06_long_array` compile-time re-localization:
+       the next user-directed hotspot check then narrowed a completely
+       different slow witness than the `% 998244353` line:
+       `lv9/06_long_array` is slow mainly in normal `-riscv` compile time,
+       not in testcase runtime
+       - direct local measurement before the fix:
+         `-riscv compile_ms ~= 7929`, `asm_lines = 13847`
+       - the same source under `-perf` compiled in about `987 ms`, which
+         immediately suggested the issue was text-generation blow-up on the
+         normal route rather than the source program itself being expensive
+       - `profile_compiler_stages` confirmed the same story:
+         explicit front/middle/backend stage timers totaled only about
+         `0.048s` while `full_riscv` was about `6.745s`, so the real cost sat
+         downstream of those explicit stage measurements
+     - same-day root-cause proof:
+       direct `ir` / `lower-ir` dumps on `06_long_array` showed that the local
+       declaration
+       `int arr[4096] = {1};`
+       was being lowered into a fully flat initializer:
+       `4100` IR instructions and `4096` lower-IR `store_local`s
+     - same-day kept fix:
+       IR lowering now has a narrow compact path for very large, sparse,
+       side-effect-free local array initializers:
+       instead of materializing one direct slot write per element, lowering
+       emits
+       `1)` a zero-fill loop over the array and then
+       `2)` direct writes for the few explicit non-zero slots
+       This path is intentionally bounded for now:
+       it only fires when the array is large (`>= 256` elements), sparse
+       (`<= 8` non-zero slots), and all explicit initializer slots are
+       compile-time constant integers
+     - same-day real-witness restamp:
+       rebuilt `06_long_array` now lowers to a compact loop:
+       `ir instructions = 14`, `lower-ir instructions = 15`
+       and the final assembly shrinks to `47` lines
+     - same-day correctness restamp:
+       `make test-ir-regression`,
+       `make test-value-ssa-regression`,
+       `make test-compiler-driver`,
+       and `autotest -riscv -s lv9`
+       are all green on the kept candidate
+     - same-day formal A/B note:
+       2-run compile-time comparison against `HEAD` is decisively positive:
+       `head compile_ms ~= 6207.941`, `asm_lines = 13847`
+       `current compile_ms ~= 15.402`, `asm_lines = 47`
+     - current authority:
+       this `06_long_array` sparse-large-local-array initializer compaction is
+       now a kept compile-time optimization and should be treated as the next
+       local stable point once committed
        work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
        attempt has now been backed out. Current authority after rollback is:
        keep the commutative repeated pure-expression reuse,

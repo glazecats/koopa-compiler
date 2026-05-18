@@ -690,6 +690,35 @@ static int test_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items(vo
         "}\n");
 }
 
+static int test_ir_compacts_sparse_large_local_array_initializer(void) {
+    return expect_ir_dump("IR-LOCAL-ARRAY-SPARSE-LARGE-COMPACT",
+        "int main(){ int a[256]={1}; return a[0]; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    __arr_init_i.256 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = mov __arr_init_i.256\n"
+        "    tmp.1 = lt tmp.0, 256\n"
+        "    br tmp.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    tmp.2 = addr_local local.0\n"
+        "    tmp.3 = mul tmp.0, 4\n"
+        "    tmp.4 = add tmp.2, tmp.3\n"
+        "    0 = store_indirect tmp.4, 0\n"
+        "    tmp.5 = add tmp.0, 1\n"
+        "    __arr_init_i.256 = mov tmp.5\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    a.0 = mov 1\n"
+        "    tmp.6 = addr_local local.0\n"
+        "    tmp.7 = mul 0, 4\n"
+        "    tmp.8 = add tmp.6, tmp.7\n"
+        "    tmp.9 = load_indirect tmp.8\n"
+        "    ret tmp.9\n"
+        "}\n");
+}
+
 static int test_ir_accepts_2d_array_initializer_mixing_nested_and_scalar_items(void) {
     return expect_ir_lower_succeeds("IR-2D-ARRAY-NESTED-SCALAR-MIX",
         "int a[2][3]={{1},2,3,{4,5}};\n"
@@ -2236,6 +2265,7 @@ int main(void) {
     ok &= test_ir_accepts_runtime_global_array_initializer_with_short_circuit_and_calls();
     ok &= test_ir_accepts_multiple_runtime_global_initializers_after_branchy_helper_growth();
     ok &= test_ir_lowers_1d_array_initializer_mixing_nested_and_scalar_items();
+    ok &= test_ir_compacts_sparse_large_local_array_initializer();
     ok &= test_ir_accepts_2d_array_initializer_mixing_nested_and_scalar_items();
     ok &= test_ir_lowers_unary_minus_llong_min_initializer_without_host_ub();
     ok &= test_ir_lowers_add_overflow_initializer_without_host_ub();

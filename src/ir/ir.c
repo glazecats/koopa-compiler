@@ -202,6 +202,11 @@ static int ir_expand_array_initializer_slots(const AstExpression *initializer_ex
     const AstExpression ***out_slots,
     size_t *out_slot_count,
     IrError *error);
+static int ir_try_emit_compact_large_local_array_initializer(IrLowerContext *ctx,
+    size_t base_local_id,
+    const AstExpression **initializer_slots,
+    size_t slot_count,
+    int *out_applied);
 static int ir_ensure_builtin_function_signature(IrProgram *program,
     const char *name,
     IrFunction **out_function,

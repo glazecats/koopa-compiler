@@ -336,6 +336,53 @@
       optimization and is checkpoint-worthy; future `% 998244353` work should
       use this as the new base rather than reopening the previously rejected
       final-text or `mul mod` butterfly variants
+  - Current 2026-05-17 `lv9/06_long_array` compile-time follow-up:
+    - root-cause diagnosis:
+      this case is primarily a `-riscv` compile-time problem, not a runtime
+      problem
+      - old local measurement on the live tree before the fix:
+        `compile_ms ~= 7929`, `asm_lines = 13847`
+      - same source under `-perf` was only about `987 ms`, which narrowed the
+        pressure to the normal text-emission route rather than source-program
+        runtime
+      - direct stage profiling then showed front/middle passes were cheap
+        (`measured_stage_sum ~= 0.048s`) while `full_riscv ~= 6.745s`, which
+        isolated the real cost to giant final text generated downstream of the
+        explicit stage timers
+      - direct `ir` / `lower-ir` dumps confirmed the source of that blow-up:
+        `int a[4096] = {1};` was being lowered into `4096` explicit slot
+        writes (`4100` IR instructions / `4096` lower-IR `store_local`s)
+    - kept fix:
+      a new narrow IR-lowering compact path now rewrites very large, sparse,
+      side-effect-free local array initializers into
+      `1)` a zero-fill loop over the full local array and then
+      `2)` explicit writes for the few non-zero slots
+      instead of emitting one direct local assignment per element
+    - safety boundary:
+      this compact path is intentionally narrow for now; it only triggers when
+      the array is large (`>= 256` elements), the initializer is sparse
+      (`<= 8` non-zero slots), and every explicit initializer slot can be
+      folded as a constant integer during lowering
+    - current evidence:
+      - the dedicated IR witness
+        `int main(){ int a[256]={1}; return a[0]; }`
+        now lowers to a 4-block / 14-instruction IR loop instead of a
+        hundreds-of-slots flat initializer dump
+      - rebuilt real `06_long_array` now shows the same shape:
+        `ir instructions = 14`,
+        `lower-ir instructions = 15`
+      - formal 2-run compile-time A/B against `HEAD`:
+        `head compile_ms ~= 6207.941`, `asm_lines = 13847`
+        `current compile_ms ~= 15.402`, `asm_lines = 47`
+      - correctness restamp:
+        `make test-ir-regression`,
+        `make test-value-ssa-regression`,
+        `make test-compiler-driver`,
+        and `autotest -riscv -s lv9`
+        are all green on the kept candidate
+    - current authority:
+      this `06_long_array` sparse-large-local-array initializer compaction is
+      now a **kept** compile-time optimization and is checkpoint-worthy
   - Current 2026-05-15 `spmv` sibling-loop load-reuse follow-up:
     - one new narrow kept `ValueSSA` perf-hotspot pass now targets the real
       `spmv1` witness more directly than late text scheduling:
