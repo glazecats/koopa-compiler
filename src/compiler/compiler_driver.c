@@ -2816,13 +2816,23 @@ static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text) {
                     lines[index + pattern_len], rd, sizeof(rd), rs1, sizeof(rs1), rs2, sizeof(rs2)) &&
                 strcmp(rs2, imm_reg) == 0 &&
                 strcmp(rs1, "t3") != 0 &&
-                strcmp(rs1, "t4") != 0) {
-                /*
-                 * Keep the first reopen deliberately narrower than the older
-                 * rejected broad mod/div experiment: quotient-only first.
-                 * The `% 998244353` path can be revisited later with a more
-                 * careful scratch/cost model if the quotient win proves real.
-                 */
+                strcmp(rs1, "t4") != 0 &&
+                strcmp(rd, "t3") != 0 &&
+                strcmp(rd, "t4") != 0) {
+                if (!compiler_builder_appendf(&builder, "  lui t3, 70493\n") ||
+                    !compiler_builder_appendf(&builder, "  addi t3, t3, -2031\n") ||
+                    !compiler_builder_appendf(&builder, "  mulh t4, %s, t3\n", rs1) ||
+                    !compiler_builder_appendf(&builder, "  srli t3, t4, 31\n") ||
+                    !compiler_builder_appendf(&builder, "  srai t4, t4, 26\n") ||
+                    !compiler_builder_appendf(&builder, "  add t4, t4, t3\n") ||
+                    !compiler_builder_appendf(&builder, "  lui t3, 243712\n") ||
+                    !compiler_builder_appendf(&builder, "  addi t3, t3, 1\n") ||
+                    !compiler_builder_appendf(&builder, "  mul t4, t4, t3\n") ||
+                    !compiler_builder_appendf(&builder, "  sub %s, %s, t4\n", rd, rs1)) {
+                    goto cleanup;
+                }
+                index += pattern_len + 1u;
+                continue;
             }
         }
 

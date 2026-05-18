@@ -1337,6 +1337,74 @@ static int test_compiler_does_not_rewrite_mod998_div_when_t3_needed_past_label(v
     return ok;
 }
 
+static int test_compiler_rewrites_mod998_rem_only(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  rem a0, t6, t5\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem regression setup failed during optimize\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strstr(text, "  rem a0, t6, t5\n") != NULL ||
+        strstr(text, "  mulh t4, t6, t3\n") == NULL ||
+        strstr(text, "  sub a0, t6, t4\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 rem rewrite did not trigger as expected\n");
+        ok = 0;
+    }
+
+cleanup:
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_rewrite_mod998_rem_when_t3_needed_past_label(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  rem a0, t6, t5\n"
+        ".Lkeep_t3:\n"
+        "  add a1, t3, t4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem live-t3 regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem live-t3 regression setup failed during optimize\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strstr(text, "  rem a0, t6, t5\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 rem rewrite should stay disabled when t3 is needed past a label\n");
+        ok = 0;
+    }
+
+cleanup:
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_reuse_repeated_indexed_addr_triple_across_stack_slot_store(void) {
     static const char *source_text =
         "  slli a0, a2, 2\n"
@@ -2632,6 +2700,8 @@ int main(void) {
     ok &= test_compiler_rewrites_pow2_div_and_mod();
     ok &= test_compiler_rewrites_mod998_div_only();
     ok &= test_compiler_does_not_rewrite_mod998_div_when_t3_needed_past_label();
+    ok &= test_compiler_rewrites_mod998_rem_only();
+    ok &= test_compiler_does_not_rewrite_mod998_rem_when_t3_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base();
     ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_across_call_when_saved_addr_reg_survives_call();

@@ -462,6 +462,33 @@
        this `fft half_n` reuse retry has now been fully backed out from the
        live tree. Keep the negative result in memory and do not reopen this
        exact same-block half-length reuse path again without a stronger proof
+     - later same-day final-text `% 998244353 rem` retry, kept:
+       after the repeated negative broader `% 998244353` experiments, I
+       reopened the final-text lane again but kept the landing extremely
+       narrow:
+       only the remaining `% 998244353` `rem` sites inside the `multiply()`
+       helper are rewritten
+     - same-day implementation style:
+       this retry reuses the already-landed quotient-side magic-constant
+       materialization for `998244353`, and lowers the remainder as
+       `mulh -> quotient estimate -> quotient*mod -> x - quotient*mod`
+       under the same scratch-register / cross-label safety gates already used
+       by the existing `% 998244353 div` peephole
+     - same-day correctness restamp:
+       `make test-compiler-driver`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`
+       all stayed green
+     - same-day formal isolated A/B note:
+       this time the FFT-facing result is modest but positive instead of
+       negative:
+       `13_fft1 run_ms = 7862.851 -> 7831.425`
+       `14_fft2 run_ms = 7379.889 -> 7371.243`
+       `brainfuck` guard runs stayed in-family and did not show an obvious
+       regression
+     - current authority:
+       this narrow final-text `% 998244353 rem` retry is now a kept small
+       optimization candidate and should be checkpointed once committed
        work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
        attempt has now been backed out. Current authority after rollback is:
        keep the commutative repeated pure-expression reuse,

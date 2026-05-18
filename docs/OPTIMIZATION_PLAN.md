@@ -426,6 +426,35 @@
       Keep the negative datapoint in memory and do not reopen this exact
       reuse shape again without a more selective proof that avoids the
       `13_fft1` regression
+  - Current 2026-05-18 narrow final-text `% 998244353` remainder retry, kept:
+    - after several broader `% 998244353` attempts were rejected, I reopened
+      the final-text lane in a much narrower way:
+      only the remaining `% 998244353` `rem` sites inside the `multiply()`
+      helper are rewritten
+    - landing point:
+      reuse the already-landed quotient-side magic-constant setup for
+      `998244353`, and lower
+      `rem x, 998244353`
+      into
+      `mulh -> quotient estimate -> quotient*mod -> x - quotient*mod`
+      with the same scratch-safety constraints already used by the existing
+      `% 998244353 div` text rewrite
+    - focused regression coverage now locks both:
+      - the positive `rem`-rewrite trigger
+      - the existing “do not rewrite when `t3` must live past a label” guard
+    - correctness restamp stayed green:
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - formal isolated A/B is modest but positive on the intended FFT surface:
+      - `13_fft1 run_ms = 7862.851 -> 7831.425`
+      - `14_fft2 run_ms = 7379.889 -> 7371.243`
+      - `brainfuck` guard runs stayed in-family with no obvious regression
+      - compile time rose, but the targeted runtime witnesses still improved
+    - current authority:
+      this final-text `% 998244353 rem` retry is now a **kept** small
+      optimization and is checkpoint-worthy
   - Current 2026-05-17 `lv9/06_long_array` compile-time follow-up:
     - root-cause diagnosis:
       this case is primarily a `-riscv` compile-time problem, not a runtime
