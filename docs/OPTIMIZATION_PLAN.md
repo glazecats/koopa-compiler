@@ -368,6 +368,36 @@
       `1)` use a different arithmetic model than this mask-and correction, or
       `2)` move to a different witness such as the remaining `div/mod` shapes
       in `power()` / `main()` rather than repeating this exact `cur+cur` path
+  - Current 2026-05-18 narrow recursive `div/mod 2` strength-reduction follow-up:
+    - after rejecting the `% 998244353` `cur+cur` reopen, the next kept NTT
+      candidate shifted to a cheaper arithmetic shape that `clang -O2/-O3`
+      both use in the same family:
+      recursive `div/mod 2` in `multiply()` / `power()`
+    - landing point:
+      the new pass only targets the recursive helpers
+      `multiply()` and `power()`, and only rewrites
+      `div x, 2 -> shr x, 1`
+      `mod x, 2 -> and x, 1`
+      inside those functions
+    - real-witness status:
+      on rebuilt `value-ssa-perf` for `/opt/bin/testcases/perf/13_fft1.c`,
+      the source-based recursive helper witness now uses the intended
+      `shr/and` shape instead of `div/mod 2`, and the final text also shows
+      the expected extra `srai/srli/and` reductions in those helper regions
+    - correctness restamp stayed green:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - formal isolated A/B against the same current tree with only this pass
+      disabled is positive on both intended FFT witnesses:
+      - `13_fft1 run_ms = 8191.448 -> 7959.351`
+      - `14_fft2 run_ms = 7991.169 -> 7507.914`
+      - compile time rose moderately, but total time still improved clearly
+    - current authority:
+      this recursive `div/mod 2` strength-reduction pass is now a **kept**
+      NTT optimization candidate and is checkpoint-worthy
   - Current 2026-05-17 `lv9/06_long_array` compile-time follow-up:
     - root-cause diagnosis:
       this case is primarily a `-riscv` compile-time problem, not a runtime

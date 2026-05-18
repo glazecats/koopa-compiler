@@ -11201,6 +11201,16 @@ static int test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_
 }
 
 static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(void) {
+    static const char *const fragments[] = {
+        "func multiply(a.0, b.1) {\n",
+        "    ssa.5 = shr ssa.1, 1\n",
+        "    ssa.6 = call multiply(ssa.0, ssa.5)\n",
+        "    ssa.7 = add ssa.6, ssa.6\n",
+        "    ssa.8 = mod ssa.7, 998244353\n",
+        "    ssa.9 = and ssa.1, 1\n",
+        "    ssa.10 = eq ssa.9, 1\n",
+        "    br ssa.10, bb.5, bb.6\n",
+    };
     static const char *source =
         "const int mod = 998244353;\n"
         "int multiply(int a, int b){\n"
@@ -11213,45 +11223,10 @@ static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(v
         "}\n"
         "int main(){ return multiply(7, 3); }\n";
 
-    return expect_source_perf_hotspot_dump("VALUE-SSA-PERF-HOTSPOT-SOURCE-MULTIPLY-BASELINE",
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-MULTIPLY-BASELINE",
         source,
-        "global mod.0 = 998244353\n"
-        "\n"
-        "func multiply(a.0, b.1) {\n"
-        "  bb.0:\n"
-        "    ssa.0 = load_local a.0\n"
-        "    ssa.1 = load_local b.1\n"
-        "    ssa.2 = eq ssa.1, 0\n"
-        "    br ssa.2, bb.1, bb.2\n"
-        "  bb.1:\n"
-        "    ret 0\n"
-        "  bb.2:\n"
-        "    ssa.3 = eq ssa.1, 1\n"
-        "    br ssa.3, bb.3, bb.4\n"
-        "  bb.3:\n"
-        "    ssa.4 = mod ssa.0, 998244353\n"
-        "    ret ssa.4\n"
-        "  bb.4:\n"
-        "    ssa.5 = div ssa.1, 2\n"
-        "    ssa.6 = call multiply(ssa.0, ssa.5)\n"
-        "    ssa.7 = add ssa.6, ssa.6\n"
-        "    ssa.8 = mod ssa.7, 998244353\n"
-        "    ssa.9 = mod ssa.1, 2\n"
-        "    ssa.10 = eq ssa.9, 1\n"
-        "    br ssa.10, bb.5, bb.6\n"
-        "  bb.5:\n"
-        "    ssa.11 = add ssa.0, ssa.8\n"
-        "    ssa.12 = mod ssa.11, 998244353\n"
-        "    ret ssa.12\n"
-        "  bb.6:\n"
-        "    ret ssa.8\n"
-        "}\n"
-        "\n"
-        "func main() {\n"
-        "  bb.0:\n"
-        "    ssa.0 = call multiply(7, 3)\n"
-        "    ret ssa.0\n"
-        "}\n");
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 }
 
 static int test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump(void) {

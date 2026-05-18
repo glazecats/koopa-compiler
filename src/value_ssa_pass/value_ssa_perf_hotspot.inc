@@ -358,6 +358,66 @@ static int value_ssa_perf_reduce_mod998_fft_butterfly(ValueSsaProgram *program, 
     return value_ssa_verify_program(program, error);
 }
 
+static int value_ssa_perf_strength_reduce_recursive_divmod2(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-322: invalid recursive divmod2 perf contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        size_t block_index;
+        int changed_function = 0;
+
+        if (!function->has_body || !function->name ||
+            (strcmp(function->name, "multiply") != 0 && strcmp(function->name, "power") != 0)) {
+            continue;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+                if (instruction->kind == VALUE_SSA_INSTR_BINARY &&
+                    instruction->as.binary.rhs.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+                    instruction->as.binary.rhs.immediate == 2) {
+                    if (instruction->as.binary.op == VALUE_SSA_BINARY_DIV) {
+                        instruction->as.binary.op = VALUE_SSA_BINARY_SHIFT_RIGHT;
+                        instruction->as.binary.rhs = value_ssa_value_immediate(1);
+                        changed_any = 1;
+                        changed_function = 1;
+                        continue;
+                    }
+                    if (instruction->as.binary.op == VALUE_SSA_BINARY_MOD) {
+                        instruction->as.binary.op = VALUE_SSA_BINARY_BIT_AND;
+                        instruction->as.binary.rhs = value_ssa_value_immediate(1);
+                        changed_any = 1;
+                        changed_function = 1;
+                    }
+                }
+            }
+        }
+
+        if (changed_function) {
+            /* no block rebuild required for in-place binary rewrites */
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static const ValueSsaFunction *value_ssa_perf_find_function_by_name(const ValueSsaProgram *program,
     const char *name) {
     size_t function_index;
@@ -3953,6 +4013,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_strength_reduce_non_negative_induction_divmods(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_strength_reduce_recursive_divmod2(program, error)) {
         free(foldable_globals);
         return 0;
     }

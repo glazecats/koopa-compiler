@@ -411,6 +411,33 @@
        out from the live tree. Keep the negative result in memory and do not
        reopen this exact `cur+cur` mask-and path again unless a materially
        different cost model is added
+     - later same-day recursive `div/mod 2` follow-up, kept:
+       after that negative `% 998244353` retry, the next NTT reopen changed
+       landing point to something cheaper and closer to what `clang -O2/-O3`
+       already does in the same helper family:
+       recursive `div/mod 2` in `multiply()` / `power()`
+     - same-day kept fix:
+       a new narrow ValueSSA perf pass now rewrites only those recursive
+       helper-local binary shapes:
+       `div x, 2 -> shr x, 1`
+       `mod x, 2 -> and x, 1`
+       and does not touch broader `div/mod` shapes elsewhere in the program
+     - same-day correctness restamp:
+       `make test-value-ssa-regression`,
+       `make test-compiler-driver`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`
+       are all green on the candidate
+     - same-day formal isolated A/B note:
+       comparing the current tree against a compiler built from the same tree
+       with only this one `recursive divmod2` pass disabled is clearly
+       positive on both targeted FFT witnesses:
+       `13_fft1 run_ms = 8191.448 -> 7959.351`
+       `14_fft2 run_ms = 7991.169 -> 7507.914`
+       compile time rose somewhat, but total time still improved strongly
+     - current authority:
+       this recursive `div/mod 2` helper strength-reduction pass is now a
+       kept optimization candidate and should be checkpointed once committed
        work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
        attempt has now been backed out. Current authority after rollback is:
        keep the commutative repeated pure-expression reuse,
