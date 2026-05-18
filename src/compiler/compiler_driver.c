@@ -1280,6 +1280,15 @@ static int compiler_riscv_preview_line_is_jal_ra(const char *line, char *target,
     return sscanf(line, "  jal ra, %255s", target) == 1;
 }
 
+static int compiler_riscv_preview_line_is_direct_call_target(const char *line, char *target, size_t target_size) {
+    if (!line || !target || target_size == 0u) {
+        return 0;
+    }
+    target[0] = '\0';
+    return sscanf(line, "  call %255s", target) == 1 ||
+        compiler_riscv_preview_line_is_jal_ra(line, target, target_size);
+}
+
 static int compiler_riscv_preview_line_is_restore_from_s11(const char *line) {
     char reg_name[32];
     int offset = 0;
@@ -2156,6 +2165,47 @@ static int compiler_riscv_preview_line_is_conditional_branch_using_reg(
     return compiler_riscv_preview_line_uses_reg(line, reg_name);
 }
 
+static int compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
+    char **lines,
+    size_t line_count,
+    size_t start_index,
+    const char *reg_name);
+
+static int compiler_riscv_preview_pick_dead_temp_reg(
+    char **lines,
+    size_t line_count,
+    size_t start_index,
+    const char *disallow_a,
+    const char *disallow_b,
+    const char *disallow_c,
+    char *out_reg,
+    size_t out_reg_size) {
+    static const char *const candidates[] = {"t3", "t4", "t6", "t2", "t1", "t0"};
+    size_t candidate_index;
+
+    if (!out_reg || out_reg_size == 0u) {
+        return 0;
+    }
+    out_reg[0] = '\0';
+
+    for (candidate_index = 0; candidate_index < sizeof(candidates) / sizeof(candidates[0]); ++candidate_index) {
+        const char *candidate = candidates[candidate_index];
+
+        if ((disallow_a && strcmp(candidate, disallow_a) == 0) ||
+            (disallow_b && strcmp(candidate, disallow_b) == 0) ||
+            (disallow_c && strcmp(candidate, disallow_c) == 0)) {
+            continue;
+        }
+        if (!compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
+                lines, line_count, start_index, candidate)) {
+            snprintf(out_reg, out_reg_size, "%s", candidate);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int compiler_riscv_preview_reg_is_used_again_before_redefinition(
     char **lines,
     size_t line_count,
@@ -2202,14 +2252,19 @@ static int compiler_riscv_preview_reg_may_be_needed_past_label_before_redefiniti
         if (!line) {
             continue;
         }
-        if (compiler_riscv_preview_line_is_label(line) ||
-            compiler_riscv_preview_line_is_control_transfer_barrier(line)) {
-            return 1;
-        }
         if (compiler_riscv_preview_line_defines_reg(line, reg_name)) {
             return 0;
         }
         if (compiler_riscv_preview_line_uses_reg(line, reg_name)) {
+            return 1;
+        }
+        if (compiler_riscv_preview_line_is_ret(line)) {
+            return 0;
+        }
+        if (compiler_riscv_preview_line_is_label(line)) {
+            return 1;
+        }
+        if (compiler_riscv_preview_line_is_control_transfer_barrier(line)) {
             return 1;
         }
     }
@@ -2271,7 +2326,7 @@ static int compiler_optimize_riscv_preview_tail_calls(char **io_text) {
         int ra_offset = 0;
         int sp_delta = 0;
 
-        if (compiler_riscv_preview_line_is_jal_ra(lines[index], target_name, sizeof(target_name))) {
+        if (compiler_riscv_preview_line_is_direct_call_target(lines[index], target_name, sizeof(target_name))) {
             if (scan_index + 3u < line_count &&
                 /*
                  * Do not fold across intervening `lw ..., off(s11)` restore rows.
@@ -2812,20 +2867,39 @@ static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text) {
                 strcmp(rs2, imm_reg) == 0 &&
                 strcmp(rs1, imm_reg) != 0 &&
                 strcmp(rd, imm_reg) != 0) {
-                if (!compiler_builder_appendf(&builder, "  lui %s, 70493\n", imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  addi %s, %s, -2031\n", imm_reg, imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  mulh %s, %s, %s\n", rd, rs1, imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  srli %s, %s, 31\n", imm_reg, rd) ||
-                    !compiler_builder_appendf(&builder, "  srai %s, %s, 26\n", rd, rd) ||
-                    !compiler_builder_appendf(&builder, "  add %s, %s, %s\n", rd, rd, imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  lui %s, 243712\n", imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  addi %s, %s, 1\n", imm_reg, imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  mul %s, %s, %s\n", rd, rd, imm_reg) ||
-                    !compiler_builder_appendf(&builder, "  sub %s, %s, %s\n", rd, rs1, rd)) {
-                    goto cleanup;
+                char quotient_reg[32];
+
+                quotient_reg[0] = '\0';
+                if (strcmp(rd, rs1) != 0) {
+                    snprintf(quotient_reg, sizeof(quotient_reg), "%s", rd);
+                } else if (!compiler_riscv_preview_pick_dead_temp_reg(
+                               lines,
+                               line_count,
+                               index + pattern_len + 1u,
+                               rd,
+                               rs1,
+                               imm_reg,
+                               quotient_reg,
+                               sizeof(quotient_reg))) {
+                    quotient_reg[0] = '\0';
                 }
-                index += pattern_len + 1u;
-                continue;
+
+                if (quotient_reg[0] != '\0') {
+                    if (!compiler_builder_appendf(&builder, "  lui %s, 70493\n", imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  addi %s, %s, -2031\n", imm_reg, imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  mulh %s, %s, %s\n", quotient_reg, rs1, imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  srli %s, %s, 31\n", imm_reg, quotient_reg) ||
+                        !compiler_builder_appendf(&builder, "  srai %s, %s, 26\n", quotient_reg, quotient_reg) ||
+                        !compiler_builder_appendf(&builder, "  add %s, %s, %s\n", quotient_reg, quotient_reg, imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  lui %s, 243712\n", imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  addi %s, %s, 1\n", imm_reg, imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  mul %s, %s, %s\n", quotient_reg, quotient_reg, imm_reg) ||
+                        !compiler_builder_appendf(&builder, "  sub %s, %s, %s\n", rd, rs1, quotient_reg)) {
+                        goto cleanup;
+                    }
+                    index += pattern_len + 1u;
+                    continue;
+                }
             }
         }
 

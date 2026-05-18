@@ -5,7 +5,7 @@ This directory is organized by role rather than kept as one flat list.
 ## Root
 
 - `NEXT_STEPS.md`: roadmap, active-stage authority, and execution log
-- `ir-conventions.md`: current engineering memory and stable conventions
+- `ENGINEERING_MEMORY.md`: current engineering memory and stable conventions
 - `README.md`: this index
 
 ## IR

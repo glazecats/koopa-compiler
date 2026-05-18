@@ -167,7 +167,8 @@ static int test_compiler_pretty_prints_calls_and_control_labels(void) {
         strstr(output, ".globl foo\n.type foo, @function\nfoo:\n.Lfoo_0:\n") == NULL ||
         strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
         strstr(output, ".Lmain_0:\n") == NULL ||
-        strstr(output, "  call foo\n") == NULL ||
+        (strstr(output, "  call foo\n") == NULL &&
+            strstr(output, "  j foo\n") == NULL) ||
         strstr(output, "  ret\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: call/control mnemonic output mismatch: %s\n", error.message);
@@ -190,7 +191,8 @@ static int test_compiler_pretty_prints_loads_and_branches(void) {
         strstr(output, "  bne a0, zero, .Lchoose_2\n") == NULL ||
         strstr(output, ".Lchoose_1:\n") == NULL ||
         strstr(output, ".Lchoose_2:\n") == NULL ||
-        strstr(output, "  call choose\n") == NULL ||
+        (strstr(output, "  call choose\n") == NULL &&
+            strstr(output, "  j choose\n") == NULL) ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: load/branch mnemonic output mismatch: %s\n", error.message);
         ok = 0;
@@ -270,7 +272,8 @@ static int test_compiler_pretty_prints_immediate_compares_and_loop_control(void)
         strstr(output, ".Lloop_3:\n") == NULL ||
         strstr(output, "  j .Lloop_1\n") == NULL ||
         strstr(output, "  call loop\n") == NULL ||
-        strstr(output, "  call testeq\n") == NULL ||
+        (strstr(output, "  call testeq\n") == NULL &&
+            strstr(output, "  j testeq\n") == NULL) ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: immediate-compare/loop-control mnemonic output mismatch: %s\n", error.message);
         ok = 0;
@@ -1013,6 +1016,38 @@ static int test_compiler_does_not_fold_tail_call_when_restore_instructions_separ
     return ok;
 }
 
+static int test_compiler_folds_direct_call_tail_sequence(void) {
+    static const char *source_text =
+        "  call foo\n"
+        "  lw s11, 4(sp)\n"
+        "  lw ra, 8(sp)\n"
+        "  addi sp, sp, 12\n"
+        "  ret\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: direct-call tail regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_tail_calls(&text) ||
+        !text ||
+        strstr(text, "  call foo\n") != NULL ||
+        strstr(text, "  j foo\n") == NULL ||
+        strstr(text, "  lw s11, 4(sp)\n") == NULL ||
+        strstr(text, "  lw ra, 8(sp)\n") == NULL ||
+        strstr(text, "  addi sp, sp, 12\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: direct call tail sequence should fold into jump epilogue\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label(void) {
     static const char *source_text =
         "  li a1, 0\n"
@@ -1397,6 +1432,83 @@ static int test_compiler_does_not_rewrite_mod998_rem_when_t3_needed_past_label(v
 
     if (strstr(text, "  rem a0, t6, t5\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: mod998 rem rewrite should stay disabled when t3 is needed past a label\n");
+        ok = 0;
+    }
+
+cleanup:
+    free(text);
+    return ok;
+}
+
+static int test_compiler_rewrites_mod998_rem_before_ret_even_with_later_label(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  rem a0, t6, t5\n"
+        "  ret\n"
+        ".Llater:\n"
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  rem a1, t4, t5\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem ret+label regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem ret+label optimize failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strstr(text, "  rem a0, t6, t5\n") != NULL ||
+        strstr(text, "  rem a1, t4, t5\n") != NULL ||
+        strstr(text, "  ret\n") == NULL ||
+        strstr(text, ".Llater:\n") == NULL ||
+        strstr(text, "  mulh a0, t6, ") == NULL ||
+        strstr(text, "  mulh a1, t4, ") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 rem rewrite should survive ret before later label\n");
+        ok = 0;
+    }
+
+cleanup:
+    free(text);
+    return ok;
+}
+
+static int test_compiler_rewrites_mod998_rem_with_same_dest_and_source_when_temp_is_dead(void) {
+    static const char *source_text =
+        "  lui t5, 0x3b800\n"
+        "  addi t5, t5, 1\n"
+        "  rem a0, a0, t5\n"
+        "  ret\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem same-rd-rs1 regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_mod998_divmods(&text) ||
+        !text) {
+        fprintf(stderr, "[compiler] FAIL: mod998-rem same-rd-rs1 optimize failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (strstr(text, "  rem a0, a0, t5\n") != NULL ||
+        strstr(text, "  mulh ") == NULL ||
+        strstr(text, "  sub a0, a0, ") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mod998 rem with same dest/source should rewrite when temp is dead\n");
         ok = 0;
     }
 
@@ -2462,7 +2574,8 @@ static int test_compiler_does_not_fold_mutated_global_condition_from_initializer
         strstr(output, "  blt a0, zero, ") == NULL ||
         strstr(output, "  li a0, 1\n") == NULL ||
         strstr(output, "  call getint\n") == NULL ||
-        strstr(output, "  call f\n") == NULL) {
+        (strstr(output, "  call f\n") == NULL &&
+            strstr(output, "  j f\n") == NULL)) {
         fprintf(stderr,
             "[compiler] FAIL: mutated-global condition should not fold from initializer metadata: %s\n",
             error.message);
@@ -2694,6 +2807,7 @@ int main(void) {
     ok &= test_compiler_folds_large_materialized_stack_slot_load();
     ok &= test_compiler_folds_large_materialized_stack_slot_store();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
+    ok &= test_compiler_folds_direct_call_tail_sequence();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
     ok &= test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label();
@@ -2702,6 +2816,8 @@ int main(void) {
     ok &= test_compiler_does_not_rewrite_mod998_div_when_t3_needed_past_label();
     ok &= test_compiler_rewrites_mod998_rem_only();
     ok &= test_compiler_does_not_rewrite_mod998_rem_when_t3_needed_past_label();
+    ok &= test_compiler_rewrites_mod998_rem_before_ret_even_with_later_label();
+    ok &= test_compiler_rewrites_mod998_rem_with_same_dest_and_source_when_temp_is_dead();
     ok &= test_compiler_does_not_reuse_stack_address_when_same_slot_is_overwritten_via_materialized_base();
     ok &= test_compiler_does_not_reuse_stack_address_when_tmp_reg_is_needed_past_label();
     ok &= test_compiler_does_not_reuse_stack_address_across_call_when_saved_addr_reg_survives_call();

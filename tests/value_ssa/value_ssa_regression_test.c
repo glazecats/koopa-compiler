@@ -5201,6 +5201,228 @@ static int build_perf_zero_based_induction_divmod_reduce_program(ValueSsaProgram
     return 1;
 }
 
+static int build_perf_simple_induction_shift_reduce_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *header = NULL;
+    ValueSsaBasicBlock *body = NULL;
+    ValueSsaBasicBlock *exit_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaPhiInput phi_inputs[2];
+    size_t acc0_local_id;
+    size_t acc1_local_id;
+    size_t block0_id;
+    size_t block1_id;
+    size_t block2_id;
+    size_t block3_id;
+    size_t v_i;
+    size_t v_cond;
+    size_t v_scaled;
+    size_t v_add0;
+    size_t v_add1;
+    size_t v_add2;
+    size_t v_next;
+    size_t v_exit0;
+    size_t v_exit1;
+    size_t v_exit2;
+    size_t v_exit_sum;
+    size_t v_exit_sum2;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "acc0", 0, &acc0_local_id, error) ||
+        !value_ssa_function_append_local(function, "acc1", 0, &acc1_local_id, error) ||
+        !value_ssa_function_append_block(function, &block0_id, &entry, error) ||
+        !value_ssa_function_append_block(function, &block1_id, &header, error) ||
+        !value_ssa_function_append_block(function, &block2_id, &body, error) ||
+        !value_ssa_function_append_block(function, &block3_id, &exit_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    entry = &function->blocks[block0_id];
+    header = &function->blocks[block1_id];
+    body = &function->blocks[block2_id];
+    exit_block = &function->blocks[block3_id];
+
+    v_i = value_ssa_function_allocate_value(function);
+    v_cond = value_ssa_function_allocate_value(function);
+    v_scaled = value_ssa_function_allocate_value(function);
+    v_add0 = value_ssa_function_allocate_value(function);
+    v_add1 = value_ssa_function_allocate_value(function);
+    v_add2 = value_ssa_function_allocate_value(function);
+    v_next = value_ssa_function_allocate_value(function);
+    v_exit0 = value_ssa_function_allocate_value(function);
+    v_exit1 = value_ssa_function_allocate_value(function);
+    v_exit2 = value_ssa_function_allocate_value(function);
+    v_exit_sum = value_ssa_function_allocate_value(function);
+    v_exit_sum2 = value_ssa_function_allocate_value(function);
+    if (v_exit_sum2 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (!value_ssa_block_set_jump(entry, block1_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    phi_inputs[0].predecessor_block_id = block0_id;
+    phi_inputs[0].value = value_ssa_value_immediate(0);
+    phi_inputs[1].predecessor_block_id = block2_id;
+    phi_inputs[1].value = value_ssa_value_id(v_next);
+    if (!value_ssa_block_append_phi(header, v_i, phi_inputs, 2u, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_cond);
+    instruction.as.binary.op = VALUE_SSA_BINARY_LT;
+    instruction.as.binary.lhs = value_ssa_value_id(v_i);
+    instruction.as.binary.rhs = value_ssa_value_immediate(4);
+    if (!value_ssa_block_append_instruction(header, &instruction, error) ||
+        !value_ssa_block_set_branch(header, value_ssa_value_id(v_cond), block2_id, block3_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_scaled);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_LEFT;
+    instruction.as.binary.lhs = value_ssa_value_id(v_i);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v_add0);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v_scaled);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(acc0_local_id);
+    instruction.as.store.value = value_ssa_value_id(v_add0);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_add2);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v_scaled);
+    instruction.as.binary.rhs = value_ssa_value_immediate(3);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(acc0_local_id);
+    instruction.as.store.value = value_ssa_value_id(v_add2);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_add1);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v_scaled);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(acc1_local_id);
+    instruction.as.store.value = value_ssa_value_id(v_add1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_next);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v_i);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(body, &instruction, error) ||
+        !value_ssa_block_set_jump(body, block1_id, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_exit0);
+    instruction.as.load_slot = value_ssa_slot_local(acc0_local_id);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v_exit1);
+    instruction.as.load_slot = value_ssa_slot_local(acc1_local_id);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v_exit2);
+    instruction.as.load_slot = value_ssa_slot_local(acc0_local_id);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(v_exit_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(v_exit0);
+    instruction.as.binary.rhs = value_ssa_value_id(v_exit1);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(v_exit_sum2);
+    instruction.as.binary.lhs = value_ssa_value_id(v_exit_sum);
+    instruction.as.binary.rhs = value_ssa_value_id(v_exit2);
+    if (!value_ssa_block_append_instruction(exit_block, &instruction, error) ||
+        !value_ssa_block_set_return(exit_block, value_ssa_value_id(v_exit_sum2), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_perf_spmv_loop_exit_indirect_load_reuse_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaGlobal *xptr_global = NULL;
     ValueSsaGlobal *x_global = NULL;
@@ -11152,6 +11374,37 @@ static int test_value_ssa_optimize_perf_hotspots_reduces_zero_based_induction_di
         "}\n");
 }
 
+static int test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_shifts(void) {
+    return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-INDUCTION-SHIFT",
+        build_perf_simple_induction_shift_reduce_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 0], [bb.2: ssa.6]\n"
+        "    ssa.1 = phi [bb.0: 0], [bb.2: ssa.7]\n"
+        "    ssa.2 = lt ssa.0, 4\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = add ssa.1, 1\n"
+        "    store_local acc0.0, ssa.3\n"
+        "    ssa.4 = add ssa.1, 3\n"
+        "    store_local acc0.0, ssa.4\n"
+        "    ssa.5 = add ssa.1, 2\n"
+        "    store_local acc1.1, ssa.5\n"
+        "    ssa.6 = add ssa.0, 1\n"
+        "    ssa.7 = add ssa.1, 4\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.8 = load_local acc0.0\n"
+        "    ssa.9 = load_local acc1.1\n"
+        "    ssa.10 = load_local acc0.0\n"
+        "    ssa.11 = add ssa.8, ssa.9\n"
+        "    ssa.12 = add ssa.11, ssa.10\n"
+        "    ret ssa.12\n"
+        "}\n");
+}
+
 static int test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads(void) {
     return expect_perf_hotspot_optimized_dump("VALUE-SSA-PERF-HOTSPOT-SPMV-LOOP-EXIT-INDIRECT",
         build_perf_spmv_loop_exit_indirect_load_reuse_program,
@@ -11203,13 +11456,13 @@ static int test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_
 static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(void) {
     static const char *const fragments[] = {
         "func multiply(a.0, b.1) {\n",
-        "    ssa.5 = shr ssa.1, 1\n",
-        "    ssa.6 = call multiply(ssa.0, ssa.5)\n",
-        "    ssa.7 = add ssa.6, ssa.6\n",
-        "    ssa.8 = mod ssa.7, 998244353\n",
-        "    ssa.9 = and ssa.1, 1\n",
-        "    ssa.10 = eq ssa.9, 1\n",
-        "    br ssa.10, bb.5, bb.6\n",
+        "    jmp bb.1\n",
+        "    ssa.3 = phi [bb.0: 0], [bb.4: ssa.9]\n",
+        "    ssa.4 = phi [bb.0: ssa.2], [bb.4: ssa.11]\n",
+        "    ssa.5 = phi [bb.0: ssa.1], [bb.4: ssa.12]\n",
+        "    br ssa.5, bb.2, bb.5\n",
+        "    ssa.6 = and ssa.5, 1\n",
+        "    br ssa.6, bb.3, bb.4\n",
     };
     static const char *source =
         "const int mod = 998244353;\n"
@@ -11224,6 +11477,42 @@ static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(v
         "int main(){ return multiply(7, 3); }\n";
 
     return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-MULTIPLY-BASELINE",
+        source,
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
+}
+
+static int test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump(void) {
+    static const char *const fragments[] = {
+        "func power(a.0, b.1) {\n",
+        "    jmp bb.1\n",
+        "    ssa.2 = phi [bb.0: 1], [bb.4: ssa.7]\n",
+        "    ssa.3 = phi [bb.0: ssa.0], [bb.4: ssa.8]\n",
+        "    ssa.4 = phi [bb.0: ssa.1], [bb.4: ssa.9]\n",
+        "    br ssa.4, bb.2, bb.5\n",
+        "    ssa.5 = and ssa.4, 1\n",
+        "    br ssa.5, bb.3, bb.4\n",
+    };
+    static const char *source =
+        "const int mod = 998244353;\n"
+        "int multiply(int a, int b){\n"
+        "  if (b == 0) return 0;\n"
+        "  if (b == 1) return a % mod;\n"
+        "  int cur = multiply(a, b / 2);\n"
+        "  cur = (cur + cur) % mod;\n"
+        "  if (b % 2 == 1) return (a + cur) % mod;\n"
+        "  return cur;\n"
+        "}\n"
+        "int power(int a, int b){\n"
+        "  if (b == 0) return 1;\n"
+        "  int cur = power(a, b / 2);\n"
+        "  cur = multiply(cur, cur);\n"
+        "  if (b % 2 == 1) return multiply(cur, a);\n"
+        "  return cur;\n"
+        "}\n"
+        "int main(){ return power(3, 5); }\n";
+
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-POWER-BRANCH-CLEANUP",
         source,
         fragments,
         sizeof(fragments) / sizeof(fragments[0]));
@@ -13540,8 +13829,10 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_hoists_power_parameter_local_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_does_not_hoist_non_hot_parameter_local_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_reduces_zero_based_induction_divmods();
+    ok &= test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_shifts();
     ok &= test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();

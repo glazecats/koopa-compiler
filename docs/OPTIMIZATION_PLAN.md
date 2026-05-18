@@ -11,6 +11,8 @@
   - third-party perf ranking and optimization
 - Keep this file synchronized with the higher-level progress memory in
   `docs/NEXT_STEPS.md`.
+- For the broader reusable-pass backlog beyond the current witness-driven
+  optimization round, see `docs/GENERAL_OPT_PASSES_TODO.md`.
 
 ## Current Plan
 
@@ -129,6 +131,239 @@
     2. hotspot-specific address/index CSE and strength reduction
     3. bounded loop transforms (`peel` / `unroll`) only after the first two
        are measured and still insufficient
+  - Current 2026-05-18 reusable-pass follow-up:
+    - the repository is no longer at the "only discuss generic passes" stage
+      on the induction line: a first narrow reusable `ValueSSA`
+      induction-strength-reduction slice is now landed locally and locked by a
+      focused regression witness
+    - current scope of that first slice:
+      simple zero-seed single-step induction plus derived `shl` recurrence
+    - current limitation:
+      rebuilt `value-ssa-perf` rereads show that this first cut has not yet
+      hit the real `mm1` / `spmv1` address trees, so it should be treated as
+      an opening foothold rather than as the completed general answer
+    - current authority:
+      continue broadening this reusable induction line toward affine
+      `shl/mul + add` address-carrier recurrence before spending more time on
+      another fresh generic-pass family
+  - later same-day reusable-pass follow-up:
+    - the current kept reusable induction line has now advanced past the
+      pure-immediate seed case:
+      preheader-provided seed values are now accepted too, and a simple
+      use-count gate is in place so we only rewrite `shl` values that look
+      structurally worth carrying
+    - rebuilt `value-ssa-perf` rereads now confirm real witness reach:
+      `03_mm1` still keeps the inner `+4` carrier, and `09_spmv1`
+      now also carries `+4` recurrences inside the main update loops rather
+      than only the tiny regression witness
+    - focused A/B after that gate tightening currently reads:
+      `03_mm1` run ms `7727.860 -> 7152.769`,
+      `09_spmv1` `12484.632 -> 12418.484`,
+      `10_spmv2` `7343.576 -> 7429.339`,
+      `11_spmv3` `9670.617 -> 9777.935`,
+      `13_fft1` `7854.056 -> 7833.304`
+    - current authority:
+      this reusable induction line is now materially useful on `mm1` and no
+      longer obviously harmful on `spmv1`, but it still needs one more
+      narrowing round before it becomes a safe keep/commit candidate for the
+      full `spmv1/2/3` cluster
+  - later same-day gate-tightening follow-up:
+    - the reusable induction line now also has one more explicit guard:
+      the current `shl` recurrence rewrite requires at least three uses of the
+      scaled value, not merely two
+    - the focused regression witness was restamped to match that stronger
+      policy
+    - focused A/B after that tighter gate currently remains:
+      `03_mm1` positive,
+      `13_fft1` slightly positive,
+      `09_spmv1` roughly flat/slightly positive,
+      but `10_spmv2` / `11_spmv3` still slightly negative
+    - current authority:
+      do not broaden the pass again yet; the next refinement should narrow by
+      structural/use-role evidence so the line keeps the `mm1` gain without
+      continuing to drag `spmv2/3`
+  - later same-day focused A/B restamp:
+    - after the first role-aware/address-chain gate, the current focused A/B
+      still reads:
+      `03_mm1` strongly positive,
+      `09_spmv1` roughly flat/slightly positive,
+      `10_spmv2` / `11_spmv3` still slightly negative,
+      `13_fft1` effectively flat
+    - current authority:
+      stop spending turns on another raw numeric threshold retune.
+      The next reusable induction refinement should use a stronger structural
+      distinction between worthwhile `mm1`-style address carriers and the
+      still-problematic `spmv2/3` candidates
+  - later same-day structural-gate restamp:
+    - the stronger structure/use-role gate is now landed, and rebuilt
+      `value-ssa-perf` rereads show that `spmv1/2/3` light candidates have
+      been pushed back to baseline-style shape while the useful `mm1` inner
+      `+4` carrier still remains
+    - focused A/B after that restamp currently reads:
+      `03_mm1` strongly positive,
+      `09_spmv1` slightly positive,
+      `10_spmv2` roughly flat/slightly negative,
+      `11_spmv3` slightly positive,
+      and `13_fft1` slightly negative
+    - current authority:
+      this reusable induction line is now much closer to checkpointable
+      territory. The next step should be a confirmation rerun before commit,
+      with special attention to compile-time cost and whether the slight
+      `fft1` regression is just noise
+  - later same-day confirmation rerun:
+    - the confirmation rerun over
+      `03_mm1`, `09_spmv1`, `10_spmv2`, `11_spmv3`, `13_fft1`, and `14_fft2`
+      still shows the broad intended tradeoff:
+      `03_mm1` remains strongly positive,
+      `11_spmv3` and `14_fft2` are slightly positive,
+      `10_spmv2` is only slightly negative,
+      while `09_spmv1` and `13_fft1` drift slightly negative/flat
+    - rebuilt `value-ssa-perf` rereads now also show `09/10/11_spmv*`
+      back at a baseline-style shape, which suggests the remaining runtime
+      drift there is more likely noise or a second-order backend/codegen
+      effect than a large remaining mid-IR overfire
+    - current authority:
+      this reusable induction line is now close enough to a keep/backout
+      checkpoint decision that the next step should be judgment-based rather
+      than another big transform expansion
+  - later same-day wider confirmation:
+    - a wider guard sample over
+      `03_mm1`, `09_spmv1`, `13_fft1`,
+      `18_brainfuck-bootstrap`, and `19_brainfuck-calculator`,
+      plus a reversed-order confirmation over
+      `14_fft2`, `13_fft1`, `11_spmv3`, `10_spmv2`, `09_spmv1`, and `03_mm1`,
+      now sharpens the decision:
+      `mm1` stays strongly positive, but the line is still not stable enough
+      across `spmv1` and `fft1/2`, and compile time is consistently higher
+    - current authority:
+      do **not** checkpoint the reusable induction line in its current form.
+      If this line continues immediately, it should continue as a refinement
+      branch; otherwise rotate to a different optimization family instead of
+      pretending this version is already a stable base
+  - later same-day fft-helper retry, not kept:
+    - the next obvious `fft1/2` opportunity remains the recursive helper pair
+      `multiply()` / `power()`
+    - one first retry tried the narrowest possible downstream hook by
+      broadening the final-text tail-call peephole so it could also fold a
+      plain `call target` + restore + `ret` wrapper, aiming at the current
+      `power()` odd-branch tail call into `multiply()`
+    - current authority is **not kept**:
+      that widening reopened unrelated `compiler_driver` regression surfaces,
+      so the recursive-helper line should not continue through a broader
+      final-text peephole first
+    - current authority:
+      if the next round reopens the `fft helper` line, prefer a more semantic
+      layer (canonical IR / lower IR / ValueSSA) over another attempt to
+      widen the current text peephole directly
+  - Current 2026-05-18 backend-text helper follow-up, keep-candidate:
+    - the next retry stayed on the backend text layer, but narrowed the work
+      to two concrete already-emitted helper-path shapes instead of reopening
+      the earlier unsafe broader tail-call attempt
+    - first change:
+      the final-text `mod998` peephole now treats `ret` as an end-of-liveness
+      boundary instead of incorrectly treating later unreachable labels as a
+      reason to keep the old `% 998244353` form
+    - second change:
+      the final-text tail-call peephole now also accepts direct
+      `call target` + epilogue + `ret` sequences, not only explicit
+      `jal ra, target`, while preserving the old "do not cross extra
+      `lw ..., off(s11)` restore rows" safety rule
+    - focused shape evidence:
+      `power()` odd branch in `13_fft1` now ends in `j multiply`
+      instead of `call multiply` + epilogue + `ret`
+    - focused A/B vs `/tmp/compiler-head-2p06l4/build/compiler`:
+      `13_fft1` run ms `8305.779 -> 8070.011`,
+      `14_fft2` `7846.097 -> 7539.025`,
+      guard `03_mm1` `8121.079 -> 7535.627`
+    - compile-time note:
+      compile ms is still materially higher on the current tree, but this
+      specific backend-text delta stayed strongly runtime-positive on all
+      three focused samples
+    - current authority:
+      treat this backend-text helper line as a real keep-candidate and
+      continue from it, but do one broader guard sample before commit because
+      the live tree still contains other uncheckpointed optimization work too
+  - Current 2026-05-18 iterative recursive-helper rewrite follow-up, strong keep-candidate:
+    - the next bigger move stayed inside
+      `src/value_ssa_perf/value_ssa_recursive_helper.inc` and rewrote the
+      measured recursive helper pair into explicit iterative CFG when the
+      source-side `ValueSSA` shape matches the expected helper skeleton
+    - current landed scope:
+      `multiply()` and `power()` are rebuilt from their recognized recursive
+      form into loop/phi-based iterative form
+    - current evidence:
+      `make -j4 test-value-ssa-regression` is green again, and rebuilt
+      `dump_middle_stage value-ssa-perf /opt/bin/testcases/perf/13_fft1.c`
+      now shows iterative `multiply()` / `power()` instead of recursive
+      self-calls
+    - focused A/B vs `/tmp/compiler-head-2p06l4/build/compiler`:
+      `13_fft1` run ms `7961.929 -> 2810.139`,
+      `14_fft2` `7624.208 -> 2564.017`,
+      guard `03_mm1` `8153.804 -> 7426.597`
+    - compile-time note:
+      compile ms is still higher on the current tree, but the runtime delta on
+      the actual `fft1/2` target is so large that this line is now much
+      stronger than the earlier small backend-text-only helper tweaks
+    - current authority:
+      keep this iterative-helper line live and move next to a broader guard
+      sample plus correctness rechecks, rather than reopening another fresh
+      optimization family immediately
+  - Current 2026-05-18 implementation-structure follow-up:
+  - Current 2026-05-18 structure consolidation follow-up:
+    - the old `value_ssa_perf_hotspot.inc` catch-all has now been split into
+      the same-level directory `src/value_ssa_perf/` with four dedicated
+      implementation files:
+      `value_ssa_perf_entry_hoist.inc`,
+      `value_ssa_perf_induction.inc`,
+      `value_ssa_perf_loop_memory.inc`, and
+      `value_ssa_recursive_helper.inc`
+    - the remaining `src/value_ssa_pass/value_ssa_perf_hotspot.inc` is now a
+      much thinner shared-tool + dispatcher layer instead of the earlier huge
+      all-in-one implementation file
+    - current authority:
+      keep new perf-specific implementation work in `src/value_ssa_perf/` and
+      treat the remaining hotspot file primarily as orchestration glue
+  - Current 2026-05-18 recursive-helper branch cleanup follow-up:
+    - follow-up refinement now reaches two concrete helper branch families on
+      the source-based `ValueSSA` witnesses instead of only one:
+      `multiply()` entry `if (b == 0)` and `multiply()/power()` odd-branch
+      `if (b % 2 == 1)` both now lower to direct branch conditions without an
+      extra helper-local compare result
+    - rebuilt `value-ssa-perf` on `/opt/bin/testcases/perf/13_fft1.c` now shows
+      `multiply()` and `power()` both using direct `br ssa.<and-or-b>` forms on
+      those helper-local conditions
+    - current authority:
+      this branch-cleanup line is now a kept structural improvement on the
+      helper path; the next helper-side follow-up should look for another
+      similarly cheap control/value simplification around `power()` or the
+      `multiply()` recursive return join
+    - a first new post-refactor helper-side optimization is now landed in
+      `src/value_ssa_perf/value_ssa_recursive_helper.inc`:
+      helper branch conditions of the form `eq/ne value, 0/1` are rewritten
+      into more direct branch conditions when the source value is already a
+      booleanish helper-local shape
+    - source-based `ValueSSA` regression evidence now confirms a real shape
+      change for the recursive `multiply()` helper: the entry `if (b == 0)`
+      no longer has to materialize a separate compare result before branching
+    - current authority:
+      continue the `fft1/2` helper line in the recursive-helper pass file; the
+      next useful step is to broaden from this first branch cleanup foothold
+      into more helper-local control/value simplification around
+      `multiply()` / `power()`
+    - the recursive/helper-oriented `ValueSSA` work is no longer being left
+      as ad hoc growth inside
+      `src/value_ssa_pass/value_ssa_perf_hotspot.inc`
+    - the currently kept recursive-helper transforms
+      (`multiply/power` `/2` and `%2` strength reduction,
+      repeated `(mod-1)/d` quotient reuse in `main`,
+      and the `fft` mod-998 butterfly middle-layer rewrite)
+      have now been split into the dedicated file
+      `src/value_ssa_perf/value_ssa_recursive_helper.inc`
+    - current authority:
+      keep `value_ssa_perf_hotspot.inc` as the broad hotspot orchestrator, but
+      continue new recursive/helper-specific implementation in the dedicated
+      recursive-helper pass file instead of growing that old hotspot file
+      further
   - Candidate-pass admission rule:
     - do not add a new pass only because it is a classic optimization name;
       each pass should be opened against a measured witness (`fft1`,
@@ -3107,6 +3342,31 @@
     easy to optimize with another tiny cleanup pass. Until a stronger witness
     is built, prefer stopping here over forcing a speculative `mm1`
     optimization that lacks a crisp observable target.
+16.1. 2026-05-18 `mm` generic loop-hoist whitelist retry, **not kept**:
+    - I briefly retried the `mm1` line by adding `mm` to
+      `value_ssa_perf_function_is_hot_parameter_local_hoist_candidate(...)`
+      so the existing
+      `value_ssa_perf_hoist_simple_loop_invariant_loads(...)`
+      pass would also run on `mm`.
+    - the rebuilt `value-ssa-perf` / final-asm witnesses did change shape,
+      but the hot inner loop also grew extra spill / stack-slot traffic
+    - two formal A/B reruns with the real course inputs
+      (`03_mm1.in`, `04_mm2.in`, `05_mm3.in`) were not directionally stable:
+      first run gave
+      `03_mm1` `16434.068 -> 16322.164`,
+      `04_mm2` `15219.848 -> 15312.101`,
+      `05_mm3` `12119.222 -> 11851.449`,
+      while the second run with reversed order gave
+      `03_mm1` `16245.688 -> 16852.468`,
+      `04_mm2` `14924.882 -> 14838.946`,
+      `05_mm3` `11564.536 -> 11864.511`
+    - compile time also roughly doubled on those same witnesses
+      (`~24-35 ms -> ~47-50 ms`)
+    - current authority:
+      do **not** keep or recommit this generic-whitelist widening;
+      the next `mm1` reopen should be a dedicated narrow `bb.16`
+      address-carrier / pointer-recurrence transform rather than another
+      attempt to give the current generic loop-hoist pass more freedom
 17. Third-party perf ranking is now no longer purely pending in principle:
     one first rebuilt shared-sample ranking has been taken across
     `compiler2021-public`, `indigo`, and `minic-test-cases-2021f`.

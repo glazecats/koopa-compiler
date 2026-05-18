@@ -5,7 +5,7 @@
 - This file is the compact active-plan authority for the still-open hidden
   runtime `RE` line when the observed failure mode looks like
   **generated-program segmentation fault**.
-- Read this after `AGENTS.md`, `docs/ir-conventions.md`, and
+- Read this after `AGENTS.md`, `docs/ENGINEERING_MEMORY.md`, and
   `docs/NEXT_STEPS.md` when this specific line is active.
 - Keep this file synchronized with the higher-level progress memory in
   `docs/NEXT_STEPS.md`.
