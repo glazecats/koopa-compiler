@@ -2737,6 +2737,36 @@
        stable baseline, and rotate the next hotspot work toward the remaining
        `spmv1` / `mv1` dynamic-complexity families rather than reopening this
        same witness only as a crash-diagnosis line.
+     - 2026-05-18 kept repeated `(mod-1)/d` reuse in `main`:
+       the next retry stayed on the user-priority NTT / `mod998` arithmetic
+       line and introduced one narrower `ValueSSA` hotspot pass for the
+       repeated `(998244353 - 1) / d` shape in `13_fft1` / `14_fft2` `main`.
+       When a dominating earlier `div(mod998_minus_1, d)` already exists with
+       the same divisor, the later repeated straight-line division in `main`
+       now reuses the earlier quotient instead of issuing a second `div`.
+       Concrete witness payoff on rebuilt `value-ssa-perf` and final asm:
+       `13_fft1` / `14_fft2` now drop from `3` visible `div` instructions
+       to `2`.
+       Formal isolated A/B against the same current tree with only this one
+       pass disabled gave:
+       `13_fft1 run_ms = 7950.258 -> 7841.318`,
+       `14_fft2 run_ms = 7607.477 -> 7428.692`,
+       while the required guards stayed near-flat:
+       `18_brainfuck-bootstrap = 9992.568 -> 10014.644`,
+       `19_brainfuck-calculator = 12474.321 -> 12534.282`.
+       An alternating FFT-only rerun stayed mixed but did not overturn that
+       first keep signal, so current authority is to treat this as a modest
+       net-positive `fft`-surface keep rather than another rejected retry.
+       Recheck status on the kept live tree:
+       `make test-value-ssa-regression` PASS,
+       `make test-compiler-driver` PASS,
+       `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+       `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`).
+       Current authority is therefore:
+       keep this pass as the new arithmetic-reuse baseline, then open the
+       next optimization pass on the remaining runtime-cost centers such as
+       `spmv1` / `mv1`, deeper NTT magic-number lowering, or other repeated
+       `mod998` hot arithmetic still surviving in `fft`.
      - 2026-05-14 correctness closure inside the optimization round:
        one fresh course recheck exposed a real default-mainline wrong-code
        case on `lv9/12_more_arr_params.c`. Narrowing showed this was not the

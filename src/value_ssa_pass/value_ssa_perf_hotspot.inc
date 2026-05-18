@@ -153,6 +153,145 @@ static int value_ssa_perf_value_is_mod998_constant(const ValueSsaProgram *progra
     return 0;
 }
 
+static int value_ssa_perf_value_is_mod998_minus1_constant(const ValueSsaProgram *program,
+    const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    unsigned depth) {
+    ValueSsaInstruction *definition = NULL;
+
+    if (!program || !function || !analysis || depth > 8u) {
+        return 0;
+    }
+    if (value.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+        return value.immediate == 998244352;
+    }
+    if (value.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        return 0;
+    }
+    if (definition->kind == VALUE_SSA_INSTR_MOV) {
+        return value_ssa_perf_value_is_mod998_minus1_constant(
+            program, function, analysis, definition->as.mov_value, depth + 1u);
+    }
+    if (definition->kind == VALUE_SSA_INSTR_BINARY &&
+        definition->as.binary.op == VALUE_SSA_BINARY_SUB) {
+        return (
+            value_ssa_perf_value_is_mod998_constant(
+                program, function, analysis, definition->as.binary.lhs, depth + 1u) &&
+            definition->as.binary.rhs.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+            definition->as.binary.rhs.immediate == 1) ||
+            (
+                value_ssa_perf_value_is_mod998_constant(
+                    program, function, analysis, definition->as.binary.rhs, depth + 1u) &&
+                definition->as.binary.lhs.kind == VALUE_SSA_VALUE_IMMEDIATE &&
+                definition->as.binary.lhs.immediate == 1);
+    }
+    return 0;
+}
+
+static int value_ssa_perf_reuse_repeated_mod998_minus1_divs(ValueSsaProgram *program, ValueSsaError *error) {
+    size_t function_index;
+    int changed_any = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-325: invalid repeated mod998-1 div reuse contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaCfgAnalysis cfg;
+        ValueSsaDefUseAnalysis def_use;
+        size_t block_index;
+        int changed_function = 0;
+
+        if (!function->has_body || !function->name || strcmp(function->name, "main") != 0) {
+            continue;
+        }
+
+        value_ssa_cfg_analysis_init(&cfg);
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_cfg_analysis(function, &cfg, error) ||
+            !value_ssa_compute_def_use_analysis(function, &def_use, error)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            value_ssa_cfg_analysis_free(&cfg);
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t search_block_index;
+                int replaced = 0;
+
+                if (instruction->kind != VALUE_SSA_INSTR_BINARY ||
+                    !instruction->has_result ||
+                    instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                    instruction->as.binary.op != VALUE_SSA_BINARY_DIV ||
+                    !value_ssa_perf_value_is_mod998_minus1_constant(
+                        program, function, &def_use, instruction->as.binary.lhs, 0u)) {
+                    continue;
+                }
+
+                for (search_block_index = 0; search_block_index < function->block_count && !replaced; ++search_block_index) {
+                    ValueSsaBasicBlock *search_block = &function->blocks[search_block_index];
+                    size_t search_instruction_index;
+
+                    if (!cfg.dominates[search_block_index * function->block_count + block_index]) {
+                        continue;
+                    }
+
+                    for (search_instruction_index = 0; search_instruction_index < search_block->instruction_count; ++search_instruction_index) {
+                        ValueSsaInstruction *candidate = &search_block->instructions[search_instruction_index];
+
+                        if (search_block_index == block_index && search_instruction_index >= instruction_index) {
+                            break;
+                        }
+                        if (candidate->kind != VALUE_SSA_INSTR_BINARY ||
+                            !candidate->has_result ||
+                            candidate->result.kind != VALUE_SSA_VALUE_ID ||
+                            candidate->as.binary.op != VALUE_SSA_BINARY_DIV ||
+                            !value_ssa_perf_value_is_mod998_minus1_constant(
+                                program, function, &def_use, candidate->as.binary.lhs, 0u) ||
+                            !value_ssa_value_refs_equal(candidate->as.binary.rhs, instruction->as.binary.rhs)) {
+                            continue;
+                        }
+
+                        instruction->kind = VALUE_SSA_INSTR_MOV;
+                        instruction->as.mov_value = candidate->result;
+                        replaced = 1;
+                        changed_any = 1;
+                        changed_function = 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        value_ssa_def_use_analysis_free(&def_use);
+        value_ssa_cfg_analysis_free(&cfg);
+        if (changed_function) {
+            --function_index;
+        }
+    }
+
+    if (changed_any &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_perf_reduce_mod998_fft_butterfly(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
     int changed_any = 0;
@@ -4017,6 +4156,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         return 0;
     }
     if (!value_ssa_perf_strength_reduce_recursive_divmod2(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_reuse_repeated_mod998_minus1_divs(program, error)) {
         free(foldable_globals);
         return 0;
     }

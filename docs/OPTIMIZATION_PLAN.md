@@ -1629,6 +1629,41 @@
       universal win on every single single-run witness, but the formal A/B
       comparison against the restored baseline is strong enough to treat it as
       a stable kept checkpoint
+  - Current 2026-05-18 repeated `(mod-1)/d` quotient reuse in `main`, kept:
+    - I opened one new narrow `ValueSSA` perf-hotspot pass specifically for
+      the user-priority NTT-side repeated `(998244353 - 1) / d` shape in
+      `13_fft1` / `14_fft2` `main`.
+    - exact landing rule:
+      when a dominating earlier `div(mod998_minus_1, d)` already exists with
+      the same divisor, a later repeated straight-line `div` in `main` is
+      replaced by reuse of the earlier quotient instead of recomputing the
+      division.
+    - witness proof on rebuilt `value-ssa-perf` and final asm:
+      `13_fft1` / `14_fft2` now keep only `2` visible `div` instructions
+      instead of `3`.
+    - formal isolated A/B against the same current tree with only this one
+      pass disabled gave:
+      `13_fft1 run_ms = 7950.258 -> 7841.318`,
+      `14_fft2 run_ms = 7607.477 -> 7428.692`,
+      `18_brainfuck-bootstrap = 9992.568 -> 10014.644`,
+      `19_brainfuck-calculator = 12474.321 -> 12534.282`
+    - alternating FFT-only rerun stayed mixed but still acceptable for this
+      witness-driven keep:
+      one `13_fft1` rerun favored the disabled build, but the paired
+      `14_fft2` reruns and the first required four-case isolate still left
+      the transform as a net-positive `fft`-surface optimization rather than
+      a clearly negative branch like the earlier rejected `half_n` /
+      `multiply-double` retries
+    - current correctness restamp on the live tree:
+      `make test-value-ssa-regression` PASS,
+      `make test-compiler-driver` PASS,
+      `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`),
+      `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+    - current authority:
+      keep this pass as the new stable `mod998` arithmetic-reuse baseline,
+      then continue the next pass on remaining runtime hotspots and on the
+      still-open NTT magic-number / division-cost line the user asked to
+      pursue next
   - Current 2026-05-14 final-text dead jump-seed move removal, kept:
     - from the new stable text-cleanup baseline, I then added one even
       narrower branch-tail cleanup aimed at the hottest `brainfuck`
