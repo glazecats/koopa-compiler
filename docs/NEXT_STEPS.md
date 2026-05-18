@@ -382,6 +382,35 @@
        this `06_long_array` sparse-large-local-array initializer compaction is
        now a kept compile-time optimization and should be treated as the next
        local stable point once committed
+     - later same-day `% 998244353` multiply-double retry, not kept:
+       I then reopened the NTT arithmetic line again, but this time with an
+       even narrower ValueSSA landing than the kept butterfly rewrite:
+       only `multiply()`'s hot
+       `cur = (cur + cur) % 998244353`
+       path was rewritten into the same branchless correction chain
+       `ge -> sub 0, ge -> and 998244353 -> sub`
+     - same-day real-witness restamp:
+       on rebuilt `value-ssa-perf` for `/opt/bin/testcases/perf/13_fft1.c`,
+       `multiply()` now showed exactly the intended transformed shape, and the
+       emitted final assembly reduced the local `multiply` helper `rem` count
+       from `3` to `2`
+     - same-day correctness restamp:
+       `make test-value-ssa-regression`,
+       `make test-compiler-driver`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`
+       all stayed green on the experiment
+     - same-day formal A/B note:
+       despite the clean real-witness hit, the isolated 2-run A/B against the
+       stable base was still negative on the intended FFT surface:
+       `13_fft1 run_ms = 16578.659 -> 16859.059`
+       `14_fft2 run_ms = 15710.949 -> 15778.221`
+       and compile time also rose
+     - current authority:
+       this `multiply-double` `% 998244353` retry has now been fully backed
+       out from the live tree. Keep the negative result in memory and do not
+       reopen this exact `cur+cur` mask-and path again unless a materially
+       different cost model is added
        work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
        attempt has now been backed out. Current authority after rollback is:
        keep the commutative repeated pure-expression reuse,

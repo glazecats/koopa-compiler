@@ -336,6 +336,38 @@
       optimization and is checkpoint-worthy; future `% 998244353` work should
       use this as the new base rather than reopening the previously rejected
       final-text or `mul mod` butterfly variants
+  - Current 2026-05-18 narrow `ValueSSA` `% 998244353` multiply-double retry, not kept:
+    - I then reopened the `% 998244353` line one level deeper inside the same
+      NTT family, but still kept the landing intentionally narrow:
+      only `multiply()`'s hot
+      `cur = (cur + cur) % 998244353`
+      shape was rewritten at ValueSSA level into the same branchless
+      correction chain
+      `ge -> sub 0, ge -> and 998244353 -> sub`
+    - real-witness proof did succeed:
+      on rebuilt `value-ssa-perf` for `/opt/bin/testcases/perf/13_fft1.c`,
+      the `multiply()` helper changed exactly as intended, and the emitted
+      final text reduced `multiply`'s local `rem` count from `3` to `2`
+    - correctness restamp also stayed green:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - current authority is still **not kept**:
+      isolated 2-run A/B against the stable local base came back negative on
+      the intended FFT witnesses
+      - `13_fft1 run_ms = 16578.659 -> 16859.059`
+      - `14_fft2 run_ms = 15710.949 -> 15778.221`
+      - compile time also rose on both
+    - current authority:
+      fully back this narrow `multiply-double` retry out.
+      Treat it as another useful negative datapoint:
+      “middle-layer real hit” is still not enough by itself.
+      The next `% 998244353` / magic-number reopen should either
+      `1)` use a different arithmetic model than this mask-and correction, or
+      `2)` move to a different witness such as the remaining `div/mod` shapes
+      in `power()` / `main()` rather than repeating this exact `cur+cur` path
   - Current 2026-05-17 `lv9/06_long_array` compile-time follow-up:
     - root-cause diagnosis:
       this case is primarily a `-riscv` compile-time problem, not a runtime
