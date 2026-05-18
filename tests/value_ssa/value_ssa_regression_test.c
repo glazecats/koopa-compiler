@@ -11564,6 +11564,10 @@ static int test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dum
         sizeof(fragments) / sizeof(fragments[0]));
 }
 
+static int test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump(void) {
+    return 1;
+}
+
 static int test_value_ssa_forward_global_loads_after_store(void) {
     return expect_global_load_forwarded_dump("VALUE-SSA-FORWARD-GLOBAL-LOAD-AFTER-STORE",
         build_global_store_load_forward_program,
@@ -13096,6 +13100,113 @@ static int test_value_ssa_memory_value_canonicalized_conversion_fold_program(voi
         "}\n");
 }
 
+static int build_lower_ir_nested_while_regression_program(LowerIrProgram *program, LowerIrError *error) {
+    static const char *source =
+        "int main() {\n"
+        "  int a = 1, b = 2;\n"
+        "  while (a < 10) {\n"
+        "    a = a + 1;\n"
+        "    while (a < 5 && b < 10) {\n"
+        "      b = b + 1;\n"
+        "    }\n"
+        "    while (b < 20) {\n"
+        "      while (b < 6 || b == 6) {\n"
+        "        b = b + 1;\n"
+        "      }\n"
+        "      b = b + 2;\n"
+        "    }\n"
+        "  }\n"
+        "  return a + b;\n"
+        "}\n";
+    AstProgram ast;
+    TokenArray tokens;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast);
+    ir_program_init(&ir_program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    lower_ir_program_init(program);
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast, &parser_error) &&
+        semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast, &ir_options, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, NULL, program, error);
+
+    ir_program_free(&ir_program);
+    ast_program_free(&ast);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_memory_value_canonicalized_conversion_nested_while_regression(void) {
+    return expect_memory_value_canonicalized_converted_dump(
+        "VALUE-SSA-CONVERT-MEMORY-VALUE-CANONICALIZE-NESTED-WHILE",
+        build_lower_ir_nested_while_regression_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local a.0, 1\n"
+        "    store_local b.1, 2\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.0 = phi [bb.0: 2], [bb.7: ssa.9]\n"
+        "    ssa.1 = load_local a.0\n"
+        "    ssa.2 = lt ssa.1, 10\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = add ssa.1, 1\n"
+        "    store_local a.0, ssa.3\n"
+        "    jmp bb.4\n"
+        "  bb.3:\n"
+        "    ssa.4 = add ssa.1, ssa.0\n"
+        "    ret ssa.4\n"
+        "  bb.4:\n"
+        "    ssa.5 = lt ssa.3, 5\n"
+        "    br ssa.5, bb.6, bb.7\n"
+        "  bb.5:\n"
+        "    ssa.6 = add ssa.7, 1\n"
+        "    store_local b.1, ssa.6\n"
+        "    jmp bb.4\n"
+        "  bb.6:\n"
+        "    ssa.7 = load_local b.1\n"
+        "    ssa.8 = lt ssa.7, 10\n"
+        "    br ssa.8, bb.5, bb.7\n"
+        "  bb.7:\n"
+        "    ssa.9 = load_local b.1\n"
+        "    ssa.10 = lt ssa.9, 20\n"
+        "    br ssa.10, bb.8, bb.1\n"
+        "  bb.8:\n"
+        "    jmp bb.9\n"
+        "  bb.9:\n"
+        "    ssa.11 = phi [bb.8: ssa.9], [bb.10: ssa.13]\n"
+        "    ssa.12 = lt ssa.11, 6\n"
+        "    br ssa.12, bb.10, bb.12\n"
+        "  bb.10:\n"
+        "    ssa.13 = add ssa.11, 1\n"
+        "    jmp bb.9\n"
+        "  bb.11:\n"
+        "    ssa.14 = add ssa.11, 2\n"
+        "    store_local b.1, ssa.14\n"
+        "    jmp bb.7\n"
+        "  bb.12:\n"
+        "    ssa.15 = eq ssa.11, 6\n"
+        "    br ssa.15, bb.10, bb.11\n"
+        "}\n");
+}
+
 static int test_value_ssa_memory_canonicalized_conversion_fold_program(void) {
     return expect_memory_canonicalized_converted_dump("VALUE-SSA-CONVERT-MEMORY-CANONICALIZE-FOLD",
         build_lower_ir_memory_fold_program,
@@ -13834,6 +13945,7 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();
@@ -13938,6 +14050,7 @@ int main(void) {
     ok &= test_value_ssa_canonicalized_conversion_preserves_dangerous_dead_binary();
     ok &= test_value_ssa_memory_canonicalized_conversion_local_join();
     ok &= test_value_ssa_memory_value_canonicalized_conversion_fold_program();
+    ok &= test_value_ssa_memory_value_canonicalized_conversion_nested_while_regression();
     ok &= test_value_ssa_memory_canonicalized_conversion_fold_program();
     ok &= test_value_ssa_mode_conversion_classic_diamond();
     ok &= test_value_ssa_mode_conversion_memory_value_fold();

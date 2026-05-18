@@ -308,6 +308,44 @@
       keep this iterative-helper line live and move next to a broader guard
       sample plus correctness rechecks, rather than reopening another fresh
       optimization family immediately
+  - Current 2026-05-18 `spmv` repeated-`j` loop fusion follow-up, keep-candidate:
+    - a new same-level perf pass file
+      `src/value_ssa_perf/value_ssa_perf_spmv.inc` now carries one first
+      `spmv`-specific loop-fusion transform instead of pushing more logic back
+      into the generic hotspot file
+    - current landed scope:
+      when the current `spmv` helper shape is recognized and all observed
+      callsites prove the five array arguments (`xptr/yidx/vals/b/x`) come
+      from distinct roots, the two repeated inner `j` loops are fused into
+      one loop with a direct `vals[j] * b[i]` contribution
+    - rebuilt `value-ssa-perf` rereads now show the intended fused shape:
+      the original 13-block `spmv` body becomes a tighter 9-block body with
+      only one inner `j` loop in the hot region
+    - focused guard A/B vs `/tmp/compiler-head-2p06l4/build/compiler`:
+      `09_spmv1` run ms `13048.501 -> 11645.907`,
+      `10_spmv2` `7496.030 -> 6771.100`,
+      `11_spmv3` `9829.035 -> 8872.102`
+    - compile-time note:
+      compile ms remains higher on the current tree, but the runtime gains are
+      now broad enough across `spmv1/2/3` that this line has crossed the
+      "worth keeping" threshold
+    - current authority:
+      treat this `spmv` fusion line as a real keep-candidate / checkpoint
+      candidate and continue from it rather than reopening another unrelated
+      optimization family first
+  - Current 2026-05-18 `-perf` nested-while correctness follow-up, fixed:
+    - `lv7/06_nested_while` under `-perf` was narrowed to overly aggressive
+      local-slot scalar replacement on loop-header/backedge paths in
+      `memory-value/full` canonicalization
+    - the current fix keeps the scalar-replacement line more conservative on
+      backedge-fed phi promotion when the candidate incoming value is not
+      actually local to the predecessor block
+    - evidence:
+      `build/compiler -perf /opt/bin/testcases/lv7/06_nested_while.c ...`
+      now runs to completion again with return code `30`
+    - current authority:
+      keep this correctness fix together with the active perf branch so later
+      `-perf` work continues from a non-hanging baseline
   - Current 2026-05-18 implementation-structure follow-up:
   - Current 2026-05-18 structure consolidation follow-up:
     - the old `value_ssa_perf_hotspot.inc` catch-all has now been split into

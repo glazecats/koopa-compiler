@@ -239,6 +239,30 @@
   Current authority is to treat this as the strongest live optimization line
   on the `fft1/2` hotspot so far, keep it in the tree, and move next to
   broader guard sampling plus correctness rechecks before any commit.
+- 2026-05-18 `spmv` fusion follow-up:
+  the current live tree now also has one new same-level `spmv`-specific perf
+  pass in `src/value_ssa_perf/value_ssa_perf_spmv.inc`. It recognizes the
+  current repeated-two-`j`-loops `spmv` helper shape, proves the array
+  arguments do not alias from observed callsites, and fuses the two repeated
+  inner loops into one direct `vals[j] * b[i]` contribution loop.
+  Rebuilt `value-ssa-perf` dumps confirm the intended fused shape, and the
+  focused guard A/B against `/tmp/compiler-head-2p06l4/build/compiler` now
+  reads:
+  `09_spmv1` run ms `13048.501 -> 11645.907`,
+  `10_spmv2` `7496.030 -> 6771.100`,
+  `11_spmv3` `9829.035 -> 8872.102`.
+  Current authority is to keep this pass live as a real checkpoint candidate,
+  not merely a speculative branch.
+- 2026-05-18 `-perf` nested-while correctness fix:
+  the `lv7/06_nested_while` hang under `-perf` has now been narrowed and
+  fixed on the live tree. The bug source was overly aggressive local-slot
+  scalar replacement on loop-header/backedge promotion in the
+  memory-value/full canonicalization path. The fix now keeps that promotion
+  more conservative on backedge-fed phi candidates whose incoming value is
+  not actually local to the predecessor block.
+  Current evidence:
+  `build/compiler -perf /opt/bin/testcases/lv7/06_nested_while.c ...`
+  now runs to completion again with return code `30`.
  1. `void call` pointless-code cleanup
      - audit all remaining `void call`-adjacent no-op materialization such as
        synthetic zero-result temps, dead result placeholders, or other

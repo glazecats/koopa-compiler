@@ -139,13 +139,22 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
             }
         }
         if (!has_input_value) {
+            size_t predecessor_block_id = memory_phi->inputs[input_index].predecessor_block_id;
+
+            if (phi_block_id < cfg_analysis->block_count &&
+                predecessor_block_id < cfg_analysis->block_count &&
+                phi_block_id != predecessor_block_id &&
+                cfg_analysis->dominates[phi_block_id * cfg_analysis->block_count + predecessor_block_id]) {
+                free(phi_inputs);
+                return 1;
+            }
             if (!memory_ssa_pass_find_dominating_equivalent_value(value_function,
                     memory_function,
                     memory_def_use,
                     value_def_use,
                     cfg_analysis,
-                    memory_phi->inputs[input_index].predecessor_block_id,
-                    value_function->blocks[memory_phi->inputs[input_index].predecessor_block_id].instruction_count,
+                    predecessor_block_id,
+                    value_function->blocks[predecessor_block_id].instruction_count,
                     instruction->as.load_slot,
                     memory_phi->inputs[input_index].version_id,
                     &has_input_value,
@@ -158,6 +167,24 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
         if (!has_input_value) {
             free(phi_inputs);
             return 1;
+        }
+
+        {
+            size_t predecessor_block_id = memory_phi->inputs[input_index].predecessor_block_id;
+            int predecessor_is_backedge =
+                phi_block_id < cfg_analysis->block_count &&
+                predecessor_block_id < cfg_analysis->block_count &&
+                phi_block_id != predecessor_block_id &&
+                cfg_analysis->dominates[phi_block_id * cfg_analysis->block_count + predecessor_block_id];
+
+            if (predecessor_is_backedge &&
+                input_value.kind == VALUE_SSA_VALUE_ID &&
+                input_value.value_id < value_def_use->value_count &&
+                value_def_use->has_def[input_value.value_id] &&
+                value_def_use->def_block_ids[input_value.value_id] != predecessor_block_id) {
+                free(phi_inputs);
+                return 1;
+            }
         }
 
         phi_inputs[input_index].predecessor_block_id = memory_phi->inputs[input_index].predecessor_block_id;

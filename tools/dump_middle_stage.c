@@ -336,7 +336,11 @@ int main(int argc, char **argv) {
         break;
     }
     if (!ok) {
-        fprintf(stderr, "failed before value-ssa dump stage\n");
+        fprintf(stderr, "failed before value-ssa dump stage");
+        if (value_error.message[0] != '\0') {
+            fprintf(stderr, ": %s", value_error.message);
+        }
+        fputc('\n', stderr);
         goto cleanup;
     }
 

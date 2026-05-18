@@ -506,6 +506,7 @@ static int value_ssa_mark_reachable_blocks(const ValueSsaFunction *function,
 #include "../value_ssa_perf/value_ssa_perf_entry_hoist.inc"
 #include "../value_ssa_perf/value_ssa_perf_induction.inc"
 #include "../value_ssa_perf/value_ssa_perf_loop_memory.inc"
+#include "../value_ssa_perf/value_ssa_perf_spmv.inc"
 #include "../value_ssa_perf/value_ssa_recursive_helper.inc"
 #include "value_ssa_perf_hotspot.inc"
 #include "value_ssa_simplify_cfg.inc"
