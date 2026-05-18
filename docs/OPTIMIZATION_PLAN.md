@@ -398,6 +398,34 @@
     - current authority:
       this recursive `div/mod 2` strength-reduction pass is now a **kept**
       NTT optimization candidate and is checkpoint-worthy
+  - Current 2026-05-18 narrow `fft half_n` reuse retry, not kept:
+    - I then tried one more structural FFT-side reopen that looked promising
+      from the static witness shape and from `clang`'s output:
+      reuse / simplify repeated `n/2` work inside `fft()` itself
+    - landing point:
+      the pass only touched same-block repeated `div n, 2` shapes inside
+      `fft()`, aiming to reuse the first computed half-length and shrink the
+      repeated scalar setup around the split / odd-index path
+    - real-witness proof did succeed:
+      rebuilt `value-ssa-perf` on `/opt/bin/testcases/perf/13_fft1.c`
+      clearly showed the intended FFT-side shape shift, with several `/2`
+      sites becoming `shr 1`
+    - correctness restamp also stayed green:
+      `make test-value-ssa-regression`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv8`,
+      and `autotest -riscv -s lv9`
+      all passed
+    - current authority is still **not kept**:
+      isolated 2-run A/B was mixed and not acceptable because the more
+      important witness regressed badly
+      - `13_fft1 run_ms = 7851.894 -> 8966.808`
+      - `14_fft2 run_ms = 7672.634 -> 7528.207`
+    - current authority:
+      fully back this `fft half_n` reuse retry out.
+      Keep the negative datapoint in memory and do not reopen this exact
+      reuse shape again without a more selective proof that avoids the
+      `13_fft1` regression
   - Current 2026-05-17 `lv9/06_long_array` compile-time follow-up:
     - root-cause diagnosis:
       this case is primarily a `-riscv` compile-time problem, not a runtime

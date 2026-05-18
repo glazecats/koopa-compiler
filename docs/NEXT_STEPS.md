@@ -438,6 +438,30 @@
      - current authority:
        this recursive `div/mod 2` helper strength-reduction pass is now a
        kept optimization candidate and should be checkpointed once committed
+     - later same-day `fft half_n` reuse retry, not kept:
+       after the kept recursive `div/mod 2` helper pass, I also tried one
+       more FFT-side structural reopen: reuse / simplify repeated `n/2`
+       computation inside `fft()` itself
+     - same-day real-witness restamp:
+       rebuilt `value-ssa-perf` on `/opt/bin/testcases/perf/13_fft1.c`
+       showed the intended local shape change, with several FFT-side `/2`
+       sites becoming `shr 1`
+     - same-day correctness restamp:
+       `make test-value-ssa-regression`,
+       `make test-compiler-driver`,
+       `autotest -riscv -s lv8`,
+       and `autotest -riscv -s lv9`
+       all stayed green
+     - same-day formal isolated A/B note:
+       the result was mixed and therefore not keepable:
+       `13_fft1 run_ms = 7851.894 -> 8966.808`
+       `14_fft2 run_ms = 7672.634 -> 7528.207`
+       so the more important FFT witness regressed badly even though the
+       sibling one improved
+     - current authority:
+       this `fft half_n` reuse retry has now been fully backed out from the
+       live tree. Keep the negative result in memory and do not reopen this
+       exact same-block half-length reuse path again without a stronger proof
        work in the hot path (`09_spmv1` rose to roughly `17.60s`). That
        attempt has now been backed out. Current authority after rollback is:
        keep the commutative repeated pure-expression reuse,
