@@ -148,6 +148,10 @@ static int memory_ssa_pass_try_phi_forward_join_load(ValueSsaFunction *value_fun
         !memory_instruction->accesses[0].has_use_version) {
         return 1;
     }
+    if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+        !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.load_slot)) {
+        return 1;
+    }
     join_expected_version_id = memory_instruction->accesses[0].use_version_id;
     if (join_expected_version_id < memory_def_use->version_count &&
         memory_def_use->has_def &&
@@ -570,6 +574,10 @@ static int memory_ssa_pass_forward_loads(ValueSsaProgram *program,
                     ValueSsaValueRef value;
 
                     if (instruction->kind != load_kind) {
+                        continue;
+                    }
+                    if (load_kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+                        !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.load_slot)) {
                         continue;
                     }
 

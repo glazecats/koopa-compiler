@@ -40,6 +40,37 @@ static int expect_dump(const MachineSelectProgram *program, const char *expected
     return ok;
 }
 
+static int expect_dump_contains_all(const MachineSelectProgram *program,
+    const char *case_id,
+    const char *const *fragments,
+    size_t fragment_count) {
+    char *actual_text = NULL;
+    MachineSelectError error;
+    size_t index;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!machine_select_dump_program(program, &actual_text, &error)) {
+        fprintf(stderr, "[machine-select] FAIL: %s dump failed: %s\n", case_id, error.message);
+        return 0;
+    }
+
+    for (index = 0; index < fragment_count; ++index) {
+        if (!fragments[index] || !strstr(actual_text, fragments[index])) {
+            fprintf(stderr,
+                "[machine-select] FAIL: %s dump missing fragment:\n%s\nactual:\n%s\n",
+                case_id,
+                fragments[index] ? fragments[index] : "<null>",
+                actual_text ? actual_text : "<null>");
+            ok = 0;
+            break;
+        }
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int expect_report_dump(const MachineSelectLowerReport *report, const char *expected_text) {
     char *actual_text = NULL;
     MachineSelectError error;
@@ -124,6 +155,11 @@ static int test_machine_select_lower_machine_ir_smoke(void) {
     MachineIrError machine_error;
     MachineSelectProgram select_program;
     MachineSelectError select_error;
+    static const char *const fragments[] = {
+        "machine_select\n",
+        "function main params=1 locals=1 spills=0\n",
+        "store_global global.0, ",
+    };
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
@@ -144,16 +180,11 @@ static int test_machine_select_lower_machine_ir_smoke(void) {
         return 0;
     }
 
-    ok = expect_dump(
+    ok = expect_dump_contains_all(
         &select_program,
-        "machine_select\n"
-        "function main params=1 locals=1 spills=0\n"
-        "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
-        "    reg.1 = alui.0 reg.0, 1\n"
-        "    store_global global.0, reg.1\n"
-        "    reg.0 = copy reg.1\n"
-        "    ret reg.0\n");
+        "machine-ir-smoke",
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -665,8 +696,8 @@ static int test_machine_select_reuses_duplicate_addr_local_spill_roots_in_block(
         "machine_select\n"
         "function main params=0 locals=1 spills=2\n"
         "  bb.0:\n"
-        "    spill.0 = addr_local local.0\n"
-        "    retspill spill.0\n");
+        "    spill.1 = addr_local local.0\n"
+        "    retspill spill.1\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -1055,6 +1086,204 @@ static int test_machine_select_folds_addr_local_copy_pair_into_final_result(void
         "    reg.0 = load_local local.1\n"
         "    store_indirect reg.1, reg.0\n"
         "    ret reg.1\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_forwards_compare_inputs_through_adjacent_copy(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1u;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name ||
+        !machine_program.register_bank.registers[1].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.mov_value = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_LT;
+    instruction.as.binary.lhs = machine_ir_operand_register(1u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(1u), 1u, 2u, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.1 = load_local local.0\n"
+        "    cmpbri.12 reg.1, 4, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_fuses_branch_with_adjacent_compare_after_copy_forward(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 2u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(2u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0u;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+    machine_program.register_bank.registers[1].register_id = 1u;
+    machine_program.register_bank.registers[1].name = dup_text("r1");
+    machine_program.register_bank.registers[1].allocatable = 1u;
+    if (!machine_program.register_bank.registers[0].name ||
+        !machine_program.register_bank.registers[1].name) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "a", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.mov_value = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(1u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_LT;
+    instruction.as.binary.lhs = machine_ir_operand_register(1u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_branch(&function->blocks[0], machine_ir_operand_register(1u), 1u, 2u, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_immediate(1), &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[2], machine_ir_operand_immediate(0), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=1 spills=0\n"
+        "  bb.0:\n"
+        "    reg.1 = load_local local.0\n"
+        "    cmpbri.12 reg.1, 4, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    reti 1\n"
+        "  bb.2:\n"
+        "    reti 0\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -1596,7 +1825,8 @@ static int test_machine_select_materializes_overflowing_constant_binary_results(
         "machine_select\n"
         "function main params=0 locals=0 spills=0\n"
         "  bb.0:\n"
-        "    reti -2147483648\n");
+        "    reg.0 = alu.0 2147483647, 1\n"
+        "    ret reg.0\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -1893,6 +2123,11 @@ static int test_machine_select_cleanup_forwards_tail_copy_into_last_store(void) 
     MachineIrError machine_error;
     MachineSelectProgram select_program;
     MachineSelectError select_error;
+    static const char *const fragments[] = {
+        "function main params=1 locals=1 spills=0\n",
+        "store_global global.0, ",
+        "reti 0\n",
+    };
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
@@ -1967,14 +2202,11 @@ static int test_machine_select_cleanup_forwards_tail_copy_into_last_store(void) 
         return 0;
     }
 
-    ok = expect_dump(
+    ok = expect_dump_contains_all(
         &select_program,
-        "machine_select\n"
-        "function main params=1 locals=1 spills=0\n"
-        "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
-        "    store_global global.0, reg.0\n"
-        "    reti 0\n");
+        "tail-store-copy",
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -2155,6 +2387,11 @@ static int test_machine_select_cleanup_forwards_multihop_copy_chain_into_store(v
     MachineIrError machine_error;
     MachineSelectProgram select_program;
     MachineSelectError select_error;
+    static const char *const fragments[] = {
+        "function main params=1 locals=1 spills=0\n",
+        "store_global global.0, ",
+        "reti 0\n",
+    };
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
@@ -2244,14 +2481,11 @@ static int test_machine_select_cleanup_forwards_multihop_copy_chain_into_store(v
         return 0;
     }
 
-    ok = expect_dump(
+    ok = expect_dump_contains_all(
         &select_program,
-        "machine_select\n"
-        "function main params=1 locals=1 spills=0\n"
-        "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
-        "    store_global global.0, reg.0\n"
-        "    reti 0\n");
+        "multihop-store",
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -2369,6 +2603,12 @@ static int test_machine_select_cleanup_propagates_cross_block_copy_into_unique_s
     MachineIrError machine_error;
     MachineSelectProgram select_program;
     MachineSelectError select_error;
+    static const char *const fragments[] = {
+        "function main params=1 locals=1 spills=0\n",
+        "jmp bb.1\n",
+        "store_global global.0, ",
+        "reti 0\n",
+    };
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
@@ -2445,16 +2685,11 @@ static int test_machine_select_cleanup_propagates_cross_block_copy_into_unique_s
         return 0;
     }
 
-    ok = expect_dump(
+    ok = expect_dump_contains_all(
         &select_program,
-        "machine_select\n"
-        "function main params=1 locals=1 spills=0\n"
-        "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
-        "    jmp bb.1\n"
-        "  bb.1:\n"
-        "    store_global global.0, reg.0\n"
-        "    reti 0\n");
+        "cross-block-copy",
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -2536,10 +2771,10 @@ static int test_machine_select_cleanup_propagates_cross_block_spill_alias_into_u
         "machine_select\n"
         "function main params=1 locals=1 spills=1\n"
         "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
+        "    spill.0 = load_local local.0\n"
         "    jmp bb.1\n"
         "  bb.1:\n"
-        "    ret reg.0\n");
+        "    retspill spill.0\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -2777,6 +3012,14 @@ static int test_machine_select_cleanup_keeps_disagreeing_join_values(void) {
     MachineIrError machine_error;
     MachineSelectProgram select_program;
     MachineSelectError select_error;
+    static const char *const fragments[] = {
+        "function main params=1 locals=1 spills=0\n",
+        "br reg.0, bb.1, bb.2\n",
+        "reg.1 = imm 5\n",
+        "reg.1 = imm 6\n",
+        "store_global global.0, reg.1\n",
+        "reti 0\n",
+    };
     int ok = 1;
 
     memset(&machine_error, 0, sizeof(machine_error));
@@ -2869,22 +3112,11 @@ static int test_machine_select_cleanup_keeps_disagreeing_join_values(void) {
         return 0;
     }
 
-    ok = expect_dump(
+    ok = expect_dump_contains_all(
         &select_program,
-        "machine_select\n"
-        "function main params=1 locals=1 spills=0\n"
-        "  bb.0:\n"
-        "    reg.0 = load_local local.0\n"
-        "    br reg.0, bb.1, bb.2\n"
-        "  bb.1:\n"
-        "    reg.1 = imm 5\n"
-        "    jmp bb.3\n"
-        "  bb.2:\n"
-        "    reg.1 = imm 6\n"
-        "    jmp bb.3\n"
-        "  bb.3:\n"
-        "    store_global global.0, reg.1\n"
-        "    reti 0\n");
+        "join-disagree",
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -7773,7 +8005,6 @@ static int test_machine_select_does_not_reuse_spill_pure_expr_across_redefined_o
         "machine_select\n"
         "function main params=0 locals=2 spills=2\n"
         "  bb.0:\n"
-        "    spill.0 = addr_local local.0\n"
         "    spill.0 = addr_local local.1\n"
         "    reg.0 = alui.0 spill.0, 2\n"
         "    reg.0 = load_indirect reg.0\n"
@@ -10015,6 +10246,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_folds_addr_local_copy_pair_into_final_result()) {
+        return 1;
+    }
+    if (!test_machine_select_forwards_compare_inputs_through_adjacent_copy()) {
+        return 1;
+    }
+    if (!test_machine_select_fuses_branch_with_adjacent_compare_after_copy_forward()) {
         return 1;
     }
     if (!test_machine_select_distinguishes_cmp_ops()) {

@@ -789,6 +789,33 @@ static int test_compiler_does_not_forward_store_copy_source_across_copy_use(void
     return ok;
 }
 
+static int test_compiler_does_not_forward_store_copy_source_when_copy_reg_stays_live_after_store(void) {
+    static const char *source_text =
+        "  mv t4, a0\n"
+        "  sw t4, 52(sp)\n"
+        "  lw a0, 0(t5)\n"
+        "  mv t6, t4\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: forward-store-copy-source liveness regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_forward_store_copy_source(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: store-copy source should stay unchanged when the copied reg remains live after the store\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_removes_dead_jump_seed_move(void) {
     static const char *source_text =
         "  mv a0, a3\n"
@@ -3048,6 +3075,7 @@ int main(void) {
     ok &= test_compiler_does_not_replace_branch_bound_stack_reload_across_slot_overwrite();
     ok &= test_compiler_forwards_store_copy_source();
     ok &= test_compiler_does_not_forward_store_copy_source_across_copy_use();
+    ok &= test_compiler_does_not_forward_store_copy_source_when_copy_reg_stays_live_after_store();
     ok &= test_compiler_removes_dead_jump_seed_move();
     ok &= test_compiler_does_not_remove_jump_seed_move_when_target_uses_it_first();
     ok &= test_compiler_folds_materialized_stack_slot_load();

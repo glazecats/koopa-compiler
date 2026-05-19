@@ -5053,6 +5053,11 @@ static int compiler_optimize_riscv_preview_forward_store_copy_source(char **io_t
                     continue;
                 }
 
+                if (compiler_riscv_preview_reg_may_be_needed_past_label_before_redefinition(
+                        lines, line_count, scan_index + 1u, copy_rd)) {
+                    break;
+                }
+
                 {
                     size_t emit_index;
 

@@ -578,7 +578,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         return 1;
     }
     if (!machine_select_program_should_skip_cleanup_pure(out_program)) {
+        machine_select_trace_marker("cleanup-pure-begin");
         cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        machine_select_trace_marker("cleanup-pure-end");
         if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
@@ -605,7 +607,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         stage_start = machine_select_now_s();
     }
     if (!machine_select_program_should_skip_reuse_addr_roots(out_program)) {
+        machine_select_trace_marker("cleanup-reuse-addr-roots-begin");
         if (machine_select_cleanup_reuse_addr_roots_program(out_program)) {
+            machine_select_trace_marker("cleanup-reuse-addr-roots-end");
             if (trace_timing) {
                 machine_select_trace_timing("cleanup-reuse-addr-roots", machine_select_now_s() - stage_start);
                 stage_start = machine_select_now_s();
@@ -619,6 +623,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
                 stage_start = machine_select_now_s();
             }
         } else if (trace_timing) {
+            machine_select_trace_marker("cleanup-reuse-addr-roots-end");
             machine_select_trace_timing("cleanup-reuse-addr-roots", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
@@ -627,7 +632,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         stage_start = machine_select_now_s();
     }
     if (!machine_select_skip_cleanup_reuse_internal_pure_calls_enabled()) {
+        machine_select_trace_marker("cleanup-reuse-internal-pure-calls-begin");
         cleanup_changed = machine_select_cleanup_reuse_internal_pure_calls_program(out_program, error);
+        machine_select_trace_marker("cleanup-reuse-internal-pure-calls-end");
         if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
@@ -637,7 +644,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
                 machine_select_trace_timing("cleanup-reuse-internal-pure-calls", machine_select_now_s() - stage_start);
                 stage_start = machine_select_now_s();
             }
+            machine_select_trace_marker("cleanup-pure-after-reuse-internal-pure-calls-begin");
             cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+            machine_select_trace_marker("cleanup-pure-after-reuse-internal-pure-calls-end");
             if (cleanup_changed < 0) {
                 machine_select_program_free(out_program);
                 return 0;
@@ -663,7 +672,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         stage_start = machine_select_now_s();
     }
     if (!machine_select_skip_cleanup_reuse_unique_predecessor_pure_calls_enabled()) {
+        machine_select_trace_marker("cleanup-reuse-unique-predecessor-pure-calls-begin");
         cleanup_changed = machine_select_cleanup_reuse_unique_predecessor_pure_calls_program(out_program, error);
+        machine_select_trace_marker("cleanup-reuse-unique-predecessor-pure-calls-end");
         if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
@@ -673,7 +684,9 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
                 machine_select_trace_timing("cleanup-reuse-unique-predecessor-pure-calls", machine_select_now_s() - stage_start);
                 stage_start = machine_select_now_s();
             }
+            machine_select_trace_marker("cleanup-pure-after-reuse-unique-predecessor-pure-calls-begin");
             cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+            machine_select_trace_marker("cleanup-pure-after-reuse-unique-predecessor-pure-calls-end");
             if (cleanup_changed < 0) {
                 machine_select_program_free(out_program);
                 return 0;
@@ -701,11 +714,14 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
     if (!machine_select_skip_cleanup_forward_same_block_indirect_loads_enabled() &&
         machine_select_program_uses_indirect_memory(out_program) &&
         machine_select_cleanup_forward_same_block_indirect_loads_program(out_program)) {
+        machine_select_trace_marker("cleanup-forward-same-block-indirect-loads-begin");
         if (trace_timing) {
             machine_select_trace_timing("cleanup-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
+        machine_select_trace_marker("cleanup-pure-after-forward-same-block-indirect-loads-begin");
         cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        machine_select_trace_marker("cleanup-pure-after-forward-same-block-indirect-loads-end");
         if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
@@ -722,6 +738,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             machine_select_trace_timing("verify-after-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
+        machine_select_trace_marker("cleanup-forward-same-block-indirect-loads-end");
     } else if (trace_timing) {
         machine_select_trace_timing("cleanup-forward-same-block-indirect-loads", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
@@ -729,11 +746,14 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
     if (!machine_select_skip_cleanup_reuse_spill_pure_expr_enabled() &&
         machine_select_program_uses_indirect_memory(out_program) &&
         machine_select_cleanup_reuse_spill_pure_expr_program(out_program)) {
+        machine_select_trace_marker("cleanup-reuse-spill-pure-expr-begin");
         if (trace_timing) {
             machine_select_trace_timing("cleanup-reuse-spill-pure-expr", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
+        machine_select_trace_marker("cleanup-pure-after-reuse-spill-pure-expr-begin");
         cleanup_changed = machine_select_cleanup_pure_program(out_program, error);
+        machine_select_trace_marker("cleanup-pure-after-reuse-spill-pure-expr-end");
         if (cleanup_changed < 0) {
             machine_select_program_free(out_program);
             return 0;
@@ -750,16 +770,19 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             machine_select_trace_timing("verify-after-reuse-spill-pure-expr", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();
         }
+        machine_select_trace_marker("cleanup-reuse-spill-pure-expr-end");
     } else if (trace_timing) {
         machine_select_trace_timing("cleanup-reuse-spill-pure-expr", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
     if (!machine_select_skip_cleanup_full_enabled() &&
         !machine_select_program_uses_indirect_memory(out_program)) {
+        machine_select_trace_marker("cleanup-full-begin");
         if (!machine_select_cleanup_program(out_program, error)) {
             machine_select_program_free(out_program);
             return 0;
         }
+        machine_select_trace_marker("cleanup-full-end");
         if (trace_timing) {
             machine_select_trace_timing("cleanup-full", machine_select_now_s() - stage_start);
             stage_start = machine_select_now_s();

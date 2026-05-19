@@ -44,6 +44,7 @@ static int memory_ssa_pass_append_instruction_ignoring_terminator(ValueSsaBasicB
 static int memory_ssa_pass_validate_alignment(const ValueSsaFunction *value_function,
     const MemorySsaFunction *memory_function,
     ValueSsaError *error);
+static int memory_ssa_pass_local_slot_is_scalar_replaceable(const ValueSsaFunction *function, ValueSsaSlotRef slot);
 static int memory_ssa_pass_append_phi(ValueSsaBasicBlock *block,
     size_t result_id,
     const ValueSsaPhiInput *inputs,

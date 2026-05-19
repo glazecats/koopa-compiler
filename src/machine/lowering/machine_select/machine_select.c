@@ -33,6 +33,18 @@ static int machine_select_trace_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_trace_pure_iter_hash_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_TRACE_PURE_ITER_HASH");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_trace_pure_iter_dump_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_TRACE_PURE_ITER_DUMP");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_skip_cleanup_pure_enabled(void) {
     const char *flag = getenv("MACHINE_SELECT_SKIP_CLEANUP_PURE");
 
@@ -57,6 +69,12 @@ static int machine_select_skip_cleanup_reuse_unique_predecessor_pure_calls_enabl
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_skip_cleanup_reuse_unique_predecessor_small_pure_exprs_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_SMALL_PURE_EXPRS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_skip_cleanup_forward_same_block_indirect_loads_enabled(void) {
     const char *flag = getenv("MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS");
 
@@ -75,6 +93,42 @@ static int machine_select_skip_cleanup_full_enabled(void) {
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
 }
 
+static int machine_select_skip_cleanup_forward_trivial_defs_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_FORWARD_TRIVIAL_DEFS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_remove_dead_defs_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REMOVE_DEAD_DEFS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_canonicalize_ops_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_CANONICALIZE_OPS");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_remove_copy_self_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_REMOVE_COPY_SELF");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_fold_addr_copy_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_FOLD_ADDR_COPY");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int machine_select_skip_cleanup_fold_pure_producer_copy_enabled(void) {
+    const char *flag = getenv("MACHINE_SELECT_SKIP_FOLD_PURE_PRODUCER_COPY");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
 static int machine_select_aggressive_opt_mode_enabled(void) {
     const char *flag = getenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS");
 
@@ -86,6 +140,14 @@ static void machine_select_trace_timing(const char *stage, double elapsed_s) {
         return;
     }
     fprintf(stderr, "[machine-select-timing] %s %.3f\n", stage, elapsed_s);
+}
+
+static void machine_select_trace_marker(const char *stage) {
+    if (!stage || !machine_select_trace_enabled()) {
+        return;
+    }
+    fprintf(stderr, "[machine-select-stage] %s\n", stage);
+    fflush(stderr);
 }
 
 static void machine_select_set_error(MachineSelectError *error, int line, int column, const char *fmt, ...);

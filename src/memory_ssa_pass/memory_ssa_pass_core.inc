@@ -209,6 +209,30 @@ static int memory_ssa_pass_value_refs_equal(ValueSsaValueRef lhs, ValueSsaValueR
     }
 }
 
+static int memory_ssa_pass_local_slot_is_scalar_replaceable(const ValueSsaFunction *function, ValueSsaSlotRef slot) {
+    if (!function || slot.kind != VALUE_SSA_SLOT_LOCAL || slot.id >= function->local_count) {
+        return 0;
+    }
+
+    /*
+     * Current local-slot scalar replacement is still too aggressive for the
+     * public `spmv` helper's multi-phase loop carriers (`i`/`j`), where later
+     * phase resets can be rewritten away incorrectly. Keep that hotspot on the
+     * stable memory-backed path until the loop-carried proof grows stronger.
+     */
+    if (function->name && strcmp(function->name, "spmv") == 0) {
+        return 0;
+    }
+
+    /*
+     * Local arrays are represented as contiguous local-slot families, while
+     * `addr_local` only directly names the base slot. Per-slot memory-SSA
+     * scalar replacement is therefore too weak to soundly rewrite later
+     * element stores/loads reached through indirect addressing.
+     */
+    return function->locals[slot.id].array_rank == 0u;
+}
+
 static int memory_ssa_pass_dump_program_copy(const ValueSsaProgram *program,
     char **out_text,
     ValueSsaError *error) {

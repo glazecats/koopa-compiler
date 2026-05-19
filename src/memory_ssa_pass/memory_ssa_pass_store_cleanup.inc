@@ -186,6 +186,10 @@ static int memory_ssa_pass_eliminate_redundant_stores_impl(ValueSsaProgram *prog
                     (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL && !include_globals)) {
                     continue;
                 }
+                if (instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL &&
+                    !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.store.slot)) {
+                    continue;
+                }
 
                 ok = memory_ssa_resolve_store_previous_value(memory_function,
                     &def_use,
@@ -363,6 +367,10 @@ static int memory_ssa_pass_eliminate_dead_stores_impl(ValueSsaProgram *program,
                 }
                 if ((instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL && !include_locals) ||
                     (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL && !include_globals)) {
+                    continue;
+                }
+                if (instruction->kind == VALUE_SSA_INSTR_STORE_LOCAL &&
+                    !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.store.slot)) {
                     continue;
                 }
                 if (instruction->kind == VALUE_SSA_INSTR_STORE_GLOBAL &&

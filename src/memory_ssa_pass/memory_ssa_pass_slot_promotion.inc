@@ -51,6 +51,10 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
         memory_def_use->def_kinds[memory_instruction->accesses[0].use_version_id] != MEMORY_SSA_VERSION_DEF_PHI) {
         return 1;
     }
+    if (instruction->kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+        !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.load_slot)) {
+        return 1;
+    }
 
     phi_block_id = memory_def_use->def_block_ids[memory_instruction->accesses[0].use_version_id];
     phi_index = memory_def_use->def_phi_indices[memory_instruction->accesses[0].use_version_id];
@@ -336,6 +340,10 @@ static int memory_ssa_pass_promote_slots(ValueSsaProgram *program,
                     int promoted = 0;
 
                     if (instruction->kind != load_kind) {
+                        continue;
+                    }
+                    if (load_kind == VALUE_SSA_INSTR_LOAD_LOCAL &&
+                        !memory_ssa_pass_local_slot_is_scalar_replaceable(value_function, instruction->as.load_slot)) {
                         continue;
                     }
                     ok = memory_ssa_pass_try_promote_dominating_memory_phi(value_function,

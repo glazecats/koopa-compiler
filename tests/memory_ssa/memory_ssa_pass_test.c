@@ -606,6 +606,109 @@ static int build_phi_local_program(ValueSsaProgram *program, ValueSsaError *erro
     return 1;
 }
 
+static int build_local_array_partial_init_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t local_ids[4];
+    size_t addr_value;
+    size_t offset_value;
+    size_t elem_addr_value;
+    size_t load_value;
+    size_t index;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &function, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    for (index = 0; index < 4u; ++index) {
+        if (!value_ssa_function_append_local(function, "arr", 0, &local_ids[index], error)) {
+            value_ssa_program_free(program);
+            return 0;
+        }
+        function->locals[local_ids[index]].array_rank = 1u;
+    }
+    if (!value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    addr_value = value_ssa_function_allocate_value(function);
+    offset_value = value_ssa_function_allocate_value(function);
+    elem_addr_value = value_ssa_function_allocate_value(function);
+    load_value = value_ssa_function_allocate_value(function);
+    if (addr_value == (size_t)-1 || offset_value == (size_t)-1 || elem_addr_value == (size_t)-1 ||
+        load_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_LOCAL;
+    instruction.as.store.slot = value_ssa_slot_local(local_ids[0]);
+    instruction.as.store.value = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    for (index = 1; index < 4u; ++index) {
+        instruction.as.store.slot = value_ssa_slot_local(local_ids[index]);
+        instruction.as.store.value = value_ssa_value_immediate(0);
+        if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+            value_ssa_program_free(program);
+            return 0;
+        }
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(addr_value);
+    instruction.as.addr_slot = value_ssa_slot_local(local_ids[0]);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(offset_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_SHIFT_LEFT;
+    instruction.as.binary.lhs = value_ssa_value_immediate(0);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(elem_addr_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(addr_value);
+    instruction.as.binary.rhs = value_ssa_value_id(offset_value);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(load_value);
+    instruction.as.load_indirect_addr = value_ssa_value_id(elem_addr_value);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(load_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_same_value_phi_local_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *entry = NULL;
@@ -12075,6 +12178,45 @@ static int test_memory_ssa_pass_scalar_replace_local_slots_join(void) {
     return ok;
 }
 
+static int test_memory_ssa_pass_scalar_replace_local_slots_keeps_array_partial_init(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok;
+
+    if (!build_local_array_partial_init_program(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace local array partial-init setup failed: %s\n",
+            error.message);
+        return 0;
+    }
+
+    if (!memory_ssa_pass_scalar_replace_local_slots(&program, &error)) {
+        fprintf(stderr,
+            "[memory-ssa-pass] FAIL: scalar-replace local array partial-init failed: %s\n",
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    ok = expect_dump("MEMORY-SSA-PASS-SCALAR-REPLACE-LOCAL-ARRAY-PARTIAL-INIT",
+        &program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local arr.0, 1\n"
+        "    store_local arr.1, 0\n"
+        "    store_local arr.2, 0\n"
+        "    store_local arr.3, 0\n"
+        "    ssa.0 = addr_local arr.0\n"
+        "    ssa.1 = shl 0, 2\n"
+        "    ssa.2 = add ssa.0, ssa.1\n"
+        "    ssa.3 = load_indirect ssa.2\n"
+        "    ret ssa.3\n"
+        "}\n");
+
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_memory_ssa_pass_scalar_replace_global_slots_join(void) {
     ValueSsaProgram program;
     ValueSsaError error;
@@ -18693,6 +18835,7 @@ int main(void) {
     ok &= test_memory_ssa_pass_canonicalize_memory_values_loop_header_global_readonly_call();
     ok &= test_memory_ssa_pass_canonicalize_memory_values_mixed_loop_other_global_call();
     ok &= test_memory_ssa_pass_scalar_replace_local_slots_join();
+    ok &= test_memory_ssa_pass_scalar_replace_local_slots_keeps_array_partial_init();
     ok &= test_memory_ssa_pass_scalar_replace_global_slots_join();
     ok &= test_memory_ssa_pass_scalar_replace_global_slots_after_other_global_call();
     ok &= test_memory_ssa_pass_scalar_replace_global_slots_dead_store_before_other_global_call();
