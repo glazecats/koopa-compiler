@@ -7633,6 +7633,10 @@ int compiler_compile_source_text_with_options(const char *source,
     int simple_backend_profile_applied = 0;
     int ok = 0;
 
+    if (mode == COMPILER_MODE_RISCV) {
+        mode = COMPILER_MODE_PERF;
+    }
+
     if (out_text) {
         *out_text = NULL;
     }
