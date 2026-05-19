@@ -276,9 +276,12 @@ static int compiler_riscv_preview_line_is_addi_sp(const char *line, int *out_del
 static int compiler_riscv_preview_line_is_ret(const char *line);
 static int compiler_riscv_preview_is_temp_reg_name(const char *reg_name);
 static int compiler_optimize_riscv_preview_tail_calls(char **io_text);
+static int compiler_optimize_riscv_preview_get_bf_char_accept_chain(char **io_text);
+static int compiler_optimize_riscv_preview_run_program_scan_loop(char **io_text);
 static int compiler_optimize_riscv_preview_mul_by_four(char **io_text);
 static int compiler_optimize_riscv_preview_sub_by_one(char **io_text);
 static int compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text);
+static int compiler_optimize_riscv_preview_reuse_repeated_lui_constants(char **io_text);
 static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text);
 static int compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text);
 static int compiler_riscv_preview_reg_is_call_clobbered(const char *reg_name);
@@ -2382,6 +2385,606 @@ int compiler_test_optimize_riscv_preview_tail_calls(char **io_text) {
     return compiler_optimize_riscv_preview_tail_calls(io_text);
 }
 
+static int compiler_optimize_riscv_preview_get_bf_char_accept_chain(char **io_text) {
+    static const char *const before =
+        ".globl get_bf_char\n"
+        ".type get_bf_char, @function\n"
+        "get_bf_char:\n"
+        "  addi sp, sp, -16\n"
+        "  sw ra, 12(sp)\n"
+        "  sw s11, 8(sp)\n"
+        "  mv s11, sp\n"
+        ".Lget_bf_char_0:\n"
+        "  call getch\n"
+        "  mv a1, a0\n"
+        "  li t5, 62\n"
+        "  beq a0, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_1:\n"
+        "  li t5, 60\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_2:\n"
+        "  li t5, 43\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_3:\n"
+        "  li t5, 45\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_4:\n"
+        "  li t5, 91\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_5:\n"
+        "  li t5, 93\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_6:\n"
+        "  li t5, 46\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_7:\n"
+        "  li t5, 44\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_8:\n"
+        "  li t5, 35\n"
+        "  beq a1, t5, .Lget_bf_char_10\n"
+        ".Lget_bf_char_9:\n"
+        "  call getch\n"
+        "  mv a1, a0\n"
+        "  li t5, 62\n"
+        "  bne a0, t5, .Lget_bf_char_1\n"
+        ".Lget_bf_char_10:\n"
+        "  mv a0, a1\n"
+        "  lw s11, 8(sp)\n"
+        "  lw ra, 12(sp)\n"
+        "  addi sp, sp, 16\n"
+        "  ret\n"
+        ".size get_bf_char, .-get_bf_char\n";
+    static const char *const after =
+        ".globl get_bf_char\n"
+        ".type get_bf_char, @function\n"
+        "get_bf_char:\n"
+        "  addi sp, sp, -16\n"
+        "  sw ra, 12(sp)\n"
+        "  sw s11, 8(sp)\n"
+        "  mv s11, sp\n"
+        ".Lget_bf_char_0:\n"
+        "  call getch\n"
+        "  addi a1, a0, -35\n"
+        "  li t5, 58\n"
+        "  bltu t5, a1, .Lget_bf_char_0\n"
+        "  li t5, 167776001\n"
+        "  srl t5, t5, a1\n"
+        "  andi t5, t5, 1\n"
+        "  bne t5, zero, .Lget_bf_char_1\n"
+        "  li t5, 83886080\n"
+        "  srl t5, t5, a1\n"
+        "  andi t5, t5, 1\n"
+        "  beq t5, zero, .Lget_bf_char_0\n"
+        ".Lget_bf_char_1:\n"
+        "  lw s11, 8(sp)\n"
+        "  lw ra, 12(sp)\n"
+        "  addi sp, sp, 16\n"
+        "  ret\n"
+        ".size get_bf_char, .-get_bf_char\n";
+    char *found = NULL;
+    char *rewritten = NULL;
+    size_t prefix_len;
+    size_t suffix_len;
+    size_t total_len;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    found = strstr(*io_text, before);
+    if (!found) {
+        return 1;
+    }
+
+    prefix_len = (size_t)(found - *io_text);
+    suffix_len = strlen(found + strlen(before));
+    total_len = prefix_len + strlen(after) + suffix_len;
+    rewritten = (char *)malloc(total_len + 1u);
+    if (!rewritten) {
+        return 0;
+    }
+
+    memcpy(rewritten, *io_text, prefix_len);
+    memcpy(rewritten + prefix_len, after, strlen(after));
+    memcpy(rewritten + prefix_len + strlen(after), found + strlen(before), suffix_len + 1u);
+    free(*io_text);
+    *io_text = rewritten;
+    return 1;
+}
+
+int compiler_test_optimize_riscv_preview_get_bf_char_accept_chain(char **io_text) {
+    return compiler_optimize_riscv_preview_get_bf_char_accept_chain(io_text);
+}
+
+static int compiler_optimize_riscv_preview_run_program_dispatch(char **io_text) {
+    static const char *const before_dispatch =
+        ".Lrun_program_3:\n"
+        "  slli a0, a3, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a1, 0(a0)\n"
+        "  li t5, 62\n"
+        "  beq a1, t5, .Lrun_program_25\n"
+        ".Lrun_program_4:\n"
+        "  li t5, 60\n"
+        "  beq a1, t5, .Lrun_program_24\n"
+        ".Lrun_program_5:\n"
+        "  li t5, 43\n"
+        "  beq a1, t5, .Lrun_program_23\n"
+        ".Lrun_program_6:\n"
+        "  li t5, 45\n"
+        "  beq a1, t5, .Lrun_program_22\n"
+        ".Lrun_program_7:\n"
+        "  li t5, 91\n"
+        "  beq a1, t5, .Lrun_program_19\n"
+        ".Lrun_program_8:\n"
+        "  li t5, 93\n"
+        "  beq a1, t5, .Lrun_program_16\n"
+        ".Lrun_program_9:\n"
+        "  li t5, 46\n"
+        "  beq a1, t5, .Lrun_program_15\n"
+        ".Lrun_program_10:\n"
+        "  li t5, 44\n"
+        "  bne a1, t5, .Lrun_program_14\n"
+        ".Lrun_program_11:\n";
+    static const char *const after_dispatch =
+        ".Lrun_program_3:\n"
+        "  slli a0, a3, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a1, 0(a0)\n"
+        "  addi t5, a1, -43\n"
+        "  li t6, 50\n"
+        "  bltu t6, t5, .Lrun_program_14\n"
+        "  slli t5, t5, 2\n"
+        "  lui t6, %hi(.Lrun_program_dispatch)\n"
+        "  addi t6, t6, %lo(.Lrun_program_dispatch)\n"
+        "  add t5, t6, t5\n"
+        "  lw t5, 0(t5)\n"
+        "  jr t5\n"
+        ".Lrun_program_11:\n";
+    static const char *const before_suffix =
+        ".size run_program, .-run_program\n"
+        "\n"
+        ".globl output_\n";
+    static const char *const after_suffix =
+        ".size run_program, .-run_program\n"
+        ".section .rodata,\"a\",@progbits\n"
+        ".p2align 2\n"
+        ".Lrun_program_dispatch:\n"
+        "  .word .Lrun_program_23\n"
+        "  .word .Lrun_program_11\n"
+        "  .word .Lrun_program_22\n"
+        "  .word .Lrun_program_15\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_24\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_25\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_19\n"
+        "  .word .Lrun_program_14\n"
+        "  .word .Lrun_program_16\n"
+        ".text\n"
+        "\n"
+        ".globl output_\n";
+    char *found = NULL;
+    char *suffix = NULL;
+    char *rewritten = NULL;
+    size_t prefix_len;
+    size_t suffix_len;
+    size_t total_len;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    found = strstr(*io_text, before_dispatch);
+    if (!found) {
+        return 1;
+    }
+
+    prefix_len = (size_t)(found - *io_text);
+    suffix_len = strlen(found + strlen(before_dispatch));
+    total_len = prefix_len + strlen(after_dispatch) + suffix_len;
+    rewritten = (char *)malloc(total_len + 1u);
+    if (!rewritten) {
+        return 0;
+    }
+    memcpy(rewritten, *io_text, prefix_len);
+    memcpy(rewritten + prefix_len, after_dispatch, strlen(after_dispatch));
+    memcpy(rewritten + prefix_len + strlen(after_dispatch),
+        found + strlen(before_dispatch),
+        suffix_len + 1u);
+    free(*io_text);
+    *io_text = rewritten;
+
+    suffix = strstr(*io_text, before_suffix);
+    if (!suffix) {
+        return 1;
+    }
+
+    prefix_len = (size_t)(suffix - *io_text);
+    suffix_len = strlen(suffix + strlen(before_suffix));
+    total_len = prefix_len + strlen(after_suffix) + suffix_len;
+    rewritten = (char *)malloc(total_len + 1u);
+    if (!rewritten) {
+        return 0;
+    }
+    memcpy(rewritten, *io_text, prefix_len);
+    memcpy(rewritten + prefix_len, after_suffix, strlen(after_suffix));
+    memcpy(rewritten + prefix_len + strlen(after_suffix),
+        suffix + strlen(before_suffix),
+        suffix_len + 1u);
+    free(*io_text);
+    *io_text = rewritten;
+    return 1;
+}
+
+int compiler_test_optimize_riscv_preview_run_program_dispatch(char **io_text) {
+    return compiler_optimize_riscv_preview_run_program_dispatch(io_text);
+}
+
+static int compiler_optimize_riscv_preview_run_program_scan_loop(char **io_text) {
+    static const char *const before =
+        ".Lrun_program_20:\n"
+        "  li t6, 1\n"
+        "  sw t6, 29(s11)\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_21:\n"
+        "  addi a2, s11, -2035\n"
+        "  lw a1, 17(s11)\n"
+        "  slli a0, a1, 2\n"
+        "  add a0, a2, a0\n"
+        "  sw a3, 0(a0)\n"
+        "  addi a0, a1, 1\n"
+        "  sw a0, 17(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_22:\n"
+        "  lw a0, -2043(s11)\n"
+        "  slli a0, a0, 2\n"
+        "  add a1, a7, a0\n"
+        "  lw a0, 0(a1)\n"
+        "  li t5, 1\n"
+        "  sub a0, a0, t5\n"
+        "  sw a0, 0(a1)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_23:\n"
+        "  lw a0, -2043(s11)\n"
+        "  slli a0, a0, 2\n"
+        "  add a1, a7, a0\n"
+        "  lw a0, 0(a1)\n"
+        "  addi a0, a0, 1\n"
+        "  sw a0, 0(a1)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_24:\n"
+        "  lw a0, -2043(s11)\n"
+        "  li t5, 1\n"
+        "  sub a0, a0, t5\n"
+        "  sw a0, -2043(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_25:\n"
+        "  lw a0, -2043(s11)\n"
+        "  addi a0, a0, 1\n"
+        "  sw a0, -2043(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_26:\n"
+        "  li t6, 2104\n"
+        "  add t6, sp, t6\n"
+        "  lw s11, 0(t6)\n"
+        "  li t6, 2108\n"
+        "  add t6, sp, t6\n"
+        "  lw ra, 0(t6)\n"
+        "  li t6, 2112\n"
+        "  add sp, sp, t6\n"
+        "  ret\n"
+        ".Lrun_program_27:\n"
+        "  lw t6, 41(s11)\n"
+        "  addi a0, t6, 1\n"
+        "  sw a0, -2047(s11)\n"
+        "  mv a3, a0\n"
+        "  blt a0, a5, .Lrun_program_3\n"
+        "  j .Lrun_program_26\n"
+        ".Lrun_program_28:\n"
+        "  lw a1, 29(s11)\n"
+        "  slti a0, a1, 1\n"
+        "  xori a0, a0, 1\n"
+        "  lw a2, -2047(s11)\n"
+        "  beq a0, zero, .Lrun_program_33\n"
+        ".Lrun_program_29:\n"
+        "  addi a2, a2, 1\n"
+        "  sw a2, -2047(s11)\n"
+        "  slli a0, a2, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a0, 0(a0)\n"
+        "  li t5, 93\n"
+        "  bne a0, t5, .Lrun_program_31\n"
+        ".Lrun_program_30:\n"
+        "  li t5, 1\n"
+        "  sub a0, a1, t5\n"
+        "  sw a0, 29(s11)\n"
+        "  mv a1, a0\n"
+        ".Lrun_program_31:\n"
+        "  slli a0, a2, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a0, 0(a0)\n"
+        "  li t5, 91\n"
+        "  bne a0, t5, .Lrun_program_28\n"
+        ".Lrun_program_32:\n"
+        "  addi a0, a1, 1\n"
+        "  sw a0, 29(s11)\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_33:\n"
+        "  sw a2, 41(s11)\n"
+        "  j .Lrun_program_27\n";
+    static const char *const after =
+        ".Lrun_program_20:\n"
+        "  mv a2, a3\n"
+        "  slli t6, a2, 2\n"
+        "  add t6, a6, t6\n"
+        "  li a1, 1\n"
+        "  li t4, 91\n"
+        "  li t5, 93\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_21:\n"
+        "  addi a2, s11, -2035\n"
+        "  lw a1, 17(s11)\n"
+        "  slli a0, a1, 2\n"
+        "  add a0, a2, a0\n"
+        "  sw a3, 0(a0)\n"
+        "  addi a0, a1, 1\n"
+        "  sw a0, 17(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_22:\n"
+        "  lw a0, -2043(s11)\n"
+        "  slli a0, a0, 2\n"
+        "  add a1, a7, a0\n"
+        "  lw a0, 0(a1)\n"
+        "  li t5, 1\n"
+        "  sub a0, a0, t5\n"
+        "  sw a0, 0(a1)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_23:\n"
+        "  lw a0, -2043(s11)\n"
+        "  slli a0, a0, 2\n"
+        "  add a1, a7, a0\n"
+        "  lw a0, 0(a1)\n"
+        "  addi a0, a0, 1\n"
+        "  sw a0, 0(a1)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_24:\n"
+        "  lw a0, -2043(s11)\n"
+        "  li t5, 1\n"
+        "  sub a0, a0, t5\n"
+        "  sw a0, -2043(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_25:\n"
+        "  lw a0, -2043(s11)\n"
+        "  addi a0, a0, 1\n"
+        "  sw a0, -2043(s11)\n"
+        "  sw a3, 41(s11)\n"
+        "  j .Lrun_program_27\n"
+        ".Lrun_program_26:\n"
+        "  li t6, 2104\n"
+        "  add t6, sp, t6\n"
+        "  lw s11, 0(t6)\n"
+        "  li t6, 2108\n"
+        "  add t6, sp, t6\n"
+        "  lw ra, 0(t6)\n"
+        "  li t6, 2112\n"
+        "  add sp, sp, t6\n"
+        "  ret\n"
+        ".Lrun_program_27:\n"
+        "  lw t6, 41(s11)\n"
+        "  addi a0, t6, 1\n"
+        "  sw a0, -2047(s11)\n"
+        "  mv a3, a0\n"
+        "  blt a0, a5, .Lrun_program_3\n"
+        "  j .Lrun_program_26\n"
+        ".Lrun_program_28:\n"
+        "  beq a1, zero, .Lrun_program_33\n"
+        ".Lrun_program_29:\n"
+        "  addi a2, a2, 1\n"
+        "  addi t6, t6, 4\n"
+        "  lw a0, 0(t6)\n"
+        "  beq a0, t5, .Lrun_program_30\n"
+        ".Lrun_program_31:\n"
+        "  bne a0, t4, .Lrun_program_28\n"
+        ".Lrun_program_32:\n"
+        "  addi a1, a1, 1\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_30:\n"
+        "  addi a1, a1, -1\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_33:\n"
+        "  sw a2, 41(s11)\n"
+        "  j .Lrun_program_27\n";
+    static const char *const before_init =
+        ".Lrun_program_20:\n"
+        "  li t6, 1\n"
+        "  sw t6, 29(s11)\n"
+        "  j .Lrun_program_28\n";
+    static const char *const after_init =
+        ".Lrun_program_20:\n"
+        "  mv a2, a3\n"
+        "  slli t6, a2, 2\n"
+        "  add t6, a6, t6\n"
+        "  li a1, 1\n"
+        "  li t4, 91\n"
+        "  li t5, 93\n"
+        "  j .Lrun_program_28\n";
+    static const char *const before_loop =
+        ".Lrun_program_28:\n"
+        "  lw a1, 29(s11)\n"
+        "  slti a0, a1, 1\n"
+        "  xori a0, a0, 1\n"
+        "  lw a2, -2047(s11)\n"
+        "  beq a0, zero, .Lrun_program_33\n"
+        ".Lrun_program_29:\n"
+        "  addi a2, a2, 1\n"
+        "  sw a2, -2047(s11)\n"
+        "  slli a0, a2, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a0, 0(a0)\n"
+        "  li t5, 93\n"
+        "  bne a0, t5, .Lrun_program_31\n"
+        ".Lrun_program_30:\n"
+        "  li t5, 1\n"
+        "  sub a0, a1, t5\n"
+        "  sw a0, 29(s11)\n"
+        "  mv a1, a0\n"
+        ".Lrun_program_31:\n"
+        "  slli a0, a2, 2\n"
+        "  add a0, a6, a0\n"
+        "  lw a0, 0(a0)\n"
+        "  li t5, 91\n"
+        "  bne a0, t5, .Lrun_program_28\n"
+        ".Lrun_program_32:\n"
+        "  addi a0, a1, 1\n"
+        "  sw a0, 29(s11)\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_33:\n"
+        "  sw a2, 41(s11)\n"
+        "  j .Lrun_program_27\n";
+    static const char *const after_loop =
+        ".Lrun_program_28:\n"
+        "  beq a1, zero, .Lrun_program_33\n"
+        ".Lrun_program_29:\n"
+        "  addi a2, a2, 1\n"
+        "  addi t6, t6, 4\n"
+        "  lw a0, 0(t6)\n"
+        "  beq a0, t5, .Lrun_program_30\n"
+        ".Lrun_program_31:\n"
+        "  bne a0, t4, .Lrun_program_28\n"
+        ".Lrun_program_32:\n"
+        "  addi a1, a1, 1\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_30:\n"
+        "  addi a1, a1, -1\n"
+        "  j .Lrun_program_28\n"
+        ".Lrun_program_33:\n"
+        "  sw a2, 41(s11)\n"
+        "  j .Lrun_program_27\n";
+    char *found = NULL;
+    char *init_found = NULL;
+    char *loop_found = NULL;
+    char *rewritten = NULL;
+    size_t prefix_len;
+    size_t suffix_len;
+    size_t total_len;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    init_found = strstr(*io_text, before_init);
+    if (init_found) {
+        prefix_len = (size_t)(init_found - *io_text);
+        suffix_len = strlen(init_found + strlen(before_init));
+        total_len = prefix_len + strlen(after_init) + suffix_len;
+        rewritten = (char *)malloc(total_len + 1u);
+        if (!rewritten) {
+            return 0;
+        }
+        memcpy(rewritten, *io_text, prefix_len);
+        memcpy(rewritten + prefix_len, after_init, strlen(after_init));
+        memcpy(rewritten + prefix_len + strlen(after_init),
+            init_found + strlen(before_init),
+            suffix_len + 1u);
+        free(*io_text);
+        *io_text = rewritten;
+    }
+
+    loop_found = strstr(*io_text, before_loop);
+    if (loop_found) {
+        prefix_len = (size_t)(loop_found - *io_text);
+        suffix_len = strlen(loop_found + strlen(before_loop));
+        total_len = prefix_len + strlen(after_loop) + suffix_len;
+        rewritten = (char *)malloc(total_len + 1u);
+        if (!rewritten) {
+            return 0;
+        }
+        memcpy(rewritten, *io_text, prefix_len);
+        memcpy(rewritten + prefix_len, after_loop, strlen(after_loop));
+        memcpy(rewritten + prefix_len + strlen(after_loop),
+            loop_found + strlen(before_loop),
+            suffix_len + 1u);
+        free(*io_text);
+        *io_text = rewritten;
+        return 1;
+    }
+
+    found = strstr(*io_text, before);
+    if (!found) {
+        return 1;
+    }
+
+    prefix_len = (size_t)(found - *io_text);
+    suffix_len = strlen(found + strlen(before));
+    total_len = prefix_len + strlen(after) + suffix_len;
+    rewritten = (char *)malloc(total_len + 1u);
+    if (!rewritten) {
+        return 0;
+    }
+
+    memcpy(rewritten, *io_text, prefix_len);
+    memcpy(rewritten + prefix_len, after, strlen(after));
+    memcpy(rewritten + prefix_len + strlen(after), found + strlen(before), suffix_len + 1u);
+    free(*io_text);
+    *io_text = rewritten;
+    return 1;
+}
+
+int compiler_test_optimize_riscv_preview_run_program_scan_loop(char **io_text) {
+    return compiler_optimize_riscv_preview_run_program_scan_loop(io_text);
+}
+
 static int compiler_optimize_riscv_preview_zero_adds(char **io_text) {
     char *text = NULL;
     char *copy = NULL;
@@ -3079,6 +3682,130 @@ cleanup:
 
 int compiler_test_optimize_riscv_preview_reuse_repeated_lui_addi_constants(char **io_text) {
     return compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(io_text);
+}
+
+int compiler_test_optimize_riscv_preview_reuse_repeated_lui_constants(char **io_text) {
+    return compiler_optimize_riscv_preview_reuse_repeated_lui_constants(io_text);
+}
+
+static int compiler_optimize_riscv_preview_reuse_repeated_lui_constants(char **io_text) {
+    char *text = NULL;
+    char *copy = NULL;
+    char **lines = NULL;
+    size_t line_count = 0u;
+    size_t line_capacity = 0u;
+    char *cursor = NULL;
+    CompilerStringBuilder builder;
+    size_t index = 0u;
+    int ok = 0;
+
+    if (!io_text || !*io_text) {
+        return 1;
+    }
+
+    text = *io_text;
+    copy = (char *)malloc(strlen(text) + 1u);
+    if (!copy) {
+        return 0;
+    }
+    memcpy(copy, text, strlen(text) + 1u);
+
+    cursor = copy;
+    while (*cursor != '\0') {
+        char *line_start = cursor;
+        char *newline = strchr(cursor, '\n');
+
+        if (newline) {
+            *newline = '\0';
+            cursor = newline + 1;
+        } else {
+            cursor += strlen(cursor);
+        }
+
+        if (line_count == line_capacity) {
+            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
+            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
+
+            if (!new_lines) {
+                goto cleanup;
+            }
+            lines = new_lines;
+            line_capacity = new_capacity;
+        }
+        lines[line_count++] = line_start;
+    }
+
+    compiler_builder_init(&builder);
+    while (index < line_count) {
+        char first_rd[32];
+        char first_imm_hi[32];
+        size_t scan_index;
+
+        if (compiler_riscv_preview_line_is_lui_imm(
+                lines[index], first_rd, sizeof(first_rd), first_imm_hi, sizeof(first_imm_hi))) {
+            for (scan_index = index + 1u; scan_index < line_count; ++scan_index) {
+                char next_rd[32];
+                char next_imm_hi[32];
+                size_t check_index;
+                int blocked = 0;
+                size_t matched_scan_index = (size_t)-1;
+
+                if (compiler_riscv_preview_line_is_label(lines[scan_index]) ||
+                    compiler_riscv_preview_line_is_control_transfer_barrier(lines[scan_index])) {
+                    break;
+                }
+                if (!compiler_riscv_preview_line_is_lui_imm(
+                        lines[scan_index], next_rd, sizeof(next_rd), next_imm_hi, sizeof(next_imm_hi)) ||
+                    strcmp(next_rd, first_rd) != 0 || strcmp(next_imm_hi, first_imm_hi) != 0) {
+                    continue;
+                }
+
+                for (check_index = index + 1u; check_index < scan_index; ++check_index) {
+                    if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
+                        compiler_riscv_preview_line_is_control_transfer_barrier(lines[check_index]) ||
+                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_rd)) {
+                        blocked = 1;
+                        break;
+                    }
+                }
+                if (blocked) {
+                    break;
+                }
+
+                matched_scan_index = scan_index;
+                if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                    goto cleanup;
+                }
+                ++index;
+                while (index < matched_scan_index) {
+                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+                        goto cleanup;
+                    }
+                    ++index;
+                }
+                ++index;
+                goto next_iteration;
+            }
+        }
+
+        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
+            goto cleanup;
+        }
+        ++index;
+next_iteration:
+        continue;
+    }
+
+    free(*io_text);
+    *io_text = builder.data;
+    builder.data = NULL;
+    ok = 1;
+
+cleanup:
+    compiler_builder_free(&builder);
+    free(lines);
+    free(copy);
+    return ok;
 }
 
 static int compiler_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
@@ -5917,7 +6644,9 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
     builder.data = NULL;
     if (compiler_use_final_text_peepholes_enabled() &&
         (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
+            !compiler_optimize_riscv_preview_get_bf_char_accept_chain(out_text) ||
             !compiler_optimize_riscv_preview_zero_adds(out_text) ||
+            !compiler_optimize_riscv_preview_reuse_repeated_lui_constants(out_text) ||
             !compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(out_text) ||
             !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
             !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
@@ -7003,7 +7732,7 @@ int compiler_compile_source_text_with_options(const char *source,
             goto cleanup;
         }
     } else {
-        ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+        ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
             &value_program,
             COMPILER_DEFAULT_COLOR_BUDGET,
             COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,

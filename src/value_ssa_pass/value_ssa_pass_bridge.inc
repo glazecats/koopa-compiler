@@ -801,6 +801,112 @@ static int value_ssa_bridge_same_pure_address_value(ValueSsaFunction *function,
     }
 }
 
+static int value_ssa_bridge_instruction_may_invalidate_address_value(ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef address_value,
+    const ValueSsaInstruction *instruction);
+
+static int value_ssa_bridge_reuse_same_block_pure_address_values_in_program(
+    ValueSsaProgram *program,
+    ValueSsaError *error) {
+    size_t function_index;
+    int changed = 0;
+
+    if (!program) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-349: invalid pure-address reuse contract");
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaDefUseAnalysis def_use;
+        size_t block_index;
+
+        if (!function->has_body) {
+            continue;
+        }
+
+        value_ssa_def_use_analysis_init(&def_use);
+        if (!value_ssa_compute_def_use_analysis(function, &def_use, error)) {
+            value_ssa_def_use_analysis_free(&def_use);
+            return 0;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            ValueSsaBasicBlock *block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                size_t candidate_index;
+
+                if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+                    continue;
+                }
+                if (instruction->kind != VALUE_SSA_INSTR_BINARY &&
+                    instruction->kind != VALUE_SSA_INSTR_MOV &&
+                    instruction->kind != VALUE_SSA_INSTR_ADDR_LOCAL &&
+                    instruction->kind != VALUE_SSA_INSTR_ADDR_GLOBAL &&
+                    instruction->kind != VALUE_SSA_INSTR_LOAD_LOCAL &&
+                    instruction->kind != VALUE_SSA_INSTR_LOAD_GLOBAL) {
+                    continue;
+                }
+
+                for (candidate_index = instruction_index; candidate_index > 0; --candidate_index) {
+                    ValueSsaInstruction *candidate = &block->instructions[candidate_index - 1u];
+                    size_t middle_index;
+                    int blocked = 0;
+
+                    if (!candidate->has_result || candidate->result.kind != VALUE_SSA_VALUE_ID) {
+                        continue;
+                    }
+                    if (candidate->kind != VALUE_SSA_INSTR_BINARY &&
+                        candidate->kind != VALUE_SSA_INSTR_MOV &&
+                        candidate->kind != VALUE_SSA_INSTR_ADDR_LOCAL &&
+                        candidate->kind != VALUE_SSA_INSTR_ADDR_GLOBAL &&
+                        candidate->kind != VALUE_SSA_INSTR_LOAD_LOCAL &&
+                        candidate->kind != VALUE_SSA_INSTR_LOAD_GLOBAL) {
+                        continue;
+                    }
+                    if (!value_ssa_bridge_same_pure_address_value(
+                            function, &def_use, candidate->result, instruction->result, 0u)) {
+                        continue;
+                    }
+
+                    for (middle_index = candidate_index; middle_index < instruction_index; ++middle_index) {
+                        ValueSsaInstruction *middle = &block->instructions[middle_index];
+
+                        if (middle->kind == VALUE_SSA_INSTR_CALL ||
+                            value_ssa_bridge_instruction_may_invalidate_address_value(
+                                function, &def_use, candidate->result, middle)) {
+                            blocked = 1;
+                            break;
+                        }
+                    }
+                    if (blocked) {
+                        continue;
+                    }
+
+                    instruction->kind = VALUE_SSA_INSTR_MOV;
+                    instruction->as.mov_value = candidate->result;
+                    changed = 1;
+                    break;
+                }
+            }
+        }
+
+        value_ssa_def_use_analysis_free(&def_use);
+    }
+
+    if (changed &&
+        (!value_ssa_simplify_trivial_values(program, error) ||
+            !value_ssa_eliminate_dead_value_defs(program, error))) {
+        return 0;
+    }
+
+    return value_ssa_verify_program(program, error);
+}
+
 static int value_ssa_bridge_extract_address_root(ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *analysis,
     ValueSsaValueRef value,
@@ -2426,6 +2532,15 @@ static int value_ssa_run_indirect_memory_direct_fast_cleanup(ValueSsaProgram *pr
     }
     if (trace_timing) {
         value_ssa_trace_timing("indirect-direct-reuse-addr-roots", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+
+    if (!value_ssa_bridge_reuse_same_block_pure_address_values_in_program(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("indirect-direct-reuse-same-block-pure-address-values",
+            value_ssa_now_s() - stage_start);
         stage_start = value_ssa_now_s();
     }
 

@@ -3113,6 +3113,8 @@ static int machine_select_op_is_small_reusable_pure_expr(const MachineSelectOp *
         case MACHINE_SELECT_OP_ALU_IMM:
         case MACHINE_SELECT_OP_CMP:
         case MACHINE_SELECT_OP_CMP_IMM:
+        case MACHINE_SELECT_OP_LOAD_LOCAL:
+        case MACHINE_SELECT_OP_LOAD_GLOBAL:
             return 1;
         default:
             return 0;
@@ -3486,7 +3488,7 @@ static int machine_select_cleanup_fold_addr_copy_pairs_in_block(const MachineSel
         size_t total_uses;
 
         if (!producer->has_result ||
-            (producer->kind != MACHINE_SELECT_OP_ADDR_LOCAL && producer->kind != MACHINE_SELECT_OP_ADDR_GLOBAL) ||
+            !machine_select_op_is_pure_value_op(producer) ||
             copy_op->kind != MACHINE_SELECT_OP_COPY ||
             !copy_op->has_result ||
             !machine_select_operand_matches_result(copy_op->as.copy_value, producer->result) ||
@@ -3497,6 +3499,55 @@ static int machine_select_cleanup_fold_addr_copy_pairs_in_block(const MachineSel
         total_uses = machine_select_count_visible_result_uses_in_block(
             program, function, block, op_index - 1u, producer->result, &redefined_before_terminator);
         if (total_uses != 1u) {
+            continue;
+        }
+
+        producer->result = copy_op->result;
+        machine_select_remove_op_at(block, op_index);
+        changed = 1;
+        op_index -= 1u;
+    }
+
+    return changed;
+}
+
+static int machine_select_cleanup_fold_pure_producer_copy_pairs_in_block(const MachineSelectProgram *program,
+    const MachineSelectFunction *function,
+    MachineSelectBasicBlock *block) {
+    size_t op_index;
+    int changed = 0;
+
+    if (!program || !function || !block) {
+        return 0;
+    }
+
+    for (op_index = 1u; op_index < block->op_count; ++op_index) {
+        MachineSelectOp *copy_op = &block->ops[op_index];
+        size_t producer_index;
+        MachineSelectOp *producer;
+        int redefined_before_terminator = 0;
+        size_t total_uses;
+
+        if (copy_op->kind != MACHINE_SELECT_OP_COPY ||
+            !copy_op->has_result ||
+            copy_op->as.copy_value.kind == MACHINE_SELECT_OPERAND_IMMEDIATE ||
+            machine_select_operand_matches_result(copy_op->result, copy_op->as.copy_value) ||
+            !machine_select_find_defining_op_in_block(
+                block, op_index, copy_op->as.copy_value, &producer_index)) {
+            continue;
+        }
+
+        producer = &block->ops[producer_index];
+        if (!producer->has_result ||
+            !machine_select_op_is_pure_value_op(producer) ||
+            !machine_select_operand_matches_result(producer->result, copy_op->as.copy_value) ||
+            machine_select_operand_matches_result(copy_op->result, producer->result)) {
+            continue;
+        }
+
+        total_uses = machine_select_count_visible_result_uses_in_block(
+            program, function, block, producer_index, producer->result, &redefined_before_terminator);
+        if (total_uses != 1u || redefined_before_terminator) {
             continue;
         }
 
@@ -3730,6 +3781,13 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
                     stage_start = machine_select_cleanup_now_s();
                 }
                 if (machine_select_cleanup_fold_addr_copy_pairs_in_block(program, function, block)) {
+                    function_changed = 1;
+                }
+                if (trace_timing) {
+                    t_addr_copy += machine_select_cleanup_now_s() - stage_start;
+                    stage_start = machine_select_cleanup_now_s();
+                }
+                if (machine_select_cleanup_fold_pure_producer_copy_pairs_in_block(program, function, block)) {
                     function_changed = 1;
                 }
                 if (trace_timing) {

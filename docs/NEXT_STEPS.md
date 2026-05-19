@@ -238,6 +238,28 @@
   guard `03_mm1` `8153.804 -> 7426.597`.
   Current authority is to treat this as the strongest live optimization line
   on the `fft1/2` hotspot so far, keep it in the tree, and move next to
+- 2026-05-18 `mm` pointer-end rebuild follow-up:
+  the current live tree now also has a dedicated `mm` hotspot line in
+  `src/value_ssa_perf/value_ssa_perf_mm.inc`, and that line has just been
+  advanced from the earlier mixed index/pointer rebuild to a more direct
+  pointer-end-loop shape. In the current dumped `ValueSSA`, the zero-fill
+  outer loop, the `k` loop, and the `i` loop all compare carried pointers
+  against precomputed end pointers rather than carrying as many explicit
+  integer indices. The local in-repo correctness surface is green again
+  (`make -j4 test-value-ssa-regression` and `make -j4 test-compiler-driver`),
+  and focused A/B against `/tmp/compiler-head-2p06l4/build/compiler`
+  currently reads:
+  `03_mm1` run ms `8385.022 -> 5484.024`,
+  `04_mm2` `7395.923 -> 5052.549`,
+  `05_mm3` `5749.002 -> 4130.245`,
+  guard `13_fft1` `8183.433 -> 2801.732`.
+  Current authority is to keep this line live but not checkpoint it yet,
+  because compile time is still much higher and the emitted asm still shows
+  a suspicious backend-visible shape where some `4096` row-step increments
+  are rematerialized as repeated `lui 0x1` sequences inside hot loops.
+  The next immediate follow-up on this line should therefore target either
+  `ValueSSA`-side carried-step cleanup or the backend-side constant-step
+  materialization waste before any keep/commit decision.
   broader guard sampling plus correctness rechecks before any commit.
 - 2026-05-18 `spmv` fusion follow-up:
   the current live tree now also has one new same-level `spmv`-specific perf

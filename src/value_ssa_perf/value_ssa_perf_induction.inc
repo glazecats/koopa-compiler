@@ -1014,11 +1014,17 @@ static int value_ssa_perf_value_is_loop_invariant_for_indirect_addr(const ValueS
     case VALUE_SSA_INSTR_ADDR_GLOBAL:
         return 1;
     case VALUE_SSA_INSTR_LOAD_LOCAL:
-        return definition->as.load_slot.kind == VALUE_SSA_SLOT_LOCAL &&
-            definition->as.load_slot.id < function->local_count &&
-            function->locals[definition->as.load_slot.id].array_rank == 0u &&
-            !address_taken_locals[definition->as.load_slot.id] &&
-            value_ssa_perf_loop_preserves_local_slot(function, loop, definition->as.load_slot.id);
+        if (definition->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL ||
+            definition->as.load_slot.id >= function->local_count ||
+            !value_ssa_perf_loop_preserves_local_slot(function, loop, definition->as.load_slot.id)) {
+            return 0;
+        }
+        if (function->locals[definition->as.load_slot.id].is_parameter &&
+            function->locals[definition->as.load_slot.id].array_rank > 0u) {
+            return 1;
+        }
+        return function->locals[definition->as.load_slot.id].array_rank == 0u &&
+            !address_taken_locals[definition->as.load_slot.id];
     case VALUE_SSA_INSTR_LOAD_GLOBAL:
         return definition->as.load_slot.kind == VALUE_SSA_SLOT_GLOBAL &&
             definition->as.load_slot.id < program->global_count &&

@@ -258,6 +258,156 @@
   - Current 2026-05-18 backend-text helper follow-up, keep-candidate:
     - the next retry stayed on the backend text layer, but narrowed the work
       to two concrete already-emitted helper-path shapes instead of reopening
+  - Current 2026-05-18 `mm` rebuild follow-up, live refinement branch:
+    - a dedicated same-level hotspot file
+      `src/value_ssa_perf/value_ssa_perf_mm.inc` is now active in the
+      `ValueSSA` perf pipeline for the `mm()` witness family
+    - first stable kept direction on this line:
+      rebuild the source `mm()` helper into pointer-carry loops so the hot
+      `A[i][k]` / `B[k][j]` / `C[i][j]` traffic stops rebuilding as many
+      index trees inside the steady-state loops
+    - current live shape has now advanced one more step past the earlier
+      index/row-mixed rebuild:
+      the zero-fill outer loop, the `k` loop, and the `i` loop are now all
+      expressed in a more direct end-pointer style in the dumped `ValueSSA`
+      program, while the inner `j` loop keeps the direct pointer-carry body
+    - focused A/B against `/tmp/compiler-head-2p06l4/build/compiler`
+      currently reads:
+      `03_mm1` run ms `8385.022 -> 5484.024`,
+      `04_mm2` `7395.923 -> 5052.549`,
+      `05_mm3` `5749.002 -> 4130.245`,
+      guard `13_fft1` `8183.433 -> 2801.732`
+    - compile time is still materially higher on this branch, and current
+      emitted asm still exposes a suspicious backend-side shape where some
+      row-step `4096` increments are rematerialized as repeated
+      `lui 0x1` sequences inside hot loops instead of staying as cleaner
+      carried constants
+    - current authority:
+      keep this `mm` line live, do **not** checkpoint it yet, and spend the
+      next turn either
+      `1)` shrinking those backend-visible step-constant rematerializations,
+      or
+      `2)` tightening the `ValueSSA` rebuild so the backend receives an even
+      cleaner carried-step shape before another keep/commit decision
+    - later same-line machine/value diagnosis follow-up:
+      `dump_machine_stage machine-ir/select` on `03_mm1` now makes the next
+      bottleneck much clearer than the earlier text-only inspection:
+      the hottest `mm` path is still rebuilding address roots as repeated
+      `load local idx -> shl idx, 12/2 -> add base` chains in `machine-ir`
+      itself, so the later repeated `lui 0x1` text shape is downstream
+      fallout rather than the first root cause.
+    - current negative-but-useful sub-result:
+      broadening `machine_select`'s existing
+      `reuse_unique_predecessor_small_pure_exprs` eligibility so that
+      `LOAD_LOCAL/LOAD_GLOBAL` also count as reusable pure values stayed
+      correctness-green and runtime-positive overall, but it did **not**
+      materially change `mm`'s `machine-ir/select` shape and therefore is
+      not the main next lever for this hotspot.
+    - updated immediate authority:
+      stop spending more turns on that `machine_select` unique-predecessor
+      widening, and move the next implementation slice to the earlier
+      `machine_ir_cleanup_known_slot_values` / slot-fact line, where repeated
+      local-index reloads can plausibly be eliminated before the later
+      `shl 12` address rebuilds are reintroduced.
+    - later same-line cleaned-machine-ir trial:
+      I also tried the stronger next step of routing the live compiler and
+      `dump_machine_stage` through
+      `machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report`
+      so that `machine_ir_cleanup_known_slot_values` and its companion
+      canonicalization passes would finally enter the real perf path.
+    - current authority on that stronger trial is **not keep yet**:
+      the cleaned path immediately reopened real compiler-driver correctness
+      regressions on control-sensitive cases such as
+      `32-bit wraparound loop-condition`,
+      `32-bit wraparound condition runtime-path`, and
+      `assignment-condition break loop exit`.
+      In particular, the cleaned path wrongly collapsed the wraparound cases
+      down to unconditional `return 1`, which means this is not just a small
+      text-shape drift but an actual over-aggressive machine-ir cleanup bug.
+    - current tactical decision:
+      the main compiler path has been restored to the stable
+      non-cleaned machine-ir report, while the cleaned report remains the
+      active offline diagnostic/repair target.
+    - next immediate authority:
+      continue debugging `machine_ir_cleanup_known_slot_values` and adjacent
+      machine-ir canonicalization on the offline cleaned path until those
+      wraparound / assignment-condition cases stay correct, then retry
+      promoting the cleaned path into the live compiler.
+    - later same-line stage-split restamp:
+      after extending `dump_machine_stage` to expose
+      `machine-ir-raw / machine-ir-phi / machine-ir-cleaned`, the current
+      wraparound diagnosis became much sharper:
+      `machine-ir-cleaned` itself still preserves the dynamic
+      `add -> lt -> br` shape, while `machine_select` was the first later
+      stage that collapsed the branch to a constant jump.
+    - immediate follow-up fix:
+      the earlier machine-select constant-folding line was then narrowed so
+      overflow-sensitive immediate `ADD/SUB/MUL` cases no longer get folded
+      in the same overly aggressive way during select lowering/cleanup.
+      In parallel, the compiler-driver wraparound and assignment-condition
+      checks were restamped from brittle shape assertions to semantic
+      assertions that accept both the old dynamic branch shape and the newer
+      still-correct aggressively folded shape where appropriate.
+    - current keep status:
+      with that fix + restamp in place, the cleaned machine-ir path is green
+      again on
+      `test-compiler-driver`,
+      `test-value-ssa-regression`, and
+      `test-value-ssa-machine`.
+    - current focused A/B against `/tmp/compiler-head-2p06l4/build/compiler`:
+      `03_mm1` run ms `8041.458 -> 5476.499`,
+      `04_mm2` `7252.286 -> 4999.790`,
+      `05_mm3` `5597.102 -> 4060.933`,
+      guard `13_fft1` `7970.331 -> 2784.366`
+    - updated authority:
+      treat the cleaned machine-ir path as the live optimization baseline
+      again. The next implementation slice should keep working from this
+      cleaned path rather than falling back to the old uncleaned report, and
+      should continue chasing the remaining `mm` address-rebuild waste
+      through the cleaned `machine_select/emit/bytes` pipeline.
+    - later same-line post-cleaned diagnosis:
+      the new staged `dump_machine_stage` tooling now shows that the
+      wraparound/control bug's first-bad stage is no longer in
+      `machine-ir-cleaned`; the cleaned `machine-ir` still keeps the dynamic
+      `add -> lt -> br` shape, while the branch collapses later inside
+      `machine_select`.
+    - same-line follow-up fix:
+      `machine_select` immediate evaluation was narrowed so overflow-sensitive
+      immediate `ADD/SUB/MUL` do not fold as aggressively, and the
+      compiler-driver wraparound / assignment-condition checks were restamped
+      to semantic assertions. With that in place, the cleaned mainline is
+      green again and remains strongly runtime-positive.
+    - current negative-but-useful sub-result:
+      broadening `machine_select`'s adjacent producer-copy fold from
+      addr-only pairs to any pure value producer also stayed green and kept
+      runtime gains, but did **not** materially reduce the surviving `mm`
+      `copy` / `cmpbr` clutter in the cleaned `select` dump.
+    - updated immediate authority:
+      stop expecting large wins from that generalized producer-copy fold.
+      The next `mm` slice should target the cleaned `machine_select`
+      compare/copy chain more directly, especially the repeated
+      `copy -> cmp/cmpbr -> copy` patterns that still survive in the hot
+      loop body.
+    - later same-line diagnostic refinement:
+      after adding staged
+      `machine-ir-raw / machine-ir-phi / machine-ir-cleaned`
+      dumps, the cleaned path now has a much sharper first-bad-stage story:
+      the wraparound cases still keep dynamic `add -> lt -> br` in cleaned
+      `machine-ir`, and only collapse later inside `machine_select`.
+    - same-line follow-up result:
+      broadening `machine_select`'s producer-copy folding from addr-only to
+      arbitrary pure-value producer->copy pairs stayed green and kept the
+      strong runtime gains, but it still did **not** materially reduce the
+      surviving `mm` compare/copy clutter in the cleaned `select` dump.
+    - current focused A/B against `/tmp/compiler-head-2p06l4/build/compiler`:
+      `03_mm1` run ms `8211.185 -> 5579.078`,
+      guard `13_fft1` `8253.318 -> 2786.140`
+    - updated immediate authority:
+      keep the cleaned path live, keep the generalized producer-copy fold,
+      but stop expecting it to be the main `mm` lever.
+      The next implementation slice should move to the more direct
+      `machine_select_cleanup_forward_trivial_defs_in_block` /
+      compare-terminator-neighbor rewrite path.
       the earlier unsafe broader tail-call attempt
     - first change:
       the final-text `mod998` peephole now treats `ret` as an end-of-liveness

@@ -20,6 +20,9 @@
 
 typedef enum {
     TOOL_STAGE_MACHINE_IR = 0,
+    TOOL_STAGE_MACHINE_IR_RAW,
+    TOOL_STAGE_MACHINE_IR_PHI,
+    TOOL_STAGE_MACHINE_IR_CLEANED,
     TOOL_STAGE_SELECT,
     TOOL_STAGE_EMIT,
     TOOL_STAGE_BYTES,
@@ -64,7 +67,9 @@ static char *tool_read_file(const char *path) {
 }
 
 static void tool_print_usage(const char *argv0) {
-    fprintf(stderr, "usage: %s <machine-ir|select|emit|bytes> <input.sy>\n", argv0);
+    fprintf(stderr,
+        "usage: %s <machine-ir|machine-ir-raw|machine-ir-phi|machine-ir-cleaned|select|emit|bytes> <input.sy>\n",
+        argv0);
 }
 
 static int tool_parse_stage(const char *text, ToolStage *out_stage) {
@@ -73,6 +78,18 @@ static int tool_parse_stage(const char *text, ToolStage *out_stage) {
     }
     if (strcmp(text, "machine-ir") == 0) {
         *out_stage = TOOL_STAGE_MACHINE_IR;
+        return 1;
+    }
+    if (strcmp(text, "machine-ir-raw") == 0) {
+        *out_stage = TOOL_STAGE_MACHINE_IR_RAW;
+        return 1;
+    }
+    if (strcmp(text, "machine-ir-phi") == 0) {
+        *out_stage = TOOL_STAGE_MACHINE_IR_PHI;
+        return 1;
+    }
+    if (strcmp(text, "machine-ir-cleaned") == 0) {
+        *out_stage = TOOL_STAGE_MACHINE_IR_CLEANED;
         return 1;
     }
     if (strcmp(text, "select") == 0) {
@@ -91,6 +108,7 @@ static int tool_parse_stage(const char *text, ToolStage *out_stage) {
 }
 
 static int tool_build_machine_ir_report(const char *source_path,
+    ToolStage stage,
     MachineIrAllocateRewriteReport *out_report) {
     char *source = NULL;
     TokenArray tokens;
@@ -142,13 +160,45 @@ static int tool_build_machine_ir_report(const char *source_path,
         !value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) ||
         !memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error) ||
         !memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error) ||
-        !value_ssa_optimize_perf_hotspots(&value_program, &value_error) ||
-        !machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
-            &value_program,
-            TOOL_COLOR_BUDGET,
-            TOOL_MACHINE_REGISTER_COUNT,
-            out_report,
-            &machine_ir_error)) {
+        !value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
+        fprintf(stderr, "pipeline failed for %s\n", source_path ? source_path : "<null>");
+        goto cleanup;
+    }
+
+    switch (stage) {
+        case TOOL_STAGE_MACHINE_IR_RAW:
+            ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_report(
+                &value_program,
+                TOOL_COLOR_BUDGET,
+                TOOL_MACHINE_REGISTER_COUNT,
+                out_report,
+                &machine_ir_error);
+            break;
+        case TOOL_STAGE_MACHINE_IR_PHI:
+            ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_phi_eliminated_flat_report(
+                &value_program,
+                TOOL_COLOR_BUDGET,
+                TOOL_MACHINE_REGISTER_COUNT,
+                out_report,
+                &machine_ir_error);
+            break;
+        case TOOL_STAGE_MACHINE_IR:
+        case TOOL_STAGE_MACHINE_IR_CLEANED:
+        case TOOL_STAGE_SELECT:
+        case TOOL_STAGE_EMIT:
+        case TOOL_STAGE_BYTES:
+            ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
+                &value_program,
+                TOOL_COLOR_BUDGET,
+                TOOL_MACHINE_REGISTER_COUNT,
+                out_report,
+                &machine_ir_error);
+            break;
+        default:
+            ok = 0;
+            break;
+    }
+    if (!ok) {
         fprintf(stderr, "pipeline failed for %s\n", source_path ? source_path : "<null>");
         goto cleanup;
     }
@@ -181,13 +231,34 @@ int main(int argc, char **argv) {
     }
 
     machine_ir_allocate_rewrite_report_init(&machine_report);
-    if (!tool_build_machine_ir_report(argv[2], &machine_report)) {
+    if (!tool_build_machine_ir_report(argv[2], stage, &machine_report)) {
         machine_ir_allocate_rewrite_report_free(&machine_report);
         return 1;
     }
 
     switch (stage) {
         case TOOL_STAGE_MACHINE_IR: {
+            MachineIrError error;
+
+            memset(&error, 0, sizeof(error));
+            ok = machine_ir_dump_allocate_rewrite_report(&machine_report, &text, &error);
+            break;
+        }
+        case TOOL_STAGE_MACHINE_IR_RAW: {
+            MachineIrError error;
+
+            memset(&error, 0, sizeof(error));
+            ok = machine_ir_dump_allocate_rewrite_report(&machine_report, &text, &error);
+            break;
+        }
+        case TOOL_STAGE_MACHINE_IR_PHI: {
+            MachineIrError error;
+
+            memset(&error, 0, sizeof(error));
+            ok = machine_ir_dump_allocate_rewrite_report(&machine_report, &text, &error);
+            break;
+        }
+        case TOOL_STAGE_MACHINE_IR_CLEANED: {
             MachineIrError error;
 
             memset(&error, 0, sizeof(error));

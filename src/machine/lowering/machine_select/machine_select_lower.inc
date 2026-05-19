@@ -92,6 +92,7 @@ static int machine_select_try_eval_binary_immediate(MachineIrBinaryOp op,
     long long *out_value) {
     int32_t lhs_value;
     int32_t rhs_value;
+    long long math_result;
 
     if (!out_value ||
         lhs.kind != MACHINE_IR_OPERAND_IMMEDIATE ||
@@ -103,12 +104,24 @@ static int machine_select_try_eval_binary_immediate(MachineIrBinaryOp op,
     rhs_value = (int32_t)machine_select_normalize_sysy_int_value(rhs.immediate);
     switch (op) {
         case MACHINE_IR_BINARY_ADD:
+            math_result = (long long)lhs_value + (long long)rhs_value;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value + (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_SUB:
+            math_result = (long long)lhs_value - (long long)rhs_value;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value - (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_MUL:
+            math_result = (long long)lhs_value * (long long)rhs_value;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_select_normalize_sysy_int_value((long long)lhs_value * (long long)rhs_value);
             return 1;
         case MACHINE_IR_BINARY_DIV:

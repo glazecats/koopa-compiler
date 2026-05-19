@@ -236,7 +236,15 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
+    if (!value_ssa_perf_strength_reduce_simple_induction_address_exprs(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
     if (!value_ssa_optimize_recursive_helpers(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_optimize_mm_functions(program, error)) {
         free(foldable_globals);
         return 0;
     }

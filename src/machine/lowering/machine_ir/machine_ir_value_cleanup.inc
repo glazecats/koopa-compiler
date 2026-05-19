@@ -10,6 +10,7 @@ static int machine_ir_try_fold_binary_immediates(MachineIrBinaryOp op,
     long long *out_value) {
     int32_t lhs32;
     int32_t rhs32;
+    long long math_result;
 
     if (!out_value) {
         return 0;
@@ -19,12 +20,24 @@ static int machine_ir_try_fold_binary_immediates(MachineIrBinaryOp op,
     rhs32 = (int32_t)machine_ir_normalize_sysy_int_value(rhs);
     switch (op) {
         case MACHINE_IR_BINARY_ADD:
+            math_result = (long long)lhs32 + (long long)rhs32;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 + (long long)rhs32);
             return 1;
         case MACHINE_IR_BINARY_SUB:
+            math_result = (long long)lhs32 - (long long)rhs32;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 - (long long)rhs32);
             return 1;
         case MACHINE_IR_BINARY_MUL:
+            math_result = (long long)lhs32 * (long long)rhs32;
+            if (math_result < INT32_MIN || math_result > INT32_MAX) {
+                return 0;
+            }
             *out_value = machine_ir_normalize_sysy_int_value((long long)lhs32 * (long long)rhs32);
             return 1;
         case MACHINE_IR_BINARY_DIV:

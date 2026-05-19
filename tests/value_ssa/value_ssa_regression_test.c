@@ -11568,6 +11568,104 @@ static int test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump(vo
     return 1;
 }
 
+static int test_value_ssa_optimize_perf_hotspots_source_mm_rebuild_dump(void) {
+    static const char *const fragments[] = {
+        "func mm(n.0, A.1, B.2, C.3) {\n",
+        "  bb.0:\n",
+        "    ssa.0 = load_local n.0\n",
+        "    ssa.1 = load_local A.1\n",
+        "    ssa.2 = load_local B.2\n",
+        "    ssa.3 = load_local C.3\n",
+        "    ssa.4 = lt 0, ssa.0\n",
+        "    ssa.5 = shl ssa.0, 2\n",
+        "    ssa.6 = shl ssa.0, 12\n",
+        "    ssa.7 = add ssa.3, ssa.6\n",
+        "    ssa.8 = add ssa.1, ssa.5\n",
+        "    br ssa.4, bb.1, bb.13\n",
+        "  bb.1:\n",
+        "    ssa.9 = phi [bb.0: ssa.3], [bb.5: ssa.15]\n",
+        "    ssa.10 = lt ssa.9, ssa.7\n",
+        "  bb.2:\n",
+        "    ssa.11 = add ssa.9, ssa.5\n",
+        "  bb.3:\n",
+        "    ssa.12 = phi [bb.2: ssa.9], [bb.4: ssa.14]\n",
+        "    ssa.13 = lt ssa.12, ssa.11\n",
+        "  bb.4:\n",
+        "    store_indirect ssa.12, 0\n",
+        "    ssa.14 = add ssa.12, 4\n",
+        "  bb.5:\n",
+        "    ssa.15 = add ssa.9, 4096\n",
+        "  bb.6:\n",
+        "    ssa.16 = phi [bb.1: ssa.2], [bb.12: ssa.36]\n",
+        "    ssa.17 = phi [bb.1: ssa.1], [bb.12: ssa.37]\n",
+        "    ssa.18 = lt ssa.17, ssa.8\n",
+        "  bb.7:\n",
+        "    ssa.19 = phi [bb.6: ssa.17], [bb.11: ssa.34]\n",
+        "    ssa.20 = phi [bb.6: ssa.3], [bb.11: ssa.35]\n",
+        "    ssa.21 = lt ssa.20, ssa.7\n",
+        "  bb.8:\n",
+        "    ssa.22 = load_indirect ssa.19\n",
+        "    ssa.23 = eq ssa.22, 0\n",
+        "    ssa.24 = add ssa.20, ssa.5\n",
+        "  bb.9:\n",
+        "    ssa.25 = phi [bb.8: ssa.16], [bb.10: ssa.32]\n",
+        "    ssa.26 = phi [bb.8: ssa.20], [bb.10: ssa.33]\n",
+        "    ssa.27 = lt ssa.26, ssa.24\n",
+        "  bb.10:\n",
+        "    ssa.28 = load_indirect ssa.26\n",
+        "    ssa.29 = load_indirect ssa.25\n",
+        "    ssa.30 = mul ssa.22, ssa.29\n",
+        "    ssa.31 = add ssa.28, ssa.30\n",
+        "    store_indirect ssa.26, ssa.31\n",
+        "    ssa.32 = add ssa.25, 4\n",
+        "    ssa.33 = add ssa.26, 4\n",
+        "  bb.11:\n",
+        "    ssa.34 = add ssa.19, 4096\n",
+        "    ssa.35 = add ssa.20, 4096\n",
+        "  bb.12:\n",
+        "    ssa.36 = add ssa.16, 4096\n",
+        "    ssa.37 = add ssa.17, 4\n",
+    };
+    static const char *source =
+        "const int N = 1024;\n"
+        "void mm(int n, int A[][N], int B[][N], int C[][N]){\n"
+        "    int i, j, k;\n"
+        "    i = 0; j = 0;\n"
+        "    while (i < n){\n"
+        "        j = 0;\n"
+        "        while (j < n){\n"
+        "            C[i][j] = 0;\n"
+        "            j = j + 1;\n"
+        "        }\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "    i = 0; j = 0; k = 0;\n"
+        "    while (k < n){\n"
+        "        i = 0;\n"
+        "        while (i < n){\n"
+        "            if (A[i][k] == 0){\n"
+        "                i = i + 1;\n"
+        "                continue;\n"
+        "            }\n"
+        "            j = 0;\n"
+        "            while (j < n){\n"
+        "                C[i][j] = C[i][j] + A[i][k] * B[k][j];\n"
+        "                j = j + 1;\n"
+        "            }\n"
+        "            i = i + 1;\n"
+        "        }\n"
+        "        k = k + 1;\n"
+        "    }\n"
+        "}\n"
+        "int A[N][N]; int B[N][N]; int C[N][N];\n"
+        "int main(){ mm(8, A, B, C); return 0; }\n";
+
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-MM-REBUILD",
+        source,
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
+}
+
 static int test_value_ssa_forward_global_loads_after_store(void) {
     return expect_global_load_forwarded_dump("VALUE-SSA-FORWARD-GLOBAL-LOAD-AFTER-STORE",
         build_global_store_load_forward_program,
@@ -13946,6 +14044,7 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_mm_rebuild_dump();
     ok &= test_value_ssa_forward_global_loads_after_store();
     ok &= test_value_ssa_forward_global_loads_across_straight_chain();
     ok &= test_value_ssa_forward_global_loads_do_not_cross_join();

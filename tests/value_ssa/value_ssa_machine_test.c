@@ -1,5 +1,12 @@
 #include "value_ssa_alloc.h"
 #include "value_ssa_machine.h"
+#include "value_ssa_pass.h"
+#include "lower_ir.h"
+#include "ir.h"
+#include "lexer.h"
+#include "parser.h"
+#include "semantic.h"
+#include "memory_ssa_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -183,6 +190,72 @@ static int expect_machine_dump_failure(const char *case_id, int ok, const ValueS
         return 0;
     }
     return 1;
+}
+
+static int build_value_ssa_perf_from_source_text_for_machine(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (out_error) {
+            out_error->line = 0;
+            out_error->column = 0;
+            snprintf(out_error->message, sizeof(out_error->message), "invalid source perf machine build contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+    value_ssa_program_init(out_program);
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_local_slots(out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_global_slots(out_program, out_error) ||
+        !value_ssa_optimize_perf_hotspots(out_program, out_error)) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(out_program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
 }
 
 static int build_alloc_spill_program(ValueSsaProgram *program, ValueSsaError *error) {
@@ -4017,6 +4090,84 @@ static int test_value_ssa_program_machine_planning_report(void) {
     return ok;
 }
 
+static int test_value_ssa_mm_perf_machine_diagnostic_surface(void) {
+    static const char *source =
+        "const int N = 1024;\n"
+        "void mm(int n, int A[][N], int B[][N], int C[][N]){\n"
+        "    int i, j, k;\n"
+        "    i = 0; j = 0;\n"
+        "    while (i < n){\n"
+        "        j = 0;\n"
+        "        while (j < n){\n"
+        "            C[i][j] = 0;\n"
+        "            j = j + 1;\n"
+        "        }\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "    i = 0; j = 0; k = 0;\n"
+        "    while (k < n){\n"
+        "        i = 0;\n"
+        "        while (i < n){\n"
+        "            if (A[i][k] == 0){\n"
+        "                i = i + 1;\n"
+        "                continue;\n"
+        "            }\n"
+        "            j = 0;\n"
+        "            while (j < n){\n"
+        "                C[i][j] = C[i][j] + A[i][k] * B[k][j];\n"
+        "                j = j + 1;\n"
+        "            }\n"
+        "            i = i + 1;\n"
+        "        }\n"
+        "        k = k + 1;\n"
+        "    }\n"
+        "}\n"
+        "int A[N][N]; int B[N][N]; int C[N][N];\n"
+        "int main(){ mm(8, A, B, C); return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *view_text = NULL;
+    char *report_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_source_text_for_machine(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: mm perf machine source build failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (!value_ssa_allocate_program_flat_machine_view_dump(&program, 8, 8, &view_text, &error) ||
+        !view_text ||
+        strstr(view_text, "machine-allocation func mm") == NULL) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: mm perf machine allocation view missing mm function: %s\n",
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!value_ssa_allocate_and_rewrite_program_single_block_spills_flat_machine_report_dump(
+            &program, 8, 8, &report_text, &error) ||
+        !report_text ||
+        strstr(report_text, "func mm") == NULL) {
+        fprintf(stderr,
+            "[value-ssa-machine] FAIL: mm perf machine rewrite report missing mm function: %s\n",
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+cleanup:
+    free(report_text);
+    free(view_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
 
@@ -4049,6 +4200,7 @@ int main(void) {
     ok &= test_value_ssa_function_machine_preservation_hint_reason_respects_pressure_order();
     ok &= test_value_ssa_program_machine_preservation_hint_report();
     ok &= test_value_ssa_program_machine_planning_report();
+    ok &= test_value_ssa_mm_perf_machine_diagnostic_surface();
     if (!ok) {
         return 1;
     }
