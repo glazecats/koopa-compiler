@@ -484,6 +484,18 @@
       `test-value-ssa-regression`, `test-compiler-driver`,
       `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
       `autotest -perf /workspaces/compiler_lab` remain green
+  - 2026-05-20 later pure-call join follow-up:
+    - the same repeated pure internal call reuse line now also handles a
+      small join shape, so repeated pure calls can collapse through an
+      existing phi/value when every reachable predecessor already computed
+      the same pure call
+    - current kept effect:
+      the new dominated/join witness keeps the earlier pure call result live
+      across the join and folds the later repeated call into that same value
+    - current status:
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
+      `autotest -perf /workspaces/compiler_lab` remain green
   - 2026-05-20 later tiny-inline nested-call follow-up:
     - the tiny-helper inliner now accepts a narrow nested-call family too:
       a tiny helper may inline another tiny leaf helper

@@ -610,6 +610,87 @@ static int value_ssa_bridge_instruction_blocks_pure_internal_call_reuse(const Va
     return 0;
 }
 
+static int value_ssa_bridge_find_existing_pure_call_phi(const ValueSsaBasicBlock *block,
+    const size_t *predecessor_ids,
+    const ValueSsaValueRef *predecessor_results,
+    size_t predecessor_count,
+    ValueSsaValueRef *out_result) {
+    size_t phi_index;
+
+    if (!block || !predecessor_ids || !predecessor_results || !out_result) {
+        return 0;
+    }
+
+    for (phi_index = 0; phi_index < block->phi_count; ++phi_index) {
+        const ValueSsaPhi *phi = &block->phis[phi_index];
+        size_t input_index;
+
+        if (phi->input_count != predecessor_count) {
+            continue;
+        }
+        for (input_index = 0; input_index < predecessor_count; ++input_index) {
+            if (phi->inputs[input_index].predecessor_block_id != predecessor_ids[input_index] ||
+                !value_ssa_value_refs_equal(phi->inputs[input_index].value, predecessor_results[input_index])) {
+                break;
+            }
+        }
+        if (input_index == predecessor_count) {
+            *out_result = value_ssa_value_id(phi->result_id);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int value_ssa_bridge_append_pure_call_phi(ValueSsaFunction *function,
+    size_t block_id,
+    const size_t *predecessor_ids,
+    const ValueSsaValueRef *predecessor_results,
+    size_t predecessor_count,
+    ValueSsaValueRef *out_result,
+    ValueSsaError *error) {
+    ValueSsaPhiInput *inputs = NULL;
+    size_t result_id;
+    size_t input_index;
+    int ok = 0;
+
+    if (!function || block_id >= function->block_count || !predecessor_ids || !predecessor_results || !out_result) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-288A: invalid pure-call phi append contract");
+        return 0;
+    }
+
+    result_id = value_ssa_function_allocate_value(function);
+    if (result_id == (size_t)-1) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-288B: failed allocating pure-call phi value");
+        return 0;
+    }
+
+    if (predecessor_count > 0u) {
+        inputs = (ValueSsaPhiInput *)calloc(predecessor_count, sizeof(ValueSsaPhiInput));
+        if (!inputs) {
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-288C: out of memory preparing pure-call phi");
+            return 0;
+        }
+    }
+
+    for (input_index = 0; input_index < predecessor_count; ++input_index) {
+        inputs[input_index].predecessor_block_id = predecessor_ids[input_index];
+        inputs[input_index].value = predecessor_results[input_index];
+    }
+
+    if (!value_ssa_block_append_phi(&function->blocks[block_id], result_id, inputs, predecessor_count, error)) {
+        goto cleanup;
+    }
+
+    *out_result = value_ssa_value_id(result_id);
+    ok = 1;
+
+cleanup:
+    free(inputs);
+    return ok;
+}
+
 static int value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(ValueSsaProgram *program,
     ValueSsaError *error) {
     unsigned char *readonly_globals = NULL;
@@ -768,6 +849,110 @@ static int value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(ValueS
                         if (reused) {
                             break;
                         }
+                    }
+                }
+                if (reused) {
+                    continue;
+                }
+
+                {
+                    size_t predecessor_count = 0u;
+                    size_t predecessor_id;
+                    size_t *predecessor_ids = NULL;
+                    ValueSsaValueRef *predecessor_results = NULL;
+                    int all_match = 1;
+
+                    for (predecessor_id = 0; predecessor_id < function->block_count; ++predecessor_id) {
+                        if (predecessor_id != block_index &&
+                            block_index < cfg.block_count &&
+                            cfg.predecessor_matrix[predecessor_id * function->block_count + block_index] &&
+                            cfg.reachable[predecessor_id]) {
+                            ++predecessor_count;
+                        }
+                    }
+
+                    if (predecessor_count >= 2u) {
+                        predecessor_ids = (size_t *)calloc(predecessor_count, sizeof(size_t));
+                        predecessor_results =
+                            (ValueSsaValueRef *)calloc(predecessor_count, sizeof(ValueSsaValueRef));
+                        if (!predecessor_ids || !predecessor_results) {
+                            free(predecessor_results);
+                            free(predecessor_ids);
+                            value_ssa_cfg_analysis_free(&cfg);
+                            free(pure_function_flags);
+                            free(readonly_globals);
+                            value_ssa_set_error(error, 0, 0, "VALUE-SSA-288D: out of memory collecting pure-call predecessors");
+                            return 0;
+                        }
+
+                        predecessor_count = 0u;
+                        for (predecessor_id = 0; predecessor_id < function->block_count; ++predecessor_id) {
+                            if (predecessor_id != block_index &&
+                                block_index < cfg.block_count &&
+                                cfg.predecessor_matrix[predecessor_id * function->block_count + block_index] &&
+                                cfg.reachable[predecessor_id]) {
+                                ValueSsaBasicBlock *predecessor_block = &function->blocks[predecessor_id];
+                                size_t predecessor_instruction_index;
+                                int found = 0;
+
+                                predecessor_ids[predecessor_count] = predecessor_id;
+                                for (predecessor_instruction_index = predecessor_block->instruction_count;
+                                     predecessor_instruction_index > 0;
+                                     --predecessor_instruction_index) {
+                                    ValueSsaInstruction *candidate =
+                                        &predecessor_block->instructions[predecessor_instruction_index - 1u];
+
+                                    if (candidate->kind != VALUE_SSA_INSTR_CALL ||
+                                        !candidate->has_result ||
+                                        candidate->result.kind != VALUE_SSA_VALUE_ID ||
+                                        !candidate->as.call.callee_name ||
+                                        strcmp(candidate->as.call.callee_name, instruction->as.call.callee_name) != 0 ||
+                                        !value_ssa_bridge_same_call_args(candidate, instruction)) {
+                                        continue;
+                                    }
+
+                                    predecessor_results[predecessor_count] = candidate->result;
+                                    found = 1;
+                                    break;
+                                }
+                                if (!found) {
+                                    all_match = 0;
+                                    break;
+                                }
+                                ++predecessor_count;
+                            }
+                        }
+
+                        if (all_match && predecessor_count >= 2u) {
+                            ValueSsaValueRef merged_result;
+
+                            if (!value_ssa_bridge_find_existing_pure_call_phi(block,
+                                    predecessor_ids,
+                                    predecessor_results,
+                                    predecessor_count,
+                                    &merged_result) &&
+                                !value_ssa_bridge_append_pure_call_phi(function,
+                                    block_index,
+                                    predecessor_ids,
+                                    predecessor_results,
+                                    predecessor_count,
+                                    &merged_result,
+                                    error)) {
+                                free(predecessor_results);
+                                free(predecessor_ids);
+                                value_ssa_cfg_analysis_free(&cfg);
+                                free(pure_function_flags);
+                                free(readonly_globals);
+                                return 0;
+                            }
+
+                            instruction->kind = VALUE_SSA_INSTR_MOV;
+                            instruction->as.mov_value = merged_result;
+                            changed = 1;
+                        }
+
+                        free(predecessor_results);
+                        free(predecessor_ids);
                     }
                 }
             }

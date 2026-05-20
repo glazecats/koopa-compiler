@@ -273,6 +273,11 @@
      dominated predecessor blocks, so repeated pure internal calls can be
      collapsed across a small cross-block shape instead of only within the
      current block.
+   - Current later same-day pure-call join follow-up:
+     the same repeated pure internal call reuse helper now also handles a
+     small join shape, so repeated pure calls can collapse through an
+     existing phi/value when every reachable predecessor already computed
+     the same pure call.
    - Current later same-day tiny-inline follow-up:
      the tiny-helper inliner now also accepts a narrow nested-call family:
      a tiny helper may inline another tiny leaf helper, and the current
