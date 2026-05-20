@@ -268,6 +268,11 @@
      the repeated pure internal call reuse helper is now also live on the
      default direct-binary cleanup path, so repeated pure internal helper
      calls can now be collapsed earlier on the non-indirect mainline too.
+   - Current later same-day pure-call dominated follow-up:
+     the same repeated pure internal call reuse helper now also looks through
+     dominated predecessor blocks, so repeated pure internal calls can be
+     collapsed across a small cross-block shape instead of only within the
+     current block.
    - Current later same-day tiny-inline follow-up:
      the tiny-helper inliner now also accepts a narrow nested-call family:
      a tiny helper may inline another tiny leaf helper, and the current

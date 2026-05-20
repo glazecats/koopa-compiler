@@ -2699,6 +2699,60 @@ static int build_lower_ir_repeated_pure_internal_call_direct_program(LowerIrProg
     return ok;
 }
 
+static int build_lower_ir_dominated_repeated_pure_internal_call_program(LowerIrProgram *program, LowerIrError *error) {
+    static const char *source =
+        "int helper(int x, int count) {\n"
+        "  int i = 0;\n"
+        "  while (i < count) {\n"
+        "    x = x + 3;\n"
+        "    i = i + 1;\n"
+        "  }\n"
+        "  return x;\n"
+        "}\n"
+        "int main() {\n"
+        "  int z;\n"
+        "  int a;\n"
+        "  z = getint();\n"
+        "  a = helper(5, 2);\n"
+        "  if (z) {\n"
+        "    z = z - 1;\n"
+        "  }\n"
+        "  return a + helper(5, 2);\n"
+        "}\n";
+    AstProgram ast;
+    TokenArray tokens;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast);
+    ir_program_init(&ir_program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    lower_ir_program_init(program);
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast, &parser_error) &&
+        semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast, &ir_options, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, NULL, program, error);
+
+    ir_program_free(&ir_program);
+    ast_program_free(&ast);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int build_lower_ir_loop_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrBasicBlock *entry = NULL;
@@ -19215,6 +19269,51 @@ static int test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls
         "}\n");
 }
 
+static int test_value_ssa_default_conversion_reuses_dominated_repeated_pure_internal_calls(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-DOMINATED-REPEATED-PURE-INTERNAL-CALL-REUSE",
+        build_lower_ir_dominated_repeated_pure_internal_call_program,
+        "declare getint()\n"
+        "\n"
+        "func helper(x.0, count.1) {\n"
+        "  bb.0:\n"
+        "    store_local i.2, 0\n"
+        "    ssa.0 = load_local count.1\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = load_local i.2\n"
+        "    ssa.2 = lt ssa.1, ssa.0\n"
+        "    br ssa.2, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ssa.3 = load_local x.0\n"
+        "    ssa.4 = add ssa.3, 3\n"
+        "    store_local x.0, ssa.4\n"
+        "    ssa.5 = add ssa.1, 1\n"
+        "    store_local i.2, ssa.5\n"
+        "    jmp bb.1\n"
+        "  bb.3:\n"
+        "    ssa.6 = load_local x.0\n"
+        "    ret ssa.6\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call getint()\n"
+        "    store_local z.0, ssa.0\n"
+        "    ssa.1 = call helper(5, 2)\n"
+        "    store_local a.1, ssa.1\n"
+        "    ssa.2 = load_local z.0\n"
+        "    br ssa.2, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ssa.3 = sub ssa.2, 1\n"
+        "    store_local z.0, ssa.3\n"
+        "    jmp bb.2\n"
+        "  bb.2:\n"
+        "    ssa.4 = load_local a.1\n"
+        "    ssa.5 = add ssa.1, ssa.4\n"
+        "    ret ssa.5\n"
+        "}\n");
+}
+
 static int test_value_ssa_default_conversion_reaches_redundant_binary_fixed_point(void) {
     return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-REDUNDANT-BINARY-FIXED-POINT",
         build_lower_ir_redundant_binary_fixed_point_program,
@@ -19812,6 +19911,7 @@ int main(void) {
     ok &= test_value_ssa_default_conversion_reuses_repeated_addr_root_program();
     ok &= test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls();
     ok &= test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls_direct();
+    ok &= test_value_ssa_default_conversion_reuses_dominated_repeated_pure_internal_calls();
     ok &= test_value_ssa_default_conversion_reaches_redundant_binary_fixed_point();
     ok &= test_value_ssa_default_conversion_forwards_same_block_indirect_load_across_param_store();
     ok &= test_value_ssa_default_conversion_reuses_repeated_pure_internal_calls_across_store_indirect();

@@ -648,20 +648,34 @@ static int value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(ValueS
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
+        ValueSsaCfgAnalysis cfg;
         size_t block_index;
 
         if (!function->has_body) {
             continue;
         }
 
+        value_ssa_cfg_analysis_init(&cfg);
+        if (!value_ssa_compute_cfg_analysis(function, &cfg, error)) {
+            value_ssa_cfg_analysis_free(&cfg);
+            free(pure_function_flags);
+            free(readonly_globals);
+            return 0;
+        }
+
         for (block_index = 0; block_index < function->block_count; ++block_index) {
             ValueSsaBasicBlock *block = &function->blocks[block_index];
             size_t instruction_index;
+
+            if (block_index >= cfg.block_count || !cfg.reachable[block_index]) {
+                continue;
+            }
 
             for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
                 ValueSsaInstruction *instruction = &block->instructions[instruction_index];
                 const ValueSsaFunction *callee = NULL;
                 size_t candidate_index;
+                int reused = 0;
 
                 if (instruction->kind != VALUE_SSA_INSTR_CALL ||
                     !instruction->has_result ||
@@ -713,10 +727,53 @@ static int value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(ValueS
                     instruction->kind = VALUE_SSA_INSTR_MOV;
                     instruction->as.mov_value = candidate->result;
                     changed = 1;
+                    reused = 1;
                     break;
+                }
+                if (reused) {
+                    continue;
+                }
+
+                {
+                    size_t candidate_block_id;
+                    for (candidate_block_id = 0; candidate_block_id < function->block_count; ++candidate_block_id) {
+                        ValueSsaBasicBlock *candidate_block;
+
+                        if (candidate_block_id == block_index ||
+                            candidate_block_id >= cfg.block_count ||
+                            !cfg.reachable[candidate_block_id] ||
+                            !cfg.dominates[candidate_block_id * function->block_count + block_index]) {
+                            continue;
+                        }
+
+                        candidate_block = &function->blocks[candidate_block_id];
+                        for (candidate_index = candidate_block->instruction_count; candidate_index > 0; --candidate_index) {
+                            ValueSsaInstruction *candidate = &candidate_block->instructions[candidate_index - 1u];
+
+                            if (candidate->kind != VALUE_SSA_INSTR_CALL ||
+                                !candidate->has_result ||
+                                candidate->result.kind != VALUE_SSA_VALUE_ID ||
+                                !candidate->as.call.callee_name ||
+                                strcmp(candidate->as.call.callee_name, instruction->as.call.callee_name) != 0 ||
+                                !value_ssa_bridge_same_call_args(candidate, instruction)) {
+                                continue;
+                            }
+
+                            instruction->kind = VALUE_SSA_INSTR_MOV;
+                            instruction->as.mov_value = candidate->result;
+                            changed = 1;
+                            reused = 1;
+                            break;
+                        }
+                        if (reused) {
+                            break;
+                        }
+                    }
                 }
             }
         }
+
+        value_ssa_cfg_analysis_free(&cfg);
     }
 
     free(pure_function_flags);

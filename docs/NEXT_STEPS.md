@@ -212,6 +212,18 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later pure-call dominated follow-up:
+  - the same repeated pure internal call reuse helper now also looks through
+    dominated predecessor blocks, not only the current block
+  - current landed effect:
+    the new dominated witness keeps only the first `helper(5, 2)` result
+    alive on the default path and folds the later repeated call away through
+    that earlier value
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later tiny-inline nested-call follow-up:
   - the tiny-helper inliner now also accepts a narrow nested-call family:
     a tiny helper may inline another tiny leaf helper, and the current
