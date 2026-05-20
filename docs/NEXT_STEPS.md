@@ -9988,3 +9988,19 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-20 later same-day perf/mainline pass-restore follow-up:
+  - the already-written perf-side simple loop-invariant load hoist helper in
+    `src/value_ssa_perf/value_ssa_perf_loop_memory.inc` is now wired back into
+    `value_ssa_optimize_perf_hotspots(...)` instead of remaining dead code
+  - current kept scope stays conservative:
+    loop-invariant `addr_*`, `load_local`, `load_global`, and safe guarded
+    `load_indirect` families only, under the same natural-loop safety
+    boundary already reclosed on `lv9/21_sort7`
+  - immediate effect:
+    no new red correctness surface appeared after reconnecting it; existing
+    regression dumps already matched the live stronger shape
+  - focused rechecks after this restore:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

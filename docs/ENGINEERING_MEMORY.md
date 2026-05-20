@@ -104,6 +104,12 @@
   branch condition on the backedge. Current kept rule: LICM and the default
   simple-loop load/pure-call hoist helpers must reason over the full natural
   loop block set, not only the header and final backedge block.
+- `ValueSSA` perf-side loop-invariant load hoists are now part of the live
+  `-perf` mainline again. The helper in
+  `src/value_ssa_perf/value_ssa_perf_loop_memory.inc` is intentionally kept
+  conservative and depends on the same natural-loop safety proof, so it can
+  stay on the mainline so long as `test-value-ssa-regression`,
+  `autotest -riscv -s lv9`, and `autotest -perf` remain green together.
 - The first non-generic byte lane is `MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW`. It currently emits fixed-width 4-byte RISC-V instruction skeletons for the landed subset and moves call/control fixup patch spans to instruction starts, but it is still intentionally conservative rather than claiming a full ABI-complete encoder.
 - That `riscv32-preview` byte lane is now also slightly more honest for known internal control-flow and same-program call targets: when the target byte offset is already known inside the current program, the emitted preview `jal` / branch words now carry the matching PC-relative immediate instead of leaving every preview target displacement at zero.
 - The post-bytes artifact chain now preserves that backend choice too: `machine_object` keeps the originating `MachineBytesTargetProfile`, and `machine_reloc` may now surface the matching nonzero preview addend for internal `riscv32-preview` targets whose byte offsets are already known, rather than flattening every relocation addend back to `0`.

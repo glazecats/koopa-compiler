@@ -228,6 +228,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
+    if (!value_ssa_perf_hoist_simple_loop_invariant_loads(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
     if (!value_ssa_perf_reuse_spmv_loop_exit_indirect_loads(program, error)) {
         free(foldable_globals);
         return 0;
