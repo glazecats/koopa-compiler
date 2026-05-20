@@ -18385,6 +18385,50 @@ static int test_value_ssa_inline_tiny_internal_helpers_private_local(void) {
         "}\n");
 }
 
+static int test_value_ssa_inline_tiny_internal_helpers_two_block_private_local(void) {
+    return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-TWO-BLOCK-PRIVATE-LOCAL",
+        build_tiny_inline_two_block_private_local_helper_program,
+        "func helper(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = add ssa.0, 5\n"
+        "    store_local tmp.1, ssa.1\n"
+        "    ssa.2 = load_local tmp.1\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main(p.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local p.0\n"
+        "    ssa.2 = add ssa.0, 5\n"
+        "    ssa.1 = mov ssa.2\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
+static int test_value_ssa_inline_tiny_internal_helpers_parameter_local_store(void) {
+    return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-PARAMETER-LOCAL-STORE",
+        build_tiny_inline_parameter_local_store_helper_program,
+        "func helper(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = add ssa.0, 5\n"
+        "    store_local x.0, ssa.1\n"
+        "    ssa.2 = load_local x.0\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main(p.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local p.0\n"
+        "    ssa.2 = add ssa.0, 5\n"
+        "    ssa.1 = mov ssa.2\n"
+        "    ret ssa.1\n"
+        "}\n");
+}
+
 static int test_value_ssa_inline_tiny_internal_helpers_budget_blocks_large_helper(void) {
     return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-BUDGET-BLOCKS-LARGE-HELPER",
         build_tiny_inline_budget_blocked_helper_program,
@@ -19600,6 +19644,8 @@ int main(void) {
     ok &= test_value_ssa_inline_tiny_internal_helpers_void_two_block_return();
     ok &= test_value_ssa_inline_tiny_internal_helpers_zero_param_constant();
     ok &= test_value_ssa_inline_tiny_internal_helpers_private_local();
+    ok &= test_value_ssa_inline_tiny_internal_helpers_two_block_private_local();
+    ok &= test_value_ssa_inline_tiny_internal_helpers_parameter_local_store();
     ok &= test_value_ssa_inline_tiny_internal_helpers_budget_blocks_large_helper();
     ok &= test_value_ssa_inline_tiny_internal_helpers_function_budget();
     ok &= test_value_ssa_source_sccp_constant_branch();
