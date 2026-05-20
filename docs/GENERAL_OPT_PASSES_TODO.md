@@ -278,6 +278,10 @@
      small join shape, so repeated pure calls can collapse through an
      existing phi/value when every reachable predecessor already computed
      the same pure call.
+   - Current later same-day SCCP branch-rewrite follow-up:
+     SCCP now also rewrites branch conditions for the address-symbol family,
+     so proven-truthy branch conditions are pushed to a concrete constant and
+     CFG cleanup can finish the fold more aggressively.
    - Current later same-day tiny-inline follow-up:
      the tiny-helper inliner now also accepts a narrow nested-call family:
      a tiny helper may inline another tiny leaf helper, and the current

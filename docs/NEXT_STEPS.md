@@ -237,6 +237,18 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later SCCP branch-rewrite follow-up:
+  - SCCP now also rewrites branch conditions for the address-symbol family,
+    so once a branch condition is proven truthy the condition is pushed to a
+    concrete constant and CFG cleanup can finish the fold more aggressively
+  - current landed effect:
+    the existing branch/address witnesses now collapse to direct returns or
+    straight jumps instead of keeping the branch shape alive in the SCCP dump
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later tiny-inline nested-call follow-up:
   - the tiny-helper inliner now also accepts a narrow nested-call family:
     a tiny helper may inline another tiny leaf helper, and the current

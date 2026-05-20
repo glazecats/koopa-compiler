@@ -18099,13 +18099,8 @@ static int test_value_ssa_sccp_readonly_global_branch(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    ssa.0 = load_global g.0\n"
-        "    br ssa.0, bb.1, bb.2\n"
+        "    jmp bb.1\n"
         "  bb.1:\n"
-        "    jmp bb.3\n"
-        "  bb.2:\n"
-        "    jmp bb.3\n"
-        "  bb.3:\n"
         "    ret 11\n"
         "}\n");
 }
@@ -18289,12 +18284,7 @@ static int test_value_ssa_sccp_global_address_branch(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    ssa.0 = addr_global g.0\n"
-        "    br ssa.0, bb.1, bb.2\n"
-        "  bb.1:\n"
         "    ret 11\n"
-        "  bb.2:\n"
-        "    ret 22\n"
         "}\n");
 }
 
@@ -18303,12 +18293,7 @@ static int test_value_ssa_sccp_local_address_branch(void) {
         build_sccp_local_address_branch_program,
         "func main() {\n"
         "  bb.0:\n"
-        "    ssa.0 = addr_local x.0\n"
-        "    br ssa.0, bb.1, bb.2\n"
-        "  bb.1:\n"
         "    ret 11\n"
-        "  bb.2:\n"
-        "    ret 22\n"
         "}\n");
 }
 
@@ -18317,12 +18302,7 @@ static int test_value_ssa_sccp_parameter_pointer_branch(void) {
         build_sccp_parameter_pointer_branch_program,
         "func main(p.0) {\n"
         "  bb.0:\n"
-        "    ssa.0 = load_local p.0\n"
-        "    br ssa.0, bb.1, bb.2\n"
-        "  bb.1:\n"
         "    ret 11\n"
-        "  bb.2:\n"
-        "    ret 22\n"
         "}\n");
 }
 
@@ -18344,13 +18324,7 @@ static int test_value_ssa_sccp_global_address_offset_branch(void) {
         "\n"
         "func main() {\n"
         "  bb.0:\n"
-        "    ssa.0 = addr_global g.0\n"
-        "    ssa.1 = add ssa.0, 4\n"
-        "    br ssa.1, bb.1, bb.2\n"
-        "  bb.1:\n"
         "    ret 11\n"
-        "  bb.2:\n"
-        "    ret 22\n"
         "}\n");
 }
 

@@ -674,14 +674,16 @@ int value_ssa_sparse_conditional_constant_propagation(ValueSsaProgram *program, 
                     const ValueSsaUseSite *site = &def_use.use_sites[def_use.use_offsets[value_id] + use_index];
                     ValueSsaValueRef replacement;
 
-                    if (site->role == VALUE_SSA_USE_ROLE_BRANCH_CONDITION) {
-                        continue;
-                    }
-                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
+                        site->role != VALUE_SSA_USE_ROLE_BRANCH_CONDITION) {
                         continue;
                     }
 
-                    replacement = value_ssa_value_immediate(values[value_id].constant);
+                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+                        replacement = value_ssa_value_immediate(1);
+                    } else {
+                        replacement = value_ssa_value_immediate(values[value_id].constant);
+                    }
 
                     if (!value_ssa_sccp_rewrite_use_site(
                             function,
