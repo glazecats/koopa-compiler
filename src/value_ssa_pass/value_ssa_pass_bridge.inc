@@ -122,26 +122,83 @@ static int value_ssa_lower_ir_has_huge_parameter_hotspot(const LowerIrProgram *p
 
 static int value_ssa_run_extreme_straight_line_fast_cleanup(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
+    int trace_timing = value_ssa_trace_enabled();
+    double stage_start = trace_timing ? value_ssa_now_s() : 0.0;
 
     if (!program) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-268: invalid extreme straight-line cleanup contract");
         return 0;
     }
 
-    if (!value_ssa_forward_local_loads(program, error) ||
-        !value_ssa_forward_global_loads(program, error) ||
-        !value_ssa_simplify_trivial_values(program, error) ||
-        !value_ssa_eliminate_redundant_stores(program, error) ||
-        !value_ssa_eliminate_dead_stores(program, error) ||
-        !value_ssa_normalize_binary_operands(program, error) ||
-        !value_ssa_simplify_algebraic_identities(program, error) ||
-        !value_ssa_fold_constants(program, error) ||
-        !value_ssa_simplify_trivial_values(program, error) ||
-        !value_ssa_eliminate_redundant_binaries(program, error) ||
-        !value_ssa_simplify_trivial_values(program, error) ||
-        !value_ssa_eliminate_dead_value_defs(program, error)) {
+    if (!value_ssa_forward_local_loads(program, error)) {
         return 0;
     }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-forward-local-loads", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_forward_global_loads(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-forward-global-loads", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_simplify_trivial_values(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-simplify-1", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_eliminate_redundant_stores(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-redundant-stores", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_eliminate_dead_stores(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-dead-stores", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_normalize_binary_operands(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-normalize", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_simplify_algebraic_identities(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-identities", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_fold_constants(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-fold-constants", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    if (!value_ssa_simplify_trivial_values(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("extreme-simplify-2", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+    /*
+     * On extreme straight-line giants such as register_alloc10000, the
+     * general cross-block redundant-binary/GVN pass dominates compile time
+     * while buying little. Keep the cheap local simplifications here and let
+     * the later backend handle the remaining straightforward code.
+     */
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
@@ -238,10 +295,14 @@ static int value_ssa_run_default_direct_binary_cleanup(ValueSsaProgram *program,
         return 0;
     }
 
-    if (!value_ssa_normalize_binary_operands(program, error) ||
+    if (!value_ssa_inline_tiny_internal_helpers(program, error) ||
+        !value_ssa_forward_non_address_taken_global_loads(program, error) ||
+        !value_ssa_licm_hoist_simple_loop_invariant_values(program, error) ||
+        !value_ssa_normalize_binary_operands(program, error) ||
         !value_ssa_collapse_same_block_identical_binary_runs(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_eliminate_dead_value_defs(program, error) ||
+        !value_ssa_sparse_conditional_constant_propagation(program, error) ||
         !value_ssa_eliminate_redundant_binaries(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_eliminate_dead_value_defs(program, error) ||
@@ -1373,7 +1434,87 @@ typedef struct {
     size_t header_id;
     size_t body_id;
     size_t preheader_id;
+    size_t block_count;
+    unsigned char *loop_marks;
 } ValueSsaBridgeSimpleLoop;
+
+static void value_ssa_bridge_simple_loop_init(ValueSsaBridgeSimpleLoop *loop) {
+    if (!loop) {
+        return;
+    }
+
+    loop->header_id = (size_t)-1;
+    loop->body_id = (size_t)-1;
+    loop->preheader_id = (size_t)-1;
+    loop->block_count = 0u;
+    loop->loop_marks = NULL;
+}
+
+static void value_ssa_bridge_simple_loop_free(ValueSsaBridgeSimpleLoop *loop) {
+    if (!loop) {
+        return;
+    }
+
+    free(loop->loop_marks);
+    loop->loop_marks = NULL;
+    loop->block_count = 0u;
+}
+
+static int value_ssa_bridge_mark_natural_loop_blocks(const ValueSsaFunction *function,
+    const ValueSsaCfgAnalysis *analysis,
+    size_t header_id,
+    size_t backedge_pred_id,
+    unsigned char *loop_marks,
+    size_t *stack) {
+    size_t stack_size = 0u;
+    size_t block_count;
+
+    if (!function || !analysis || !loop_marks || !stack ||
+        analysis->block_count != function->block_count ||
+        header_id >= function->block_count ||
+        backedge_pred_id >= function->block_count) {
+        return 0;
+    }
+
+    block_count = function->block_count;
+    memset(loop_marks, 0, block_count * sizeof(unsigned char));
+    loop_marks[header_id] = 1u;
+    loop_marks[backedge_pred_id] = 1u;
+    if (backedge_pred_id != header_id) {
+        stack[stack_size++] = backedge_pred_id;
+    }
+
+    while (stack_size > 0u) {
+        size_t block_id = stack[--stack_size];
+        size_t predecessor_id;
+
+        for (predecessor_id = 0; predecessor_id < block_count; ++predecessor_id) {
+            if (!analysis->reachable[predecessor_id] ||
+                !analysis->predecessor_matrix[predecessor_id * block_count + block_id]) {
+                continue;
+            }
+            if (predecessor_id != header_id &&
+                !analysis->dominates[header_id * block_count + predecessor_id]) {
+                continue;
+            }
+            if (loop_marks[predecessor_id]) {
+                continue;
+            }
+
+            loop_marks[predecessor_id] = 1u;
+            stack[stack_size++] = predecessor_id;
+        }
+    }
+
+    return 1;
+}
+
+static int value_ssa_bridge_loop_contains_block(const ValueSsaBridgeSimpleLoop *loop, size_t block_id) {
+    return loop &&
+        loop->loop_marks &&
+        block_id < loop->block_count &&
+        loop->loop_marks[block_id];
+}
 
 static int value_ssa_bridge_find_simple_single_body_loop(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
@@ -1385,6 +1526,8 @@ static int value_ssa_bridge_find_simple_single_body_loop(const ValueSsaFunction 
     size_t predecessor_b = (size_t)-1;
     size_t body_id = (size_t)-1;
     size_t preheader_id = (size_t)-1;
+    unsigned char *loop_marks = NULL;
+    size_t *stack = NULL;
 
     if (!function || !analysis || !out_loop || header_id >= function->block_count) {
         return 0;
@@ -1445,9 +1588,21 @@ static int value_ssa_bridge_find_simple_single_body_loop(const ValueSsaFunction 
         return 0;
     }
 
+    loop_marks = (unsigned char *)calloc(function->block_count ? function->block_count : 1u, sizeof(unsigned char));
+    stack = (size_t *)malloc((function->block_count ? function->block_count : 1u) * sizeof(size_t));
+    if (!loop_marks || !stack ||
+        !value_ssa_bridge_mark_natural_loop_blocks(function, analysis, header_id, body_id, loop_marks, stack)) {
+        free(stack);
+        free(loop_marks);
+        return 0;
+    }
+    free(stack);
+
     out_loop->header_id = header_id;
     out_loop->body_id = body_id;
     out_loop->preheader_id = preheader_id;
+    out_loop->block_count = function->block_count;
+    out_loop->loop_marks = loop_marks;
     return 1;
 }
 
@@ -1515,19 +1670,20 @@ static int value_ssa_bridge_loop_instruction_preserves_global_invariance(const V
 static int value_ssa_bridge_loop_preserves_local_slot(const ValueSsaFunction *function,
     const ValueSsaBridgeSimpleLoop *loop,
     size_t slot_id) {
-    size_t block_ids[2];
-    size_t block_pos;
+    size_t block_id;
 
     if (!function || !loop || slot_id >= function->local_count) {
         return 0;
     }
 
-    block_ids[0] = loop->header_id;
-    block_ids[1] = loop->body_id;
-    for (block_pos = 0; block_pos < 2u; ++block_pos) {
-        const ValueSsaBasicBlock *block = &function->blocks[block_ids[block_pos]];
+    for (block_id = 0; block_id < function->block_count; ++block_id) {
+        const ValueSsaBasicBlock *block;
         size_t instruction_index;
 
+        if (!value_ssa_bridge_loop_contains_block(loop, block_id)) {
+            continue;
+        }
+        block = &function->blocks[block_id];
         for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
             const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
 
@@ -1576,8 +1732,7 @@ static int value_ssa_bridge_value_is_simple_loop_invariant(const ValueSsaProgram
     if (definition->kind == VALUE_SSA_INSTR_CALL) {
         return 0;
     }
-    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
-        analysis->def_block_ids[value.value_id] != loop->body_id) {
+    if (!value_ssa_bridge_loop_contains_block(loop, analysis->def_block_ids[value.value_id])) {
         return 1;
     }
 
@@ -1590,28 +1745,24 @@ static int value_ssa_bridge_value_is_simple_loop_invariant(const ValueSsaProgram
             definition->as.load_slot.id >= program->global_count) {
             return 0;
         }
-        for (scan_index = 0; scan_index < function->blocks[loop->header_id].instruction_count; ++scan_index) {
-            if (!value_ssa_bridge_loop_instruction_preserves_global_invariance(
-                    program,
-                    function,
-                    analysis,
-                    readonly_globals,
-                    pure_function_flags,
-                    definition->as.load_slot.id,
-                    &function->blocks[loop->header_id].instructions[scan_index])) {
-                return 0;
+        for (scan_index = 0; scan_index < function->block_count; ++scan_index) {
+            const ValueSsaBasicBlock *block = &function->blocks[scan_index];
+            size_t instruction_index;
+
+            if (!value_ssa_bridge_loop_contains_block(loop, scan_index)) {
+                continue;
             }
-        }
-        for (scan_index = 0; scan_index < function->blocks[loop->body_id].instruction_count; ++scan_index) {
-            if (!value_ssa_bridge_loop_instruction_preserves_global_invariance(
-                    program,
-                    function,
-                    analysis,
-                    readonly_globals,
-                    pure_function_flags,
-                    definition->as.load_slot.id,
-                    &function->blocks[loop->body_id].instructions[scan_index])) {
-                return 0;
+            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                if (!value_ssa_bridge_loop_instruction_preserves_global_invariance(
+                        program,
+                        function,
+                        analysis,
+                        readonly_globals,
+                        pure_function_flags,
+                        definition->as.load_slot.id,
+                        &block->instructions[instruction_index])) {
+                    return 0;
+                }
             }
         }
         return 1;
@@ -1662,8 +1813,7 @@ static int value_ssa_bridge_clone_loop_invariant_value_into_preheader(const Valu
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-276: missing loop-invariant definition for ssa.%zu", value.value_id);
         return 0;
     }
-    if (analysis->def_block_ids[value.value_id] != loop->header_id &&
-        analysis->def_block_ids[value.value_id] != loop->body_id) {
+    if (!value_ssa_bridge_loop_contains_block(loop, analysis->def_block_ids[value.value_id])) {
         *out_value = value;
         return 1;
     }
@@ -1809,6 +1959,7 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(ValueSs
             int changed_loop = 0;
             int ok = 1;
 
+            value_ssa_bridge_simple_loop_init(&loop);
             if (!value_ssa_bridge_find_simple_single_body_loop(function, &cfg, header_id, &loop)) {
                 continue;
             }
@@ -1816,6 +1967,7 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(ValueSs
             preheader = &function->blocks[loop.preheader_id];
             body = &function->blocks[loop.body_id];
             if (preheader->instruction_count == 0u || body->instruction_count == 0u) {
+                value_ssa_bridge_simple_loop_free(&loop);
                 continue;
             }
 
@@ -1973,6 +2125,7 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(ValueSs
             value_ssa_basic_block_free(&rebuilt_body);
             free(mappings);
             free(has_mapping);
+            value_ssa_bridge_simple_loop_free(&loop);
 
             if (!ok) {
                 value_ssa_def_use_analysis_free(&def_use);
@@ -2070,19 +2223,21 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_pure_calls_in_program(Va
                 ValueSsaBasicBlock rebuilt_body;
                 unsigned char *has_mapping = NULL;
                 ValueSsaValueRef *mappings = NULL;
-                size_t instruction_index;
-                int changed_loop = 0;
-                int ok = 1;
+            size_t instruction_index;
+            int changed_loop = 0;
+            int ok = 1;
 
-                if (!value_ssa_bridge_find_simple_single_body_loop(function, &cfg, header_id, &loop)) {
-                    continue;
-                }
+            value_ssa_bridge_simple_loop_init(&loop);
+            if (!value_ssa_bridge_find_simple_single_body_loop(function, &cfg, header_id, &loop)) {
+                continue;
+            }
 
-                preheader = &function->blocks[loop.preheader_id];
-                body = &function->blocks[loop.body_id];
-                if (preheader->instruction_count == 0u || body->instruction_count == 0u) {
-                    continue;
-                }
+            preheader = &function->blocks[loop.preheader_id];
+            body = &function->blocks[loop.body_id];
+            if (preheader->instruction_count == 0u || body->instruction_count == 0u) {
+                value_ssa_bridge_simple_loop_free(&loop);
+                continue;
+            }
 
                 memset(&rebuilt_preheader, 0, sizeof(rebuilt_preheader));
                 memset(&rebuilt_body, 0, sizeof(rebuilt_body));
@@ -2096,11 +2251,11 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_pure_calls_in_program(Va
                 if (!has_mapping || !mappings) {
                     free(mappings);
                     free(has_mapping);
-                    value_ssa_basic_block_free(&rebuilt_preheader);
-                    value_ssa_basic_block_free(&rebuilt_body);
-                    value_ssa_def_use_analysis_free(&def_use);
-                    value_ssa_cfg_analysis_free(&cfg);
-                    free(readonly_globals);
+                value_ssa_basic_block_free(&rebuilt_preheader);
+                value_ssa_basic_block_free(&rebuilt_body);
+                value_ssa_def_use_analysis_free(&def_use);
+                value_ssa_cfg_analysis_free(&cfg);
+                free(readonly_globals);
                     value_ssa_set_error(error, 0, 0, "VALUE-SSA-283: out of memory preparing loop-invariant mappings");
                     return 0;
                 }
@@ -2236,6 +2391,7 @@ static int value_ssa_bridge_hoist_simple_loop_invariant_pure_calls_in_program(Va
                 value_ssa_basic_block_free(&rebuilt_body);
                 free(mappings);
                 free(has_mapping);
+                value_ssa_bridge_simple_loop_free(&loop);
 
                 if (!ok) {
                     value_ssa_def_use_analysis_free(&def_use);
@@ -2287,11 +2443,35 @@ static int value_ssa_run_indirect_memory_direct_fast_cleanup(ValueSsaProgram *pr
         stage_start = value_ssa_now_s();
     }
 
+    if (!value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("indirect-direct-hoist-simple-loop-invariant-loads", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+
     if (!value_ssa_eliminate_unread_scalar_local_stores(program, error)) {
         return 0;
     }
     if (trace_timing) {
         value_ssa_trace_timing("indirect-direct-eliminate-unread-scalar-local-stores", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+
+    if (!value_ssa_inline_tiny_internal_helpers(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("indirect-direct-inline-tiny-helpers", value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+
+    if (!value_ssa_licm_hoist_simple_loop_invariant_values(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("indirect-direct-licm", value_ssa_now_s() - stage_start);
         stage_start = value_ssa_now_s();
     }
 
@@ -2492,15 +2672,6 @@ static int value_ssa_run_indirect_memory_direct_fast_cleanup(ValueSsaProgram *pr
         stage_start = value_ssa_now_s();
     }
 
-    if (!value_ssa_bridge_forward_dominated_repeated_indirect_loads(program, error)) {
-        return 0;
-    }
-    if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-dominated-indirect-load-forward",
-            value_ssa_now_s() - stage_start);
-        stage_start = value_ssa_now_s();
-    }
-
     if (!value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(program, error)) {
         return 0;
     }
@@ -2519,44 +2690,11 @@ static int value_ssa_run_indirect_memory_direct_fast_cleanup(ValueSsaProgram *pr
         stage_start = value_ssa_now_s();
     }
 
-    if (!value_ssa_inline_tiny_internal_helpers(program, error)) {
+    if (!value_ssa_sparse_conditional_constant_propagation(program, error)) {
         return 0;
     }
     if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-inline-tiny-helpers", value_ssa_now_s() - stage_start);
-        stage_start = value_ssa_now_s();
-    }
-
-    if (!value_ssa_bridge_reuse_addr_roots_in_program(program, error)) {
-        return 0;
-    }
-    if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-reuse-addr-roots", value_ssa_now_s() - stage_start);
-        stage_start = value_ssa_now_s();
-    }
-
-    if (!value_ssa_bridge_reuse_same_block_pure_address_values_in_program(program, error)) {
-        return 0;
-    }
-    if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-reuse-same-block-pure-address-values",
-            value_ssa_now_s() - stage_start);
-        stage_start = value_ssa_now_s();
-    }
-
-    if (!value_ssa_simplify_trivial_values(program, error)) {
-        return 0;
-    }
-    if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-post-root-simplify", value_ssa_now_s() - stage_start);
-        stage_start = value_ssa_now_s();
-    }
-
-    if (!value_ssa_run_default_direct_binary_cleanup(program, error)) {
-        return 0;
-    }
-    if (trace_timing) {
-        value_ssa_trace_timing("indirect-direct-redundant-binary-cleanup", value_ssa_now_s() - stage_start);
+        value_ssa_trace_timing("indirect-direct-sccp", value_ssa_now_s() - stage_start);
         stage_start = value_ssa_now_s();
     }
 
@@ -2639,6 +2777,18 @@ int value_ssa_build_default_from_lower_ir(const LowerIrProgram *program,
         }
         if (trace_timing) {
             value_ssa_trace_timing("indirect-direct-fast-cleanup", value_ssa_now_s() - stage_start);
+            value_ssa_trace_timing("total", value_ssa_now_s() - total_start);
+        }
+        return 1;
+    }
+    if (has_huge_parameter_hotspot) {
+        stage_start = trace_timing ? value_ssa_now_s() : 0.0;
+        if (!value_ssa_build_from_lower_ir_with_canonicalization(
+                program, VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC, out_program, error)) {
+            return 0;
+        }
+        if (trace_timing) {
+            value_ssa_trace_timing("huge-params-classic-canonicalized-build", value_ssa_now_s() - stage_start);
             value_ssa_trace_timing("total", value_ssa_now_s() - total_start);
         }
         return 1;

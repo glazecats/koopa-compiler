@@ -68,6 +68,20 @@
      start with pure `mov` / `binary` / `addr_*` / safe `load_*` hoisting,
      leaving call motion and alias-heavy indirect-load motion out of the
      first cut.
+   - Current 2026-05-20 status:
+     a first conservative `ValueSSA` LICM slice is now not only landed and
+     regression-locked, but also wired into the main canonicalize/default
+     cleanup pipelines rather than living only as a standalone helper entry.
+     Current kept scope remains the simple-loop pure-value family
+     (`mov` / `binary` / `addr_*` / safe `load_*`), with the narrower alias
+     boundary on indirect loads still intentionally preserved.
+   - Current later same-day 2026-05-20 status:
+     the live safety proof is now stronger than the first landing cut:
+     loop-invariance checks no longer inspect only `header + backedge body`,
+     but the full natural loop block set. On top of that stronger proof, the
+     already-written bridge-side simple loop-invariant local/global load hoist
+     helper is now reconnected into the default indirect-memory direct cleanup
+     path instead of remaining dead code.
 
 2. Induction-variable simplification and strength reduction
    - What is missing:
@@ -190,8 +204,9 @@
 
 3. Real global value numbering / cross-block CSE
    - What is missing:
-     current redundant-binary cleanup is useful but still not a full
-     dominance-aware GVN pass.
+     the tree now has a first cross-block available-value slice for pure
+     scalar values, but it is still not a broader full GVN framework with
+     memory-value reasoning or stronger equivalence classes.
    - Why it matters:
      many present wins are being recovered via narrow repeated-expression or
      repeated-call special cases that a stronger generic CSE/GVN framework
@@ -200,23 +215,139 @@
      `value_ssa_pass`
    - Suggested first scope:
      pure scalar values only, no memory-value unification in the first cut.
+   - Current 2026-05-20 status:
+     the old dominator-scoped `redundant_binaries` cleanup is now promoted to
+     a first real cross-block available-value / GVN-style pass in
+     `src/value_ssa_pass/value_ssa_cse.inc`.
+     Current landed scope:
+     - pure scalar values only
+     - `mov`
+     - safe pure `binary`
+     - `addr_local` / `addr_global`
+     - readonly `load_global`
+     - join-time phi materialization when the same available-value key reaches
+       a block through all reachable predecessors but with different edge
+       result ids
+   - Current later 2026-05-20 status:
+     that same first GVN slice now also absorbs `load_indirect` reuse instead
+     of leaving indirect loads only on the older same-block sibling pass.
+     Current landed extension:
+   - Current later 2026-05-20 commutative follow-up:
+     the same available-value keying is now one step less dependent on pass
+     ordering: commutative binary families normalize their key locally inside
+     the GVN/CSE pass itself, so repeated `a + 1` vs `1 + a` shapes can be
+     recognized and reused even when a caller has not already run the
+     standalone binary-normalize pass first. Focused regression coverage now
+     locks both same-block and join-time commuted-operand reuse.
+     - `load_indirect`
+     - same-block and cross-block reuse through the same available-value table
+     - join-time phi materialization for repeated indirect loads when the same
+       pure address value is available on all reachable predecessors
+     - a first unified kill rule for indirect-load entries on `call`,
+       aliasing stores, and address-dependence-invalidating local/global
+       stores
+   - Current later same-day follow-up:
+     the same available-value framework now also covers stable `load_local`
+     from non-address-taken local slots, instead of leaving that family only
+     to the earlier forwarding-oriented passes.
+     The same follow-up also taught the join path to reuse an already-present
+     equivalent phi in the destination block instead of synthesizing a second
+     duplicate merge-phi for the same available value.
+   - Current authority:
+     treat this as the opening GVN foothold, not the final pass.
+     The next useful expansions should be:
+     - deciding whether to fold same-key join phis more aggressively after
+       later simplify/rename rounds
+     - broadening beyond pure scalars into carefully proven memory-value
+       cases, most likely starting from readonly or alias-closed loads
+     - deciding whether the remaining standalone redundant-`load_indirect`
+       entrypoint should stay only as a test/debug surface or be retired once
+       the unified GVN framework has enough external evidence
 
 4. SCCP
    - What is missing:
-     the tree folds constants and simplifies CFG, but does not yet have a
-     sparse conditional constant propagation pass that jointly reasons about
-     lattice values and executable edges.
+     the tree now has a real SCCP foothold, but it is still not a broader
+     symbolic/value-range SCCP with richer memory or pointer reasoning.
    - Why it matters:
      SCCP is often a compact force multiplier for later DCE / CFG cleanup and
      can expose simplifications that local folding cannot reach.
    - Best landing layer:
      `value_ssa_pass`
+   - Current 2026-05-20 status:
+     a first reusable `ValueSSA` SCCP slice is now not only landed, but also
+     reconnected to the live default mainline instead of remaining a
+     classic-only feature:
+     the default direct-binary cleanup and default indirect-memory direct
+     cleanup paths now run SCCP too.
+   - Current kept scope:
+     integer constants, executable-edge discovery, simple phi merging,
+     address-symbol propagation, and the existing constant/address cleanup
+     handoff into simplify/fold/GVN/CFG/DCE.
    - Suggested first scope:
      integer immediates, branch reachability, and simple phi lattices.
+   - Current 2026-05-19 status:
+     a first conservative `ValueSSA` SCCP slice is now live code in
+     `src/value_ssa_pass/value_ssa_sccp.inc`.
+     Current landed scope:
+     - integer constant lattice (`unknown / constant / overdefined`)
+     - executable-edge discovery for `jump` / `branch`
+     - simple phi merging over executable predecessors
+     - constant use-site rewrite followed by existing simplify/fold/cfg/dce
+       cleanup
+   - Current authority:
+     treat this as the opening SCCP foothold, not the final full pass.
+     The next useful expansions should be:
+     - cleaner handling of more instruction kinds than `mov` / `binary`
+     - stronger executable-edge / unreachable-path validation witnesses
+     - deciding whether default/direct and canonicalize paths should keep the
+       exact same SCCP placement or diverge slightly by workload.
+   - Current later 2026-05-20 status:
+     SCCP now also has a first small symbolic-address lattice instead of
+     stopping strictly at integer constants.
+     Current landed extension:
+     - `addr_global`
+     - `addr_local`
+     - parameter-pointer `load_local`
+     - `mov` propagation of the same global address
+     - phi merge of the same address symbol
+     - small zero-offset `add/sub` preservation around that same address
+     - readonly `addr_global -> load_indirect` folding to a constant,
+       including a simple joined-address-through-phi case
+     - local-address `eq`/`ne`/`sub` self-comparison folding through the same
+       lattice
+     - parameter-pointer zero-offset arithmetic and direct self-comparison
+       folding through that same lattice
+     - first "must differ" address proofs for:
+       different locals,
+       different globals,
+       local-vs-global,
+       and local-vs-parameter-pointer pairs
+     - direct address-symbol vs `0` `eq/ne` folding
+     - aliasing `store_indirect` barrier coverage for the readonly-global
+       indirect-load fold
+     - address-symbol truthiness for branch conditions
+     - first `base + constant offset` address-symbol lane
+     - readonly-global indirect-load fold remains zero-offset only
+   - Current later 2026-05-20 follow-up:
+     the address-symbol family now also closes a small exchange-order hole:
+     `const + addr` / `const == addr` / `const != addr` are now recognized
+     the same way as the already-supported `addr + const` / `addr == const`
+     / `addr != const` shapes, so the SCCP lattice no longer depends on the
+     caller having normalized binary operands first.
+   - Current authority:
+     the next useful SCCP expansions should now be chosen in families rather
+     than one-off opcodes:
+     - broaden symbolic-address reasoning only where alias proofs stay honest
+     - decide whether local address symbols or readonly array/pointer cases
+       deserve the next symbolic lattice family
+     - consider whether some of the current "unknown vs overdefined" cases now
+       merit a richer lattice element instead of another ad hoc fold
 
 5. Tiny-function inlining
    - What is missing:
-     there is no general small-helper inliner.
+     the tree now has a narrow small-helper inliner, but it is not yet a
+     broader well-staged general inline pass with a richer eligibility model,
+     cost model, or multi-block support.
    - Why it matters:
      some current hotspots, especially `fft1/fft2`, are still paying for
      recursive or helper-driven structure that blocks later simplification.
@@ -234,6 +365,41 @@
      Current authority is to continue helper-specific evolution there
      if this line broadens into multi-block helper inlining or more
      structured recursive-helper rewrites.
+   - Current later 2026-05-20 status:
+     the existing `ValueSSA` tiny-helper inliner is now also treated as a
+     public pass surface instead of only a hidden default-path utility.
+     Current landed scope:
+     - internal-only
+     - one-block, plus two-block helpers with a pure return-block tail
+     - return-valued
+     - small body
+     - zero-parameter helpers allowed
+     - `load_local`, `load_global`, `mov`, `binary`
+     - `addr_local`, `addr_global`, `load_indirect`
+     - explicit helper-size / callsite inserted-instruction / same-function
+       total inserted-instruction budget gates
+   - Current authority:
+     treat this as the first true foothold for general tiny inlining, not the
+     finished pass.
+     The next useful expansions should be:
+     - deciding whether the next step after the now-landed two-block pure
+       return-tail support should be broader CFG eligibility or richer helper
+       instruction families
+     - further refining the existing code-growth/callsite budgets rather than
+       replacing them
+   - Current later same-day follow-up:
+     this tiny-inline family is now also part of the classic
+     `value_ssa_canonicalize_program(...)` pipeline itself, not only a public
+     separately callable pass surface.
+   - Current later same-day follow-up 2:
+     the same broadened tiny-inline family now also participates in the
+     default reusable direct-build cleanup paths, not only in the classic
+     canonicalization lane.
+     - deciding whether readonly small helper bodies should participate in
+       canonicalize/mainline paths beyond the current default bridge usage,
+       after the broader driver/output surface is restamped
+     - keep the current checkpoint at the stable one-block family; the
+       broader two-block return-wrapper tier remains future work
 
 ### Band B: High-Value but More Delicate
 

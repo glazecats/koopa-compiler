@@ -638,6 +638,9 @@ static int ir_lower_flow_state_proves_loop_condition_stays_true_from_state(const
     if (!cond_expr && !(loop_stmt->kind == AST_STMT_FOR && !loop_stmt->has_condition_expression)) {
         return 0;
     }
+    if (cond_expr && ir_expression_has_side_effects(cond_expr)) {
+        return 0;
+    }
 
     if (base_state) {
         state = *base_state;
@@ -818,10 +821,15 @@ static int ir_lower_flow_state_analyze_loop_transfer(const IrLowerContext *ctx,
         IrLowerFlowState else_state = *state;
         IrLowerLoopTransferInfo then_info = {1, 0, 0, 0};
         IrLowerLoopTransferInfo else_info = {1, 0, 0, 0};
+        int condition_has_side_effects = cond_expr ? ir_expression_has_side_effects(cond_expr) : 0;
 
         if (cond_expr &&
             ir_lower_flow_state_eval_expr(ctx, cond_expr, state, &cond_truthy)) {
             cond_known = 1;
+        }
+        if (condition_has_side_effects) {
+            cond_known = 0;
+            cond_truthy = 0;
         }
 
         if (cond_known) {
@@ -870,10 +878,15 @@ static int ir_lower_flow_state_analyze_loop_transfer(const IrLowerContext *ctx,
         long long cond_truthy = cond_known ? 1 : 0;
         IrLowerFlowState body_state = *state;
         IrLowerLoopTransferInfo body_info = {1, 0, 0, 0};
+        int condition_has_side_effects = cond_expr ? ir_expression_has_side_effects(cond_expr) : 0;
 
         if (!cond_known && cond_expr &&
             ir_lower_flow_state_eval_expr(ctx, cond_expr, state, &cond_truthy)) {
             cond_known = 1;
+        }
+        if (condition_has_side_effects) {
+            cond_known = 0;
+            cond_truthy = 0;
         }
         if (cond_known && !cond_truthy) {
             return 1;
@@ -983,10 +996,15 @@ static int ir_lower_flow_state_process_statement(const IrLowerContext *ctx,
         IrLowerFlowState else_state = *state;
         int then_may_fallthrough = 1;
         int else_may_fallthrough = 1;
+        int condition_has_side_effects = cond_expr ? ir_expression_has_side_effects(cond_expr) : 0;
 
         if (cond_expr &&
             ir_lower_flow_state_eval_expr(ctx, cond_expr, state, &cond_truthy)) {
             cond_known = 1;
+        }
+        if (condition_has_side_effects) {
+            cond_known = 0;
+            cond_truthy = 0;
         }
         if (cond_known) {
             if (cond_truthy) {
@@ -1112,10 +1130,15 @@ static int ir_lower_flow_state_contains_unknown_control(const IrLowerContext *ct
         const AstExpression *cond_expr = statement_get_condition_expression(stmt);
         int cond_known = 0;
         long long cond_truthy = 0;
+        int condition_has_side_effects = cond_expr ? ir_expression_has_side_effects(cond_expr) : 0;
 
         if (cond_expr &&
             ir_lower_flow_state_eval_expr(ctx, cond_expr, state, &cond_truthy)) {
             cond_known = 1;
+        }
+        if (condition_has_side_effects) {
+            cond_known = 0;
+            cond_truthy = 0;
         }
         if (!cond_known) {
             if (out_has_unknown_control) {

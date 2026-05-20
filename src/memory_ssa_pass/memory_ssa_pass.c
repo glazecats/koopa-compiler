@@ -8,11 +8,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 static int memory_ssa_pass_trace_enabled(void) {
     const char *flag = getenv("MEMORY_SSA_PASS_TRACE");
 
     return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static int memory_ssa_pass_trace_timing_enabled(void) {
+    const char *flag = getenv("MEMORY_SSA_PASS_TRACE_TIMING");
+
+    return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+}
+
+static double memory_ssa_pass_now_s(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
 }
 
 static void memory_ssa_pass_trace(const char *fmt, ...) {
@@ -27,6 +41,14 @@ static void memory_ssa_pass_trace(const char *fmt, ...) {
     vfprintf(stderr, fmt, args);
     va_end(args);
     fputc('\n', stderr);
+}
+
+static void memory_ssa_pass_trace_timing(const char *step_name, double elapsed_s) {
+    if (!step_name || !memory_ssa_pass_trace_timing_enabled()) {
+        return;
+    }
+
+    fprintf(stderr, "[memory-ssa-pass-timing] %s %.6f\n", step_name, elapsed_s);
 }
 
 static long long memory_ssa_pass_normalize_sysy_int_value(long long value) {
@@ -44,7 +66,9 @@ static int memory_ssa_pass_append_instruction_ignoring_terminator(ValueSsaBasicB
 static int memory_ssa_pass_validate_alignment(const ValueSsaFunction *value_function,
     const MemorySsaFunction *memory_function,
     ValueSsaError *error);
+static int memory_ssa_pass_program_has_extreme_local_scalar_replace_hotspot(const ValueSsaProgram *program);
 static int memory_ssa_pass_local_slot_is_scalar_replaceable(const ValueSsaFunction *function, ValueSsaSlotRef slot);
+static int memory_ssa_pass_local_slot_has_loop_carried_store(const ValueSsaFunction *function, ValueSsaSlotRef slot);
 static int memory_ssa_pass_append_phi(ValueSsaBasicBlock *block,
     size_t result_id,
     const ValueSsaPhiInput *inputs,

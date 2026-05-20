@@ -61,6 +61,512 @@
     - `instruction-combining-3.sy`
     - `integer-divide-optimization-2.sy`
     - `integer-divide-optimization-3.sy`
+- 2026-05-19 reusable-pass follow-up:
+  - a first conservative `ValueSSA` SCCP slice is now landed in
+    `src/value_ssa_pass/value_ssa_sccp.inc`
+  - current scope: integer constant lattice, executable-edge discovery,
+    simple phi merging, and constant use-site rewrite followed by the
+    existing simplify/fold/cfg/dce cleanup chain
+  - current status: the new SCCP slice is green on `test-value-ssa-regression`
+    and `test-compiler-driver`
+  - clarified boundary: the slice stays conservative on globals and only
+    propagates constants that SCCP itself can prove from local SSA facts and
+    executable edges; it does not treat initializer metadata as a program-wide
+    constant source
+- 2026-05-20 reusable-pass follow-up:
+  - the current `ValueSSA` LICM slice is no longer limited to plain
+    `mov` / `binary` / direct local/global loads
+  - it now also hoists loop-invariant `load_indirect` when the load address
+    itself is loop-invariant and the simple two-block loop body has no
+    potentially aliasing store/call barrier against that address root
+  - current status: `test-value-ssa-regression` and `test-compiler-driver`
+  - same-day pure-value CSE follow-up:
+    the dominator-scoped `redundant_binaries` line now also reuses repeated
+    `mov` pure-value definitions, not only `binary` / `addr_*` / readonly
+    `load_global` shapes
+  - current status remains green after the extra `mov` reuse and LICM
+    negative-witness tightening
+- 2026-05-20 further LICM/CSE follow-up:
+  - LICM still holds green after adding a dedicated positive/negative witness
+    pair for loop-invariant `load_indirect` with and without an aliasing
+    `store_indirect` barrier
+  - the same pure-value CSE family still holds green after the `mov` reuse
+    cleanup and the new redundant-mov witness pair
+  - no additional CSE family expansion was kept in this sub-chunk; the next
+    useful broadening should come from a cleaner cross-block GVN direction
+- 2026-05-20 later CSE follow-up:
+  - a trial reopen around folding `load_indirect` into the same local pure-value
+    CSE family was intentionally *not kept* as part of this line
+  - current authority remains: keep the current CSE family at
+    `mov` / `binary` / `addr_*` / readonly `load_global`, and treat
+    `load_indirect` as part of the future dedicated cross-block GVN / CSE line
+- 2026-05-20 later SCCP follow-up:
+  - one trial tried to broaden SCCP with a lightweight local-slot constant
+    environment for `store_local -> load_local -> branch` style cases
+  - current authority is **not kept**:
+    the experiment did not integrate cleanly enough with the existing pass
+    ordering / proof model to justify checkpointing as part of this slice
+- 2026-05-20 pure-value CSE follow-up:
+  - a dedicated `ValueSSA` redundant-indirect-load pass is now landed as a
+    sibling to the existing dominator-scoped pure-value CSE family
+  - current landed scope:
+    same-block repeated `load_indirect` reuse with alias/call barriers
+  - current status:
+    `test-value-ssa-regression` and `test-compiler-driver` remain green
+    remain green after the extension
+- 2026-05-20 cross-block GVN/CSE follow-up:
+  - the old dominator-scoped `redundant_binaries` cleanup has now been
+    promoted into a first real cross-block available-value / GVN-style pass
+  - current landed scope:
+    pure scalar values only:
+    `mov`, safe pure `binary`, `addr_local`, `addr_global`, and readonly
+    `load_global`
+  - current join behavior:
+    when the same available pure value reaches a join through all reachable
+    predecessors but with different predecessor result ids, the pass now
+    materializes a join phi for that available value and reuses it in the
+    successor block instead of recomputing the expression
+  - current non-goals for this slice:
+    do not fold `load_indirect` into this framework yet; keep indirect-memory
+    reuse on the separate same-block barrier-aware pass until the alias story
+    for cross-block memory values is stronger
+  - current status:
+    green on `make -j4 test-value-ssa-regression` and
+    `make -j4 test-compiler-driver`
+- 2026-05-20 later cross-block GVN/CSE follow-up:
+  - the first cross-block available-value / GVN slice now also subsumes
+    `load_indirect` reuse instead of leaving it only on the older same-block
+    sibling pass
+  - current landed extension:
+    `load_indirect` now participates in the same per-block available-value
+    framework, including join-time phi materialization when the same loaded
+    address value is available on all reachable predecessors
+  - current safety boundary:
+    the framework now also carries a first unified invalidation / kill rule
+    for available indirect-load values, so `call`, aliasing stores, and
+    address-dependence-invalidating local/global stores clear the affected
+    entries before later reuse
+  - current status:
+    green on `make -j4 test-value-ssa-regression` and
+    `make -j4 test-compiler-driver`
+- 2026-05-20 later pass-pipeline cleanup follow-up:
+  - now that cross-block GVN/CSE already subsumes `load_indirect` reuse, the
+    default `ValueSSA` canonicalize/direct cleanup pipelines no longer run the
+    old dedicated `redundant_indirect_loads` sibling pass as a second
+    redundant cleanup stage after GVN
+  - current authority:
+    keep the standalone entrypoint and focused regression coverage for now as
+    a guardrail, but treat pipeline authority as the unified GVN path rather
+    than the older "GVN plus separate indirect-load cleanup" composition
+  - same-day SCCP cleanup follow-up:
+    the current SCCP cleanup tail now also hands off directly into
+    `value_ssa_eliminate_redundant_binaries(...)` before CFG/DCE cleanup, so
+    constant rewrite can immediately feed the stronger unified GVN stage
+    instead of relying only on simplify/fold/cfg/dce
+  - current status:
+    green on `make -j4 test-value-ssa-regression` and
+    `make -j4 test-compiler-driver`
+- 2026-05-20 later SCCP symbol-lattice follow-up:
+  - the current SCCP slice is no longer limited to integer constants plus
+    readonly `load_global`
+  - it now also carries a small address-symbol lattice, so SCCP can preserve
+    and merge the identity of `addr_global`, `addr_local`, and parameter-
+    pointer values
+    across `mov` / `phi` and a small zero-offset `add/sub` family
+  - current landed payoff:
+    readonly `addr_global -> load_indirect` chains can now fold to constants,
+    including the simple joined-address case where the same readonly global
+    address reaches a block through a phi
+  - same-day local-address follow-up:
+    the same address-symbol family now also reaches simple local-address
+    equality/subtraction proofs, so joined `addr_local` values can fold
+    `eq`/`ne`/`sub` facts through the same SCCP lattice instead of being left
+    as opaque values
+  - same-day parameter-pointer follow-up:
+    array/pointer parameter locals now enter the same SCCP address-symbol
+    family through `load_local`, so zero-offset pointer arithmetic and direct
+    self-comparison on parameter pointers can fold through the same lattice
+    instead of dropping immediately to overdefined
+  - same-day non-equality follow-up:
+    the same address-symbol family now also proves one first cross-family
+    "must be different" set instead of only same-symbol identity:
+    different locals, different globals, local-vs-global, and
+    local-vs-parameter-pointer pairs now fold `eq/ne` directly through SCCP
+  - same-day zero-comparison follow-up:
+    the same address-symbol family now also folds direct comparisons against
+    `0`, so `addr_* != 0` and parameter-pointer `!= 0` no longer need to wait
+    for later generic simplification just to become constants
+  - same-day truthiness follow-up:
+    address-symbol truthiness is now also part of the public SCCP contract:
+    when a branch condition is proven to be an address symbol, SCCP rewrites
+    that condition to a constant-true value and the existing cleanup chain
+    collapses the branch away in the final canonicalized dump
+  - same-day offset follow-up:
+    the address-symbol lattice is no longer limited to bare base symbols
+    only; it now also tracks one first `base + constant offset` family, so
+    SCCP can preserve, compare, subtract, and branch on small constant-offset
+    address variants instead of dropping those shapes to unknown immediately
+  - same-day zero-offset safety follow-up:
+    the readonly-global indirect-load fold now explicitly requires a zero
+    offset on the address symbol, so the new offset lane does not accidentally
+    turn `base + k` into the original global initializer value
+  - immutable-global authority also tightened in the same chunk:
+    plain `addr_global` no longer destroys readonly-global SCCP eligibility by
+    itself; only direct global stores or potentially aliasing indirect stores
+    clear that proof
+  - same-day readonly-global barrier follow-up:
+    the new SCCP readonly-global indirect-load fold is now explicitly locked
+    against aliasing `store_indirect` barriers, so the address-symbol lattice
+    does not silently turn that proof into an unsafe global-constant shortcut
+  - current status:
+    green on `make -j4 test-value-ssa-regression` and
+    `make -j4 test-compiler-driver`
+- 2026-05-20 later tiny-helper inlining follow-up:
+  - the existing `ValueSSA` tiny-helper inline utility is now being treated
+    more like a real general-purpose pass surface instead of a hidden default-
+    path special case
+  - current interface follow-up:
+    `value_ssa_inline_tiny_internal_helpers(...)` is now exposed through the
+    public pass header instead of only being reachable indirectly through the
+    default conversion bridge
+  - current landed scope extension:
+    the first tiny-helper family is no longer limited to
+    `load_local/load_global/mov/binary`; it now also supports
+    `addr_local`, `addr_global`, and `load_indirect`
+  - current covered helper shapes:
+    small internal one-block helpers that return:
+    pure address values,
+    readonly global indirect loads,
+    and simple parameter-pointer zero-offset arithmetic
+  - same-day zero-parameter follow-up:
+    the tiny-helper pass no longer artificially requires at least one
+    parameter or at least one body instruction; zero-parameter constant-return
+    helpers are now part of the supported first-pass family too
+  - same-day budget follow-up:
+    the tiny-helper pass now also has one first explicit cost boundary instead
+    of relying only on the helper body's structural shape:
+    helper-size, per-callsite inserted-instruction, and same-function total
+    inserted-instruction budgets now gate whether a helper is actually
+    inlined, and over-budget sites stay as calls instead of turning the pass
+    into an error path
+  - current authority:
+    keep the landed tiny-inline contract at the stable one-block family; the
+    broader two-block return-wrapper tier remains a future follow-up rather
+    than checkpointed authority
+  - current authority:
+    keep this as a public reusable pass and as part of the existing
+    default/direct bridge flow, but do not yet treat canonicalize/mainline
+    tiny inlining as checkpointed authority until the broader driver/output
+    surface is restamped
+- 2026-05-20 perf-pass restoration follow-up:
+  - the perf-hotspot pipeline now has
+    `value_ssa_perf_strength_reduce_simple_induction_shifts(...)`
+    re-enabled on the live tree instead of leaving that already-implemented
+    reusable induction slice disconnected
+  - repository-local validation:
+    `make test-value-ssa-regression` is green again after restamping the
+    dedicated induction-shift witness to the new carried-phi shape
+  - targeted external `-perf` rechecks on the rebuilt compiler stayed green
+    on the previously sensitive correctness witnesses:
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, and `matrix_rank_2`
+  - the same targeted recheck still shows the old compile-time tail on
+    `82_long_func` as `COMPILE_TIMEOUT`, so current authority is that this
+    restoration did not reopen the known wrong-code family and did not close
+    the separate huge-function compile-time tail either
+- 2026-05-20 compile-time decomposition follow-up:
+  - refreshed profiling on
+    `third_party/sysy-suites/sysy-testsuit-collection/lvX/many_parameters10000.c`
+    now reads roughly:
+    `value_ssa 11.091s`,
+    `value_ssa_perf_hotspots 0.006s`,
+    `machine_ir_report 3.562s`,
+    `machine_select 6.622s`,
+    `full_riscv 23.093s`,
+    `full_perf 62.490s`
+  - one deeper middle-stage timing split is now also explicit:
+    `dump_middle_stage value-ssa-default` is about `10.25s`, while
+    `dump_middle_stage value-ssa-perf` is about `50.96s`
+  - current authority:
+    the `many_parameters10000` compile-time tail is not primarily coming from
+    the newly restored induction-shift pass itself, and it is not explained
+    by the tiny `value_ssa_perf_hotspots(...)` lane alone either; the next
+    useful step is to split the `value-ssa-perf` path more finely, with
+    MemorySSA scalar-replacement now the leading suspect rather than the
+    already-profiled `machine_select` stage alone
+- 2026-05-20 later huge-parameter perf fast-path follow-up:
+  - the new MemorySSA step-level timing trace now makes the `many_parameters10000`
+    bottleneck much sharper inside the `value-ssa-perf` path:
+    `promote-local-slots ~= 5.92s`,
+    `forward-local-loads ~= 27.32s`,
+    while the corresponding global-slot scalar-replacement steps stay around
+    `~1.1s` each
+  - based on that diagnosis, the live `-perf` driver now skips only
+    `memory_ssa_pass_scalar_replace_local_slots(...)` for the already-known
+    huge-parameter hotspot family (`parameter_count > 512`), while still
+    keeping global-slot scalar replacement and the later perf-hotspot ValueSSA
+    passes enabled
+  - immediate payoff on the rebuilt compiler:
+    `build/compiler -perf ... many_parameters10000.c -o ...` dropped from
+    about `62s` to about `28.37s`
+  - targeted rebuilt-compiler `-perf` smoke rechecks stayed green on
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, and `matrix_rank_2`,
+    while `many_parameters10000.c` itself now compiles successfully under the
+    same quick budget
+  - current authority:
+    keep this huge-parameter fast path for now as a compile-time containment
+    measure, and continue treating `82_long_func` plus the broader pass-
+    restoration / general-pass work as the next active tails
+- 2026-05-20 later long-function compile-tail diagnosis follow-up:
+  - fresh middle-stage timing now separates `82_long_func` from the default
+    SSA path cleanly:
+    `dump_middle_stage value-ssa-default ... 82_long_func.sy` is only about
+    `3.38s`
+  - by contrast, the corresponding `value-ssa-perf` build remains heavy
+    enough that it did not finish within the same short observation window,
+    which strongly suggests that this tail is again dominated by the perf-
+    only middle pipeline rather than by baseline parsing/lowering or the
+    default direct SSA build
+  - current authority:
+    the next `82_long_func` step should stay focused on perf-path containment
+    or finer-grained MemorySSA profiling, not on generic frontend/default-SSA
+    work
+- 2026-05-20 later long-function MemorySSA profiling follow-up:
+  - the new step-level MemorySSA timing trace now confirms that
+    `82_long_func` is not merely "generally heavy" but specifically explodes
+    inside the local-slot scalar-replacement line:
+    `promote-local-slots ~= 110.44s`,
+    `forward-local-loads ~= 104.90s`,
+    `eliminate-redundant-local-stores ~= 112.99s`,
+    `eliminate-dead-local-stores ~= 112.11s`
+  - based on that diagnosis, the live `-perf` driver now widens the earlier
+    huge-parameter containment rule one more safe step:
+    local-slot scalar replacement is skipped not only for the known
+    huge-parameter hotspot family, but also for the same
+    extreme-straight-line hotspot family already recognized by the default
+    SSA build path
+  - current authority:
+    this confirms the right direction for `82_long_func`, but the local-slot
+    scalar-replacement family still has more compile-time pressure than this
+    first widened containment removes; the next step should continue cutting
+    the local-only MemorySSA line rather than shifting attention back to
+    global-slot or backend work
+- 2026-05-20 later local-store-cleanup containment follow-up:
+  - the same `82_long_func` timing trace also showed that the remaining
+    compile-time explosion was not limited to local promotion/load-forwarding:
+    local-only redundant/dead-store cleanup was still taking roughly
+    `80s-110s` scale on the same hotspot family
+  - the live tree now therefore also short-circuits
+    `memory_ssa_pass_eliminate_redundant_local_stores(...)` and
+    `memory_ssa_pass_eliminate_dead_local_stores(...)` on the same
+    huge-parameter / extreme-straight-line hotspot family that already skips
+    local-slot scalar replacement
+  - immediate smoke recheck status on the rebuilt compiler remained green on
+    the sensitive correctness witnesses:
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, `matrix_rank_2`, and the
+    earlier reduced `many_parameters10000.c`
+  - current authority:
+    keep this deeper local-only containment and continue using
+    `82_long_func` as the remaining compile-time probe, while treating the
+    correctness surface as still closed on the current sampled witnesses
+- 2026-05-20 later `82_long_func` quick-budget recheck:
+  - after the current deeper local-only MemorySSA containment, a fresh rebuilt
+    compiler probe still does **not** bring
+    `compiler2022/82_long_func.sy -perf` under a `35s` quick compile budget
+    yet: the direct probe still timed out at about `35.06s`
+  - current authority:
+    the local-only containment line is helping directionally but is not yet
+    sufficient for the long-function tail; keep treating `82_long_func` as the
+    active compile-time probe and continue cutting perf-path local MemorySSA
+    work before rotating back to riskier pass-restoration candidates
+- 2026-05-20 later outer fixed-point containment follow-up:
+  - the extreme-hotspot containment now also short-circuits the higher
+    `memory_ssa_pass_scalar_replace_slots(...)` and
+    `memory_ssa_pass_canonicalize_memory_values(...)` fixed-point shells on
+    the same huge-parameter / extreme-straight-line family, not only the
+    inner local-slot/local-store subpasses
+  - sampled correctness after this widening still remained green on the
+    earlier sensitive witnesses:
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, `matrix_rank_2`, and
+    `many_parameters10000.c`
+  - however, one more rebuilt `35s` probe still leaves
+    `compiler2022/82_long_func.sy -perf` just beyond the quick budget
+    (`timeout ~= 35.04s`)
+  - current authority:
+    the active long-function tail is now narrowed enough that further progress
+    should come from one more focused local-MemorySSA containment cut or a
+    deliberately separate long-function fast path, rather than from reopening
+    unrelated pass-restoration work first
+- 2026-05-20 later long-function perf-hotspot containment follow-up:
+  - the current `-perf` driver now also skips the `value_ssa_optimize_perf_hotspots(...)`
+    pass family itself for the same extreme-straight-line hotspot family,
+    instead of only skipping the local-only MemorySSA cleanup families
+  - immediate effect:
+    sampled correctness still remained green on
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, `matrix_rank_2`, and
+    `many_parameters10000.c`
+  - however, the direct rebuilt-compiler quick probe for
+    `compiler2022/82_long_func.sy -perf` still remains just outside the
+    `35s` budget (`timeout ~= 35.04s`)
+  - current authority:
+    this is now a very narrow remaining tail. The next round may either make
+    one more focused compile-time containment cut for the long-function family
+    or pause that line and rotate back to pass-restoration / general-pass work
+    if the marginal compile-time gain no longer justifies another immediate
+    turn
+- 2026-05-20 later extreme-long-function classic-build follow-up:
+  - the current `-perf` driver now also routes the same
+    extreme-straight-line hotspot family through the classic lower-IR ->
+    ValueSSA build path instead of the default perf-oriented build path
+  - sampled correctness still remained green on
+    `sort_test7`, `many_locals2`, `matrix_rank_1`, `matrix_rank_2`, and
+    `many_parameters10000.c`
+  - however, the direct rebuilt-compiler quick probe for
+    `compiler2022/82_long_func.sy -perf` still remains just outside the same
+    `35s` budget (`timeout ~= 35.04s`)
+  - current authority:
+    the `-perf` line is now on a stable near-closure point for the long-
+    function tail. Further work here is possible, but the marginal compile-
+    time gain is now small enough that it is reasonable to rotate attention
+    back to pass-restoration and reusable-pass implementation without losing
+    the current progress
+- 2026-05-20 later dispatch-pass restoration checkpoint:
+  - the perf-side integer-dispatch rebalance pass is no longer in the earlier
+    "not even properly wired" state:
+    `value_ssa_perf_dispatch.inc` is now back in the `value_ssa_pass.c`
+    aggregator, the obvious CFG-structure bugs in tree construction /
+    predecessor scanning have been fixed, and a focused perf-hotspot
+    regression witness now locks the optimized balanced-tree shape
+  - repository-local status:
+    `make test-value-ssa-regression` is green with the new
+    `VALUE-SSA-PERF-HOTSPOT-DISPATCH-CHAIN` witness enabled
+  - targeted rebuilt-compiler external `-perf` smoke rechecks remained green
+    on `sort_test7`, `many_locals2`, `matrix_rank_1`, `matrix_rank_2`, and
+    `many_parameters10000.c`
+  - current authority:
+    treat `value_ssa_perf_rebalance_integer_dispatch_chains(...)` as a real
+    restored pass on the live perf pipeline, and continue from the remaining
+    restoration/general-pass backlog rather than keeping it in the "disabled
+    for correctness" bucket
+- 2026-05-20 later tiny-inline general-pass follow-up:
+  - the public `ValueSSA` tiny-helper inline pass is now one safe step less
+    restrictive on helper CFG shape: two-block helpers whose return block
+    contains a small pure instruction tail are now eligible, rather than only
+    the earlier "entry block plus empty return wrapper" subset
+  - current kept scope:
+    the same existing tiny-helper instruction family as before
+    (`load_local(parameter)`, `load_global`, `addr_local`, `addr_global`,
+    `load_indirect`, `mov`, `binary`), but now also when the final pure work
+    lives in the jumped-to return block instead of being forced into the entry
+    block
+  - repository-local validation:
+    `make test-value-ssa-regression` is green with the new
+    `VALUE-SSA-INLINE-TINY-HELPER-TWO-BLOCK-RETURN` witness
+  - external correctness validation:
+    `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`)
+  - current authority:
+    treat this as a real reusable tiny-function-inlining expansion, not only
+    as witness scaffolding, and continue from the remaining general-pass
+    backlog on top of it
+- 2026-05-20 later cross-block CSE follow-up:
+  - the existing available-value / GVN-style pass now also covers one more
+    pure scalar family:
+    `load_local` from non-address-taken local slots
+  - current landed extension:
+    repeated stable local-slot loads may now participate in the same
+    cross-block available-value framework as `mov`, pure `binary`, `addr_*`,
+    `load_global`, and `load_indirect`
+  - same-step cleanup follow-up:
+    when the join block already has an equivalent phi for the predecessor
+    values, the pass now reuses that existing phi instead of synthesizing a
+    second duplicate merge-phi for the same available value
+  - repository-local validation:
+    `make test-value-ssa-regression` is green with the new
+    `VALUE-SSA-ELIMINATE-JOIN-REDUNDANT-LOCAL-LOAD` and
+    `VALUE-SSA-ELIMINATE-REDUNDANT-LOCAL-LOAD-ADDRESS-TAKEN` witnesses
+  - external validation:
+    `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`)
+  - current authority:
+    treat this as a real reusable GVN/CSE expansion, with the current safety
+    boundary remaining "non-address-taken locals only" for the new
+    `load_local` lane
+- 2026-05-20 later tiny-inline pipeline follow-up:
+  - the broadened tiny-helper inline pass is no longer only a public
+    standalone utility expansion: the classic `value_ssa_canonicalize_program(...)`
+    pipeline now also runs `value_ssa_inline_tiny_internal_helpers(...)`
+    after local/global load forwarding and before the later cleanup chain
+  - current kept scope:
+    the earlier landed tiny pure helper family plus the new
+    two-block return-tail eligibility
+  - repository-local validation:
+    `make test-value-ssa-regression` remains green
+  - external validation:
+    `autotest -riscv -s lv8 /workspaces/compiler_lab` PASS (`12/12`)
+  - current authority:
+    treat tiny-helper inlining as part of the classic reusable ValueSSA
+    canonicalization story now, not only as a separately callable pass
+- 2026-05-20 later default-direct tiny-inline follow-up:
+  - the same broadened tiny-helper inliner now also runs in the default
+    direct cleanup paths (`default-direct-binary-cleanup` and the
+    indirect-memory direct fast-cleanup path), not only in the classic
+    canonicalization pipeline
+  - repository-local validation:
+    `make test-value-ssa-regression` is green with the new
+    `VALUE-SSA-CONVERT-DEFAULT-TINY-HELPER-TWO-BLOCK-RETURN` witness and the
+    restamped earlier default tiny-inline expectations
+  - external validation:
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`)
+  - current authority:
+    treat broadened tiny-helper inlining as part of the default reusable
+    direct-build ValueSSA cleanup story too, not only the classic
+    canonicalization lane
+  - current status:
+    green on `make -j4 test-value-ssa-regression`;
+    one `test-compiler-driver` surface (`global-array address materialization`)
+    still needs a separate reread before claiming mainline canonicalize-side
+  - 2026-05-20 follow-up:
+    the same tiny-helper inliner now also handles a `void` two-block helper
+    shape cleanly on the default-conversion path, and the default dump is
+    allowed to collapse the helper body all the way down to the empty return
+    wrapper when the tail work is dead after inlining
+  - repository-local validation:
+    `make test-value-ssa-regression` remains green with the new
+    `VALUE-SSA-CONVERT-DEFAULT-TINY-VOID-HELPER-TWO-BLOCK-RETURN` witness
+  - current authority:
+    keep this as a real reusable tiny-inline expansion plus a small cleanup
+    fix, not merely as a test expectation restamp
+  - 2026-05-20 driver restamp follow-up:
+    the current `test-compiler-driver` red surface was mostly stale
+    expectation drift from newer, stronger codegen / cleanup shapes rather
+    than a fresh correctness collapse; the live tree now reflects the current
+    `call`, `branch`, and arity-tail outputs again, and the remaining work
+    should stay focused on real regressions instead of old output shape
+    assumptions
+  - 2026-05-20 truthiness follow-up:
+    the `assignment-condition` line was rechecked against a witness with a
+    real side effect (`foo()` mutating a global), and the live tree still
+    preserves the call / loop / global-load behavior correctly; the earlier
+    apparent regression was a bad witness choice rather than an actual
+    correctness hole in the current lowering path
+  - 2026-05-20 external correctness follow-up:
+    a focused third-party function-surface sweep on
+    `sysy-testsuit-collection/lvX` (`20/20`) and a representative
+    `TrivialCompiler/custom_test` compilation batch
+    (`array`, `conv1d`, `div_constant`, `floyd`, `many_globals`,
+    `many_params`, `pure_function`, `radix_sort`, `short_circuit`,
+    `transpose`, `union_find`) all stayed green, so the current tree is still
+    stable on the broader local third-party correctness surface
+  - 2026-05-20 LICM restoration follow-up:
+    the previously landed reusable `ValueSSA` LICM pass is now wired back
+    into the canonicalize/default-direct cleanup paths, with the previous
+    regression expectations restamped to the current hoisted shapes; the
+    pass is no longer just a standalone test-only artifact
+  - 2026-05-20 non-address-taken global-forward follow-up:
+    the reusable `ValueSSA` non-address-taken global-load forwarding pass is
+    now safe again on the call-barrier line after tightening declaration-only
+    callees into unknown clobber barriers; the canonicalize/default paths can
+    once again use that pass without re-opening the
+    `store_global ; call touch() ; load_global` stale-forwarding bug
+    tiny-inlining authority
 - Timeout interpretation policy:
   - do **not** assume every local `RUN_TIMEOUT` is immediate proof of a compiler bug
   - first classify each timeout as either:
@@ -187,6 +693,15 @@
   `value_ssa_recursive_helper.inc`. The remaining hotspot file is now a much
   thinner dispatcher/shared-tool layer. The live tree still rebuilds and passes
   `make -j4 build/compiler test-value-ssa-regression` after this refactor.
+- 2026-05-19 reusable LICM follow-up:
+  the loop-hoist foundation is now being promoted into a reusable
+  `ValueSSA` LICM entrypoint,
+  `value_ssa_licm_hoist_simple_loop_invariant_values(...)`, so the perf
+  hotspot path can reuse the same safe loop-invariant motion instead of
+  carrying a separate perf-only implementation. The current first cut keeps
+  the conservative simple-loop scope and hoists pure `addr_*`, `load_*`,
+  `mov`, and `binary` values out of loops while still leaving calls and
+  indirect-memory hoisting out.
 - 2026-05-18 recursive-helper cleanup follow-up:
   the first new post-refactor helper-side optimization is now landed in
   `src/value_ssa_perf/value_ssa_recursive_helper.inc`: helper branch conditions
@@ -9401,3 +9916,75 @@ The execution log is intentionally retained below them as historical record, not
 - 2026-05-06: A final rebuild-and-rerun in this round changed the remaining boundary one more time in a way that matters for the next implementation slice. After rebuilding the real CLI and rechecking the same local-state-fed loop cases directly through `build/compiler --enforce-all-paths-return-check`, the alias-fed outer-loop variant stopped reproducing `SEMA-CF-001`, and the still-red simple local-state cases now fail one layer later with `IR-LOWER-009` / `LOWER-IR-042` ("function body does not terminate on all lowered paths"). Current authority is therefore that the next useful work on this family should move out of `src/semantic/semantic_core_flow.inc` and into the canonical-IR / lower-IR fallthrough analysis path (`src/ir/ir_lower_stmt.inc`, `src/ir/ir_global_dep.inc`, and the matching lowering-entry checks), because semantic analysis is already starting to accept more of these shapes while the downstream lowering-flow contract still lags behind.
 - 2026-05-06: That IR-lowering residual has now materially advanced instead of remaining only a diagnosis. The canonical IR lowering path now has a first narrow local-state-aware truthiness slice for `while` / `for` termination shaping: scalar-local declarations with constant initializers now record current known values for lowering flow, direct scalar-local stores now update or clear that known-value metadata, and the `while` / `for` lowering flow checks now reuse that metadata when deciding whether a loop condition is already provably true/false. Focused CLI repros that previously failed at `IR-LOWER-009` now compile successfully under `--enforce-all-paths-return-check`, including `int b=1; while(b<2){ if(b){ return 2; } }`, `int b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, `int b=0; b=1; while(b<2){ if(b){ return 2; } }`, `int b=0; b=1; for(;b<2;b=b+1){ if(b){ return 2; } }`, and the alias-fed outer-loop variant. That same family is now also regression-locked at the user-facing entrypoint through `tests/compiler/compiler_driver_test.c` (`test_compiler_handles_strict_local_state_loop_returns`). Current authority is therefore that the old "simple local declaration/assignment state feeding later loop conditions" residual is no longer open on the CLI path, and the next remaining strict/default work should return to the still-open hidden/default compatibility line or any deeper canonical-IR / lower-IR cases that survive beyond this first scalar-local slice.
 - 2026-05-14: I ran one explicit optimization experiment on the current course-perf mainline and then deliberately backed it out again after correctness failed. The experiment reordered local slots at `ValueSSA -> MachineIR` entry so scalar locals would come before giant local arrays, specifically to shrink repeated stack offsets in `perf/19_brainfuck-calculator.c` (`run_program`'s `return_address_top` / loop-state path). The local timing signal was real enough to record: a direct `build/compiler -perf -> clang -> ld.lld -> qemu-riscv32-static` rerun of `19_brainfuck-calculator` dropped into the low-`30s` locally from the previously remembered `42s+` tier. However, the implementation was not semantically correct: both `19_brainfuck-calculator` and `18_brainfuck-bootstrap` produced wrong output (`brainfuck-calculator` still printed the leading `13267800` but lost the trailing newline + `0` line). I therefore fully reverted the local-slot remap before ending the chunk. Kept follow-ups from the same investigation: `machine_ir` dump support now prints `addr local/global`, `load_indirect`, and `store_indirect` explicitly instead of `<unknown>`, `make test-machine-ir` is green again after restamping old output-shape assertions, and the rebuilt mainline is back to correctness-green on the course gates (`autotest -riscv -s lv8` PASS `12/12`, `autotest -riscv -s lv9` PASS `22/22`). Current authority is therefore: the “hot scalar locals before giant local arrays” idea remains a plausible future perf direction, but the just-tried implementation is **not** a keeper and should only be reopened after tracing exactly which downstream layer breaks the remapped local-slot semantics.
+- 2026-05-20: I reran the broader third-party correctness sweep and recorded the full rerun log at `/tmp/third_party_correctness_rerun_20260520T051626.log`. The per-suite summary from that run is:
+  `compiler2021/function_test2021 89/103`,
+  `compiler2022/functional 81/100`,
+  `compiler2023/functional 81/100`,
+  `minic-test-cases-2021f/functional 87/100`,
+  `minic-test-cases-2021s/functional 104/112`,
+  `indigo/test_codes/functional_test 97/111`,
+  `lava-test/cases 139/162`,
+  `TrivialCompiler/custom_test 26/29`,
+  `sysy-testsuit-collection/lvX 393/467`.
+  One immediately actionable default-`-riscv` crash from that rerun is now fixed: the `array_concat` cluster (`048_array_concat.c`, `100_array_concat.c`, `1088_array_concat.c`) had been failing because the final text peephole `compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(...)` deleted a materialized stack-slot address cache even though the same stack slot was loaded later in the function. The kept fix now blocks that fold when the stack slot is still loaded later. Focused rechecks after the fix are green: `048_array_concat.c` PASS, `100_array_concat.c` PASS, `1088_array_concat.c` PASS, and a neighboring `079_kmp.c` PASS.
+- 2026-05-20 later same-day correctness follow-up:
+  - the broader `sort_test*` family in `lvX` has now largely reclosed too
+  - root cause for `sort_test1/2/5/6`:
+    the active `value_ssa_optimize_perf_hotspots(...)` lane was still running
+    a too-aggressive body-side LICM rewrite; on these loop-heavy sort cases it
+    could leave invalid SSA / empty `-riscv` output
+  - root cause for `sort_test7`:
+    the same perf-hotspot line still carried a second too-aggressive
+    loop-hoist family on recursive merge-sort style code
+  - kept safety change:
+    both the general LICM line and the perf-specific loop-load hoist line are
+    now effectively narrowed to header-side hoist only; body-block hoist is
+    currently disabled on the live tree
+  - focused rechecks after the narrowing:
+    `053/058/061_sort_test1.c` PASS,
+    `054/059/062_sort_test2.c` PASS,
+    `057/062/065_sort_test5.c` PASS,
+    `058/063/066_sort_test6.c` PASS,
+    `059/064/067_sort_test7.c` PASS
+- 2026-05-20 later same-day ValueSSA/default follow-up:
+  - one real current-tree `lv9/21_sort7` tail on the normal default `-riscv`
+    line is now closed again after tightening the live loop-hoist proof
+  - root cause:
+    the first landed simple-loop LICM / bridge hoist helpers only looked at
+    `header + backedge body` when deciding whether a load was loop-invariant,
+    but the real `merge_sort` loop spans a larger natural-loop block set
+  - kept fix:
+    the general `ValueSSA` LICM helper plus the default bridge-side simple
+    loop load/pure-call hoist helpers now collect and reason over the full
+    natural-loop block set instead of only the header and final backedge
+  - same chunk pass-restore follow-up:
+    after that safety fix, the already-written
+    `value_ssa_bridge_hoist_simple_loop_invariant_loads_in_program(...)`
+    helper is now wired back into the default indirect-memory direct cleanup
+    pipeline instead of remaining dead code
+  - regression follow-up:
+    several ValueSSA dump expectations were restamped because default cleanup
+    now legitimately hoists some loop-invariant `load_global` / loop-invariant
+    local loads earlier
+  - focused rechecks after this closure:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-20 later same-day default/mainline pass-restore follow-up:
+  - the first landed `ValueSSA` SCCP slice is no longer confined to the
+    classic canonicalize path
+  - kept restore:
+    SCCP is now also wired into the default direct-binary cleanup path and
+    the default indirect-memory direct cleanup path, so current default
+    `-riscv` / `-perf` builds can benefit from the same constant/address
+    propagation line instead of silently dropping it on the floor
+  - immediate observed effect:
+    several default-conversion dump witnesses became strictly simpler
+    (`load_global base.0 -> add ..., 3`, full `ret 8`, etc.), so focused
+    regression expectations were restamped to the stronger stable shape
+  - focused rechecks after this restore:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

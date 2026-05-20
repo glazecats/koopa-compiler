@@ -4,6 +4,13 @@
 #include "value_ssa_pass.c"
 #else
 
+enum {
+    VALUE_SSA_TINY_INLINE_HELPER_MAX_INSTRUCTIONS = 8,
+    VALUE_SSA_TINY_INLINE_HELPER_MAX_RETURN_INSTRUCTIONS = 4,
+    VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS = 8,
+    VALUE_SSA_TINY_INLINE_FUNCTION_MAX_INSERTED_INSTRUCTIONS = 12,
+};
+
 static const ValueSsaFunction *value_ssa_find_function_by_name(const ValueSsaProgram *program, const char *name) {
     size_t function_index;
 
@@ -23,46 +30,92 @@ static const ValueSsaFunction *value_ssa_find_function_by_name(const ValueSsaPro
 }
 
 static int value_ssa_function_is_tiny_inline_helper(const ValueSsaProgram *program, const ValueSsaFunction *function) {
-    const ValueSsaBasicBlock *block;
+    const ValueSsaBasicBlock *entry_block;
+    const ValueSsaBasicBlock *return_block = NULL;
     size_t instruction_index;
+    size_t block_index;
+    size_t total_instruction_count = 0u;
 
-    if (!program || !function || !function->has_body || function->block_count != 1u || function->parameter_count == 0u) {
+    if (!program || !function || !function->has_body ||
+        function->block_count == 0u || function->block_count > 2u) {
         return 0;
     }
 
-    block = &function->blocks[0];
-    if (block->phi_count != 0u || !block->has_terminator || block->terminator.kind != VALUE_SSA_TERM_RETURN ||
-        !block->terminator.has_return_value || block->instruction_count == 0u || block->instruction_count > 8u) {
+    entry_block = &function->blocks[0];
+    if (entry_block->phi_count != 0u || !entry_block->has_terminator) {
         return 0;
     }
-
-    for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
-        const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
-
-        if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+    if (function->block_count == 1u) {
+        return_block = entry_block;
+    } else {
+        if (entry_block->terminator.kind != VALUE_SSA_TERM_JUMP ||
+            entry_block->terminator.as.jump_target >= function->block_count) {
             return 0;
         }
-
-        switch (instruction->kind) {
-        case VALUE_SSA_INSTR_LOAD_LOCAL:
-            if (instruction->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL ||
-                instruction->as.load_slot.id >= function->parameter_count ||
-                instruction->as.load_slot.id >= function->local_count ||
-                !function->locals[instruction->as.load_slot.id].is_parameter) {
-                return 0;
-            }
-            break;
-        case VALUE_SSA_INSTR_LOAD_GLOBAL:
-            if (instruction->as.load_slot.kind != VALUE_SSA_SLOT_GLOBAL ||
-                instruction->as.load_slot.id >= program->global_count) {
-                return 0;
-            }
-            break;
-        case VALUE_SSA_INSTR_MOV:
-        case VALUE_SSA_INSTR_BINARY:
-            break;
-        default:
+        return_block = &function->blocks[entry_block->terminator.as.jump_target];
+        if (return_block->phi_count != 0u || !return_block->has_terminator ||
+            return_block->terminator.kind != VALUE_SSA_TERM_RETURN ||
+            return_block->instruction_count > VALUE_SSA_TINY_INLINE_HELPER_MAX_RETURN_INSTRUCTIONS) {
             return 0;
+        }
+    }
+    if (return_block->terminator.kind != VALUE_SSA_TERM_RETURN) {
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+        total_instruction_count += block->instruction_count;
+    }
+    if (total_instruction_count > VALUE_SSA_TINY_INLINE_HELPER_MAX_INSTRUCTIONS) {
+        return 0;
+    }
+
+    for (block_index = 0; block_index < function->block_count; ++block_index) {
+        const ValueSsaBasicBlock *block = &function->blocks[block_index];
+
+        for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+
+            if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
+                return 0;
+            }
+
+            switch (instruction->kind) {
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+                if (instruction->as.load_slot.kind != VALUE_SSA_SLOT_LOCAL ||
+                    instruction->as.load_slot.id >= function->parameter_count ||
+                    instruction->as.load_slot.id >= function->local_count ||
+                    !function->locals[instruction->as.load_slot.id].is_parameter) {
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                if (instruction->as.load_slot.kind != VALUE_SSA_SLOT_GLOBAL ||
+                    instruction->as.load_slot.id >= program->global_count) {
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_ADDR_LOCAL:
+                if (instruction->as.addr_slot.kind != VALUE_SSA_SLOT_LOCAL ||
+                    instruction->as.addr_slot.id >= function->local_count) {
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                if (instruction->as.addr_slot.kind != VALUE_SSA_SLOT_GLOBAL ||
+                    instruction->as.addr_slot.id >= program->global_count) {
+                    return 0;
+                }
+                break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                break;
+            case VALUE_SSA_INSTR_MOV:
+            case VALUE_SSA_INSTR_BINARY:
+                break;
+            default:
+                return 0;
+            }
         }
     }
 
@@ -98,17 +151,51 @@ static int value_ssa_inline_helper_map_value_ref(ValueSsaValueRef value,
     return 1;
 }
 
+static size_t value_ssa_tiny_inline_helper_inserted_instruction_cost(const ValueSsaFunction *callee) {
+    const ValueSsaBasicBlock *entry_block;
+    const ValueSsaBasicBlock *return_block;
+    size_t instruction_index;
+    size_t inserted;
+
+    if (!callee || !callee->has_body || callee->block_count == 0u || callee->block_count > 2u) {
+        return (size_t)-1;
+    }
+
+    entry_block = &callee->blocks[0];
+    return_block = callee->block_count == 1u
+        ? entry_block
+        : &callee->blocks[entry_block->terminator.as.jump_target];
+    inserted = return_block->terminator.has_return_value ? 1u : 0u;
+
+    for (instruction_index = 0; instruction_index < entry_block->instruction_count; ++instruction_index) {
+        if (entry_block->instructions[instruction_index].kind != VALUE_SSA_INSTR_LOAD_LOCAL) {
+            ++inserted;
+        }
+    }
+    if (return_block != entry_block) {
+        for (instruction_index = 0; instruction_index < return_block->instruction_count; ++instruction_index) {
+            if (return_block->instructions[instruction_index].kind != VALUE_SSA_INSTR_LOAD_LOCAL) {
+                ++inserted;
+            }
+        }
+    }
+
+    return inserted;
+}
+
 static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *program,
     ValueSsaFunction *caller,
     const ValueSsaFunction *callee,
     const ValueSsaInstruction *call_instruction,
     ValueSsaBasicBlock *rebuilt_block,
     ValueSsaError *error) {
-    const ValueSsaBasicBlock *callee_block;
+    const ValueSsaBasicBlock *entry_block;
+    const ValueSsaBasicBlock *return_block;
     unsigned char *has_mapping = NULL;
     ValueSsaValueRef *mappings = NULL;
     ValueSsaInstruction cloned_instruction;
     size_t instruction_index;
+    size_t inserted_instruction_count = 0u;
     ValueSsaValueRef return_value;
     int ok = 0;
 
@@ -116,13 +203,25 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-260: invalid inline-helper block contract");
         return 0;
     }
+
+    entry_block = &callee->blocks[0];
+    return_block = callee->block_count == 1u
+        ? &callee->blocks[0]
+        : &callee->blocks[entry_block->terminator.as.jump_target];
+
     if (!value_ssa_function_is_tiny_inline_helper(program, callee) ||
         call_instruction->kind != VALUE_SSA_INSTR_CALL ||
-        !call_instruction->has_result ||
-        call_instruction->result.kind != VALUE_SSA_VALUE_ID ||
         !call_instruction->as.call.callee_name ||
         call_instruction->as.call.arg_count != callee->parameter_count) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-261: invalid inline-helper call shape");
+        return 0;
+    }
+    if (call_instruction->has_result && call_instruction->result.kind != VALUE_SSA_VALUE_ID) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-261: invalid inline-helper call result shape");
+        return 0;
+    }
+    if (return_block->terminator.has_return_value && !call_instruction->has_result) {
+        value_ssa_set_error(error, 0, 0, "VALUE-SSA-261: inline-helper value return requires call result");
         return 0;
     }
 
@@ -133,10 +232,14 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
         goto cleanup;
     }
 
-    callee_block = &callee->blocks[0];
-    for (instruction_index = 0; instruction_index < callee_block->instruction_count; ++instruction_index) {
-        const ValueSsaInstruction *source = &callee_block->instructions[instruction_index];
+    for (instruction_index = 0; instruction_index < entry_block->instruction_count; ++instruction_index) {
+        const ValueSsaInstruction *source = &entry_block->instructions[instruction_index];
         ValueSsaValueRef mapped_value;
+
+        if (inserted_instruction_count >= VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS) {
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-265: inline-helper callsite budget exceeded");
+            goto cleanup;
+        }
 
         switch (source->kind) {
         case VALUE_SSA_INSTR_LOAD_LOCAL:
@@ -162,6 +265,35 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                 !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
                 goto cleanup;
             }
+            ++inserted_instruction_count;
+            mappings[source->result.value_id] = cloned_instruction.result;
+            has_mapping[source->result.value_id] = 1u;
+            break;
+        case VALUE_SSA_INSTR_ADDR_LOCAL:
+            memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+            cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
+            cloned_instruction.has_result = 1;
+            cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+            cloned_instruction.as.addr_slot = source->as.addr_slot;
+            if (cloned_instruction.result.value_id == (size_t)-1 ||
+                !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                goto cleanup;
+            }
+            ++inserted_instruction_count;
+            mappings[source->result.value_id] = cloned_instruction.result;
+            has_mapping[source->result.value_id] = 1u;
+            break;
+        case VALUE_SSA_INSTR_ADDR_GLOBAL:
+            memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+            cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+            cloned_instruction.has_result = 1;
+            cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+            cloned_instruction.as.addr_slot = source->as.addr_slot;
+            if (cloned_instruction.result.value_id == (size_t)-1 ||
+                !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                goto cleanup;
+            }
+            ++inserted_instruction_count;
             mappings[source->result.value_id] = cloned_instruction.result;
             has_mapping[source->result.value_id] = 1u;
             break;
@@ -187,6 +319,27 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                 !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
                 goto cleanup;
             }
+            ++inserted_instruction_count;
+            mappings[source->result.value_id] = cloned_instruction.result;
+            has_mapping[source->result.value_id] = 1u;
+            break;
+        case VALUE_SSA_INSTR_LOAD_INDIRECT:
+            memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+            cloned_instruction.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
+            cloned_instruction.has_result = 1;
+            cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+            if (cloned_instruction.result.value_id == (size_t)-1 ||
+                !value_ssa_inline_helper_map_value_ref(
+                    source->as.load_indirect_addr,
+                    has_mapping,
+                    mappings,
+                    callee->next_value_id,
+                    &cloned_instruction.as.load_indirect_addr,
+                    error) ||
+                !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                goto cleanup;
+            }
+            ++inserted_instruction_count;
             mappings[source->result.value_id] = cloned_instruction.result;
             has_mapping[source->result.value_id] = 1u;
             break;
@@ -196,22 +349,147 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
         }
     }
 
-    if (!value_ssa_inline_helper_map_value_ref(callee_block->terminator.as.return_value,
-            has_mapping,
-            mappings,
-            callee->next_value_id,
-            &return_value,
-            error)) {
-        goto cleanup;
+    if (return_block != entry_block) {
+        for (instruction_index = 0; instruction_index < return_block->instruction_count; ++instruction_index) {
+            const ValueSsaInstruction *source = &return_block->instructions[instruction_index];
+            ValueSsaValueRef mapped_value;
+
+            if (inserted_instruction_count >= VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-265: inline-helper callsite budget exceeded");
+                goto cleanup;
+            }
+
+            switch (source->kind) {
+            case VALUE_SSA_INSTR_LOAD_LOCAL:
+                mapped_value = call_instruction->as.call.args[source->as.load_slot.id];
+                mappings[source->result.value_id] = mapped_value;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_MOV:
+                if (!value_ssa_inline_helper_map_value_ref(
+                        source->as.mov_value, has_mapping, mappings, callee->next_value_id, &mapped_value, error)) {
+                    goto cleanup;
+                }
+                mappings[source->result.value_id] = mapped_value;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_LOAD_GLOBAL:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_LOAD_GLOBAL;
+                cloned_instruction.has_result = 1;
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                cloned_instruction.as.load_slot = source->as.load_slot;
+                if (cloned_instruction.result.value_id == (size_t)-1 ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_ADDR_LOCAL:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
+                cloned_instruction.has_result = 1;
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                cloned_instruction.as.addr_slot = source->as.addr_slot;
+                if (cloned_instruction.result.value_id == (size_t)-1 ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_ADDR_GLOBAL:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+                cloned_instruction.has_result = 1;
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                cloned_instruction.as.addr_slot = source->as.addr_slot;
+                if (cloned_instruction.result.value_id == (size_t)-1 ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_BINARY:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                cloned_instruction.has_result = 1;
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                cloned_instruction.as.binary.op = source->as.binary.op;
+                if (cloned_instruction.result.value_id == (size_t)-1 ||
+                    !value_ssa_inline_helper_map_value_ref(source->as.binary.lhs,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.binary.lhs,
+                        error) ||
+                    !value_ssa_inline_helper_map_value_ref(source->as.binary.rhs,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.binary.rhs,
+                        error) ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_LOAD_INDIRECT:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_LOAD_INDIRECT;
+                cloned_instruction.has_result = 1;
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                if (cloned_instruction.result.value_id == (size_t)-1 ||
+                    !value_ssa_inline_helper_map_value_ref(
+                        source->as.load_indirect_addr,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.load_indirect_addr,
+                        error) ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+                break;
+            default:
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-263: unsupported inline-helper instruction kind");
+                goto cleanup;
+            }
+        }
     }
 
-    memset(&cloned_instruction, 0, sizeof(cloned_instruction));
-    cloned_instruction.kind = VALUE_SSA_INSTR_MOV;
-    cloned_instruction.has_result = 1;
-    cloned_instruction.result = call_instruction->result;
-    cloned_instruction.as.mov_value = return_value;
-    if (!value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
-        goto cleanup;
+    if (return_block->terminator.has_return_value) {
+        if (!value_ssa_inline_helper_map_value_ref(return_block->terminator.as.return_value,
+                has_mapping,
+                mappings,
+                callee->next_value_id,
+                &return_value,
+                error)) {
+            goto cleanup;
+        }
+
+        memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+        cloned_instruction.kind = VALUE_SSA_INSTR_MOV;
+        cloned_instruction.has_result = 1;
+        cloned_instruction.result = call_instruction->result;
+        cloned_instruction.as.mov_value = return_value;
+        if (inserted_instruction_count >= VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS ||
+            !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+            if (inserted_instruction_count >= VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS) {
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-265: inline-helper callsite budget exceeded");
+            }
+            goto cleanup;
+        }
     }
 
     ok = 1;
@@ -220,6 +498,20 @@ cleanup:
     free(has_mapping);
     free(mappings);
     return ok;
+}
+
+static int value_ssa_inline_tiny_helper_call_fits_budget(const ValueSsaFunction *callee) {
+    size_t inserted;
+
+    if (!callee || !callee->has_body) {
+        return 0;
+    }
+    inserted = value_ssa_tiny_inline_helper_inserted_instruction_cost(callee);
+    if (inserted == (size_t)-1) {
+        return 0;
+    }
+
+    return inserted <= VALUE_SSA_TINY_INLINE_CALLSITE_MAX_INSERTED_INSTRUCTIONS;
 }
 
 int value_ssa_inline_tiny_internal_helpers(ValueSsaProgram *program, ValueSsaError *error) {
@@ -233,6 +525,7 @@ int value_ssa_inline_tiny_internal_helpers(ValueSsaProgram *program, ValueSsaErr
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
         size_t block_index;
+        size_t function_inline_inserted_budget = 0u;
 
         if (!function->has_body) {
             continue;
@@ -256,12 +549,21 @@ int value_ssa_inline_tiny_internal_helpers(ValueSsaProgram *program, ValueSsaErr
                     callee = value_ssa_find_function_by_name(program, instruction->as.call.callee_name);
                 }
 
-                if (callee && callee != function && value_ssa_function_is_tiny_inline_helper(program, callee)) {
+                if (callee && callee != function &&
+                    value_ssa_function_is_tiny_inline_helper(program, callee) &&
+                    value_ssa_inline_tiny_helper_call_fits_budget(callee)) {
+                    size_t callsite_cost = value_ssa_tiny_inline_helper_inserted_instruction_cost(callee);
+
+                    if (callsite_cost != (size_t)-1 &&
+                        function_inline_inserted_budget + callsite_cost <=
+                            VALUE_SSA_TINY_INLINE_FUNCTION_MAX_INSERTED_INSTRUCTIONS) {
                     ok = value_ssa_inline_tiny_helper_call_into_block(
                         program, function, callee, instruction, &rebuilt_block, error);
                     if (ok) {
+                            function_inline_inserted_budget += callsite_cost;
                         changed = 1;
                         continue;
+                    }
                     }
                 }
 

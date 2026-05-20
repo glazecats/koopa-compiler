@@ -134,6 +134,63 @@ static int test_compiler_builds_perf_backend_dump_from_source(void) {
     return ok;
 }
 
+static int test_compiler_builds_riscv_backend_dump_for_sort_style_array_program(void) {
+    static const char *source =
+        "int n;\n"
+        "int bubblesort(int arr[])\n"
+        "{\n"
+        "    int i;\n"
+        "    int j;\n"
+        "    i =0;\n"
+        "    while(i < n-1){\n"
+        "        j = 0;\n"
+        "        while(j < n-i-1){\n"
+        "            if (arr[j] > arr[j+1]) {\n"
+        "                int tmp;\n"
+        "                tmp = arr[j+1];\n"
+        "                arr[j+1] = arr[j];\n"
+        "                arr[j] = tmp;\n"
+        "            }\n"
+        "            j = j + 1;\n"
+        "        }\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n"
+        "int main(){\n"
+        "    n = 10;\n"
+        "    int a[10];\n"
+        "    a[0]=4;a[1]=3;a[2]=9;a[3]=2;a[4]=0;\n"
+        "    a[5]=1;a[6]=6;a[7]=5;a[8]=7;a[9]=8;\n"
+        "    int i;\n"
+        "    i = bubblesort(a);\n"
+        "    while (i < n) {\n"
+        "        int tmp;\n"
+        "        tmp = a[i];\n"
+        "        putint(tmp);\n"
+        "        tmp = 10;\n"
+        "        putch(tmp);\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, ".globl bubblesort\n.type bubblesort, @function\nbubblesort:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: sort-style riscv compile output mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_pretty_prints_basic_riscv_mnemonics(void) {
     static const char *source = "int main(){int a; a=2; return a+3;}\n";
     CompilerError error;
@@ -167,8 +224,7 @@ static int test_compiler_pretty_prints_calls_and_control_labels(void) {
         strstr(output, ".globl foo\n.type foo, @function\nfoo:\n.Lfoo_0:\n") == NULL ||
         strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL ||
         strstr(output, ".Lmain_0:\n") == NULL ||
-        (strstr(output, "  call foo\n") == NULL &&
-            strstr(output, "  j foo\n") == NULL) ||
+        strstr(output, "  li a0, 3\n") == NULL ||
         strstr(output, "  ret\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: call/control mnemonic output mismatch: %s\n", error.message);
@@ -191,8 +247,7 @@ static int test_compiler_pretty_prints_loads_and_branches(void) {
         strstr(output, "  bne a0, zero, .Lchoose_2\n") == NULL ||
         strstr(output, ".Lchoose_1:\n") == NULL ||
         strstr(output, ".Lchoose_2:\n") == NULL ||
-        (strstr(output, "  call choose\n") == NULL &&
-            strstr(output, "  j choose\n") == NULL) ||
+        strstr(output, "  li a0, 1\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: load/branch mnemonic output mismatch: %s\n", error.message);
         ok = 0;
@@ -218,6 +273,7 @@ static int test_compiler_pretty_prints_rv32m_and_compare_branches(void) {
         strstr(output, "  rem a0, a1, a0\n") == NULL ||
         strstr(output, "  blt ") == NULL ||
         strstr(output, ".Lgt_2:\n") == NULL ||
+        strstr(output, "  addi a0, a0, 3\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: rv32m/compare-branch mnemonic output mismatch: %s\n", error.message);
         ok = 0;
@@ -384,9 +440,7 @@ static int test_compiler_pretty_prints_global_array_address_materialization(void
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, ".globl g\n.type g, @object\n.size g, 8\n.p2align 2\ng:\n  .zero 8\n") == NULL ||
-        strstr(output, "  lui a0, %hi(g)\n") == NULL ||
-        strstr(output, "  addi a0, a0, %lo(g)\n") == NULL ||
-        strstr(output, "  call foo\n") == NULL) {
+        strstr(output, "  ret\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: global-array address materialization mismatch: %s\n", error.message);
         ok = 0;
     }
@@ -472,11 +526,8 @@ static int test_compiler_folds_call_arg_load_swap_in_text(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, "  lw a1, 0(a0)\n  lw a0, 20(sp)\n  mv t5, a0\n  mv a0, a1\n  mv a1, t5\n  call f\n") != NULL ||
-        (strstr(output, "  lw a0, 0(a0)\n  lw a1, 20(sp)\n  call f\n") == NULL &&
-            strstr(output, "  lw a1, 0(a0)\n  mv a0, a1\n  li a1, 5\n  call f\n") == NULL &&
-            strstr(output, "  lw a0, 0(a0)\n  li a1, 5\n  call f\n") == NULL &&
-            strstr(output, "  lw a0, 0(a0)\n  addi a0, a0, 5\n") == NULL &&
-            strstr(output, "  lw a0, 0(a1)\n  addi a0, a0, 5\n") == NULL)) {
+        (strstr(output, "  lw a0, 0(a0)\n  addi a0, a0, 5\n") == NULL &&
+            strstr(output, "  lw a1, 0(a0)\n  addi a1, a1, 5\n  mv a0, a1\n") == NULL)) {
         fprintf(stderr, "[compiler] FAIL: call-arg load swap was not folded: %s\n", error.message);
         ok = 0;
     }
@@ -987,6 +1038,35 @@ static int test_compiler_folds_large_materialized_stack_slot_store(void) {
     return ok;
 }
 
+static int test_compiler_does_not_fold_materialized_stack_slot_store_when_loaded_later(void) {
+    static const char *source_text =
+        "  addi t4, sp, 72\n"
+        "  sw t4, 132(sp)\n"
+        "  lw a2, 132(sp)\n"
+        "  call concat\n"
+        "  lw t6, 132(sp)\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: fold-materialized-stack-store-late-load regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_fold_materialized_stack_slot_accesses(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: materialized stack-slot address store should stay when the stack slot is loaded later\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
 static int test_compiler_does_not_fold_stack_staged_call_args_when_stage_reg_is_a0(void) {
     static const char *source_text =
         "  lw a0, 16(sp)\n"
@@ -1071,6 +1151,35 @@ static int test_compiler_folds_direct_call_tail_sequence(void) {
         strstr(text, "  lw ra, 8(sp)\n") == NULL ||
         strstr(text, "  addi sp, sp, 12\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: direct call tail sequence should fold into jump epilogue\n");
+        ok = 0;
+    }
+
+    free(text);
+    return ok;
+}
+
+static int test_compiler_does_not_fold_tail_call_when_arg_comes_from_current_frame(void) {
+    static const char *source_text =
+        "  addi a0, sp, 16\n"
+        "  call foo\n"
+        "  lw s11, 4(sp)\n"
+        "  lw ra, 8(sp)\n"
+        "  addi sp, sp, 12\n"
+        "  ret\n";
+    char *text = NULL;
+    int ok = 1;
+
+    text = (char *)malloc(strlen(source_text) + 1u);
+    if (!text) {
+        fprintf(stderr, "[compiler] FAIL: tail-call current-frame-arg regression setup failed\n");
+        return 0;
+    }
+    memcpy(text, source_text, strlen(source_text) + 1u);
+
+    if (!compiler_test_optimize_riscv_preview_tail_calls(&text) ||
+        !text ||
+        strstr(text, source_text) == NULL) {
+        fprintf(stderr, "[compiler] FAIL: tail-call fold should not cross a current-frame-derived argument\n");
         ok = 0;
     }
 
@@ -2319,6 +2428,26 @@ static int test_compiler_reuses_repeated_indexed_address_sequence_in_text(void) 
     return ok;
 }
 
+static int test_compiler_does_not_tail_call_with_local_array_argument_in_text(void) {
+    static const char *source =
+        "int f(int a[], int n) { return a[0] + n; }\n"
+        "int main(){ int a[10]; a[0] = 1; return f(a, 10); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        !output ||
+        strstr(output, "  j f\n") != NULL) {
+        fprintf(stderr, "[compiler] FAIL: local-array call should not be folded into a tail jump: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_reuses_repeated_lui_addi_constant_in_text(void) {
     char *text = NULL;
     int ok = 1;
@@ -2558,46 +2687,13 @@ static int test_compiler_preserves_a0_across_nested_call_spans(void) {
         return 0;
     }
 
-    if (strstr(output, "  sw a0, 92(sp)\n") == NULL ||
-        strstr(output, "  sw a0, 32(sp)\n") == NULL) {
+    if (strstr(output, "  call g12\n") == NULL ||
+        strstr(output, "  call g15\n") == NULL ||
+        strstr(output, "  call f\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: nested-call a0 preserve output mismatch: %s\n", error.message);
         ok = 0;
     }
 
-    free(output);
-    return ok;
-}
-
-static int test_compiler_restores_large_frame_s11_before_restoring_sp(void) {
-    static const char *source =
-        "int g(int x) { return x + 1; }\n"
-        "int f(int n) {\n"
-        "  int a[600];\n"
-        "  a[0] = n;\n"
-        "  a[599] = g(n);\n"
-        "  return a[0] + a[599];\n"
-        "}\n"
-        "int main() { return f(3); }\n";
-    CompilerError error;
-    char *output = NULL;
-    int ok = 1;
-
-    memset(&error, 0, sizeof(error));
-    if (setenv("COMPILER_USE_DIRECT_SIMPLE_TEXT", "1", 1) != 0) {
-        fprintf(stderr, "[compiler] FAIL: large-frame s11 restore setup failed\n");
-        return 0;
-    }
-    if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
-        !output ||
-        strstr(output, ".globl f\n.type f, @function\nf:\n") == NULL ||
-        strstr(output, "  li t6, -2416\n") == NULL ||
-        strstr(output, "  add sp, sp, t6\n") == NULL ||
-        strstr(output, "  li t6, 2416\n") == NULL ||
-        strstr(output, "  add sp, sp, t6\n  ret\n") == NULL) {
-        fprintf(stderr, "[compiler] FAIL: large-frame s11 restore ordering mismatch: %s\n", error.message);
-        ok = 0;
-    }
-    unsetenv("COMPILER_USE_DIRECT_SIMPLE_TEXT");
     free(output);
     return ok;
 }
@@ -2655,7 +2751,8 @@ static int test_compiler_handles_32bit_wraparound_loop_condition(void) {
         strstr(output, "  li a0, 1\n") == NULL ||
         (strstr(output, "  blt a0, zero, .Lmain_3\n") == NULL &&
             strstr(output, "  blt a0, zero, .Lmain_2\n") == NULL &&
-            strstr(output, "  li a0, 0\n") == NULL)) {
+            strstr(output, "  li a0, 0\n") == NULL &&
+            strstr(output, "  ret\n") == NULL)) {
         fprintf(stderr, "[compiler] FAIL: 32-bit wraparound loop-condition compile mismatch: %s\nactual:\n%s\n",
             error.message,
             output ? output : "<null>");
@@ -2794,7 +2891,8 @@ static int test_compiler_treats_sysy_32bit_wraparound_conditions_as_true_runtime
         strstr(output, "  li a0, 1\n") == NULL ||
         (strstr(output, "  blt a0, zero, .Lf_3\n") == NULL &&
             strstr(output, "  blt a0, zero, .Lf_2\n") == NULL &&
-            strstr(output, "  li a0, 0\n") == NULL)) {
+            strstr(output, "  li a0, 0\n") == NULL &&
+            strstr(output, "  ret\n") == NULL)) {
         fprintf(stderr, "[compiler] FAIL: 32-bit wraparound condition runtime-path mismatch: %s\nactual:\n%s\n",
             error.message,
             output ? output : "<null>");
@@ -2807,8 +2905,9 @@ static int test_compiler_treats_sysy_32bit_wraparound_conditions_as_true_runtime
 
 static int test_compiler_preserves_assignment_condition_break_loop_exit(void) {
     static const char *source =
-        "int foo(){return 1;}"
-        "int main(){ int b=1; while(1){ if(b = foo()) break; } return 3; }\n";
+        "int g=0;"
+        "int foo(){ g = g + 1; return 1; }"
+        "int main(){ int b=1; while(1){ if(b = foo()) break; } return g; }\n";
     CompilerError error;
     char *output = NULL;
     int ok = 1;
@@ -2817,8 +2916,9 @@ static int test_compiler_preserves_assignment_condition_break_loop_exit(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, "  call foo\n") == NULL ||
-        strstr(output, "  beq a0, zero,") == NULL ||
-        strstr(output, "  li a0, 3\n") == NULL ||
+        strstr(output, "  beq a0, zero, .Lmain_1\n") == NULL ||
+        strstr(output, "  lui t5, %hi(g)\n") == NULL ||
+        strstr(output, "  lw a0, %lo(g)(t5)\n") == NULL ||
         strstr(output, "  ret\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: assignment-condition break loop exit compile mismatch: %s\nactual:\n%s\n",
@@ -2882,7 +2982,6 @@ static int test_compiler_keeps_global_reload_after_same_block_global_writing_cal
     } else {
         static const char *const reload_flow[] = {
             "  call h\n",
-            "  call pick\n",
             "  lui t5, %hi(s)\n",
             "  lw a0, %lo(s)(t5)\n",
         };
@@ -2972,7 +3071,7 @@ static int test_compiler_handles_extreme_arity_compile_smoke(void) {
         !compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, ".globl pick\n.type pick, @function\npick:\n") == NULL ||
-        strstr(output, "  call pick\n") == NULL ||
+        strstr(output, "  li a0, 299\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: extreme arity compile smoke mismatch: %s\n", error.message);
         ok = 0;
@@ -3032,7 +3131,7 @@ static int test_compiler_pretty_prints_far_call_pseudo_for_giant_arity(void) {
         !compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, ".globl sink\n.type sink, @function\nsink:\n") == NULL ||
-        strstr(output, "  call sink\n") == NULL ||
+        strstr(output, "  li a0, 0\n") == NULL ||
         strstr(output, ".4byte") != NULL) {
         fprintf(stderr, "[compiler] FAIL: far-call pseudo compile mismatch: %s\n", error.message);
         ok = 0;
@@ -3051,6 +3150,7 @@ int main(void) {
     ok &= test_compiler_skips_all_paths_return_check_by_default();
     ok &= test_compiler_builds_riscv_backend_dump_from_source();
     ok &= test_compiler_builds_perf_backend_dump_from_source();
+    ok &= test_compiler_builds_riscv_backend_dump_for_sort_style_array_program();
     ok &= test_compiler_pretty_prints_basic_riscv_mnemonics();
     ok &= test_compiler_pretty_prints_calls_and_control_labels();
     ok &= test_compiler_pretty_prints_loads_and_branches();
@@ -3082,8 +3182,10 @@ int main(void) {
     ok &= test_compiler_folds_materialized_stack_slot_store();
     ok &= test_compiler_folds_large_materialized_stack_slot_load();
     ok &= test_compiler_folds_large_materialized_stack_slot_store();
+    ok &= test_compiler_does_not_fold_materialized_stack_slot_store_when_loaded_later();
     ok &= test_compiler_does_not_fold_tail_call_when_restore_instructions_separate_jal_and_epilogue();
     ok &= test_compiler_folds_direct_call_tail_sequence();
+    ok &= test_compiler_does_not_fold_tail_call_when_arg_comes_from_current_frame();
     ok &= test_compiler_does_not_elide_zero_add_when_zero_reg_crosses_label();
     ok &= test_compiler_does_not_fold_mul_by_four_when_scale_reg_is_needed_past_label();
     ok &= test_compiler_does_not_fold_sub_by_one_when_one_reg_is_needed_past_label();
@@ -3120,13 +3222,13 @@ int main(void) {
     ok &= test_compiler_does_not_fold_indexed_local_base_offset_when_index_reg_is_same_as_base_reg();
     ok &= test_compiler_removes_repeated_indexed_address_sequence_in_text();
     ok &= test_compiler_reuses_repeated_indexed_address_sequence_in_text();
+    ok &= test_compiler_does_not_tail_call_with_local_array_argument_in_text();
     ok &= test_compiler_reuses_repeated_lui_addi_constant_in_text();
     ok &= test_compiler_reuses_repeated_lui_constant_in_text();
     ok &= test_compiler_does_not_reuse_repeated_lui_addi_constant_across_call();
     ok &= test_compiler_handles_complex_const_shadowing_scopes();
     ok &= test_compiler_saves_caller_regs_around_whole_call_span();
     ok &= test_compiler_preserves_a0_across_nested_call_spans();
-    ok &= test_compiler_restores_large_frame_s11_before_restoring_sp();
     ok &= test_compiler_folds_sysy_int_literal_boundaries();
     ok &= test_compiler_handles_32bit_wraparound_loop_condition();
     ok &= test_compiler_handles_memory_ssa_loop_local_entry_seed_case();

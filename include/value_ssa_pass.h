@@ -19,9 +19,13 @@ int value_ssa_normalize_binary_operands(ValueSsaProgram *program, ValueSsaError 
 int value_ssa_simplify_algebraic_identities(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_fold_constants(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_eliminate_redundant_binaries(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_eliminate_redundant_indirect_loads(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_sparse_conditional_constant_propagation(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_inline_tiny_internal_helpers(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_simplify_cfg(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_eliminate_dead_value_defs(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *error);
+int value_ssa_licm_hoist_simple_loop_invariant_values(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *error);
 int value_ssa_build_from_lower_ir_with_canonicalization(const LowerIrProgram *program,
     ValueSsaLowerIrCanonicalizeMode mode,

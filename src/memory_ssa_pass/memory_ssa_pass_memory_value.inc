@@ -17,6 +17,9 @@ int memory_ssa_pass_canonicalize_memory_values(ValueSsaProgram *program, ValueSs
     if (!value_ssa_verify_program(program, error)) {
         return 0;
     }
+    if (memory_ssa_pass_program_has_extreme_local_scalar_replace_hotspot(program)) {
+        return 1;
+    }
 
     for (iteration = 0; iteration < 8; ++iteration) {
         free(before_text);

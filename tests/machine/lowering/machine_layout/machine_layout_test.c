@@ -5770,7 +5770,6 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
         "    reg.0 = cmpi.10 reg.0, 0\n"
         "    brft.t reg.0, taken=layout.6, fallthrough=layout.1\n"
         "  layout.1 -> bb.2:\n"
-        "    reg.0 = cmpi.10 reg.0, 0\n"
         "    brft.t reg.0, taken=layout.5, fallthrough=layout.2\n"
         "  layout.2 -> bb.5:\n"
         "    cmpbrift.t.10 reg.0, 0, taken=layout.4, fallthrough=layout.3\n"
@@ -5792,7 +5791,7 @@ static int test_machine_layout_bridge_prefers_ready_merge_seed_over_longer_unrea
 
     if (!machine_layout_function_compute_summary(&layout_program.functions[1], &summary) ||
         summary.block_count != 8 ||
-        summary.op_count != 7 ||
+        summary.op_count != 6 ||
         summary.branch_fallthrough_count != 2 ||
         summary.compare_branch_imm_fallthrough_count != 1 ||
         summary.fallthrough_count != 0 ||

@@ -220,31 +220,11 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
-    if (!value_ssa_perf_hoist_hot_parameter_local_loads(program, error)) {
-        free(foldable_globals);
-        return 0;
-    }
     if (!value_ssa_perf_hoist_shared_branch_successor_local_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }
-    if (!value_ssa_perf_strength_reduce_non_negative_induction_divmods(program, error)) {
-        free(foldable_globals);
-        return 0;
-    }
-    if (!value_ssa_perf_strength_reduce_simple_induction_shifts(program, error)) {
-        free(foldable_globals);
-        return 0;
-    }
-    if (!value_ssa_perf_strength_reduce_simple_induction_address_exprs(program, error)) {
-        free(foldable_globals);
-        return 0;
-    }
-    if (!value_ssa_optimize_recursive_helpers(program, error)) {
-        free(foldable_globals);
-        return 0;
-    }
-    if (!value_ssa_perf_optimize_mm_functions(program, error)) {
+    if (!value_ssa_perf_hoist_hot_parameter_local_loads(program, error)) {
         free(foldable_globals);
         return 0;
     }
@@ -252,11 +232,15 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
-    if (!value_ssa_perf_fuse_spmv_repeated_j_loops(program, error)) {
+    if (!value_ssa_perf_rebalance_integer_dispatch_chains(program, error)) {
         free(foldable_globals);
         return 0;
     }
-    if (!value_ssa_perf_hoist_simple_loop_invariant_loads(program, error)) {
+    if (!value_ssa_perf_strength_reduce_simple_induction_shifts(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
+    if (!value_ssa_perf_strength_reduce_non_negative_induction_divmods(program, error)) {
         free(foldable_globals);
         return 0;
     }

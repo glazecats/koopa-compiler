@@ -56,6 +56,26 @@ static int value_ssa_pass_store_indirect_may_alias_global(const ValueSsaFunction
     const ValueSsaDefUseAnalysis *analysis,
     ValueSsaValueRef addr,
     size_t global_id);
+static int value_ssa_pass_same_pure_address_value(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef lhs,
+    ValueSsaValueRef rhs,
+    unsigned depth);
+static int value_ssa_pass_value_may_depend_on_slot(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    ValueSsaSlotRef slot,
+    unsigned depth);
+static int value_ssa_pass_instruction_may_invalidate_address_value(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef address_value,
+    const ValueSsaInstruction *instruction);
+static int value_ssa_pass_address_roots_proven_non_alias(const ValueSsaPassAddressRoot *lhs,
+    const ValueSsaPassAddressRoot *rhs);
+static int value_ssa_pass_store_cannot_alias_loaded_address(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaPassAddressRoot *load_root,
+    const ValueSsaInstruction *store_instruction);
 
 static int value_ssa_trace_enabled(void) {
     const char *flag = getenv("VALUE_SSA_TRACE_TIMING");
@@ -397,6 +417,189 @@ static int value_ssa_pass_store_indirect_may_alias_global(const ValueSsaFunction
     }
 }
 
+static int value_ssa_pass_same_pure_address_value(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef lhs,
+    ValueSsaValueRef rhs,
+    unsigned depth) {
+    ValueSsaInstruction *lhs_def;
+    ValueSsaInstruction *rhs_def;
+
+    if (depth > 8u) {
+        return 0;
+    }
+    if (value_ssa_value_refs_equal(lhs, rhs)) {
+        return 1;
+    }
+    if (!function || !analysis || lhs.kind != VALUE_SSA_VALUE_ID || rhs.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+
+    lhs_def = value_ssa_pass_lookup_instruction_definition(function, analysis, lhs.value_id);
+    rhs_def = value_ssa_pass_lookup_instruction_definition(function, analysis, rhs.value_id);
+    if (!lhs_def || !rhs_def || lhs_def->kind != rhs_def->kind) {
+        return 0;
+    }
+
+    switch (lhs_def->kind) {
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
+        return lhs_def->as.addr_slot.kind == rhs_def->as.addr_slot.kind &&
+            lhs_def->as.addr_slot.id == rhs_def->as.addr_slot.id;
+    case VALUE_SSA_INSTR_LOAD_LOCAL:
+        return lhs_def->as.load_slot.kind == rhs_def->as.load_slot.kind &&
+            lhs_def->as.load_slot.id == rhs_def->as.load_slot.id;
+    case VALUE_SSA_INSTR_LOAD_GLOBAL:
+        return lhs_def->as.load_slot.kind == rhs_def->as.load_slot.kind &&
+            lhs_def->as.load_slot.id == rhs_def->as.load_slot.id;
+    case VALUE_SSA_INSTR_MOV:
+        return value_ssa_pass_same_pure_address_value(
+            function, analysis, lhs_def->as.mov_value, rhs_def->as.mov_value, depth + 1u);
+    case VALUE_SSA_INSTR_BINARY:
+        return lhs_def->as.binary.op == rhs_def->as.binary.op &&
+            value_ssa_pass_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.lhs, rhs_def->as.binary.lhs, depth + 1u) &&
+            value_ssa_pass_same_pure_address_value(
+                function, analysis, lhs_def->as.binary.rhs, rhs_def->as.binary.rhs, depth + 1u);
+    default:
+        return 0;
+    }
+}
+
+static int value_ssa_pass_value_may_depend_on_slot(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value,
+    ValueSsaSlotRef slot,
+    unsigned depth) {
+    ValueSsaInstruction *definition;
+
+    if (depth > 8u || value.kind != VALUE_SSA_VALUE_ID) {
+        return 0;
+    }
+    if (!function || !analysis) {
+        return 1;
+    }
+
+    definition = value_ssa_pass_lookup_instruction_definition(function, analysis, value.value_id);
+    if (!definition) {
+        return 1;
+    }
+
+    switch (definition->kind) {
+    case VALUE_SSA_INSTR_ADDR_LOCAL:
+    case VALUE_SSA_INSTR_ADDR_GLOBAL:
+        return 0;
+    case VALUE_SSA_INSTR_LOAD_LOCAL:
+    case VALUE_SSA_INSTR_LOAD_GLOBAL:
+        return definition->as.load_slot.kind == slot.kind &&
+            definition->as.load_slot.id == slot.id;
+    case VALUE_SSA_INSTR_MOV:
+        return value_ssa_pass_value_may_depend_on_slot(
+            function, analysis, definition->as.mov_value, slot, depth + 1u);
+    case VALUE_SSA_INSTR_BINARY:
+        return value_ssa_pass_value_may_depend_on_slot(
+                   function, analysis, definition->as.binary.lhs, slot, depth + 1u) ||
+            value_ssa_pass_value_may_depend_on_slot(
+                   function, analysis, definition->as.binary.rhs, slot, depth + 1u);
+    default:
+        return 1;
+    }
+}
+
+static int value_ssa_pass_instruction_may_invalidate_address_value(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef address_value,
+    const ValueSsaInstruction *instruction) {
+    ValueSsaSlotRef slot;
+
+    if (!function || !analysis || !instruction) {
+        return 1;
+    }
+
+    switch (instruction->kind) {
+    case VALUE_SSA_INSTR_STORE_LOCAL:
+        slot = instruction->as.store.slot;
+        return value_ssa_pass_value_may_depend_on_slot(function, analysis, address_value, slot, 0u);
+    case VALUE_SSA_INSTR_STORE_GLOBAL:
+        slot = instruction->as.store.slot;
+        return value_ssa_pass_value_may_depend_on_slot(function, analysis, address_value, slot, 0u);
+    default:
+        return 0;
+    }
+}
+
+static int value_ssa_pass_address_roots_proven_non_alias(const ValueSsaPassAddressRoot *lhs,
+    const ValueSsaPassAddressRoot *rhs) {
+    if (!lhs || !rhs ||
+        lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_UNKNOWN ||
+        rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_UNKNOWN) {
+        return 0;
+    }
+
+    if (lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT &&
+        rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT) {
+        return lhs->id != rhs->id;
+    }
+    if (lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_GLOBAL_SLOT &&
+        rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_GLOBAL_SLOT) {
+        return lhs->id != rhs->id;
+    }
+    if ((lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT &&
+            rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_GLOBAL_SLOT) ||
+        (lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_GLOBAL_SLOT &&
+            rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT)) {
+        return 1;
+    }
+    if ((lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT &&
+            rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_PARAMETER_POINTER) ||
+        (lhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_PARAMETER_POINTER &&
+            rhs->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int value_ssa_pass_store_cannot_alias_loaded_address(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaPassAddressRoot *load_root,
+    const ValueSsaInstruction *store_instruction) {
+    ValueSsaPassAddressRoot store_root;
+
+    if (!function || !analysis || !load_root || !store_instruction) {
+        return 0;
+    }
+
+    switch (store_instruction->kind) {
+    case VALUE_SSA_INSTR_STORE_LOCAL:
+        if (load_root->kind != VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT ||
+            store_instruction->as.store.slot.kind != VALUE_SSA_SLOT_LOCAL ||
+            store_instruction->as.store.slot.id >= function->local_count) {
+            return load_root->kind != VALUE_SSA_PASS_ADDRESS_ROOT_PARAMETER_POINTER;
+        }
+        if (store_instruction->as.store.slot.id == load_root->id) {
+            return 0;
+        }
+        return function->locals[store_instruction->as.store.slot.id].array_rank == 0u;
+    case VALUE_SSA_INSTR_STORE_GLOBAL:
+        if (store_instruction->as.store.slot.kind != VALUE_SSA_SLOT_GLOBAL) {
+            return 0;
+        }
+        if (load_root->kind == VALUE_SSA_PASS_ADDRESS_ROOT_GLOBAL_SLOT) {
+            return store_instruction->as.store.slot.id != load_root->id;
+        }
+        return load_root->kind == VALUE_SSA_PASS_ADDRESS_ROOT_LOCAL_SLOT;
+    case VALUE_SSA_INSTR_STORE_INDIRECT:
+        if (!value_ssa_pass_extract_address_root(
+                function, analysis, store_instruction->as.store_indirect.addr, &store_root, 0u)) {
+            return 0;
+        }
+        return value_ssa_pass_address_roots_proven_non_alias(load_root, &store_root);
+    default:
+        return 1;
+    }
+}
+
 static size_t value_ssa_pass_get_single_idom_predecessor(const ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     size_t block_id) {
@@ -502,8 +705,11 @@ static int value_ssa_mark_reachable_blocks(const ValueSsaFunction *function,
 #include "value_ssa_normalize.inc"
 #include "value_ssa_identity.inc"
 #include "value_ssa_fold.inc"
+#include "value_ssa_sccp.inc"
+#include "value_ssa_licm.inc"
 #include "value_ssa_cse.inc"
 #include "../value_ssa_perf/value_ssa_perf_entry_hoist.inc"
+#include "../value_ssa_perf/value_ssa_perf_dispatch.inc"
 #include "../value_ssa_perf/value_ssa_perf_induction.inc"
 #include "../value_ssa_perf/value_ssa_perf_loop_memory.inc"
 #include "../value_ssa_perf/value_ssa_perf_mm.inc"

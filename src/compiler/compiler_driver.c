@@ -47,12 +47,6 @@ typedef struct {
     size_t block_label_count;
 } CompilerRiscvPreviewCache;
 
-typedef struct {
-    const char *name;
-    char *value;
-    int had_value;
-} CompilerSavedEnv;
-
 static int compiler_env_flag_enabled(const char *name, int default_value) {
     const char *flag = NULL;
 
@@ -104,79 +98,85 @@ static int compiler_use_final_text_peepholes_enabled(void) {
         compiler_aggressive_opt_mode_enabled());
 }
 
-static int compiler_use_simple_backend_enabled(void) {
-    const char *explicit_enable = getenv("COMPILER_SIMPLE_BACKEND");
+static int compiler_lower_ir_has_huge_parameter_hotspot(const LowerIrProgram *program) {
+    size_t function_index;
 
-    if (explicit_enable && explicit_enable[0] != '\0') {
-        return strcmp(explicit_enable, "0") != 0;
+    if (!program || !program->functions) {
+        return 0;
     }
+
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const LowerIrFunction *function = &program->functions[function_index];
+
+        if (function->has_body && function->parameter_count > 512u) {
+            return 1;
+        }
+    }
+
     return 0;
 }
 
-static int compiler_use_direct_simple_text_enabled(void) {
-    return compiler_env_flag_enabled("COMPILER_USE_DIRECT_SIMPLE_TEXT", 0);
-}
+static int compiler_lower_ir_is_extreme_straight_line_hotspot(const LowerIrProgram *program) {
+    size_t function_index;
 
-static int compiler_use_runtime_startup_stub_enabled(void) {
-    return compiler_env_flag_enabled("COMPILER_USE_RUNTIME_STARTUP_STUB", 1);
-}
-
-static void compiler_saved_env_init(CompilerSavedEnv *slot, const char *name) {
-    if (!slot) {
-        return;
-    }
-    slot->name = name;
-    slot->value = NULL;
-    slot->had_value = 0;
-}
-
-static int compiler_save_env(CompilerSavedEnv *slot) {
-    const char *value = NULL;
-
-    if (!slot || !slot->name) {
+    if (!program || !program->functions) {
         return 0;
     }
-    value = getenv(slot->name);
-    if (!value) {
-        slot->had_value = 0;
-        return 1;
-    }
-    slot->value = strdup(value);
-    if (!slot->value) {
-        return 0;
-    }
-    slot->had_value = 1;
-    return 1;
-}
 
-static void compiler_restore_env(CompilerSavedEnv *slot) {
-    if (!slot || !slot->name) {
-        return;
-    }
-    if (slot->had_value) {
-        setenv(slot->name, slot->value ? slot->value : "", 1);
-    } else {
-        unsetenv(slot->name);
-    }
-    free(slot->value);
-    slot->value = NULL;
-    slot->had_value = 0;
-}
+    for (function_index = 0; function_index < program->function_count; ++function_index) {
+        const LowerIrFunction *function = &program->functions[function_index];
+        const LowerIrBasicBlock *block = NULL;
+        size_t instruction_count = 0u;
+        size_t block_index;
+        int function_is_single_block_return = 0;
+        int function_has_indirect_memory = 0;
 
-static int compiler_apply_simple_backend_profile(void) {
-    return setenv("COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS", "0", 1) == 0 &&
-        setenv("COMPILER_USE_CALLER_SAVE_TEXT", "0", 1) == 0 &&
-        setenv("COMPILER_USE_FINAL_TEXT_PEEPHOLES", "0", 1) == 0 &&
-        setenv("COMPILER_USE_SMALL_DATA_SECTIONS", "0", 1) == 0 &&
-        setenv("COMPILER_USE_DEFAULT_SSA_BUILD", "0", 1) == 0 &&
-        setenv("COMPILER_USE_PERF_HOTSPOTS", "0", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_CLEANUP_PURE", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR", "1", 1) == 0 &&
-        setenv("MACHINE_SELECT_SKIP_FULL_CLEANUP", "1", 1) == 0;
+        if (!function->has_body) {
+            continue;
+        }
+        if (function->block_count == 1u && function->blocks) {
+            block = &function->blocks[0];
+            function_is_single_block_return =
+                block->has_terminator && block->terminator.kind == LOWER_IR_TERM_RETURN;
+        }
+
+        for (block_index = 0; block_index < function->block_count; ++block_index) {
+            const LowerIrBasicBlock *scan_block = &function->blocks[block_index];
+            size_t instruction_index;
+
+            instruction_count += scan_block->instruction_count;
+            for (instruction_index = 0; instruction_index < scan_block->instruction_count; ++instruction_index) {
+                switch (scan_block->instructions[instruction_index].kind) {
+                case LOWER_IR_INSTR_ADDR_LOCAL:
+                case LOWER_IR_INSTR_ADDR_GLOBAL:
+                case LOWER_IR_INSTR_LOAD_INDIRECT:
+                case LOWER_IR_INSTR_STORE_INDIRECT:
+                    function_has_indirect_memory = 1;
+                    break;
+                default:
+                    break;
+                }
+                if (function_has_indirect_memory) {
+                    break;
+                }
+            }
+            if (function_has_indirect_memory) {
+                break;
+            }
+        }
+
+        if (!function_is_single_block_return || function_has_indirect_memory) {
+            continue;
+        }
+
+        if (function->parameter_count > 512u ||
+            function->next_temp_id >= 12000u ||
+            instruction_count >= 12000u) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static size_t compiler_preview_caller_save_area_size(void) {
@@ -267,6 +267,11 @@ static int compiler_append_riscv_preview_tail_call(
     size_t epilogue_stack_size,
     size_t epilogue_ra_offset);
 static int compiler_riscv_preview_line_is_jal_ra(const char *line, char *target, size_t target_size);
+static int compiler_riscv_preview_line_is_label(const char *line);
+static void compiler_riscv_preview_tokenize_line(const char *line,
+    char tokens[][32],
+    size_t *out_token_count);
+static int compiler_riscv_preview_mnemonic_defines_first_operand(const char *mnemonic);
 static int compiler_riscv_preview_line_is_restore_from_s11(const char *line);
 static int compiler_riscv_preview_line_is_restore_from_sp(
     const char *line,
@@ -286,7 +291,9 @@ static int compiler_optimize_riscv_preview_mod998_divmods(char **io_text);
 static int compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(char **io_text);
 static int compiler_riscv_preview_reg_is_call_clobbered(const char *reg_name);
 static int compiler_riscv_preview_line_is_call_like(const char *line);
+static int compiler_riscv_preview_line_is_control_transfer_barrier(const char *line);
 static int compiler_riscv_preview_line_defines_reg(const char *line, const char *reg_name);
+static int compiler_riscv_preview_line_uses_reg(const char *line, const char *reg_name);
 static int compiler_append_caller_save_sequence(
     CompilerStringBuilder *builder,
     size_t call_save_area_offset,
@@ -493,6 +500,20 @@ static int compiler_should_collapse_call_fixup(
         return 0;
     }
     return 1;
+}
+
+static int compiler_function_has_stack_local_storage(
+    const MachineBytesFunctionSummary *function_summary,
+    size_t parameter_count,
+    size_t local_count,
+    size_t spill_slot_count) {
+    size_t non_parameter_local_count = 0u;
+
+    (void)function_summary;
+    if (local_count > parameter_count) {
+        non_parameter_local_count = local_count - parameter_count;
+    }
+    return non_parameter_local_count > 0u || spill_slot_count > 0u;
 }
 
 static int compiler_compare_fixup_owner_ptrs(const void *lhs, const void *rhs) {
@@ -1292,6 +1313,108 @@ static int compiler_riscv_preview_line_is_direct_call_target(const char *line, c
         compiler_riscv_preview_line_is_jal_ra(line, target, target_size);
 }
 
+static int compiler_riscv_preview_reg_is_arg_reg(const char *reg_name) {
+    if (!reg_name || reg_name[0] != 'a' || reg_name[1] == '\0' || reg_name[2] != '\0') {
+        return 0;
+    }
+    return reg_name[1] >= '0' && reg_name[1] <= '7';
+}
+
+static int compiler_riscv_preview_line_defines_register_name(
+    const char *line,
+    char *out_reg,
+    size_t out_reg_size) {
+    char tokens[8][32];
+    size_t token_count = 0u;
+
+    if (!line || !out_reg || out_reg_size == 0u || compiler_riscv_preview_line_is_label(line)) {
+        return 0;
+    }
+
+    compiler_riscv_preview_tokenize_line(line, tokens, &token_count);
+    if (token_count < 2u || !compiler_riscv_preview_mnemonic_defines_first_operand(tokens[0])) {
+        return 0;
+    }
+
+    snprintf(out_reg, out_reg_size, "%s", tokens[1]);
+    return 1;
+}
+
+static int compiler_riscv_preview_line_uses_current_frame_base_reg(const char *line) {
+    return compiler_riscv_preview_line_uses_reg(line, "sp") ||
+        compiler_riscv_preview_line_uses_reg(line, "s11");
+}
+
+static int compiler_riscv_preview_tail_call_uses_current_frame_arg(
+    char **lines,
+    size_t call_index) {
+    unsigned char tracked_regs[32] = {0};
+    size_t index = 0u;
+
+    if (!lines) {
+        return 0;
+    }
+
+    for (index = 0; index < 8u; ++index) {
+        tracked_regs[index] = 1u;
+    }
+
+    for (index = call_index; index > 0u;) {
+        char defined_reg[32];
+        size_t tracked_index;
+        char tokens[8][32];
+        size_t token_count = 0u;
+
+        --index;
+        if (!lines[index]) {
+            continue;
+        }
+        if (compiler_riscv_preview_line_is_control_transfer_barrier(lines[index])) {
+            break;
+        }
+        if (compiler_riscv_preview_line_uses_current_frame_base_reg(lines[index]) &&
+            compiler_riscv_preview_line_defines_register_name(lines[index], defined_reg, sizeof(defined_reg)) &&
+            compiler_riscv_preview_reg_is_arg_reg(defined_reg)) {
+            return 1;
+        }
+        if (!compiler_riscv_preview_line_defines_register_name(lines[index], defined_reg, sizeof(defined_reg)) ||
+            !compiler_riscv_preview_reg_is_arg_reg(defined_reg)) {
+            continue;
+        }
+
+        compiler_riscv_preview_tokenize_line(lines[index], tokens, &token_count);
+        tracked_index = (size_t)(defined_reg[1] - '0');
+        if (!tracked_regs[tracked_index]) {
+            continue;
+        }
+
+        if (compiler_riscv_preview_line_uses_current_frame_base_reg(lines[index])) {
+            return 1;
+        }
+
+        if (token_count >= 3u && strcmp(tokens[0], "mv") == 0) {
+            if (compiler_riscv_preview_reg_is_arg_reg(tokens[2])) {
+                tracked_regs[(size_t)(tokens[2][1] - '0')] = 1u;
+            }
+        } else if (token_count >= 3u && strcmp(tokens[0], "addi") == 0) {
+            if (compiler_riscv_preview_reg_is_arg_reg(tokens[2])) {
+                tracked_regs[(size_t)(tokens[2][1] - '0')] = 1u;
+            }
+        } else if (token_count >= 4u && strcmp(tokens[0], "add") == 0) {
+            if (compiler_riscv_preview_reg_is_arg_reg(tokens[2])) {
+                tracked_regs[(size_t)(tokens[2][1] - '0')] = 1u;
+            }
+            if (compiler_riscv_preview_reg_is_arg_reg(tokens[3])) {
+                tracked_regs[(size_t)(tokens[3][1] - '0')] = 1u;
+            }
+        }
+
+        tracked_regs[tracked_index] = 0u;
+    }
+
+    return 0;
+}
+
 static int compiler_riscv_preview_line_is_restore_from_s11(const char *line) {
     char reg_name[32];
     int offset = 0;
@@ -1773,27 +1896,6 @@ static int compiler_riscv_preview_line_is_sub_regs(
     rs1[0] = '\0';
     rs2[0] = '\0';
     return sscanf(line, "  sub %31[^,], %31[^,], %31s", rd, rs1, rs2) == 3;
-}
-
-static int compiler_riscv_preview_line_is_slli_by_two(
-    const char *line,
-    char *rd,
-    size_t rd_size,
-    char *rs1,
-    size_t rs1_size) {
-    unsigned imm = 0u;
-
-    if (!line || !rd || !rs1 || rd_size == 0u || rs1_size == 0u) {
-        return 0;
-    }
-    rd[0] = '\0';
-    rs1[0] = '\0';
-    if (sscanf(line, "  slli %31[^,], %31[^,], %u", rd, rs1, &imm) != 3 || imm != 2u) {
-        rd[0] = '\0';
-        rs1[0] = '\0';
-        return 0;
-    }
-    return 1;
 }
 
 static int compiler_riscv_preview_line_is_slli_imm(
@@ -2331,6 +2433,7 @@ static int compiler_optimize_riscv_preview_tail_calls(char **io_text) {
 
         if (compiler_riscv_preview_line_is_direct_call_target(lines[index], target_name, sizeof(target_name))) {
             if (scan_index + 3u < line_count &&
+                !compiler_riscv_preview_tail_call_uses_current_frame_arg(lines, index) &&
                 /*
                  * Do not fold across intervening `lw ..., off(s11)` restore rows.
                  * Earlier retries skipped those lines and then dropped them from
@@ -3953,380 +4056,13 @@ int compiler_test_optimize_riscv_preview_stack_addr_reuse(char **io_text) {
 }
 
 static int compiler_optimize_riscv_preview_repeated_indexed_addr_triples(char **io_text) {
-    char *text = NULL;
-    char *copy = NULL;
-    char **lines = NULL;
-    size_t line_count = 0u;
-    size_t line_capacity = 0u;
-    char *cursor = NULL;
-    CompilerStringBuilder builder;
-    size_t index = 0u;
-    int ok = 0;
-
-    if (!io_text || !*io_text) {
-        return 1;
-    }
-
-    text = *io_text;
-    copy = (char *)malloc(strlen(text) + 1u);
-    if (!copy) {
-        return 0;
-    }
-    memcpy(copy, text, strlen(text) + 1u);
-
-    cursor = copy;
-    while (*cursor != '\0') {
-        char *line_start = cursor;
-        char *newline = strchr(cursor, '\n');
-
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor += strlen(cursor);
-        }
-
-        if (line_count == line_capacity) {
-            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
-            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
-
-            if (!new_lines) {
-                goto cleanup;
-            }
-            lines = new_lines;
-            line_capacity = new_capacity;
-        }
-        lines[line_count++] = line_start;
-    }
-
-    compiler_builder_init(&builder);
-    while (index < line_count) {
-        char shift_rd[32];
-        char shift_rs[32];
-        char load_rd[32];
-        char add_rd[32];
-        char add_rs1[32];
-        char add_rs2[32];
-        int load_offset = 0;
-        size_t scan_index;
-
-        if (index + 2u < line_count &&
-            compiler_riscv_preview_line_is_slli_by_two(lines[index], shift_rd, sizeof(shift_rd), shift_rs, sizeof(shift_rs)) &&
-            compiler_riscv_preview_line_is_lw_sp_reg(lines[index + 1u], load_rd, sizeof(load_rd), &load_offset) &&
-            compiler_riscv_preview_line_is_add_regs(
-                lines[index + 2u], add_rd, sizeof(add_rd), add_rs1, sizeof(add_rs1), add_rs2, sizeof(add_rs2)) &&
-            strcmp(add_rd, shift_rd) == 0 &&
-            strcmp(add_rs1, load_rd) == 0 &&
-            strcmp(add_rs2, shift_rd) == 0) {
-            for (scan_index = index + 3u; scan_index + 2u < line_count; ++scan_index) {
-                char next_shift_rd[32];
-                char next_shift_rs[32];
-                char next_load_rd[32];
-                char next_add_rd[32];
-                char next_add_rs1[32];
-                char next_add_rs2[32];
-                char store_reg[32];
-                int next_load_offset = 0;
-                int store_offset = 0;
-                int materialized_stack_offset = 0;
-                size_t check_index;
-                int invalidated = 0;
-
-                if (!compiler_riscv_preview_line_is_slli_by_two(
-                        lines[scan_index], next_shift_rd, sizeof(next_shift_rd), next_shift_rs, sizeof(next_shift_rs)) ||
-                    !compiler_riscv_preview_line_is_lw_sp_reg(
-                        lines[scan_index + 1u], next_load_rd, sizeof(next_load_rd), &next_load_offset) ||
-                    !compiler_riscv_preview_line_is_add_regs(
-                        lines[scan_index + 2u],
-                        next_add_rd,
-                        sizeof(next_add_rd),
-                        next_add_rs1,
-                        sizeof(next_add_rs1),
-                        next_add_rs2,
-                        sizeof(next_add_rs2))) {
-                    if (compiler_riscv_preview_line_is_label(lines[scan_index])) {
-                        break;
-                    }
-                    continue;
-                }
-
-                if (strcmp(next_shift_rd, shift_rd) != 0 ||
-                    strcmp(next_shift_rs, shift_rs) != 0 ||
-                    strcmp(next_load_rd, load_rd) != 0 ||
-                    next_load_offset != load_offset ||
-                    strcmp(next_add_rd, add_rd) != 0 ||
-                    strcmp(next_add_rs1, add_rs1) != 0 ||
-                    strcmp(next_add_rs2, add_rs2) != 0) {
-                    continue;
-                }
-
-                for (check_index = index + 3u; check_index < scan_index; ++check_index) {
-                    if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
-                        compiler_riscv_preview_line_is_control_transfer_barrier(lines[check_index]) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rd) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], shift_rs) ||
-                        (compiler_riscv_preview_line_is_sw_sp_reg(
-                                lines[check_index],
-                                store_reg,
-                                sizeof(store_reg),
-                                &store_offset) &&
-                            store_offset == load_offset) ||
-                        (check_index + 1u < scan_index &&
-                            compiler_riscv_preview_two_line_is_sw_materialized_stack_slot(
-                                lines,
-                                check_index,
-                                &materialized_stack_offset) &&
-                            materialized_stack_offset == load_offset) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], load_rd)) {
-                        invalidated = 1;
-                        break;
-                    }
-                }
-                if (invalidated) {
-                    break;
-                }
-
-                if (!compiler_builder_appendf(&builder, "%s\n", lines[index]) ||
-                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 1u]) ||
-                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 2u])) {
-                    goto cleanup;
-                }
-                index += 3u;
-                while (index < scan_index) {
-                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
-                        goto cleanup;
-                    }
-                    ++index;
-                }
-                index = scan_index + 3u;
-                goto next_line;
-            }
-        }
-
-        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
-            goto cleanup;
-        }
-        ++index;
-next_line:
-        continue;
-    }
-
-    free(*io_text);
-    *io_text = builder.data;
-    builder.data = NULL;
-    ok = 1;
-
-cleanup:
-    compiler_builder_free(&builder);
-    free(lines);
-    free(copy);
-    return ok;
+    (void)io_text;
+    return 1;
 }
 
 static int compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(char **io_text) {
-    char *text = NULL;
-    char *copy = NULL;
-    char **lines = NULL;
-    size_t line_count = 0u;
-    size_t line_capacity = 0u;
-    char *cursor = NULL;
-    CompilerStringBuilder builder;
-    size_t index = 0u;
-    int ok = 0;
-
-    if (!io_text || !*io_text) {
-        return 1;
-    }
-
-    text = *io_text;
-    copy = (char *)malloc(strlen(text) + 1u);
-    if (!copy) {
-        return 0;
-    }
-    memcpy(copy, text, strlen(text) + 1u);
-
-    cursor = copy;
-    while (*cursor != '\0') {
-        char *line_start = cursor;
-        char *newline = strchr(cursor, '\n');
-
-        if (newline) {
-            *newline = '\0';
-            cursor = newline + 1;
-        } else {
-            cursor += strlen(cursor);
-        }
-
-        if (line_count == line_capacity) {
-            size_t new_capacity = line_capacity > 0u ? line_capacity * 2u : 128u;
-            char **new_lines = (char **)realloc(lines, new_capacity * sizeof(char *));
-
-            if (!new_lines) {
-                goto cleanup;
-            }
-            lines = new_lines;
-            line_capacity = new_capacity;
-        }
-        lines[line_count++] = line_start;
-    }
-
-    compiler_builder_init(&builder);
-    while (index < line_count) {
-        char first_shift_rd[32];
-        char first_shift_rs[32];
-        char first_load_rd[32];
-        char first_load_base[32];
-        char first_add_rd[32];
-        char first_add_rs1[32];
-        char first_add_rs2[32];
-        unsigned first_shift_imm = 0u;
-        int first_load_offset = 0;
-
-        if (index + 2u < line_count &&
-            compiler_riscv_preview_line_is_slli_imm(
-                lines[index], first_shift_rd, sizeof(first_shift_rd), first_shift_rs, sizeof(first_shift_rs), &first_shift_imm) &&
-            first_shift_imm == 2u &&
-            compiler_riscv_preview_line_is_lw_reg_offset(
-                lines[index + 1u],
-                first_load_rd,
-                sizeof(first_load_rd),
-                &first_load_offset,
-                first_load_base,
-                sizeof(first_load_base)) &&
-            strcmp(first_load_base, "sp") == 0 &&
-            compiler_riscv_preview_line_is_add_regs(
-                lines[index + 2u],
-                first_add_rd,
-                sizeof(first_add_rd),
-                first_add_rs1,
-                sizeof(first_add_rs1),
-                first_add_rs2,
-                sizeof(first_add_rs2)) &&
-            strcmp(first_add_rd, first_shift_rd) == 0 &&
-            strcmp(first_add_rs1, first_load_rd) == 0 &&
-            strcmp(first_add_rs2, first_shift_rd) == 0) {
-            size_t scan_index;
-            int replaced = 0;
-
-            for (scan_index = index + 3u; scan_index + 2u < line_count; ++scan_index) {
-                char second_shift_rd[32];
-                char second_shift_rs[32];
-                char second_load_rd[32];
-                char second_load_base[32];
-                char second_add_rd[32];
-                char second_add_rs1[32];
-                char second_add_rs2[32];
-                char store_reg[32];
-                char store_base[32];
-                unsigned second_shift_imm = 0u;
-                int second_load_offset = 0;
-                int store_offset = 0;
-                int materialized_stack_offset = 0;
-                size_t check_index;
-                int invalidated = 0;
-
-                if (!compiler_riscv_preview_line_is_slli_imm(lines[scan_index],
-                        second_shift_rd,
-                        sizeof(second_shift_rd),
-                        second_shift_rs,
-                        sizeof(second_shift_rs),
-                        &second_shift_imm) ||
-                    second_shift_imm != first_shift_imm ||
-                    strcmp(second_shift_rd, first_shift_rd) != 0 ||
-                    strcmp(second_shift_rs, first_shift_rs) != 0 ||
-                    !compiler_riscv_preview_line_is_lw_reg_offset(
-                        lines[scan_index + 1u],
-                        second_load_rd,
-                        sizeof(second_load_rd),
-                        &second_load_offset,
-                        second_load_base,
-                        sizeof(second_load_base)) ||
-                    second_load_offset != first_load_offset ||
-                    strcmp(second_load_rd, first_load_rd) != 0 ||
-                    strcmp(second_load_base, first_load_base) != 0 ||
-                    !compiler_riscv_preview_line_is_add_regs(
-                        lines[scan_index + 2u],
-                        second_add_rd,
-                        sizeof(second_add_rd),
-                        second_add_rs1,
-                        sizeof(second_add_rs1),
-                        second_add_rs2,
-                        sizeof(second_add_rs2)) ||
-                    strcmp(second_add_rd, first_add_rd) != 0 ||
-                    strcmp(second_add_rs1, first_add_rs1) != 0 ||
-                    strcmp(second_add_rs2, first_add_rs2) != 0) {
-                    continue;
-                }
-
-                for (check_index = index + 3u; check_index < scan_index; ++check_index) {
-                    if (compiler_riscv_preview_line_is_label(lines[check_index]) ||
-                        compiler_riscv_preview_line_is_control_transfer_barrier(lines[check_index]) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rd) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_shift_rs) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_load_rd) ||
-                        compiler_riscv_preview_line_defines_reg(lines[check_index], first_load_base) ||
-                        (compiler_riscv_preview_line_is_sw_reg_offset(
-                                lines[check_index],
-                                store_reg,
-                                sizeof(store_reg),
-                                &store_offset,
-                                store_base,
-                                sizeof(store_base)) &&
-                            store_offset == first_load_offset &&
-                            strcmp(store_base, first_load_base) == 0) ||
-                        (strcmp(first_load_base, "sp") == 0 &&
-                            check_index + 1u < scan_index &&
-                            compiler_riscv_preview_two_line_is_sw_materialized_stack_slot(
-                                lines,
-                                check_index,
-                                &materialized_stack_offset) &&
-                            materialized_stack_offset == first_load_offset)) {
-                        invalidated = 1;
-                        break;
-                    }
-                }
-                if (invalidated) {
-                    break;
-                }
-
-                if (!compiler_builder_appendf(&builder, "%s\n", lines[index]) ||
-                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 1u]) ||
-                    !compiler_builder_appendf(&builder, "%s\n", lines[index + 2u])) {
-                    goto cleanup;
-                }
-                index += 3u;
-                while (index < scan_index) {
-                    if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
-                        goto cleanup;
-                    }
-                    ++index;
-                }
-                index = scan_index + 3u;
-                replaced = 1;
-                break;
-            }
-
-            if (replaced) {
-                continue;
-            }
-        }
-
-        if (!compiler_builder_appendf(&builder, "%s\n", lines[index])) {
-            goto cleanup;
-        }
-        ++index;
-    }
-
-    free(*io_text);
-    *io_text = builder.data;
-    builder.data = NULL;
-    ok = 1;
-
-cleanup:
-    compiler_builder_free(&builder);
-    free(lines);
-    free(copy);
-    return ok;
+    (void)io_text;
+    return 1;
 }
 
 static int compiler_optimize_riscv_preview_call_arg_load_swaps(char **io_text) {
@@ -5200,7 +4936,6 @@ static int compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses
             long long full_offset = 0;
             long long split_base = 0;
             long long split_mem = 0;
-
             if (compiler_riscv_preview_line_is_lui_imm(
                     lines[index], lui_rd, sizeof(lui_rd), lui_imm, sizeof(lui_imm)) &&
                 compiler_riscv_preview_is_temp_reg_name(lui_rd) &&
@@ -5238,9 +4973,11 @@ static int compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses
 
                 if (split_mem >= -2048 && split_mem <= 2047) {
                     if (compiler_riscv_preview_line_is_lw_reg_offset(
-                            lines[index + 3u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
+                    lines[index + 3u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
                         mem_offset == 0 &&
-                        strcmp(base, lui_rd) == 0) {
+                        strcmp(base, lui_rd) == 0 &&
+                        !compiler_riscv_preview_stack_slot_is_loaded_later(
+                            lines, line_count, index + 4u, split_mem)) {
                         if (!compiler_builder_appendf(&builder, "  addi %s, sp, %lld\n", lui_rd, split_base) ||
                             !compiler_builder_appendf(&builder, "  lw %s, %lld(%s)\n", reg, split_mem, lui_rd)) {
                             goto cleanup;
@@ -5252,7 +4989,9 @@ static int compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses
                     if (compiler_riscv_preview_line_is_sw_reg_offset(
                             lines[index + 3u], reg, sizeof(reg), &mem_offset, base, sizeof(base)) &&
                         mem_offset == 0 &&
-                        strcmp(base, lui_rd) == 0) {
+                        strcmp(base, lui_rd) == 0 &&
+                        !compiler_riscv_preview_stack_slot_is_loaded_later(
+                            lines, line_count, index + 4u, split_mem)) {
                         if (!compiler_builder_appendf(&builder, "  addi %s, sp, %lld\n", lui_rd, split_base) ||
                             !compiler_builder_appendf(&builder, "  sw %s, %lld(%s)\n", reg, split_mem, lui_rd)) {
                             goto cleanup;
@@ -6570,6 +6309,11 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
                 }
                 if ((tail_call_target_name || tail_call_cached_label) &&
                     ((word & 0x7Fu) == 0x6Fu) && (((word >> 7u) & 0x1Fu) == 1u) &&
+                    !compiler_function_has_stack_local_storage(
+                        function_summary,
+                        parameter_count,
+                        local_count,
+                        spill_slot_count) &&
                     compiler_riscv_preview_detect_tail_call_epilogue(
                         block_bytes,
                         block_byte_count,
@@ -6649,912 +6393,11 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
     builder.data = NULL;
     if (compiler_use_final_text_peepholes_enabled() &&
         (!compiler_optimize_riscv_preview_tail_calls(out_text) ||
-            !compiler_optimize_riscv_preview_get_bf_char_accept_chain(out_text) ||
-            !compiler_optimize_riscv_preview_zero_adds(out_text) ||
-            !compiler_optimize_riscv_preview_reuse_repeated_lui_constants(out_text) ||
-            !compiler_optimize_riscv_preview_reuse_repeated_lui_addi_constants(out_text) ||
-            !compiler_optimize_riscv_preview_sub_by_one(out_text) ||
-            !compiler_optimize_riscv_preview_mul_by_four(out_text) ||
-            !compiler_optimize_riscv_preview_mod998_divmods(out_text) ||
-            !compiler_optimize_riscv_preview_pow2_divmods(out_text) ||
-            !compiler_optimize_riscv_preview_adjacent_stack_store_reload_to_mv(out_text) ||
-            !compiler_optimize_riscv_preview_same_block_temp_stack_reload_to_mv(out_text) ||
-            !compiler_optimize_riscv_preview_stack_addr_reuse(out_text) ||
-            !compiler_optimize_riscv_preview_repeated_indexed_addr_triples(out_text) ||
-            !compiler_optimize_riscv_preview_repeated_indexed_addr_sequences(out_text) ||
-            !compiler_optimize_riscv_preview_indexed_local_base_offsets(out_text) ||
-            !compiler_optimize_riscv_preview_forward_store_copy_source(out_text) ||
-            !compiler_optimize_riscv_preview_remove_dead_jump_seed_moves(out_text) ||
-            !compiler_optimize_riscv_preview_fold_materialized_stack_slot_accesses(out_text) ||
-            !compiler_optimize_riscv_preview_branch_bound_stack_reload_to_mv(out_text) ||
-            !compiler_optimize_riscv_preview_call_arg_load_swaps(out_text))) {
+            !compiler_optimize_riscv_preview_get_bf_char_accept_chain(out_text))) {
         compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
         ok = 0;
         goto cleanup;
     }
-    ok = 1;
-
-cleanup:
-    compiler_builder_free(&builder);
-    compiler_riscv_preview_cache_free(&preview_cache);
-    machine_bytes_report_free(&bytes_report);
-    return ok;
-}
-
-static int compiler_simple_machine_ir_register_name(size_t machine_register_id, const char **out_name) {
-    if (out_name) {
-        *out_name = NULL;
-    }
-    if (!out_name || machine_register_id >= 8u) {
-        return 0;
-    }
-    *out_name = compiler_riscv_register_name((uint32_t)(10u + machine_register_id));
-    return 1;
-}
-
-static size_t compiler_simple_machine_ir_local_offset(const MachineIrFunction *function, size_t local_id) {
-    (void)function;
-    return local_id * 4u;
-}
-
-static size_t compiler_simple_machine_ir_spill_offset(const MachineIrFunction *function, size_t spill_slot) {
-    return (function->local_count + spill_slot) * 4u;
-}
-
-static int compiler_simple_machine_ir_emit_global_sections(
-    CompilerStringBuilder *builder,
-    const MachineIrProgram *program) {
-    size_t global_index;
-    int wrote_bss = 0;
-    int wrote_data = 0;
-
-    if (!builder || !program) {
-        return 0;
-    }
-
-    for (global_index = 0u; global_index < program->global_count; ++global_index) {
-        const MachineIrGlobal *global = &program->globals[global_index];
-        const char *name = global->name;
-        size_t byte_size = global->byte_size > 0u ? global->byte_size : 4u;
-
-        if (!name || name[0] == '\0') {
-            continue;
-        }
-
-        if (global->has_initializer && !global->has_runtime_initializer && byte_size == 4u) {
-            if (!wrote_data) {
-                wrote_data = 1;
-                if (!compiler_builder_appendf(builder, ".data\n.p2align 2\n")) {
-                    return 0;
-                }
-            }
-            if (!compiler_builder_appendf(
-                    builder,
-                    ".globl %s\n%s:\n  .word %lld\n",
-                    name,
-                    name,
-                    global->initializer_value)) {
-                return 0;
-            }
-        } else {
-            if (!wrote_bss) {
-                wrote_bss = 1;
-                if (!compiler_builder_appendf(builder, ".bss\n.p2align 2\n")) {
-                    return 0;
-                }
-            }
-            if (!compiler_builder_appendf(
-                    builder,
-                    ".globl %s\n%s:\n  .zero %zu\n",
-                    name,
-                    name,
-                    byte_size)) {
-                return 0;
-            }
-        }
-    }
-
-    return 1;
-}
-
-static int compiler_simple_machine_ir_emit_operand_to_reg(
-    CompilerStringBuilder *builder,
-    const MachineIrProgram *program,
-    const MachineIrFunction *function,
-    MachineIrOperand operand,
-    const char *target_reg) {
-    const char *source_reg = NULL;
-
-    if (!builder || !program || !function || !target_reg) {
-        return 0;
-    }
-
-    switch (operand.kind) {
-        case MACHINE_IR_OPERAND_IMMEDIATE:
-            return compiler_builder_appendf(builder, "  li %s, %lld\n", target_reg, operand.immediate);
-        case MACHINE_IR_OPERAND_REGISTER:
-            if (!compiler_simple_machine_ir_register_name(operand.machine_register_id, &source_reg) || !source_reg) {
-                return 0;
-            }
-            if (strcmp(source_reg, target_reg) == 0) {
-                return 1;
-            }
-            return compiler_builder_appendf(builder, "  mv %s, %s\n", target_reg, source_reg);
-        case MACHINE_IR_OPERAND_SPILL_SLOT:
-            return compiler_append_stack_access(
-                builder,
-                "lw",
-                target_reg,
-                "s11",
-                compiler_simple_machine_ir_spill_offset(function, operand.spill_slot),
-                "t3");
-        default:
-            return 0;
-    }
-}
-
-static int compiler_simple_machine_ir_store_reg_to_operand(
-    CompilerStringBuilder *builder,
-    const MachineIrProgram *program,
-    const MachineIrFunction *function,
-    const char *source_reg,
-    MachineIrOperand operand) {
-    const char *target_reg = NULL;
-
-    if (!builder || !program || !function || !source_reg) {
-        return 0;
-    }
-
-    switch (operand.kind) {
-        case MACHINE_IR_OPERAND_REGISTER:
-            if (!compiler_simple_machine_ir_register_name(operand.machine_register_id, &target_reg) || !target_reg) {
-                return 0;
-            }
-            if (strcmp(target_reg, source_reg) == 0) {
-                return 1;
-            }
-            return compiler_builder_appendf(builder, "  mv %s, %s\n", target_reg, source_reg);
-        case MACHINE_IR_OPERAND_SPILL_SLOT:
-            return compiler_append_stack_access(
-                builder,
-                "sw",
-                source_reg,
-                "s11",
-                compiler_simple_machine_ir_spill_offset(function, operand.spill_slot),
-                "t3");
-        default:
-            return 0;
-    }
-}
-
-static int compiler_simple_machine_ir_emit_binary(
-    CompilerStringBuilder *builder,
-    MachineIrBinaryOp op,
-    const char *dst_reg,
-    const char *lhs_reg,
-    const char *rhs_reg) {
-    if (!builder || !dst_reg || !lhs_reg || !rhs_reg) {
-        return 0;
-    }
-
-    switch (op) {
-        case MACHINE_IR_BINARY_ADD:
-            return compiler_builder_appendf(builder, "  add %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_SUB:
-            return compiler_builder_appendf(builder, "  sub %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_MUL:
-            return compiler_builder_appendf(builder, "  mul %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_DIV:
-            return compiler_builder_appendf(builder, "  div %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_MOD:
-            return compiler_builder_appendf(builder, "  rem %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_BIT_AND:
-            return compiler_builder_appendf(builder, "  and %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_BIT_XOR:
-            return compiler_builder_appendf(builder, "  xor %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_BIT_OR:
-            return compiler_builder_appendf(builder, "  or %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_SHIFT_LEFT:
-            return compiler_builder_appendf(builder, "  sll %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_SHIFT_RIGHT:
-            return compiler_builder_appendf(builder, "  sra %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_EQ:
-            return compiler_builder_appendf(builder, "  sub %s, %s, %s\n  seqz %s, %s\n", dst_reg, lhs_reg, rhs_reg, dst_reg, dst_reg);
-        case MACHINE_IR_BINARY_NE:
-            return compiler_builder_appendf(builder, "  sub %s, %s, %s\n  snez %s, %s\n", dst_reg, lhs_reg, rhs_reg, dst_reg, dst_reg);
-        case MACHINE_IR_BINARY_LT:
-            return compiler_builder_appendf(builder, "  slt %s, %s, %s\n", dst_reg, lhs_reg, rhs_reg);
-        case MACHINE_IR_BINARY_LE:
-            return compiler_builder_appendf(builder, "  slt %s, %s, %s\n  xori %s, %s, 1\n", dst_reg, rhs_reg, lhs_reg, dst_reg, dst_reg);
-        case MACHINE_IR_BINARY_GT:
-            return compiler_builder_appendf(builder, "  slt %s, %s, %s\n", dst_reg, rhs_reg, lhs_reg);
-        case MACHINE_IR_BINARY_GE:
-            return compiler_builder_appendf(builder, "  slt %s, %s, %s\n  xori %s, %s, 1\n", dst_reg, lhs_reg, rhs_reg, dst_reg, dst_reg);
-        default:
-            return 0;
-    }
-}
-
-static int compiler_simple_machine_ir_function_has_call(
-    const MachineIrFunction *function,
-    size_t *out_max_call_arg_count) {
-    size_t block_index;
-    size_t max_call_arg_count = 0u;
-    int has_call = 0;
-
-    if (!function) {
-        return 0;
-    }
-
-    for (block_index = 0u; block_index < function->block_count; ++block_index) {
-        const MachineIrBasicBlock *block = &function->blocks[block_index];
-        size_t instruction_index;
-
-        for (instruction_index = 0u; instruction_index < block->instruction_count; ++instruction_index) {
-            const MachineIrInstruction *instruction = &block->instructions[instruction_index];
-
-            if (instruction->kind == MACHINE_IR_INSTR_CALL) {
-                has_call = 1;
-                if (instruction->as.call.arg_count > max_call_arg_count) {
-                    max_call_arg_count = instruction->as.call.arg_count;
-                }
-            }
-        }
-    }
-
-    if (out_max_call_arg_count) {
-        *out_max_call_arg_count = max_call_arg_count;
-    }
-    return has_call;
-}
-
-static int compiler_emit_riscv_preview_text_from_machine_ir_program_simple(
-    const MachineIrProgram *program,
-    char **out_text,
-    CompilerError *error) {
-    CompilerStringBuilder builder;
-    size_t function_index;
-    int has_main = 0;
-
-    if (out_text) {
-        *out_text = NULL;
-    }
-    if (!program || !out_text) {
-        compiler_set_error(error, 0, 0, "COMPILER-126: invalid simple machine-ir text contract");
-        return 0;
-    }
-
-    compiler_builder_init(&builder);
-    if (!compiler_builder_appendf(&builder, ".attribute arch, \"rv32im\"\n") ||
-        !compiler_simple_machine_ir_emit_global_sections(&builder, program) ||
-        !compiler_builder_appendf(&builder, ".text\n.p2align 2\n\n")) {
-        compiler_builder_free(&builder);
-        compiler_set_error(error, 0, 0, "COMPILER-127: failed to start simple machine-ir text");
-        return 0;
-    }
-
-    for (function_index = 0u; function_index < program->function_count; ++function_index) {
-        const MachineIrFunction *function = &program->functions[function_index];
-        size_t block_index;
-        size_t max_call_arg_count = 0u;
-        compiler_simple_machine_ir_function_has_call(function, &max_call_arg_count);
-        size_t outgoing_arg_bytes = max_call_arg_count > 8u ? (max_call_arg_count - 8u) * 4u : 0u;
-        size_t local_storage_bytes = (function->local_count + function->spill_slot_count) * 4u;
-        size_t frame_bytes = local_storage_bytes > function->parameter_count * 4u
-            ? local_storage_bytes
-            : function->parameter_count * 4u;
-        size_t ra_save_offset;
-        size_t s11_save_offset;
-
-        if (!function->has_body || !function->name || function->name[0] == '\0') {
-            continue;
-        }
-        if (strcmp(function->name, "main") == 0) {
-            has_main = 1;
-        }
-
-        frame_bytes += 8u;
-        if ((frame_bytes % 16u) != 0u) {
-            frame_bytes = ((frame_bytes + 15u) / 16u) * 16u;
-        }
-        ra_save_offset = frame_bytes - 4u;
-        s11_save_offset = frame_bytes - 8u;
-
-        if (!compiler_builder_appendf(
-                &builder,
-                ".globl %s\n.type %s, @function\n%s:\n",
-                function->name,
-                function->name,
-                function->name) ||
-            !compiler_append_stack_adjust(&builder, -(long long)frame_bytes) ||
-            !compiler_append_stack_access(&builder, "sw", "ra", "sp", ra_save_offset, "t6") ||
-            !compiler_append_stack_access(&builder, "sw", "s11", "sp", s11_save_offset, "t6") ||
-            !compiler_builder_appendf(&builder, "  mv s11, sp\n")) {
-            compiler_builder_free(&builder);
-            compiler_set_error(error, 0, 0, "COMPILER-128: failed to emit simple function prologue");
-            return 0;
-        }
-
-        {
-            size_t param_index;
-
-            for (param_index = 0u; param_index < function->parameter_count; ++param_index) {
-                size_t offset = compiler_simple_machine_ir_local_offset(function, param_index);
-
-                if (param_index < 8u) {
-                    if (!compiler_append_stack_access(
-                            &builder,
-                            "sw",
-                            compiler_riscv_register_name((uint32_t)(10u + param_index)),
-                            "s11",
-                            offset,
-                            "t6")) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-129: failed to spill simple parameters");
-                        return 0;
-                    }
-                } else {
-                    size_t caller_stack_offset = frame_bytes + ((param_index - 8u) * 4u);
-
-                    if (!compiler_append_stack_access(&builder, "lw", "t5", "s11", caller_stack_offset, "t6") ||
-                        !compiler_append_stack_access(&builder, "sw", "t5", "s11", offset, "t6")) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-130: failed to load simple stack parameters");
-                        return 0;
-                    }
-                }
-            }
-        }
-
-        for (block_index = 0u; block_index < function->block_count; ++block_index) {
-            const MachineIrBasicBlock *block = &function->blocks[block_index];
-            size_t instruction_index;
-
-            if (!compiler_builder_appendf(&builder, ".L%s_%zu:\n", function->name, block->id)) {
-                compiler_builder_free(&builder);
-                compiler_set_error(error, 0, 0, "COMPILER-131: failed to emit simple block label");
-                return 0;
-            }
-
-            for (instruction_index = 0u; instruction_index < block->instruction_count; ++instruction_index) {
-                const MachineIrInstruction *instruction = &block->instructions[instruction_index];
-
-                switch (instruction->kind) {
-                    case MACHINE_IR_INSTR_MOV:
-                        if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.mov_value, "t4") ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-132: unsupported simple mov emission");
-                            return 0;
-                        }
-                        break;
-                    case MACHINE_IR_INSTR_BINARY:
-                        if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.binary.lhs, "t5") ||
-                            !compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.binary.rhs, "t6") ||
-                            !compiler_simple_machine_ir_emit_binary(
-                                &builder, instruction->as.binary.op, "t4", "t5", "t6") ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-133: unsupported simple binary emission");
-                            return 0;
-                        }
-                        break;
-                    case MACHINE_IR_INSTR_CALL: {
-                        size_t arg_index;
-
-                        if (outgoing_arg_bytes > 0u &&
-                            !compiler_append_stack_adjust(&builder, -(long long)outgoing_arg_bytes)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-134: failed to reserve simple call arg area");
-                            return 0;
-                        }
-                        for (arg_index = 0u; arg_index < instruction->as.call.arg_count; ++arg_index) {
-                            if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                    &builder, program, function, instruction->as.call.args[arg_index], "t5")) {
-                                compiler_builder_free(&builder);
-                                compiler_set_error(error, 0, 0, "COMPILER-135: failed to materialize simple call arg");
-                                return 0;
-                            }
-                            if (arg_index < 8u) {
-                                if (!compiler_builder_appendf(
-                                        &builder,
-                                        "  mv %s, t5\n",
-                                        compiler_riscv_register_name((uint32_t)(10u + arg_index)))) {
-                                    compiler_builder_free(&builder);
-                                    compiler_set_error(error, 0, 0, "COMPILER-136: failed to move simple call arg");
-                                    return 0;
-                                }
-                            } else {
-                                if (!compiler_append_stack_access(
-                                        &builder, "sw", "t5", "sp", (arg_index - 8u) * 4u, "t6")) {
-                                    compiler_builder_free(&builder);
-                                    compiler_set_error(error, 0, 0, "COMPILER-137: failed to stage simple stack arg");
-                                    return 0;
-                                }
-                            }
-                        }
-                        if (!compiler_builder_appendf(
-                                &builder,
-                                "  call %s\n",
-                                instruction->as.call.callee_name ? instruction->as.call.callee_name : "<null>")) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-138: failed to emit simple call");
-                            return 0;
-                        }
-                        if (outgoing_arg_bytes > 0u &&
-                            !compiler_append_stack_adjust(&builder, (long long)outgoing_arg_bytes)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-139: failed to release simple call arg area");
-                            return 0;
-                        }
-                        if (instruction->has_result &&
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "a0", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-140: failed to store simple call result");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_ADDR_LOCAL: {
-                        size_t offset = compiler_simple_machine_ir_local_offset(function, instruction->as.addr_slot.id);
-
-                        if (!compiler_builder_appendf(&builder, "  li t5, %zu\n  add t4, s11, t5\n", offset) ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-141: failed to emit simple addr_local");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_ADDR_GLOBAL: {
-                        const MachineIrGlobal *global = instruction->as.addr_slot.id < program->global_count
-                            ? &program->globals[instruction->as.addr_slot.id]
-                            : NULL;
-
-                        if (!global || !global->name ||
-                            !compiler_builder_appendf(&builder, "  la t4, %s\n", global->name) ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-142: failed to emit simple addr_global");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_LOAD_LOCAL: {
-                        size_t offset = compiler_simple_machine_ir_local_offset(function, instruction->as.load_slot.id);
-
-                        if (!compiler_append_stack_access(&builder, "lw", "t4", "s11", offset, "t6") ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-143: failed to emit simple load_local");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_STORE_LOCAL: {
-                        size_t offset = compiler_simple_machine_ir_local_offset(function, instruction->as.store.slot.id);
-
-                        if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.store.value, "t5") ||
-                            !compiler_append_stack_access(&builder, "sw", "t5", "s11", offset, "t6")) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-144: failed to emit simple store_local");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_LOAD_GLOBAL: {
-                        const MachineIrGlobal *global = instruction->as.load_slot.id < program->global_count
-                            ? &program->globals[instruction->as.load_slot.id]
-                            : NULL;
-
-                        if (!global || !global->name ||
-                            !compiler_builder_appendf(&builder, "  la t6, %s\n  lw t4, 0(t6)\n", global->name) ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-145: failed to emit simple load_global");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_STORE_GLOBAL: {
-                        const MachineIrGlobal *global = instruction->as.store.slot.id < program->global_count
-                            ? &program->globals[instruction->as.store.slot.id]
-                            : NULL;
-
-                        if (!global || !global->name ||
-                            !compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.store.value, "t5") ||
-                            !compiler_builder_appendf(&builder, "  la t6, %s\n  sw t5, 0(t6)\n", global->name)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-146: failed to emit simple store_global");
-                            return 0;
-                        }
-                        break;
-                    }
-                    case MACHINE_IR_INSTR_LOAD_INDIRECT:
-                        if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.load_indirect_addr, "t6") ||
-                            !compiler_builder_appendf(&builder, "  lw t4, 0(t6)\n") ||
-                            !compiler_simple_machine_ir_store_reg_to_operand(
-                                &builder, program, function, "t4", instruction->result)) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-147: failed to emit simple load_indirect");
-                            return 0;
-                        }
-                        break;
-                    case MACHINE_IR_INSTR_STORE_INDIRECT:
-                        if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.store_indirect.addr, "t6") ||
-                            !compiler_simple_machine_ir_emit_operand_to_reg(
-                                &builder, program, function, instruction->as.store_indirect.value, "t5") ||
-                            !compiler_builder_appendf(&builder, "  sw t5, 0(t6)\n")) {
-                            compiler_builder_free(&builder);
-                            compiler_set_error(error, 0, 0, "COMPILER-148: failed to emit simple store_indirect");
-                            return 0;
-                        }
-                        break;
-                    default:
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-149: unsupported simple machine-ir instruction");
-                        return 0;
-                }
-            }
-
-            switch (block->terminator.kind) {
-                case MACHINE_IR_TERM_RETURN:
-                    if (block->terminator.as.return_value.kind != MACHINE_IR_OPERAND_NONE &&
-                        !compiler_simple_machine_ir_emit_operand_to_reg(
-                            &builder, program, function, block->terminator.as.return_value, "a0")) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-150: failed to materialize simple return value");
-                        return 0;
-                    }
-                    if (!compiler_append_stack_access(&builder, "lw", "ra", "s11", ra_save_offset, "t6") ||
-                        !compiler_append_stack_access(&builder, "lw", "s11", "s11", s11_save_offset, "t6") ||
-                        !compiler_append_stack_adjust(&builder, (long long)frame_bytes) ||
-                        !compiler_builder_appendf(&builder, "  ret\n")) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-151: failed to emit simple return");
-                        return 0;
-                    }
-                    break;
-                case MACHINE_IR_TERM_JUMP:
-                    if (!compiler_builder_appendf(
-                            &builder, "  j .L%s_%zu\n", function->name, block->terminator.as.jump_target)) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-152: failed to emit simple jump");
-                        return 0;
-                    }
-                    break;
-                case MACHINE_IR_TERM_BRANCH:
-                    if (!compiler_simple_machine_ir_emit_operand_to_reg(
-                            &builder, program, function, block->terminator.as.branch.condition, "t5") ||
-                        !compiler_builder_appendf(
-                            &builder,
-                            "  bne t5, zero, .L%s_%zu\n  j .L%s_%zu\n",
-                            function->name,
-                            block->terminator.as.branch.then_target,
-                            function->name,
-                            block->terminator.as.branch.else_target)) {
-                        compiler_builder_free(&builder);
-                        compiler_set_error(error, 0, 0, "COMPILER-153: failed to emit simple branch");
-                        return 0;
-                    }
-                    break;
-                default:
-                    compiler_builder_free(&builder);
-                    compiler_set_error(error, 0, 0, "COMPILER-154: unsupported simple terminator");
-                    return 0;
-            }
-        }
-
-        if (!compiler_builder_appendf(&builder, ".size %s, .-%s\n\n", function->name, function->name)) {
-            compiler_builder_free(&builder);
-            compiler_set_error(error, 0, 0, "COMPILER-155: failed to finalize simple function");
-            return 0;
-        }
-    }
-
-    if (has_main && compiler_use_runtime_startup_stub_enabled()) {
-        if (!compiler_builder_appendf(&builder,
-                ".weak _start\n"
-                ".type _start, @function\n"
-                "_start:\n"
-                "  call main\n"
-                "  li a7, 93\n"
-                "  ecall\n"
-                ".size _start, .-_start\n")) {
-            compiler_builder_free(&builder);
-            compiler_set_error(error, 0, 0, "COMPILER-156: failed to emit simple startup");
-            return 0;
-        }
-    }
-
-    *out_text = builder.data;
-    builder.data = NULL;
-    compiler_builder_free(&builder);
-    return 1;
-}
-
-int compiler_emit_riscv_preview_text_from_report_simple(const MachineIrAllocateRewriteReport *report,
-    CompilerMode mode,
-    char **out_text,
-    CompilerError *error) {
-    MachineBytesReport bytes_report;
-    CompilerRiscvPreviewCache preview_cache;
-    const MachineBytesProgram *program = NULL;
-    size_t symbol_count = 0u;
-    CompilerStringBuilder builder;
-    MachineIrProgram simple_program;
-    MachineIrError machine_error;
-    int ok = 0;
-    size_t symbol_index;
-    size_t function_index;
-    int has_main = 0;
-
-    if (out_text) {
-        *out_text = NULL;
-    }
-    if (!report || !out_text) {
-        compiler_set_error(error, 0, 0, "COMPILER-109: invalid simple riscv text export contract");
-        return 0;
-    }
-
-    machine_ir_program_init(&simple_program);
-    memset(&machine_error, 0, sizeof(machine_error));
-    if (compiler_use_direct_simple_text_enabled()) {
-        if (machine_ir_clone_program(&report->program, &simple_program, &machine_error) &&
-            machine_ir_eliminate_phi_nodes(&simple_program, &machine_error) &&
-            machine_ir_cleanup_after_phi_elimination(&simple_program, &machine_error) &&
-            compiler_emit_riscv_preview_text_from_machine_ir_program_simple(&simple_program, out_text, error)) {
-            machine_ir_program_free(&simple_program);
-            return 1;
-        }
-    }
-    machine_ir_program_free(&simple_program);
-
-    compiler_riscv_preview_cache_init(&preview_cache);
-    compiler_builder_init(&builder);
-    memset(&bytes_report, 0, sizeof(bytes_report));
-
-    ok = compiler_build_riscv_preview_bytes_report_from_machine_ir_report(report, mode, &bytes_report, error);
-    if (!ok) {
-        goto cleanup;
-    }
-    if (!compiler_riscv_preview_cache_build(&bytes_report, &preview_cache)) {
-        compiler_set_error(error, 0, 0, "COMPILER-110: failed to build riscv preview lookup cache");
-        ok = 0;
-        goto cleanup;
-    }
-    if (!machine_bytes_report_get_program(&bytes_report, &program) || !program) {
-        compiler_set_error(error, 0, 0, "COMPILER-110: missing bytes program in riscv text export");
-        ok = 0;
-        goto cleanup;
-    }
-    if (!compiler_builder_appendf(&builder, ".attribute arch, \"rv32im\"\n") ||
-        !compiler_emit_global_sections(&builder, program) ||
-        !compiler_builder_appendf(&builder, ".text\n.p2align 2\n")) {
-        compiler_set_error(error, 0, 0, "COMPILER-111: out of memory building riscv text");
-        ok = 0;
-        goto cleanup;
-    }
-    if (!machine_bytes_report_get_symbol_summary_count(&bytes_report, &symbol_count)) {
-        compiler_set_error(error, 0, 0, "COMPILER-112: missing bytes symbol summary surface");
-        ok = 0;
-        goto cleanup;
-    }
-    for (symbol_index = 0u; symbol_index < symbol_count; ++symbol_index) {
-        const MachineBytesSymbolSummary *symbol = NULL;
-
-        if (!machine_bytes_report_get_symbol_summary(&bytes_report, symbol_index, &symbol) || !symbol) {
-            compiler_set_error(error, 0, 0, "COMPILER-113: malformed bytes symbol summary");
-            ok = 0;
-            goto cleanup;
-        }
-        if (symbol->kind == MACHINE_BYTES_SYMBOL_EXTERNAL && !symbol->is_defined && symbol->name &&
-            symbol->name[0] != '\0') {
-            if (!compiler_builder_appendf(&builder, ".globl %s\n.type %s, @function\n", symbol->name, symbol->name)) {
-                compiler_set_error(error, 0, 0, "COMPILER-114: out of memory writing external declaration");
-                ok = 0;
-                goto cleanup;
-            }
-        }
-    }
-    if (program->function_count > 0u && !compiler_builder_appendf(&builder, "\n")) {
-        compiler_set_error(error, 0, 0, "COMPILER-115: out of memory separating text header");
-        ok = 0;
-        goto cleanup;
-    }
-    for (function_index = 0u; function_index < program->function_count; ++function_index) {
-        const MachineBytesFunction *function = NULL;
-        const char *function_name = NULL;
-        int has_body = 0;
-        size_t parameter_count = 0u;
-        size_t local_count = 0u;
-        size_t block_count = 0u;
-        size_t spill_slot_count = 0u;
-        const MachineBytesFunctionSummary *function_summary = NULL;
-        size_t frame_bytes = 0u;
-        size_t local_storage_bytes = 0u;
-        size_t ra_save_offset = 0u;
-        size_t s11_save_offset = 0u;
-        size_t block_index;
-
-        if (!machine_bytes_report_get_function(&bytes_report, function_index, &function) || !function ||
-            !machine_bytes_function_get_summary(function, &function_name, &has_body, &parameter_count, &local_count, &block_count, &spill_slot_count) ||
-            !machine_bytes_report_get_function_summary_artifact(&bytes_report, function_index, &function_summary) ||
-            !function_summary) {
-            compiler_set_error(error, 0, 0, "COMPILER-116: malformed bytes function surface");
-            ok = 0;
-            goto cleanup;
-        }
-        if (!has_body || !function_name || function_name[0] == '\0') {
-            continue;
-        }
-        if (strcmp(function_name, "main") == 0) {
-            has_main = 1;
-        }
-        local_storage_bytes = (local_count + spill_slot_count) * 4u;
-        frame_bytes = local_storage_bytes > parameter_count * 4u ? local_storage_bytes : parameter_count * 4u;
-        if (function_summary->call_count > 0u) {
-            frame_bytes += 8u;
-        }
-        if (frame_bytes > 0u && (frame_bytes % 16u) != 0u) {
-            frame_bytes = ((frame_bytes + 15u) / 16u) * 16u;
-        }
-        if (function_summary->call_count > 0u) {
-            ra_save_offset = frame_bytes - 4u;
-            s11_save_offset = frame_bytes - 8u;
-        }
-        if (!compiler_builder_appendf(&builder, ".globl %s\n.type %s, @function\n%s:\n", function_name, function_name, function_name)) {
-            compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function header");
-            ok = 0;
-            goto cleanup;
-        }
-        if (frame_bytes > 0u) {
-            size_t param_index;
-
-            if (!compiler_append_stack_adjust(&builder, -(long long)frame_bytes)) {
-                compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
-                ok = 0;
-                goto cleanup;
-            }
-            if (function_summary->call_count > 0u &&
-                (!compiler_append_stack_access(&builder, "sw", "ra", "sp", ra_save_offset, "t6") ||
-                    !compiler_append_stack_access(&builder, "sw", "s11", "sp", s11_save_offset, "t6") ||
-                    !compiler_builder_appendf(&builder, "  mv s11, sp\n"))) {
-                compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
-                ok = 0;
-                goto cleanup;
-            }
-            for (param_index = 0u; param_index < parameter_count; ++param_index) {
-                if (param_index < 8u) {
-                    if (!compiler_append_stack_access(&builder,
-                            "sw",
-                            compiler_riscv_register_name((uint32_t)(10u + param_index)),
-                            "sp",
-                            param_index * 4u,
-                            "t6")) {
-                        compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
-                        ok = 0;
-                        goto cleanup;
-                    }
-                } else {
-                    size_t caller_stack_offset = frame_bytes + ((param_index - 8u) * 4u);
-
-                    if (!compiler_append_stack_access(&builder, "lw", "t5", "sp", caller_stack_offset, "t6") ||
-                        !compiler_append_stack_access(&builder, "sw", "t5", "sp", param_index * 4u, "t6")) {
-                        compiler_set_error(error, 0, 0, "COMPILER-117: out of memory writing function prologue");
-                        ok = 0;
-                        goto cleanup;
-                    }
-                }
-            }
-        }
-
-        for (block_index = 0u; block_index < block_count; ++block_index) {
-            const MachineBytesBlock *block = NULL;
-            MachineBytesBlockSummary block_summary;
-            const unsigned char *block_bytes = NULL;
-            size_t block_byte_count = 0u;
-            size_t function_start = 0u;
-            size_t byte_offset;
-            size_t skip_until_program_byte_offset = (size_t)-1;
-
-            memset(&block_summary, 0, sizeof(block_summary));
-            if (!machine_bytes_function_get_block(function, block_index, &block) || !block ||
-                !machine_bytes_block_get_summary(block, &block_summary) ||
-                !machine_bytes_block_get_bytes(block, &block_bytes, &block_byte_count) || !block_bytes ||
-                !machine_bytes_report_get_function_byte_span(&bytes_report, function_index, &function_start, NULL)) {
-                compiler_set_error(error, 0, 0, "COMPILER-118: malformed bytes block surface");
-                ok = 0;
-                goto cleanup;
-            }
-            if ((block_byte_count % 4u) != 0u) {
-                compiler_set_error(error, 0, 0, "COMPILER-119: riscv preview block is not 4-byte aligned");
-                ok = 0;
-                goto cleanup;
-            }
-            if (block_summary.label_name && block_summary.label_name[0] != '\0') {
-                if (!compiler_builder_appendf(&builder, ".L%s_%zu:\n", function_name, block_index)) {
-                    compiler_set_error(error, 0, 0, "COMPILER-120: out of memory writing block label");
-                    ok = 0;
-                    goto cleanup;
-                }
-            }
-            for (byte_offset = 0u; byte_offset < block_byte_count; byte_offset += 4u) {
-                uint32_t word = compiler_read_u32_le(block_bytes + byte_offset);
-                size_t program_byte_offset = function_start + block_summary.start_byte_offset + byte_offset;
-
-                if (skip_until_program_byte_offset != (size_t)-1 &&
-                    program_byte_offset < skip_until_program_byte_offset) {
-                    continue;
-                }
-                if (!compiler_append_riscv_preview_instruction(
-                        &builder,
-                        &bytes_report,
-                        &preview_cache,
-                        program_byte_offset,
-                        word,
-                        frame_bytes,
-                        ra_save_offset,
-                        function_summary->call_count > 0u,
-                        0u,
-                        0)) {
-                    compiler_set_error(error, 0, 0, "COMPILER-121: out of memory writing riscv instruction");
-                    ok = 0;
-                    goto cleanup;
-                }
-                {
-                    const MachineBytesFixupSummary *current_fixup =
-                        compiler_find_fixup_at_patch_offset_cached(&preview_cache, program_byte_offset);
-
-                    if (current_fixup &&
-                        current_fixup->kind == MACHINE_BYTES_FIXUP_CALL_TARGET &&
-                        compiler_should_collapse_call_fixup(&bytes_report, current_fixup, 0) &&
-                        (word & 0x7Fu) == 0x17u) {
-                        skip_until_program_byte_offset = program_byte_offset + 8u;
-                    } else {
-                        skip_until_program_byte_offset = (size_t)-1;
-                    }
-                }
-            }
-        }
-        if (!compiler_builder_appendf(&builder, ".size %s, .-%s\n\n", function_name, function_name)) {
-            compiler_set_error(error, 0, 0, "COMPILER-122: out of memory separating functions");
-            ok = 0;
-            goto cleanup;
-        }
-    }
-
-    if (has_main && compiler_use_runtime_startup_stub_enabled()) {
-        if (!compiler_builder_appendf(&builder,
-                ".weak _start\n"
-                ".type _start, @function\n"
-                "_start:\n"
-                "  call main\n"
-                "  li a7, 93\n"
-                "  ecall\n"
-                ".size _start, .-_start\n")) {
-            compiler_set_error(error, 0, 0, "COMPILER-123: out of memory writing riscv startup");
-            ok = 0;
-            goto cleanup;
-        }
-    }
-
-    *out_text = builder.data;
-    builder.data = NULL;
     ok = 1;
 
 cleanup:
@@ -7599,38 +6442,7 @@ int compiler_compile_source_text_with_options(const char *source,
     SemanticOptions semantic_options;
     IrLowerOptions ir_options;
     LowerIrOptions lower_options;
-    CompilerSavedEnv simple_backend_saved_envs[] = {
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-        {0},
-    };
-    const char *simple_backend_env_names[] = {
-        "COMPILER_ENABLE_AGGRESSIVE_OPTIMIZATIONS",
-        "COMPILER_USE_CALLER_SAVE_TEXT",
-        "COMPILER_USE_FINAL_TEXT_PEEPHOLES",
-        "COMPILER_USE_SMALL_DATA_SECTIONS",
-        "COMPILER_USE_DEFAULT_SSA_BUILD",
-        "COMPILER_USE_PERF_HOTSPOTS",
-        "MACHINE_SELECT_SKIP_REUSE_ADDR_ROOTS",
-        "MACHINE_SELECT_SKIP_CLEANUP_PURE",
-        "MACHINE_SELECT_SKIP_REUSE_INTERNAL_PURE_CALLS",
-        "MACHINE_SELECT_SKIP_REUSE_UNIQUE_PREDECESSOR_PURE_CALLS",
-        "MACHINE_SELECT_SKIP_FORWARD_SAME_BLOCK_INDIRECT_LOADS",
-        "MACHINE_SELECT_SKIP_REUSE_SPILL_PURE_EXPR",
-        "MACHINE_SELECT_SKIP_FULL_CLEANUP",
-    };
-    size_t simple_backend_env_index = 0u;
-    int simple_backend_profile_applied = 0;
+    int extreme_straight_line_hotspot = 0;
     int ok = 0;
 
     if (out_text) {
@@ -7688,25 +6500,11 @@ int compiler_compile_source_text_with_options(const char *source,
         compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
         goto cleanup;
     }
-    if (compiler_use_simple_backend_enabled()) {
-        for (simple_backend_env_index = 0u;
-             simple_backend_env_index < sizeof(simple_backend_saved_envs) / sizeof(simple_backend_saved_envs[0]);
-             ++simple_backend_env_index) {
-            compiler_saved_env_init(
-                &simple_backend_saved_envs[simple_backend_env_index],
-                simple_backend_env_names[simple_backend_env_index]);
-            if (!compiler_save_env(&simple_backend_saved_envs[simple_backend_env_index])) {
-                compiler_set_error(error, 0, 0, "COMPILER-124: failed to save simple-backend env");
-                goto cleanup;
-            }
-        }
-        if (!compiler_apply_simple_backend_profile()) {
-            compiler_set_error(error, 0, 0, "COMPILER-125: failed to apply simple-backend profile");
-            goto cleanup;
-        }
-        simple_backend_profile_applied = 1;
-    }
-    if (compiler_use_default_ssa_build_enabled()) {
+    extreme_straight_line_hotspot = compiler_lower_ir_is_extreme_straight_line_hotspot(&lower_program);
+    if (mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot) {
+        ok = value_ssa_build_from_lower_ir_with_canonicalization(
+            &lower_program, VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC, &value_program, &value_error);
+    } else if (compiler_use_default_ssa_build_enabled()) {
         ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
     } else {
         ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
@@ -7716,51 +6514,45 @@ int compiler_compile_source_text_with_options(const char *source,
         goto cleanup;
     }
     if (mode == COMPILER_MODE_PERF) {
-        if (!memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error)) {
-            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-            goto cleanup;
+        if (!compiler_lower_ir_has_huge_parameter_hotspot(&lower_program) &&
+            !extreme_straight_line_hotspot) {
+            if (!memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error)) {
+                compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+                goto cleanup;
+            }
         }
         if (!memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error)) {
             compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
             goto cleanup;
         }
     }
-    if (compiler_use_perf_hotspots_enabled()) {
+    if (compiler_use_perf_hotspots_enabled() &&
+        !(mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot)) {
         if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
             compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
             goto cleanup;
         }
     }
-    if (compiler_use_simple_backend_enabled()) {
-        ok = compiler_simple_backend_emit_from_value_ssa(&value_program, out_text, error);
-        if (!ok) {
-            goto cleanup;
-        }
-    } else {
-        ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
-            &value_program,
-            COMPILER_DEFAULT_COLOR_BUDGET,
-            COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
-            &machine_report,
-            &machine_error);
-        if (!ok) {
-            compiler_copy_stage_error(error, machine_error.line, machine_error.column, machine_error.message);
-            goto cleanup;
-        }
-        ok = compiler_emit_riscv_preview_text_from_report(&machine_report, mode, out_text, error);
-        if (!ok) {
-            goto cleanup;
-        }
+    if (!value_ssa_verify_program(&value_program, &value_error)) {
+        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+        goto cleanup;
+    }
+    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
+        &value_program,
+        COMPILER_DEFAULT_COLOR_BUDGET,
+        COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
+        &machine_report,
+        &machine_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, machine_error.line, machine_error.column, machine_error.message);
+        goto cleanup;
+    }
+    ok = compiler_emit_riscv_preview_text_from_report(&machine_report, mode, out_text, error);
+    if (!ok) {
+        goto cleanup;
     }
 
 cleanup:
-    if (simple_backend_profile_applied) {
-        for (simple_backend_env_index = 0u;
-             simple_backend_env_index < sizeof(simple_backend_saved_envs) / sizeof(simple_backend_saved_envs[0]);
-             ++simple_backend_env_index) {
-            compiler_restore_env(&simple_backend_saved_envs[simple_backend_env_index]);
-        }
-    }
     machine_ir_allocate_rewrite_report_free(&machine_report);
     value_ssa_program_free(&value_program);
     lower_ir_program_free(&lower_program);

@@ -102,6 +102,7 @@ static int value_ssa_collect_non_address_taken_global_call_clobbers(
         size_t block_index;
 
         if (!function->has_body) {
+            unknown_call_clobber[function_index] = 1u;
             continue;
         }
 
@@ -122,7 +123,8 @@ static int value_ssa_collect_non_address_taken_global_call_clobbers(
                             program,
                             instruction->as.call.callee_name);
 
-                    if (callee_index == (size_t)-1) {
+                    if (callee_index == (size_t)-1 ||
+                        !program->functions[callee_index].has_body) {
                         unknown_call_clobber[function_index] = 1u;
                     }
                 }
@@ -157,7 +159,8 @@ static int value_ssa_collect_non_address_taken_global_call_clobbers(
                         value_ssa_non_address_taken_global_load_forward_find_function_index_by_name(
                             program,
                             instruction->as.call.callee_name);
-                    if (callee_index == (size_t)-1) {
+                    if (callee_index == (size_t)-1 ||
+                        !program->functions[callee_index].has_body) {
                         continue;
                     }
 

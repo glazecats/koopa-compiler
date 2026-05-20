@@ -261,6 +261,9 @@ static int memory_ssa_pass_eliminate_redundant_stores_impl(ValueSsaProgram *prog
 }
 
 int memory_ssa_pass_eliminate_redundant_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    if (memory_ssa_pass_program_has_extreme_local_scalar_replace_hotspot(program)) {
+        return value_ssa_verify_program(program, error);
+    }
     return memory_ssa_pass_eliminate_redundant_stores_impl(program, 1, 0, error);
 }
 
@@ -427,6 +430,9 @@ int memory_ssa_pass_eliminate_dead_stores(ValueSsaProgram *program, ValueSsaErro
 }
 
 int memory_ssa_pass_eliminate_dead_local_stores(ValueSsaProgram *program, ValueSsaError *error) {
+    if (memory_ssa_pass_program_has_extreme_local_scalar_replace_hotspot(program)) {
+        return value_ssa_verify_program(program, error);
+    }
     return memory_ssa_pass_eliminate_dead_stores_impl(program, 1, 0, error);
 }
 

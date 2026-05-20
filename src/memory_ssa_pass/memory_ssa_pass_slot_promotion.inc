@@ -69,6 +69,17 @@ static int memory_ssa_pass_try_promote_dominating_memory_phi(ValueSsaFunction *v
         return 1;
     }
 
+    /*
+     * Be conservative for loop headers: if the load itself sits in a block with
+     * a backedge predecessor, only promote from a dominating memory phi when we
+     * can later resolve each phi input to a concrete predecessor-carried value.
+     * Otherwise we may manufacture a self-referential scalar carrier that does
+     * not actually correspond to the slot state along the loop backedge.
+     */
+    if (phi_block_id == block_id && memory_ssa_pass_block_has_backedge_predecessor(cfg_analysis, block_id)) {
+        return 1;
+    }
+
     phi_block = &value_function->blocks[phi_block_id];
     if (phi_block_id == block_id) {
         if (!memory_ssa_pass_find_prior_equivalent_value_in_block(value_function,

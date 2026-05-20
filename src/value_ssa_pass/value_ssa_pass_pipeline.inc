@@ -18,12 +18,16 @@ int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *erro
     if (!value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_forward_local_loads(program, error) ||
         !value_ssa_forward_global_loads(program, error) ||
+        !value_ssa_forward_non_address_taken_global_loads(program, error) ||
+        !value_ssa_inline_tiny_internal_helpers(program, error) ||
+        !value_ssa_licm_hoist_simple_loop_invariant_values(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_eliminate_redundant_stores(program, error) ||
         !value_ssa_eliminate_dead_stores(program, error) ||
         !value_ssa_normalize_binary_operands(program, error) ||
         !value_ssa_simplify_algebraic_identities(program, error) ||
         !value_ssa_fold_constants(program, error) ||
+        !value_ssa_sparse_conditional_constant_propagation(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_eliminate_redundant_binaries(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||

@@ -283,6 +283,7 @@ static int value_ssa_perf_dispatch_build_tree(ValueSsaFunction *function,
                 function, compared_value, cases, mid, end, default_target, &right_root, error)) {
             return 0;
         }
+        block = &function->blocks[block_id];
 
         memset(&instruction, 0, sizeof(instruction));
         instruction.kind = VALUE_SSA_INSTR_BINARY;
@@ -317,6 +318,7 @@ static int value_ssa_perf_rebalance_integer_dispatch_chains(ValueSsaProgram *pro
 
     for (function_index = 0; function_index < program->function_count; ++function_index) {
         ValueSsaFunction *function = &program->functions[function_index];
+        size_t original_block_count = function->block_count;
         size_t predecessor_index;
         int changed_function = 0;
 
@@ -324,7 +326,7 @@ static int value_ssa_perf_rebalance_integer_dispatch_chains(ValueSsaProgram *pro
             continue;
         }
 
-        for (predecessor_index = 0; predecessor_index < function->block_count; ++predecessor_index) {
+        for (predecessor_index = 0; predecessor_index < original_block_count; ++predecessor_index) {
             ValueSsaBasicBlock *predecessor = &function->blocks[predecessor_index];
             size_t root_block_id;
             ValueSsaPerfDispatchCase cases[16];
