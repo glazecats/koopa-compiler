@@ -282,6 +282,11 @@
      SCCP now also rewrites branch conditions for the address-symbol family,
      so proven-truthy branch conditions are pushed to a concrete constant and
      CFG cleanup can finish the fold more aggressively.
+   - Current later same-day SCCP nonzero-address follow-up:
+     SCCP now also preserves one first richer merged address fact instead of
+     dropping directly to overdefined whenever two different address symbols
+     meet, via a new `nonzero-address` lattice element that keeps joined
+     address-family truthiness available to later folds.
    - Current later same-day tiny-inline follow-up:
      the tiny-helper inliner now also accepts a narrow nested-call family:
      a tiny helper may inline another tiny leaf helper, and the current

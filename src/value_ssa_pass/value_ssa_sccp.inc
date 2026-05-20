@@ -8,6 +8,7 @@ typedef enum {
     VALUE_SSA_SCCP_VALUE_UNKNOWN = 0,
     VALUE_SSA_SCCP_VALUE_CONSTANT,
     VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL,
+    VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS,
     VALUE_SSA_SCCP_VALUE_OVERDEFINED,
 } ValueSsaSccpValueKind;
 
@@ -62,6 +63,16 @@ static ValueSsaSccpValue value_ssa_sccp_make_address_symbol(
     return value;
 }
 
+static ValueSsaSccpValue value_ssa_sccp_make_nonzero_address(void) {
+    ValueSsaSccpValue value;
+    value.kind = VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS;
+    value.constant = 0;
+    value.address_symbol.kind = VALUE_SSA_SCCP_ADDRESS_LOCAL_SLOT;
+    value.address_symbol.id = 0u;
+    value.address_symbol.offset = 0;
+    return value;
+}
+
 static ValueSsaSccpValue value_ssa_sccp_make_overdefined(void) {
     ValueSsaSccpValue value;
     value.kind = VALUE_SSA_SCCP_VALUE_OVERDEFINED;
@@ -91,13 +102,20 @@ static ValueSsaSccpValue value_ssa_sccp_meet(ValueSsaSccpValue lhs, ValueSsaSccp
     if (lhs.kind == VALUE_SSA_SCCP_VALUE_OVERDEFINED || rhs.kind == VALUE_SSA_SCCP_VALUE_OVERDEFINED) {
         return value_ssa_sccp_make_overdefined();
     }
-    if (lhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL || rhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+    if (lhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+        lhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS ||
+        rhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+        rhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) {
         if (lhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
             rhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
             lhs.address_symbol.kind == rhs.address_symbol.kind &&
             lhs.address_symbol.id == rhs.address_symbol.id &&
             lhs.address_symbol.offset == rhs.address_symbol.offset) {
             return lhs;
+        }
+        if ((lhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL || lhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) &&
+            (rhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL || rhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS)) {
+            return value_ssa_sccp_make_nonzero_address();
         }
         return value_ssa_sccp_make_overdefined();
     }
@@ -267,6 +285,19 @@ static int value_ssa_sccp_try_evaluate_binary(ValueSsaBinaryOp op,
             return 1;
         default:
             break;
+        }
+    }
+    if ((lhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS &&
+            rhs.kind == VALUE_SSA_SCCP_VALUE_CONSTANT) ||
+        (lhs.kind == VALUE_SSA_SCCP_VALUE_CONSTANT &&
+            rhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS)) {
+        if (op == VALUE_SSA_BINARY_EQ) {
+            *out_value = value_ssa_sccp_make_constant(0);
+            return 1;
+        }
+        if (op == VALUE_SSA_BINARY_NE) {
+            *out_value = value_ssa_sccp_make_constant(1);
+            return 1;
         }
     }
     if (lhs.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
@@ -623,10 +654,12 @@ int value_ssa_sparse_conditional_constant_propagation(ValueSsaProgram *program, 
                         size_t else_target = block->terminator.as.branch.else_target;
 
                         if (condition.kind == VALUE_SSA_SCCP_VALUE_CONSTANT ||
-                            condition.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+                            condition.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+                            condition.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) {
                             size_t taken = condition.constant != 0 ? then_target : else_target;
 
-                            if (condition.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+                            if (condition.kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+                                condition.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) {
                                 taken = then_target;
                             }
 
@@ -666,7 +699,8 @@ int value_ssa_sparse_conditional_constant_propagation(ValueSsaProgram *program, 
 
                 if (value_id >= def_use.value_count || !def_use.has_def[value_id] ||
                     (values[value_id].kind != VALUE_SSA_SCCP_VALUE_CONSTANT &&
-                        values[value_id].kind != VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL)) {
+                        values[value_id].kind != VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
+                        values[value_id].kind != VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS)) {
                     continue;
                 }
 
@@ -674,12 +708,14 @@ int value_ssa_sparse_conditional_constant_propagation(ValueSsaProgram *program, 
                     const ValueSsaUseSite *site = &def_use.use_sites[def_use.use_offsets[value_id] + use_index];
                     ValueSsaValueRef replacement;
 
-                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL &&
+                    if ((values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+                            values[value_id].kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) &&
                         site->role != VALUE_SSA_USE_ROLE_BRANCH_CONDITION) {
                         continue;
                     }
 
-                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL) {
+                    if (values[value_id].kind == VALUE_SSA_SCCP_VALUE_ADDRESS_SYMBOL ||
+                        values[value_id].kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS) {
                         replacement = value_ssa_value_immediate(1);
                     } else {
                         replacement = value_ssa_value_immediate(values[value_id].constant);

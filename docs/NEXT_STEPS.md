@@ -249,6 +249,21 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later SCCP nonzero-address follow-up:
+  - SCCP now also preserves one first richer merged address fact instead of
+    dropping directly to overdefined whenever two different address symbols
+    meet: the new `nonzero-address` lattice element carries "definitely an
+    address / definitely truthy" through joins even when exact identity is
+    lost
+  - current landed effect:
+    address-family joins no longer immediately lose branch-truthiness facts,
+    so the stronger branch rewrite line can keep collapsing those joined
+    branch shapes instead of leaving them behind as opaque values
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later tiny-inline nested-call follow-up:
   - the tiny-helper inliner now also accepts a narrow nested-call family:
     a tiny helper may inline another tiny leaf helper, and the current
