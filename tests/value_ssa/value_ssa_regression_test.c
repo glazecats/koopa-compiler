@@ -893,6 +893,45 @@ static int build_lower_ir_tiny_helper_two_block_return_program(LowerIrProgram *p
     return 1;
 }
 
+static int build_lower_ir_tiny_helper_nested_call_program(LowerIrProgram *program, LowerIrError *error) {
+    static const char *source =
+        "int inner() { return 1 + 2; }\n"
+        "int outer() { return inner() + 2; }\n"
+        "int main() { return outer(); }\n";
+    AstProgram ast;
+    TokenArray tokens;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast);
+    ir_program_init(&ir_program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    lower_ir_program_init(program);
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast, &parser_error) &&
+        semantic_analyze_program_with_options(&ast, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast, &ir_options, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, NULL, program, error);
+
+    ir_program_free(&ir_program);
+    ast_program_free(&ast);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int build_lower_ir_tiny_void_helper_two_block_return_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *helper = NULL;
     LowerIrFunction *main_function = NULL;
@@ -18906,6 +18945,25 @@ static int test_value_ssa_default_conversion_tiny_helper_two_block_return_progra
         "}\n");
 }
 
+static int test_value_ssa_default_conversion_tiny_helper_nested_call_program(void) {
+    return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-TINY-HELPER-NESTED-CALL",
+        build_lower_ir_tiny_helper_nested_call_program,
+        "func inner() {\n"
+        "  bb.0:\n"
+        "    ret 3\n"
+        "}\n"
+        "\n"
+        "func outer() {\n"
+        "  bb.0:\n"
+        "    ret 5\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 5\n"
+        "}\n");
+}
+
 static int test_value_ssa_default_conversion_tiny_void_helper_two_block_return_program(void) {
     return expect_default_converted_dump("VALUE-SSA-CONVERT-DEFAULT-TINY-VOID-HELPER-TWO-BLOCK-RETURN",
         build_lower_ir_tiny_void_helper_two_block_return_program,
@@ -19742,6 +19800,7 @@ int main(void) {
     ok &= test_value_ssa_default_conversion_indirect_safe_global_forward_program();
     ok &= test_value_ssa_default_conversion_tiny_helper_inline_program();
     ok &= test_value_ssa_default_conversion_tiny_helper_two_block_return_program();
+    ok &= test_value_ssa_default_conversion_tiny_helper_nested_call_program();
     ok &= test_value_ssa_default_conversion_tiny_void_helper_two_block_return_program();
     ok &= test_value_ssa_default_conversion_internal_call_preserves_unwritten_global_forward_program();
     ok &= test_value_ssa_default_conversion_eliminates_unread_scalar_local_store_program();

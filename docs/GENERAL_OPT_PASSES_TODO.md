@@ -268,6 +268,11 @@
      the repeated pure internal call reuse helper is now also live on the
      default direct-binary cleanup path, so repeated pure internal helper
      calls can now be collapsed earlier on the non-indirect mainline too.
+   - Current later same-day tiny-inline follow-up:
+     the tiny-helper inliner now also accepts a narrow nested-call family:
+     a tiny helper may inline another tiny leaf helper, and the current
+     regression witness locks the chain all the way down to the folded
+     default output rather than leaving the nested calls live.
    - Current authority:
      treat this as the opening GVN foothold, not the final pass.
      The next useful expansions should be:

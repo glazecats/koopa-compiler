@@ -473,6 +473,17 @@
       `test-value-ssa-regression`, `test-compiler-driver`,
       `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
       `autotest -perf /workspaces/compiler_lab` remain green
+  - 2026-05-20 later tiny-inline nested-call follow-up:
+    - the tiny-helper inliner now accepts a narrow nested-call family too:
+      a tiny helper may inline another tiny leaf helper
+    - current kept effect:
+      the current regression witness now collapses the nested helper chain all
+      the way to a fully folded `ret 5` on the default direct path instead of
+      leaving the nested calls live
+    - current status:
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
+      `autotest -perf /workspaces/compiler_lab` remain green
   - 2026-05-20 later SCCP symbol-lattice follow-up:
     - the current SCCP slice now also has one first non-immediate symbolic
       value family instead of stopping at integer constants alone

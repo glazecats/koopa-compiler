@@ -212,6 +212,20 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later tiny-inline nested-call follow-up:
+  - the tiny-helper inliner now also accepts a narrow nested-call family:
+    a tiny helper may inline another tiny leaf helper, and the current
+    regression witness now locks that path all the way down to the default
+    converted output
+  - current landed effect:
+    a small `inner -> outer -> main` source witness now collapses completely
+    through the default `ValueSSA` path, ending at the fully folded
+    `ret 5` output rather than keeping the nested calls alive
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later SCCP symbol-lattice follow-up:
   - the current SCCP slice is no longer limited to integer constants plus
     readonly `load_global`
