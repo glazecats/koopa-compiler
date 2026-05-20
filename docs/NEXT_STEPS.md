@@ -185,6 +185,20 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later addr-root cleanup follow-up:
+  - another older bridge-side helper is now live again too instead of only
+    existing on disk: same-block `addr_local` / `addr_global` root reuse now
+    runs in both the default direct-binary cleanup path and the indirect-
+    memory direct-fast cleanup path
+  - current landed effect:
+    default conversion now exposes that earlier addr-root reuse directly in
+    the regression surface instead of relying on later stronger cleanups to
+    erase every duplicate root shape implicitly
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later SCCP symbol-lattice follow-up:
   - the current SCCP slice is no longer limited to integer constants plus
     readonly `load_global`

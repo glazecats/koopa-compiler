@@ -449,6 +449,18 @@
       `test-value-ssa-regression`, `test-compiler-driver`,
       `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
       `autotest -perf /workspaces/compiler_lab` are all green on the live tree
+  - 2026-05-20 later addr-root cleanup follow-up:
+    - the older bridge-side same-block addr-root reuse helper is now also
+      reconnected into those same live default direct-binary and indirect-
+      memory direct-fast cleanup paths
+    - current kept effect:
+      repeated local/global address-root materialization is now exposed as an
+      earlier explicit cleanup step instead of being left entirely to later
+      stronger pure-address/GVN cleanup layers
+    - current status:
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
+      `autotest -perf /workspaces/compiler_lab` remain green
   - 2026-05-20 later SCCP symbol-lattice follow-up:
     - the current SCCP slice now also has one first non-immediate symbolic
       value family instead of stopping at integer constants alone

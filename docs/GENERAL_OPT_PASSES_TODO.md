@@ -259,6 +259,11 @@
      the default direct-binary and indirect-memory direct-fast bridge flows,
      so repeated `addr_*` / pure address-add chains are shortened before the
      later GVN/CSE family even needs to see them.
+   - Current later same-day addr-root follow-up:
+     the even older same-block addr-root bridge helper is now also live again
+     in those same bridge flows, so plain repeated `addr_local` /
+     `addr_global` roots are no longer only an accidentally cleaned-up shape
+     left to later stronger passes.
    - Current authority:
      treat this as the opening GVN foothold, not the final pass.
      The next useful expansions should be:

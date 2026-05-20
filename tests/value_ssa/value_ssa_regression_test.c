@@ -19034,8 +19034,10 @@ static int test_value_ssa_default_conversion_reuses_repeated_addr_root_program(v
         "    ssa.1 = load_local idx.0\n"
         "    ssa.2 = mul ssa.1, 4\n"
         "    ssa.3 = add ssa.0, ssa.2\n"
-        "    ssa.4 = load_indirect ssa.3\n"
-        "    ret ssa.4\n"
+        "    ssa.4 = mov ssa.0\n"
+        "    ssa.5 = add ssa.0, ssa.2\n"
+        "    ssa.6 = load_indirect ssa.5\n"
+        "    ret ssa.6\n"
         "}\n");
 }
 
