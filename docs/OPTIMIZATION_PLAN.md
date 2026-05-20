@@ -461,6 +461,18 @@
       `test-value-ssa-regression`, `test-compiler-driver`,
       `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
       `autotest -perf /workspaces/compiler_lab` remain green
+  - 2026-05-20 later pure-call cleanup follow-up:
+    - the repeated pure internal call reuse helper is now also active on the
+      live default direct-binary cleanup path, not only on the indirect-memory
+      side path
+    - current kept effect:
+      repeated pure internal helper calls now collapse earlier on the default
+      mainline too, and a direct `helper(5, 2) + helper(5, 2)` witness now
+      locks the behavior on the standard non-indirect conversion route
+    - current status:
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
+      `autotest -perf /workspaces/compiler_lab` remain green
   - 2026-05-20 later SCCP symbol-lattice follow-up:
     - the current SCCP slice now also has one first non-immediate symbolic
       value family instead of stopping at integer constants alone

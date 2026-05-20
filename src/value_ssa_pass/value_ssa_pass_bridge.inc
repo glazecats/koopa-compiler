@@ -6,6 +6,8 @@
 
 static int value_ssa_collapse_same_block_identical_binary_runs(ValueSsaProgram *program, ValueSsaError *error);
 static int value_ssa_bridge_reuse_addr_roots_in_program(ValueSsaProgram *program, ValueSsaError *error);
+static int value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(ValueSsaProgram *program,
+    ValueSsaError *error);
 static int value_ssa_bridge_reuse_same_block_pure_address_values_in_program(
     ValueSsaProgram *program,
     ValueSsaError *error);
@@ -303,6 +305,7 @@ static int value_ssa_run_default_direct_binary_cleanup(ValueSsaProgram *program,
         !value_ssa_forward_non_address_taken_global_loads(program, error) ||
         !value_ssa_bridge_reuse_addr_roots_in_program(program, error) ||
         !value_ssa_bridge_reuse_same_block_pure_address_values_in_program(program, error) ||
+        !value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(program, error) ||
         !value_ssa_licm_hoist_simple_loop_invariant_values(program, error) ||
         !value_ssa_normalize_binary_operands(program, error) ||
         !value_ssa_collapse_same_block_identical_binary_runs(program, error) ||

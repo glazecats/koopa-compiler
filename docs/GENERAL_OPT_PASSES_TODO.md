@@ -264,6 +264,10 @@
      in those same bridge flows, so plain repeated `addr_local` /
      `addr_global` roots are no longer only an accidentally cleaned-up shape
      left to later stronger passes.
+   - Current later same-day pure-call follow-up:
+     the repeated pure internal call reuse helper is now also live on the
+     default direct-binary cleanup path, so repeated pure internal helper
+     calls can now be collapsed earlier on the non-indirect mainline too.
    - Current authority:
      treat this as the opening GVN foothold, not the final pass.
      The next useful expansions should be:

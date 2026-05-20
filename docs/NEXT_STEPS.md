@@ -199,6 +199,19 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-20 later pure-call cleanup follow-up:
+  - the already-written repeated pure internal call reuse helper is now also
+    active in the live default direct-binary cleanup path, instead of only
+    appearing on the indirect-memory bridge side
+  - current landed effect:
+    repeated pure internal helper calls can now be collapsed earlier even on
+    the default non-indirect mainline, and a new direct-path regression locks
+    that behavior in on the standard `helper(5, 2) + helper(5, 2)` shape
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later SCCP symbol-lattice follow-up:
   - the current SCCP slice is no longer limited to integer constants plus
     readonly `load_global`
