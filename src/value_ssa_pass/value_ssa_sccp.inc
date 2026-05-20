@@ -235,6 +235,22 @@ static int value_ssa_sccp_try_evaluate_binary(ValueSsaBinaryOp op,
             *out_value = value_ssa_sccp_make_constant(
                 lhs.address_symbol.offset != rhs.address_symbol.offset ? 1 : 0);
             return 1;
+        case VALUE_SSA_BINARY_LT:
+            *out_value = value_ssa_sccp_make_constant(
+                lhs.address_symbol.offset < rhs.address_symbol.offset ? 1 : 0);
+            return 1;
+        case VALUE_SSA_BINARY_LE:
+            *out_value = value_ssa_sccp_make_constant(
+                lhs.address_symbol.offset <= rhs.address_symbol.offset ? 1 : 0);
+            return 1;
+        case VALUE_SSA_BINARY_GT:
+            *out_value = value_ssa_sccp_make_constant(
+                lhs.address_symbol.offset > rhs.address_symbol.offset ? 1 : 0);
+            return 1;
+        case VALUE_SSA_BINARY_GE:
+            *out_value = value_ssa_sccp_make_constant(
+                lhs.address_symbol.offset >= rhs.address_symbol.offset ? 1 : 0);
+            return 1;
         default:
             break;
         }

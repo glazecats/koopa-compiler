@@ -5001,6 +5001,141 @@ static int build_sccp_global_address_offset_branch_program(ValueSsaProgram *prog
     return 1;
 }
 
+static int build_sccp_global_address_offset_relational_program(ValueSsaProgram *program,
+    ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t base_addr;
+    size_t addr_plus_4;
+    size_t addr_plus_8;
+    size_t lt_value;
+    size_t le_value;
+    size_t gt_value;
+    size_t ge_value;
+    size_t sum_value;
+    size_t sum_value2;
+    size_t sum_value3;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    base_addr = value_ssa_function_allocate_value(function);
+    addr_plus_4 = value_ssa_function_allocate_value(function);
+    addr_plus_8 = value_ssa_function_allocate_value(function);
+    lt_value = value_ssa_function_allocate_value(function);
+    le_value = value_ssa_function_allocate_value(function);
+    gt_value = value_ssa_function_allocate_value(function);
+    ge_value = value_ssa_function_allocate_value(function);
+    sum_value = value_ssa_function_allocate_value(function);
+    sum_value2 = value_ssa_function_allocate_value(function);
+    sum_value3 = value_ssa_function_allocate_value(function);
+    if (base_addr == (size_t)-1 || addr_plus_4 == (size_t)-1 || addr_plus_8 == (size_t)-1 ||
+        lt_value == (size_t)-1 || le_value == (size_t)-1 || gt_value == (size_t)-1 ||
+        ge_value == (size_t)-1 || sum_value == (size_t)-1 ||
+        sum_value2 == (size_t)-1 || sum_value3 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(base_addr);
+    instruction.as.addr_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(addr_plus_4);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(base_addr);
+    instruction.as.binary.rhs = value_ssa_value_immediate(4);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(addr_plus_8);
+    instruction.as.binary.rhs = value_ssa_value_immediate(8);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(lt_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_LT;
+    instruction.as.binary.lhs = value_ssa_value_id(addr_plus_4);
+    instruction.as.binary.rhs = value_ssa_value_id(addr_plus_8);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(le_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_LE;
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(gt_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_GT;
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(ge_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_GE;
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(sum_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(lt_value);
+    instruction.as.binary.rhs = value_ssa_value_id(le_value);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(sum_value2);
+    instruction.as.binary.lhs = value_ssa_value_id(sum_value);
+    instruction.as.binary.rhs = value_ssa_value_id(gt_value);
+    if (!value_ssa_block_append_instruction(block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(sum_value3);
+    instruction.as.binary.lhs = value_ssa_value_id(sum_value2);
+    instruction.as.binary.rhs = value_ssa_value_id(ge_value);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(sum_value3), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_sccp_readonly_global_indirect_load_zero_offset_program(ValueSsaProgram *program,
     ValueSsaError *error) {
     ValueSsaGlobal *global = NULL;
@@ -17741,6 +17876,17 @@ static int test_value_ssa_sccp_global_address_offset_branch(void) {
         "}\n");
 }
 
+static int test_value_ssa_sccp_global_address_offset_relational_compare(void) {
+    return expect_sccp_dump("VALUE-SSA-SCCP-GLOBAL-ADDRESS-OFFSET-RELATIONAL",
+        build_sccp_global_address_offset_relational_program,
+        "global g.0\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 2\n"
+        "}\n");
+}
+
 static int test_value_ssa_sccp_readonly_global_indirect_load_zero_offset(void) {
     return expect_sccp_dump("VALUE-SSA-SCCP-READONLY-GLOBAL-INDIRECT-LOAD-ZERO-OFFSET",
         build_sccp_readonly_global_indirect_load_zero_offset_program,
@@ -19086,6 +19232,7 @@ int main(void) {
     ok &= test_value_ssa_sccp_parameter_pointer_branch();
     ok &= test_value_ssa_sccp_global_address_offset_compare();
     ok &= test_value_ssa_sccp_global_address_offset_branch();
+    ok &= test_value_ssa_sccp_global_address_offset_relational_compare();
     ok &= test_value_ssa_sccp_readonly_global_indirect_load_zero_offset();
     ok &= test_value_ssa_sccp_readonly_global_indirect_load_nonzero_offset();
     ok &= test_value_ssa_inline_tiny_internal_helpers_addr_global();
