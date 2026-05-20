@@ -166,6 +166,25 @@
   - current status:
     green on `make -j4 test-value-ssa-regression` and
     `make -j4 test-compiler-driver`
+- 2026-05-20 later bridge cleanup follow-up:
+  - one more already-written bridge-side cleanup helper is now reconnected
+    into the live default/direct paths instead of staying dormant:
+    same-block pure-address reuse now runs in both the default direct-binary
+    cleanup path and the indirect-memory direct-fast cleanup path
+  - current landed payoff:
+    repeated same-block `addr_*` / pure address-add chains collapse earlier,
+    which in turn shortens several existing default/perf dump witnesses
+    without reopening the earlier loop-hoist or indirect-load correctness
+    failures
+  - same-day test-surface follow-up:
+    one `compiler_driver` assertion was widened at the text-shape level
+    because the stronger mid-IR cleanup can now eliminate the old call shape
+    entirely and fold the witness all the way to a direct `addi` return path
+  - current status:
+    green on `make test-value-ssa-regression`,
+    `make test-compiler-driver`,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
+    `autotest -perf /workspaces/compiler_lab` (`130/130`)
 - 2026-05-20 later SCCP symbol-lattice follow-up:
   - the current SCCP slice is no longer limited to integer constants plus
     readonly `load_global`

@@ -526,8 +526,8 @@ static int test_compiler_folds_call_arg_load_swap_in_text(void) {
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
         strstr(output, "  lw a1, 0(a0)\n  lw a0, 20(sp)\n  mv t5, a0\n  mv a0, a1\n  mv a1, t5\n  call f\n") != NULL ||
-        (strstr(output, "  lw a0, 0(a0)\n  addi a0, a0, 5\n") == NULL &&
-            strstr(output, "  lw a1, 0(a0)\n  addi a1, a1, 5\n  mv a0, a1\n") == NULL)) {
+        (strstr(output, "  addi a0, a0, 5\n") == NULL &&
+            strstr(output, "  addi a1, a1, 5\n  mv a0, a1\n") == NULL)) {
         fprintf(stderr, "[compiler] FAIL: call-arg load swap was not folded: %s\n", error.message);
         ok = 0;
     }

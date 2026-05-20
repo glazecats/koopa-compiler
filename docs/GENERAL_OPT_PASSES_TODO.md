@@ -253,6 +253,12 @@
      The same follow-up also taught the join path to reuse an already-present
      equivalent phi in the destination block instead of synthesizing a second
      duplicate merge-phi for the same available value.
+   - Current later same-day bridge follow-up:
+     one already-written bridge-side sibling helper is now live again too:
+     same-block pure-address reuse runs ahead of the unified cleanup path in
+     the default direct-binary and indirect-memory direct-fast bridge flows,
+     so repeated `addr_*` / pure address-add chains are shortened before the
+     later GVN/CSE family even needs to see them.
    - Current authority:
      treat this as the opening GVN foothold, not the final pass.
      The next useful expansions should be:

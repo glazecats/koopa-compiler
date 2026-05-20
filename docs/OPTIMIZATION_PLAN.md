@@ -436,6 +436,19 @@
       CFG/DCE passes
     - current status:
       `test-value-ssa-regression` and `test-compiler-driver` remain green
+  - 2026-05-20 later bridge cleanup follow-up:
+    - the bridge-side same-block pure-address reuse helper is now reconnected
+      into the live default direct-binary cleanup path and the indirect-memory
+      direct-fast cleanup path instead of remaining dead code
+    - current kept payoff:
+      repeated same-block `addr_*` and pure address-add materialization is
+      removed earlier, feeding simpler default/perf `ValueSSA` dumps and in
+      at least one driver witness collapsing the whole old call-argument swap
+      shape into a direct folded return
+    - current status:
+      `test-value-ssa-regression`, `test-compiler-driver`,
+      `autotest -riscv -s lv9 /workspaces/compiler_lab`, and
+      `autotest -perf /workspaces/compiler_lab` are all green on the live tree
   - 2026-05-20 later SCCP symbol-lattice follow-up:
     - the current SCCP slice now also has one first non-immediate symbolic
       value family instead of stopping at integer constants alone

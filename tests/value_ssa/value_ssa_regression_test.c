@@ -16213,9 +16213,10 @@ static int test_value_ssa_optimize_perf_hotspots_source_mm_rebuild_dump(void) {
         "    ssa.19 = load_local A.1\n",
         "    ssa.25 = eq ssa.24, 0\n",
         "  bb.16:\n",
-        "    ssa.42 = load_indirect ssa.41\n",
-        "    ssa.47 = add ssa.44, ssa.46\n",
-        "    ssa.54 = mul ssa.48, ssa.53\n",
+        "    ssa.38 = add ssa.29, ssa.34\n",
+        "    ssa.40 = load_indirect ssa.39\n",
+        "    ssa.42 = load_local k.6\n",
+        "    ssa.50 = mul ssa.45, ssa.49\n",
     };
     static const char *source =
         "const int N = 1024;\n"
@@ -18809,7 +18810,6 @@ static int test_value_ssa_default_conversion_indirect_safe_global_forward_progra
         "    ssa.0 = mov 7\n"
         "    ssa.1 = addr_global arr.1\n"
         "    store_indirect ssa.1, 7\n"
-        "    ssa.2 = mov 7\n"
         "    ret 7\n"
         "}\n");
 }
@@ -19034,10 +19034,8 @@ static int test_value_ssa_default_conversion_reuses_repeated_addr_root_program(v
         "    ssa.1 = load_local idx.0\n"
         "    ssa.2 = mul ssa.1, 4\n"
         "    ssa.3 = add ssa.0, ssa.2\n"
-        "    ssa.4 = addr_global head.0\n"
-        "    ssa.5 = add ssa.4, ssa.2\n"
-        "    ssa.6 = load_indirect ssa.5\n"
-        "    ret ssa.6\n"
+        "    ssa.4 = load_indirect ssa.3\n"
+        "    ret ssa.4\n"
         "}\n");
 }
 
@@ -19089,10 +19087,8 @@ static int test_value_ssa_default_conversion_reaches_redundant_binary_fixed_poin
         "    store_indirect ssa.0, 0\n"
         "    ssa.1 = load_local idx.0\n"
         "    ssa.2 = add ssa.1, 1\n"
-        "    ssa.3 = add ssa.1, 1\n"
-        "    ssa.4 = add ssa.3, 2\n"
-        "    ssa.5 = add ssa.2, 2\n"
-        "    ret ssa.4\n"
+        "    ssa.3 = add ssa.2, 2\n"
+        "    ret ssa.3\n"
         "}\n");
 }
 
