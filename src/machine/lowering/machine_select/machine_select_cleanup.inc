@@ -4309,7 +4309,7 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
                     t_redundant_addr += machine_select_cleanup_now_s() - stage_start;
                     stage_start = machine_select_cleanup_now_s();
                 }
-                if (0 && (block->terminator.kind == MACHINE_SELECT_TERM_BRANCH ||
+                if ((block->terminator.kind == MACHINE_SELECT_TERM_BRANCH ||
                         block->terminator.kind == MACHINE_SELECT_TERM_COMPARE_BRANCH ||
                         block->terminator.kind == MACHINE_SELECT_TERM_COMPARE_BRANCH_IMM) &&
                     (machine_select_block_has_copy_op(block) || machine_select_block_has_compare_op(block))) {
@@ -4317,11 +4317,11 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
                             program, function, block)) {
                         function_changed = 1;
                     }
-                    if (machine_select_cleanup_fuse_branch_with_adjacent_compare_in_block(
+                    if (0 && machine_select_cleanup_fuse_branch_with_adjacent_compare_in_block(
                             program, function, block)) {
                         function_changed = 1;
                     }
-                    if (machine_select_cleanup_fuse_branch_with_visible_compare_in_block(
+                    if (0 && machine_select_cleanup_fuse_branch_with_visible_compare_in_block(
                             program, function, block_index, resource_count, live_out_sets, block)) {
                         function_changed = 1;
                     }
