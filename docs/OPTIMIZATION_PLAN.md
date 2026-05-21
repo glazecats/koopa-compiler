@@ -57,6 +57,14 @@
   selected pure-cleanup fixed-point, while the broader visible-compare sibling
   remains intentionally disabled until it has its own proof and regression
   coverage.
+- 2026-05-21 later tiny-inline checkpoint:
+  the public `ValueSSA` tiny-helper inliner now also closes one remaining
+  pass-completeness gap:
+  nested/helper-order-sensitive opportunities are no longer limited by a
+  single forward scan over the function table. The pass now runs to a small
+  fixed-point while preserving its existing per-function inline budget across
+  rounds, so newly simplified tiny helpers may unlock later callers in the
+  same invocation without silently over-expanding code size.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

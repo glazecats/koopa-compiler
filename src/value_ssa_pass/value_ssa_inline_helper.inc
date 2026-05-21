@@ -968,86 +968,107 @@ static int value_ssa_inline_tiny_helper_call_is_tiny_helper(const ValueSsaProgra
 }
 
 int value_ssa_inline_tiny_internal_helpers(ValueSsaProgram *program, ValueSsaError *error) {
-    size_t function_index;
+    size_t *function_inline_inserted_budgets = NULL;
+    int changed_program = 1;
 
     if (!program) {
         value_ssa_set_error(error, 0, 0, "VALUE-SSA-264: invalid inline-helper contract");
         return 0;
     }
-
-    for (function_index = 0; function_index < program->function_count; ++function_index) {
-        ValueSsaFunction *function = &program->functions[function_index];
-        size_t block_index;
-        size_t function_inline_inserted_budget = 0u;
-
-        if (!function->has_body) {
-            continue;
-        }
-
-        for (block_index = 0; block_index < function->block_count; ++block_index) {
-            ValueSsaBasicBlock *block = &function->blocks[block_index];
-            ValueSsaBasicBlock rebuilt_block;
-            size_t instruction_index;
-            int changed = 0;
-            int ok = 1;
-
-            memset(&rebuilt_block, 0, sizeof(rebuilt_block));
-            rebuilt_block.id = block->id;
-
-            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
-                const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
-                const ValueSsaFunction *callee = NULL;
-
-                if (instruction->kind == VALUE_SSA_INSTR_CALL && instruction->as.call.callee_name) {
-                    callee = value_ssa_find_function_by_name(program, instruction->as.call.callee_name);
-                }
-
-                if (callee && callee != function &&
-                    value_ssa_function_is_tiny_inline_helper_call_candidate(program, callee) &&
-                    value_ssa_inline_tiny_helper_call_fits_budget(callee)) {
-                    size_t callsite_cost = value_ssa_tiny_inline_helper_inserted_instruction_cost(callee);
-
-                    if (callsite_cost != (size_t)-1 &&
-                        function_inline_inserted_budget + callsite_cost <=
-                            VALUE_SSA_TINY_INLINE_FUNCTION_MAX_INSERTED_INSTRUCTIONS) {
-                    ok = value_ssa_inline_tiny_helper_call_into_block(
-                        program, function, callee, instruction, &rebuilt_block, error);
-                    if (ok) {
-                            function_inline_inserted_budget += callsite_cost;
-                        changed = 1;
-                        continue;
-                    }
-                    }
-                }
-
-                if (!value_ssa_block_append_instruction(&rebuilt_block, instruction, error)) {
-                    ok = 0;
-                }
-                if (!ok) {
-                    break;
-                }
-            }
-
-            if (!ok) {
-                value_ssa_basic_block_free(&rebuilt_block);
-                return 0;
-            }
-
-            if (!changed) {
-                value_ssa_basic_block_free(&rebuilt_block);
-                continue;
-            }
-
-            for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
-                value_ssa_instruction_free(&block->instructions[instruction_index]);
-            }
-            free(block->instructions);
-            block->instructions = rebuilt_block.instructions;
-            block->instruction_count = rebuilt_block.instruction_count;
-            block->instruction_capacity = rebuilt_block.instruction_capacity;
+    if (program->function_count > 0u) {
+        function_inline_inserted_budgets = (size_t *)calloc(program->function_count, sizeof(size_t));
+        if (!function_inline_inserted_budgets) {
+            value_ssa_set_error(error, 0, 0, "VALUE-SSA-265A: out of memory preparing tiny-inline budgets");
+            return 0;
         }
     }
 
+    while (changed_program) {
+        size_t function_index;
+
+        changed_program = 0;
+        for (function_index = 0; function_index < program->function_count; ++function_index) {
+            ValueSsaFunction *function = &program->functions[function_index];
+            size_t block_index;
+            size_t function_inline_inserted_budget = function_inline_inserted_budgets
+                ? function_inline_inserted_budgets[function_index]
+                : 0u;
+
+            if (!function->has_body) {
+                continue;
+            }
+
+            for (block_index = 0; block_index < function->block_count; ++block_index) {
+                ValueSsaBasicBlock *block = &function->blocks[block_index];
+                ValueSsaBasicBlock rebuilt_block;
+                size_t instruction_index;
+                int changed = 0;
+                int ok = 1;
+
+                memset(&rebuilt_block, 0, sizeof(rebuilt_block));
+                rebuilt_block.id = block->id;
+
+                for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                    const ValueSsaInstruction *instruction = &block->instructions[instruction_index];
+                    const ValueSsaFunction *callee = NULL;
+
+                    if (instruction->kind == VALUE_SSA_INSTR_CALL && instruction->as.call.callee_name) {
+                        callee = value_ssa_find_function_by_name(program, instruction->as.call.callee_name);
+                    }
+
+                    if (callee && callee != function &&
+                        value_ssa_function_is_tiny_inline_helper_call_candidate(program, callee) &&
+                        value_ssa_inline_tiny_helper_call_fits_budget(callee)) {
+                        size_t callsite_cost = value_ssa_tiny_inline_helper_inserted_instruction_cost(callee);
+
+                        if (callsite_cost != (size_t)-1 &&
+                            function_inline_inserted_budget + callsite_cost <=
+                                VALUE_SSA_TINY_INLINE_FUNCTION_MAX_INSERTED_INSTRUCTIONS) {
+                            ok = value_ssa_inline_tiny_helper_call_into_block(
+                                program, function, callee, instruction, &rebuilt_block, error);
+                            if (ok) {
+                                function_inline_inserted_budget += callsite_cost;
+                                changed = 1;
+                                continue;
+                            }
+                        }
+                    }
+
+                    if (!value_ssa_block_append_instruction(&rebuilt_block, instruction, error)) {
+                        ok = 0;
+                    }
+                    if (!ok) {
+                        break;
+                    }
+                }
+
+                if (!ok) {
+                    value_ssa_basic_block_free(&rebuilt_block);
+                    free(function_inline_inserted_budgets);
+                    return 0;
+                }
+
+                if (!changed) {
+                    value_ssa_basic_block_free(&rebuilt_block);
+                    continue;
+                }
+
+                for (instruction_index = 0; instruction_index < block->instruction_count; ++instruction_index) {
+                    value_ssa_instruction_free(&block->instructions[instruction_index]);
+                }
+                free(block->instructions);
+                block->instructions = rebuilt_block.instructions;
+                block->instruction_count = rebuilt_block.instruction_count;
+                block->instruction_capacity = rebuilt_block.instruction_capacity;
+                if (function_inline_inserted_budgets) {
+                    function_inline_inserted_budgets[function_index] = function_inline_inserted_budget;
+                }
+                changed_program = 1;
+            }
+        }
+    }
+
+    free(function_inline_inserted_budgets);
     return value_ssa_verify_program(program, error);
 }
 

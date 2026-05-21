@@ -10176,3 +10176,28 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 tiny-inline fixed-point follow-up:
+  - the public `ValueSSA` tiny internal-helper inliner no longer depends on a
+    single forward function-order pass to discover all inline opportunities
+  - kept implementation change:
+    `value_ssa_inline_tiny_internal_helpers(...)` now runs as a small
+    function-level fixed-point instead of a one-shot scan, so when one helper
+    becomes tiny only after its own nested tiny calls inline, later callers in
+    the same program can still see and inline that newly-simplified helper in
+    the same pass invocation
+  - important safety/budget rule:
+    the existing per-function inserted-instruction budget is now preserved
+    across fixed-point rounds instead of being reset each round, so the new
+    repeated scan does not silently over-inline past the earlier budget guard
+  - regression follow-up:
+    a new order-sensitive tiny-inline witness now locks the original failure
+    mode directly:
+    `main -> outer -> inner` with function order `main, outer, inner`
+    must still inline all the way through `main` rather than leaving the
+    outer call live just because `outer` was not tiny at the start of the
+    first scan
+  - focused rechecks after this expansion:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

@@ -5730,6 +5730,84 @@ static int build_tiny_inline_zero_param_constant_helper_program(ValueSsaProgram 
     return 1;
 }
 
+static int build_tiny_inline_nested_call_order_sensitive_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaFunction *main_fn = NULL;
+    ValueSsaFunction *outer = NULL;
+    ValueSsaFunction *inner = NULL;
+    ValueSsaBasicBlock *main_block = NULL;
+    ValueSsaBasicBlock *outer_block = NULL;
+    ValueSsaBasicBlock *inner_block = NULL;
+    ValueSsaInstruction instruction;
+    size_t main_call_value;
+    size_t outer_call_value;
+    size_t outer_add_value;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_function(program, "main", 1, &main_fn, error) ||
+        !value_ssa_program_append_function(program, "outer", 1, &outer, error) ||
+        !value_ssa_program_append_function(program, "inner", 1, &inner, error) ||
+        !value_ssa_function_append_block(main_fn, NULL, &main_block, error) ||
+        !value_ssa_function_append_block(outer, NULL, &outer_block, error) ||
+        !value_ssa_function_append_block(inner, NULL, &inner_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    main_call_value = value_ssa_function_allocate_value(main_fn);
+    outer_call_value = value_ssa_function_allocate_value(outer);
+    outer_add_value = value_ssa_function_allocate_value(outer);
+    if (main_call_value == (size_t)-1 || outer_call_value == (size_t)-1 || outer_add_value == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(main_call_value);
+    instruction.as.call.callee_name = "outer";
+    instruction.as.call.arg_count = 0u;
+    instruction.as.call.args = NULL;
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
+        !value_ssa_block_set_return(main_block, value_ssa_value_id(main_call_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(outer_call_value);
+    instruction.as.call.callee_name = "inner";
+    instruction.as.call.arg_count = 0u;
+    instruction.as.call.args = NULL;
+    if (!value_ssa_block_append_instruction(outer_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(outer_add_value);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(outer_call_value);
+    instruction.as.binary.rhs = value_ssa_value_immediate(2);
+    if (!value_ssa_block_append_instruction(outer_block, &instruction, error) ||
+        !value_ssa_block_set_return(outer_block, value_ssa_value_id(outer_add_value), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    if (!value_ssa_block_set_return(inner_block, value_ssa_value_immediate(3), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_tiny_inline_private_local_helper_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *helper = NULL;
     ValueSsaFunction *main_fn = NULL;
@@ -18777,6 +18855,29 @@ static int test_value_ssa_inline_tiny_internal_helpers_zero_param_constant(void)
         "}\n");
 }
 
+static int test_value_ssa_inline_tiny_internal_helpers_nested_call_order_sensitive(void) {
+    return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-NESTED-CALL-ORDER",
+        build_tiny_inline_nested_call_order_sensitive_program,
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.1 = add 3, 2\n"
+        "    ssa.0 = mov ssa.1\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func outer() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = mov 3\n"
+        "    ssa.1 = add ssa.0, 2\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func inner() {\n"
+        "  bb.0:\n"
+        "    ret 3\n"
+        "}\n");
+}
+
 static int test_value_ssa_inline_tiny_internal_helpers_private_local(void) {
     return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-PRIVATE-LOCAL",
         build_tiny_inline_private_local_helper_program,
@@ -20194,6 +20295,7 @@ int main(void) {
     ok &= test_value_ssa_inline_tiny_internal_helpers_two_block_return();
     ok &= test_value_ssa_inline_tiny_internal_helpers_void_two_block_return();
     ok &= test_value_ssa_inline_tiny_internal_helpers_zero_param_constant();
+    ok &= test_value_ssa_inline_tiny_internal_helpers_nested_call_order_sensitive();
     ok &= test_value_ssa_inline_tiny_internal_helpers_private_local();
     ok &= test_value_ssa_inline_tiny_internal_helpers_two_block_private_local();
     ok &= test_value_ssa_inline_tiny_internal_helpers_parameter_local_store();
