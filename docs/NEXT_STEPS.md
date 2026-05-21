@@ -10201,6 +10201,25 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 tiny-inline void-nested-call follow-up:
+  - the current `ValueSSA` tiny internal-helper inliner now also accepts the
+    void-call half of the same nested tiny-helper family instead of only the
+    value-returning one
+  - kept expansion:
+    a tiny helper may now inline another tiny helper even when that nested
+    call has no SSA result, and the cloned nested call continues to respect
+    the same existing per-callsite and per-function inline budgets
+  - regression follow-up:
+    a new focused tiny-inline witness now locks the exact missing family:
+    `main -> outer -> inner` where both helper calls are void, `inner`
+    performs one tiny global side effect, `outer` performs another, and the
+    inliner must collapse both levels correctly instead of rejecting the
+    nested no-result call shape
+  - focused rechecks after this expansion:
+    `VALUE_SSA_REG_FILTER=VALUE-SSA-INLINE-TINY-HELPER-VOID-NESTED-CALL build/value_ssa/value_ssa_regression_test` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
 - 2026-05-21 induction-address carrier follow-up:
   - the perf-side induction-strength-reduction line now also has a first real
     affine address-carrier slice rather than stopping at plain carried `shl`

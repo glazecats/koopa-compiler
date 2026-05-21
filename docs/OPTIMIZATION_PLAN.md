@@ -65,6 +65,13 @@
   fixed-point while preserving its existing per-function inline budget across
   rounds, so newly simplified tiny helpers may unlock later callers in the
   same invocation without silently over-expanding code size.
+- 2026-05-21 later tiny-inline void-nested-call checkpoint:
+  the same tiny-inline family now also closes the no-result side of nested
+  helper inlining: a tiny helper may inline a nested tiny helper even when
+  that inner call is void. Current kept scope stays narrow and aligned with
+  the existing inliner contract: no new CFG forms, no wider budgets, just
+  the missing `has_result = 0` nested-call shape under the same one-block /
+  two-block return-tail eligibility and existing inserted-instruction caps.
 - 2026-05-21 later induction-address checkpoint:
   the perf-side induction-strength-reduction line now also has a first live
   affine address-carrier slice instead of only the earlier carried-`shl`

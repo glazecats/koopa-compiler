@@ -328,7 +328,7 @@ static int value_ssa_function_is_tiny_inline_helper(const ValueSsaProgram *progr
             case VALUE_SSA_INSTR_STORE_INDIRECT:
                 break;
             case VALUE_SSA_INSTR_CALL:
-                if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID ||
+                if ((instruction->has_result && instruction->result.kind != VALUE_SSA_VALUE_ID) ||
                     !instruction->as.call.callee_name ||
                     !value_ssa_inline_tiny_helper_call_is_tiny_helper(program, instruction->as.call.callee_name)) {
                     goto cleanup;
@@ -648,13 +648,15 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
         case VALUE_SSA_INSTR_CALL:
             memset(&cloned_instruction, 0, sizeof(cloned_instruction));
             cloned_instruction.kind = VALUE_SSA_INSTR_CALL;
-            cloned_instruction.has_result = 1;
-            cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+            cloned_instruction.has_result = source->has_result;
             cloned_instruction.as.call.callee_name = source->as.call.callee_name;
             cloned_instruction.as.call.arg_count = source->as.call.arg_count;
             cloned_instruction.as.call.args = NULL;
-            if (cloned_instruction.result.value_id == (size_t)-1) {
-                goto cleanup;
+            if (source->has_result) {
+                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                if (cloned_instruction.result.value_id == (size_t)-1) {
+                    goto cleanup;
+                }
             }
             if (source->as.call.arg_count != 0u) {
                 size_t arg_index;
@@ -683,8 +685,10 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                 goto cleanup;
             }
             ++inserted_instruction_count;
-            mappings[source->result.value_id] = cloned_instruction.result;
-            has_mapping[source->result.value_id] = 1u;
+            if (source->has_result) {
+                mappings[source->result.value_id] = cloned_instruction.result;
+                has_mapping[source->result.value_id] = 1u;
+            }
             break;
         default:
             value_ssa_set_error(error, 0, 0, "VALUE-SSA-263: unsupported inline-helper instruction kind");
@@ -862,13 +866,15 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
             case VALUE_SSA_INSTR_CALL:
                 memset(&cloned_instruction, 0, sizeof(cloned_instruction));
                 cloned_instruction.kind = VALUE_SSA_INSTR_CALL;
-                cloned_instruction.has_result = 1;
-                cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                cloned_instruction.has_result = source->has_result;
                 cloned_instruction.as.call.callee_name = source->as.call.callee_name;
                 cloned_instruction.as.call.arg_count = source->as.call.arg_count;
                 cloned_instruction.as.call.args = NULL;
-                if (cloned_instruction.result.value_id == (size_t)-1) {
-                    goto cleanup;
+                if (source->has_result) {
+                    cloned_instruction.result = value_ssa_value_id(value_ssa_function_allocate_value(caller));
+                    if (cloned_instruction.result.value_id == (size_t)-1) {
+                        goto cleanup;
+                    }
                 }
                 if (source->as.call.arg_count != 0u) {
                     size_t arg_index;
@@ -897,8 +903,10 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                     goto cleanup;
                 }
                 ++inserted_instruction_count;
-                mappings[source->result.value_id] = cloned_instruction.result;
-                has_mapping[source->result.value_id] = 1u;
+                if (source->has_result) {
+                    mappings[source->result.value_id] = cloned_instruction.result;
+                    has_mapping[source->result.value_id] = 1u;
+                }
                 break;
             default:
                 value_ssa_set_error(error, 0, 0, "VALUE-SSA-263: unsupported inline-helper instruction kind");
