@@ -16780,12 +16780,12 @@ static int test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dum
         "func power(a.0, b.1) {\n",
         "    ssa.0 = load_local a.0\n",
         "    ssa.1 = load_local b.1\n",
-        "    ssa.3 = div ssa.1, 2\n",
-        "    ssa.4 = call power(ssa.0, ssa.3)\n",
-        "    ssa.5 = call multiply(ssa.4, ssa.4)\n",
-        "    ssa.6 = mod ssa.1, 2\n",
-        "    ssa.7 = eq ssa.6, 1\n",
-        "    ret ssa.5\n",
+        "    ssa.2 = shr ssa.1, 1\n",
+        "    ssa.3 = call power(ssa.0, ssa.2)\n",
+        "    ssa.4 = call multiply(ssa.3, ssa.3)\n",
+        "    ssa.5 = and ssa.1, 1\n",
+        "    br ssa.5, bb.3, bb.4\n",
+        "    ret ssa.4\n",
     };
     static const char *source =
         "const int mod = 998244353;\n"
@@ -20391,6 +20391,9 @@ int main(void) {
     if (filter && filter[0] != '\0') {
         if (strstr("VALUE-SSA-PERF-HOTSPOT-INDUCTION-ADDRESS", filter) != NULL) {
             return test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_addresses() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-PERF-HOTSPOT-SOURCE-POWER-BRANCH-CLEANUP", filter) != NULL) {
+            return test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump() ? 0 : 1;
         }
         if (strstr("VALUE-SSA-PERF-HOTSPOT-SOURCE-RECURSIVE-DIVMOD2", filter) != NULL) {
             return test_value_ssa_optimize_perf_hotspots_source_recursive_divmod2_reduced_dump() ? 0 : 1;

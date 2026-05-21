@@ -977,6 +977,26 @@
       next useful step is to broaden from this first branch cleanup foothold
       into more helper-local control/value simplification around
       `multiply()` / `power()`
+  - Current 2026-05-21 recursive-helper branch-cleanup restore follow-up:
+    - that earlier kept helper-local branch simplification is now not only
+      parked in `src/value_ssa_perf/value_ssa_recursive_helper.inc`, but wired
+      back into the live `-perf` hotspot mainline immediately after the
+      already-restored recursive `div/mod 2` helper reduction
+    - current landed scope stays narrow:
+      only helper-local branch predicate cleanup is restored, especially the
+      `multiply()/power()` odd-branch booleanization family and adjacent
+      `eq/ne value, 0/1` shapes inside the recognized recursive helpers
+    - focused correctness restamp on the live tree stayed green:
+      `VALUE_SSA_REG_FILTER=POWER-BRANCH-CLEANUP
+      build/value_ssa/value_ssa_regression_test`,
+      `make test-compiler-driver`,
+      `autotest -riscv -s lv9`,
+      and `autotest -perf`
+      all passed again
+    - current authority:
+      keep this narrow restore on the live `-perf` mainline, but continue to
+      restore the remaining recursive-helper family one small slice at a time
+      rather than reopening the whole helper bundle at once
     - the recursive/helper-oriented `ValueSSA` work is no longer being left
       as ad hoc growth inside
       `src/value_ssa_pass/value_ssa_perf_hotspot.inc`

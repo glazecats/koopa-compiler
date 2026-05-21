@@ -10251,3 +10251,30 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 recursive-helper branch-cleanup restore follow-up:
+  - one more earlier kept recursive-helper-local cleanup is now live again on
+    the perf hotspot mainline instead of remaining only as parked helper-side
+    code:
+    `value_ssa_recursive_helper_simplify_branch_conditions(...)`
+  - kept restore:
+    the narrow helper-local branch cleanup now runs immediately after the
+    already-restored recursive `div/mod 2` strength reduction inside
+    `value_ssa_optimize_perf_hotspots(...)`
+  - current kept scope:
+    only helper-local condition shapes are touched:
+    direct cleanup of `eq/ne value, 0/1`-style branch predicates and the
+    already-observed `multiply()/power()` odd-branch booleanization family
+  - current proof boundary:
+    this restore still does **not** reopen the broader recursive-helper
+    bundle:
+    repeated `mod998-1` quotient reuse, iterative helper conversion, and
+    other helper-side rewrites remain outside this checkpoint
+  - regression/tooling follow-up:
+    the focused source witness for the `power()` odd-branch helper shape is
+    now wired into the lightweight `VALUE_SSA_REG_FILTER` hook as
+    `POWER-BRANCH-CLEANUP`
+  - focused rechecks after this restore:
+    `VALUE_SSA_REG_FILTER=POWER-BRANCH-CLEANUP build/value_ssa/value_ssa_regression_test` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
