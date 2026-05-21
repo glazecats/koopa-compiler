@@ -307,6 +307,7 @@ static int value_ssa_run_default_direct_binary_cleanup(ValueSsaProgram *program,
         !value_ssa_bridge_reuse_same_block_pure_address_values_in_program(program, error) ||
         !value_ssa_bridge_reuse_repeated_pure_internal_calls_in_program(program, error) ||
         !value_ssa_licm_hoist_simple_loop_invariant_values(program, error) ||
+        !value_ssa_eliminate_unread_scalar_local_stores(program, error) ||
         !value_ssa_normalize_binary_operands(program, error) ||
         !value_ssa_collapse_same_block_identical_binary_runs(program, error) ||
         !value_ssa_simplify_trivial_values(program, error) ||
