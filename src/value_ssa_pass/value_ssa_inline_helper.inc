@@ -142,6 +142,12 @@ static int value_ssa_function_is_tiny_inline_helper_leaf(const ValueSsaProgram *
                     goto cleanup;
                 }
                 break;
+            case VALUE_SSA_INSTR_STORE_GLOBAL:
+                if (instruction->as.store.slot.kind != VALUE_SSA_SLOT_GLOBAL ||
+                    instruction->as.store.slot.id >= program->global_count) {
+                    goto cleanup;
+                }
+                break;
             case VALUE_SSA_INSTR_ADDR_LOCAL:
                 if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID ||
                     instruction->as.addr_slot.kind != VALUE_SSA_SLOT_LOCAL ||
@@ -160,6 +166,8 @@ static int value_ssa_function_is_tiny_inline_helper_leaf(const ValueSsaProgram *
                 if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
                     goto cleanup;
                 }
+                break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
                 break;
             case VALUE_SSA_INSTR_MOV:
             case VALUE_SSA_INSTR_BINARY:
@@ -292,6 +300,12 @@ static int value_ssa_function_is_tiny_inline_helper(const ValueSsaProgram *progr
                     goto cleanup;
                 }
                 break;
+            case VALUE_SSA_INSTR_STORE_GLOBAL:
+                if (instruction->as.store.slot.kind != VALUE_SSA_SLOT_GLOBAL ||
+                    instruction->as.store.slot.id >= program->global_count) {
+                    goto cleanup;
+                }
+                break;
             case VALUE_SSA_INSTR_ADDR_LOCAL:
                 if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID ||
                     instruction->as.addr_slot.kind != VALUE_SSA_SLOT_LOCAL ||
@@ -310,6 +324,8 @@ static int value_ssa_function_is_tiny_inline_helper(const ValueSsaProgram *progr
                 if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID) {
                     goto cleanup;
                 }
+                break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
                 break;
             case VALUE_SSA_INSTR_CALL:
                 if (!instruction->has_result || instruction->result.kind != VALUE_SSA_VALUE_ID ||
@@ -517,6 +533,22 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
             mappings[source->result.value_id] = cloned_instruction.result;
             has_mapping[source->result.value_id] = 1u;
             break;
+        case VALUE_SSA_INSTR_STORE_GLOBAL:
+            memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+            cloned_instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+            cloned_instruction.as.store.slot = source->as.store.slot;
+            if (!value_ssa_inline_helper_map_value_ref(
+                    source->as.store.value,
+                    has_mapping,
+                    mappings,
+                    callee->next_value_id,
+                    &cloned_instruction.as.store.value,
+                    error) ||
+                !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                goto cleanup;
+            }
+            ++inserted_instruction_count;
+            break;
         case VALUE_SSA_INSTR_ADDR_LOCAL:
             memset(&cloned_instruction, 0, sizeof(cloned_instruction));
             cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
@@ -590,6 +622,28 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
             ++inserted_instruction_count;
             mappings[source->result.value_id] = cloned_instruction.result;
             has_mapping[source->result.value_id] = 1u;
+            break;
+        case VALUE_SSA_INSTR_STORE_INDIRECT:
+            memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+            cloned_instruction.kind = VALUE_SSA_INSTR_STORE_INDIRECT;
+            if (!value_ssa_inline_helper_map_value_ref(
+                    source->as.store_indirect.addr,
+                    has_mapping,
+                    mappings,
+                    callee->next_value_id,
+                    &cloned_instruction.as.store_indirect.addr,
+                    error) ||
+                !value_ssa_inline_helper_map_value_ref(
+                    source->as.store_indirect.value,
+                    has_mapping,
+                    mappings,
+                    callee->next_value_id,
+                    &cloned_instruction.as.store_indirect.value,
+                    error) ||
+                !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                goto cleanup;
+            }
+            ++inserted_instruction_count;
             break;
         case VALUE_SSA_INSTR_CALL:
             memset(&cloned_instruction, 0, sizeof(cloned_instruction));
@@ -693,6 +747,22 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                 mappings[source->result.value_id] = cloned_instruction.result;
                 has_mapping[source->result.value_id] = 1u;
                 break;
+            case VALUE_SSA_INSTR_STORE_GLOBAL:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+                cloned_instruction.as.store.slot = source->as.store.slot;
+                if (!value_ssa_inline_helper_map_value_ref(
+                        source->as.store.value,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.store.value,
+                        error) ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
+                break;
             case VALUE_SSA_INSTR_ADDR_LOCAL:
                 memset(&cloned_instruction, 0, sizeof(cloned_instruction));
                 cloned_instruction.kind = VALUE_SSA_INSTR_ADDR_LOCAL;
@@ -766,6 +836,28 @@ static int value_ssa_inline_tiny_helper_call_into_block(const ValueSsaProgram *p
                 ++inserted_instruction_count;
                 mappings[source->result.value_id] = cloned_instruction.result;
                 has_mapping[source->result.value_id] = 1u;
+                break;
+            case VALUE_SSA_INSTR_STORE_INDIRECT:
+                memset(&cloned_instruction, 0, sizeof(cloned_instruction));
+                cloned_instruction.kind = VALUE_SSA_INSTR_STORE_INDIRECT;
+                if (!value_ssa_inline_helper_map_value_ref(
+                        source->as.store_indirect.addr,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.store_indirect.addr,
+                        error) ||
+                    !value_ssa_inline_helper_map_value_ref(
+                        source->as.store_indirect.value,
+                        has_mapping,
+                        mappings,
+                        callee->next_value_id,
+                        &cloned_instruction.as.store_indirect.value,
+                        error) ||
+                    !value_ssa_block_append_instruction(rebuilt_block, &cloned_instruction, error)) {
+                    goto cleanup;
+                }
+                ++inserted_instruction_count;
                 break;
             case VALUE_SSA_INSTR_CALL:
                 memset(&cloned_instruction, 0, sizeof(cloned_instruction));

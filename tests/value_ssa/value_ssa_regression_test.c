@@ -6067,6 +6067,216 @@ static int build_tiny_inline_parameter_local_store_helper_program(ValueSsaProgra
     return 1;
 }
 
+static int build_tiny_inline_store_global_helper_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *main_fn = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *main_block = NULL;
+    ValueSsaInstruction instruction;
+    size_t helper_value;
+    size_t helper_sum;
+    size_t call_result;
+    size_t main_arg;
+    size_t main_param_id;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &main_fn, error) ||
+        !value_ssa_function_append_local(helper, "x", 1, NULL, error) ||
+        !value_ssa_function_append_local(main_fn, "p", 1, &main_param_id, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(main_fn, NULL, &main_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_value = value_ssa_function_allocate_value(helper);
+    helper_sum = value_ssa_function_allocate_value(helper);
+    call_result = value_ssa_function_allocate_value(main_fn);
+    main_arg = value_ssa_function_allocate_value(main_fn);
+    if (helper_value == (size_t)-1 || helper_sum == (size_t)-1 ||
+        call_result == (size_t)-1 || main_arg == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_local(0u);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(helper_value);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_GLOBAL;
+    instruction.as.store.slot = value_ssa_slot_global(global->id);
+    instruction.as.store.value = value_ssa_value_id(helper_sum);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(main_arg);
+    instruction.as.load_slot = value_ssa_slot_local(main_param_id);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(call_result);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (ValueSsaValueRef *)malloc(sizeof(ValueSsaValueRef));
+    if (!instruction.as.call.args) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = value_ssa_value_id(main_arg);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
+        !value_ssa_block_set_return(main_block, value_ssa_value_id(call_result), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_tiny_inline_store_indirect_helper_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *helper = NULL;
+    ValueSsaFunction *main_fn = NULL;
+    ValueSsaBasicBlock *helper_block = NULL;
+    ValueSsaBasicBlock *main_block = NULL;
+    ValueSsaInstruction instruction;
+    size_t helper_addr;
+    size_t helper_value;
+    size_t helper_sum;
+    size_t call_result;
+    size_t main_arg;
+    size_t main_param_id;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !value_ssa_program_append_function(program, "helper", 1, &helper, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &main_fn, error) ||
+        !value_ssa_function_append_local(helper, "x", 1, NULL, error) ||
+        !value_ssa_function_append_local(main_fn, "p", 1, &main_param_id, error) ||
+        !value_ssa_function_append_block(helper, NULL, &helper_block, error) ||
+        !value_ssa_function_append_block(main_fn, NULL, &main_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    helper_addr = value_ssa_function_allocate_value(helper);
+    helper_value = value_ssa_function_allocate_value(helper);
+    helper_sum = value_ssa_function_allocate_value(helper);
+    call_result = value_ssa_function_allocate_value(main_fn);
+    main_arg = value_ssa_function_allocate_value(main_fn);
+    if (helper_addr == (size_t)-1 || helper_value == (size_t)-1 || helper_sum == (size_t)-1 ||
+        call_result == (size_t)-1 || main_arg == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_addr);
+    instruction.as.addr_slot = value_ssa_slot_global(global->id);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_value);
+    instruction.as.load_slot = value_ssa_slot_local(0u);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(helper_sum);
+    instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+    instruction.as.binary.lhs = value_ssa_value_id(helper_value);
+    instruction.as.binary.rhs = value_ssa_value_immediate(1);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_STORE_INDIRECT;
+    instruction.as.store_indirect.addr = value_ssa_value_id(helper_addr);
+    instruction.as.store_indirect.value = value_ssa_value_id(helper_sum);
+    if (!value_ssa_block_append_instruction(helper_block, &instruction, error) ||
+        !value_ssa_block_set_return(helper_block, value_ssa_value_id(helper_sum), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(main_arg);
+    instruction.as.load_slot = value_ssa_slot_local(main_param_id);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_CALL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(call_result);
+    instruction.as.call.callee_name = "helper";
+    instruction.as.call.arg_count = 1u;
+    instruction.as.call.args = (ValueSsaValueRef *)malloc(sizeof(ValueSsaValueRef));
+    if (!instruction.as.call.args) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+    instruction.as.call.args[0] = value_ssa_value_id(main_arg);
+    if (!value_ssa_block_append_instruction(main_block, &instruction, error) ||
+        !value_ssa_block_set_return(main_block, value_ssa_value_id(call_result), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_tiny_inline_two_block_return_helper_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *helper = NULL;
     ValueSsaFunction *main_fn = NULL;
@@ -18576,6 +18786,54 @@ static int test_value_ssa_inline_tiny_internal_helpers_budget_blocks_large_helpe
         "}\n");
 }
 
+static int test_value_ssa_inline_tiny_internal_helpers_store_global(void) {
+    return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-STORE-GLOBAL",
+        build_tiny_inline_store_global_helper_program,
+        "global g.0\n"
+        "\n"
+        "func helper(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = add ssa.0, 1\n"
+        "    store_global g.0, ssa.1\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func main(p.0) {\n"
+        "  bb.0:\n"
+        "    ssa.1 = load_local p.0\n"
+        "    ssa.2 = add ssa.1, 1\n"
+        "    store_global g.0, ssa.2\n"
+        "    ssa.0 = mov ssa.2\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
+static int test_value_ssa_inline_tiny_internal_helpers_store_indirect(void) {
+    return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-STORE-INDIRECT",
+        build_tiny_inline_store_indirect_helper_program,
+        "global g.0\n"
+        "\n"
+        "func helper(x.0) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = addr_global g.0\n"
+        "    ssa.1 = load_local x.0\n"
+        "    ssa.2 = add ssa.1, 1\n"
+        "    store_indirect ssa.0, ssa.2\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main(p.0) {\n"
+        "  bb.0:\n"
+        "    ssa.1 = load_local p.0\n"
+        "    ssa.2 = addr_global g.0\n"
+        "    ssa.3 = add ssa.1, 1\n"
+        "    store_indirect ssa.2, ssa.3\n"
+        "    ssa.0 = mov ssa.3\n"
+        "    ret ssa.0\n"
+        "}\n");
+}
+
 static int test_value_ssa_inline_tiny_internal_helpers_function_budget(void) {
     return expect_tiny_helper_inlined_dump("VALUE-SSA-INLINE-TINY-HELPER-FUNCTION-BUDGET",
         build_tiny_inline_function_budget_program,
@@ -19854,6 +20112,8 @@ int main(void) {
     ok &= test_value_ssa_inline_tiny_internal_helpers_private_local();
     ok &= test_value_ssa_inline_tiny_internal_helpers_two_block_private_local();
     ok &= test_value_ssa_inline_tiny_internal_helpers_parameter_local_store();
+    ok &= test_value_ssa_inline_tiny_internal_helpers_store_global();
+    ok &= test_value_ssa_inline_tiny_internal_helpers_store_indirect();
     ok &= test_value_ssa_inline_tiny_internal_helpers_budget_blocks_large_helper();
     ok &= test_value_ssa_inline_tiny_internal_helpers_function_budget();
     ok &= test_value_ssa_source_sccp_constant_branch();

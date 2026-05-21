@@ -10116,3 +10116,22 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-20 later same-day tiny-inline richer-instruction follow-up:
+  - the current `ValueSSA` tiny internal-helper inliner now also accepts one
+    first narrow stateful instruction family instead of stopping at pure
+    load/address/binary bodies only
+  - kept expansion:
+    tiny helpers containing `store_global` and `store_indirect` are now
+    eligible for the existing one-block / two-block-return-tail inline path,
+    with the cloned stores rebuilt directly into the caller blocks under the
+    same small-body and inserted-instruction budget gates
+  - immediate observed effect:
+    default `-riscv` output can now inline tiny global-writing helpers all the
+    way into the caller, so some older driver expectations had to be widened
+    from "must still call helper" to "either call or stronger inlined store
+    shape is acceptable"
+  - focused rechecks after this extension:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

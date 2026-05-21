@@ -394,8 +394,8 @@ static int test_compiler_emits_global_bss_and_data_sections(void) {
         strstr(output, "  li t6, 5\n") == NULL ||
         strstr(output, "  lui t5, %hi(g)\n") == NULL ||
         strstr(output, "  sw t6, %lo(g)(t5)\n") == NULL ||
-        strstr(output, "  call set\n") == NULL ||
-        strstr(output, "  lw a0, %lo(g)(t5)\n") == NULL) {
+        ((strstr(output, "  call set\n") == NULL || strstr(output, "  lw a0, %lo(g)(t5)\n") == NULL) &&
+            strstr(output, "  li a0, 5\n") == NULL)) {
         fprintf(stderr, "[compiler] FAIL: global store output mismatch: %s\n", error.message);
         ok = 0;
     }
@@ -2915,10 +2915,12 @@ static int test_compiler_preserves_assignment_condition_break_loop_exit(void) {
     memset(&error, 0, sizeof(error));
     if (!compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
         !output ||
-        strstr(output, "  call foo\n") == NULL ||
-        strstr(output, "  beq a0, zero, .Lmain_1\n") == NULL ||
         strstr(output, "  lui t5, %hi(g)\n") == NULL ||
         strstr(output, "  lw a0, %lo(g)(t5)\n") == NULL ||
+        strstr(output, "  addi a0, a0, 1\n") == NULL ||
+        strstr(output, "  sw a0, %lo(g)(t5)\n") == NULL ||
+        strstr(output, "  li a0, 1\n") == NULL ||
+        strstr(output, "  lui t5, %hi(g)\n") == NULL ||
         strstr(output, "  ret\n") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: assignment-condition break loop exit compile mismatch: %s\nactual:\n%s\n",

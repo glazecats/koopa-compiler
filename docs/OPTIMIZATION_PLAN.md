@@ -37,6 +37,14 @@
   only `header + backedge body`. That same chunk also reconnected the
   already-written bridge-side simple loop-invariant load hoist into the
   default indirect-memory direct cleanup path.
+- 2026-05-20 later same-day tiny-inline checkpoint:
+  the current tiny internal-helper inliner is now widened one more step on
+  the live mainline: small helper bodies with `store_global` or
+  `store_indirect` can now inline too, not only pure load/address/binary
+  helpers. Keep the scope narrow for now: this is still the existing
+  one-block / two-block return-tail family with the same body-size and
+  callsite budget gates, and the next work should broaden pass coverage only
+  after a real perf witness asks for it.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

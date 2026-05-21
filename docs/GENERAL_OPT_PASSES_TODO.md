@@ -434,11 +434,21 @@
      the same broadened tiny-inline family now also participates in the
      default reusable direct-build cleanup paths, not only in the classic
      canonicalization lane.
-     - deciding whether readonly small helper bodies should participate in
-       canonicalize/mainline paths beyond the current default bridge usage,
-       after the broader driver/output surface is restamped
-     - keep the current checkpoint at the stable one-block family; the
-       broader two-block return-wrapper tier remains future work
+   - Current later same-day follow-up 3:
+     the current tiny-inline instruction family is now also wider than the
+     earlier pure-only slice:
+     - `store_global`
+     - `store_indirect`
+     helpers can inline too under the same tiny-body and inserted-instruction
+     budget gates, and focused regression coverage now includes both cases.
+   - Current authority:
+     treat this as a useful richer-helper-family checkpoint, not the finished
+     inliner. The next worthwhile expansions should still be chosen in
+     families:
+     - broader CFG eligibility beyond the current one-block / two-block
+       return-tail form
+     - additional helper instruction families only when they can be validated
+       as a coherent slice, rather than reopening ad hoc one-off cases
 
 ### Band B: High-Value but More Delicate
 
