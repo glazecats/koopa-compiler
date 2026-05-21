@@ -19407,10 +19407,7 @@ static int test_value_ssa_default_conversion_reuses_dominated_repeated_indirect_
         "  bb.1:\n"
         "    jmp bb.2\n"
         "  bb.2:\n"
-        "    ssa.5 = addr_global head.0\n"
-        "    ssa.6 = add ssa.5, ssa.2\n"
-        "    ssa.7 = load_indirect ssa.6\n"
-        "    ret ssa.7\n"
+        "    ret ssa.4\n"
         "}\n");
 }
 

@@ -45,6 +45,11 @@
   one-block / two-block return-tail family with the same body-size and
   callsite budget gates, and the next work should broaden pass coverage only
   after a real perf witness asks for it.
+- 2026-05-21 later default-path checkpoint:
+  the default indirect-memory direct cleanup path now also runs the existing
+  dominated repeated-indirect-load forwarding helper, not only the older
+  same-block and single-predecessor-edge slices. This is a reusable
+  correctness-closed pass-restore checkpoint, not a witness-specific rewrite.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

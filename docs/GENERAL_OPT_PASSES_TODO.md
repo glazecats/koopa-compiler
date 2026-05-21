@@ -292,6 +292,13 @@
      a tiny helper may inline another tiny leaf helper, and the current
      regression witness locks the chain all the way down to the folded
      default output rather than leaving the nested calls live.
+   - Current 2026-05-21 bridge follow-up:
+     another older bridge-side sibling helper is now live again on the
+     default indirect-memory direct cleanup path:
+     dominated repeated `load_indirect` forwarding now complements the
+     existing same-block and single-idom-edge forwarding family, so repeated
+     alias-safe indirect loads can collapse through a larger dominated region
+     before the later unified GVN/CSE pass even needs to see them.
    - Current authority:
      treat this as the opening GVN foothold, not the final pass.
      The next useful expansions should be:

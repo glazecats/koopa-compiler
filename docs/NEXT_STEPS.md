@@ -10135,3 +10135,22 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 default/mainline indirect-load restore follow-up:
+  - one more already-written bridge-side optimization is now live again on the
+    default indirect-memory direct cleanup path instead of remaining dead code:
+    dominated repeated `load_indirect` forwarding now runs in addition to the
+    older same-block and single-idom-edge forwarding helpers
+  - kept restore:
+    when a repeated indirect load is already available from a dominating block
+    and the intervening dominated region is alias-safe, the default direct
+    builder can now reuse that earlier result instead of reloading through a
+    rebuilt address chain
+  - immediate observed effect:
+    the focused dominated-load witness now collapses further than before on the
+    live default path: the second `load_indirect` disappears entirely and the
+    tail block can return the original dominating load result directly
+  - focused rechecks after this restore:
+    `make test-value-ssa-regression` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

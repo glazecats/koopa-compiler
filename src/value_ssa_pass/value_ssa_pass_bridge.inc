@@ -2907,6 +2907,15 @@ static int value_ssa_run_indirect_memory_direct_fast_cleanup(ValueSsaProgram *pr
         stage_start = value_ssa_now_s();
     }
 
+    if (!value_ssa_bridge_forward_dominated_repeated_indirect_loads(program, error)) {
+        return 0;
+    }
+    if (trace_timing) {
+        value_ssa_trace_timing("indirect-direct-dominated-indirect-load-forward",
+            value_ssa_now_s() - stage_start);
+        stage_start = value_ssa_now_s();
+    }
+
     if (!value_ssa_forward_non_address_taken_global_loads(program, error)) {
         return 0;
     }
