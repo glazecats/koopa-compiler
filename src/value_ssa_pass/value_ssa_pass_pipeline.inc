@@ -24,6 +24,7 @@ int value_ssa_canonicalize_program(ValueSsaProgram *program, ValueSsaError *erro
         !value_ssa_simplify_trivial_values(program, error) ||
         !value_ssa_eliminate_redundant_stores(program, error) ||
         !value_ssa_eliminate_dead_stores(program, error) ||
+        !value_ssa_eliminate_unread_scalar_local_stores(program, error) ||
         !value_ssa_normalize_binary_operands(program, error) ||
         !value_ssa_simplify_algebraic_identities(program, error) ||
         !value_ssa_fold_constants(program, error) ||
