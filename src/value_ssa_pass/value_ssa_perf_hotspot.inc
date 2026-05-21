@@ -212,6 +212,10 @@ int value_ssa_optimize_perf_hotspots(ValueSsaProgram *program, ValueSsaError *er
         free(foldable_globals);
         return 0;
     }
+    if (!value_ssa_recursive_helper_strength_reduce_divmod2(program, error)) {
+        free(foldable_globals);
+        return 0;
+    }
     if (!value_ssa_perf_hoist_function_entry_global_loads(program, error)) {
         free(foldable_globals);
         return 0;

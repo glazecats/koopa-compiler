@@ -16812,6 +16812,40 @@ static int test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dum
         sizeof(fragments) / sizeof(fragments[0]));
 }
 
+static int test_value_ssa_optimize_perf_hotspots_source_recursive_divmod2_reduced_dump(void) {
+    static const char *const fragments[] = {
+        "func multiply(a.0, b.1) {\n",
+        "    ssa.5 = shr ssa.1, 1\n",
+        "    ssa.9 = and ssa.1, 1\n",
+        "func power(a.0, b.1) {\n",
+        "    ssa.3 = shr ssa.1, 1\n",
+        "    ssa.6 = and ssa.1, 1\n",
+    };
+    static const char *source =
+        "const int mod = 998244353;\n"
+        "int multiply(int a, int b){\n"
+        "  if (b == 0) return 0;\n"
+        "  if (b == 1) return a % mod;\n"
+        "  int cur = multiply(a, b / 2);\n"
+        "  cur = (cur + cur) % mod;\n"
+        "  if (b % 2 == 1) return (a + cur) % mod;\n"
+        "  return cur;\n"
+        "}\n"
+        "int power(int a, int b){\n"
+        "  if (b == 0) return 1;\n"
+        "  int cur = power(a, b / 2);\n"
+        "  cur = multiply(cur, cur);\n"
+        "  if (b % 2 == 1) return multiply(cur, a);\n"
+        "  return cur;\n"
+        "}\n"
+        "int main(){ return power(3, 5); }\n";
+
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-RECURSIVE-DIVMOD2",
+        source,
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
+}
+
 static int test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump(void) {
     static const char *const fragments[] = {
         "func fft(arr.0, begin_pos.1, half_n.2, w.3) {\n",
@@ -20358,6 +20392,9 @@ int main(void) {
         if (strstr("VALUE-SSA-PERF-HOTSPOT-INDUCTION-ADDRESS", filter) != NULL) {
             return test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_addresses() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-PERF-HOTSPOT-SOURCE-RECURSIVE-DIVMOD2", filter) != NULL) {
+            return test_value_ssa_optimize_perf_hotspots_source_recursive_divmod2_reduced_dump() ? 0 : 1;
+        }
     }
 
     ok &= test_value_ssa_dump_straight_line_program();
@@ -20397,6 +20434,7 @@ int main(void) {
     ok &= test_value_ssa_optimize_perf_hotspots_reuses_spmv_loop_exit_indirect_loads();
     ok &= test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dump();
+    ok &= test_value_ssa_optimize_perf_hotspots_source_recursive_divmod2_reduced_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump();
     ok &= test_value_ssa_optimize_perf_hotspots_source_mm_rebuild_dump();

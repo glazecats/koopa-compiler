@@ -73,6 +73,12 @@
   `scale * iv + const`
   address expressions into carried recurrence families under the existing
   simple-loop perf hotspot lane.
+- 2026-05-21 later recursive-helper checkpoint:
+  one earlier kept recursive-helper-local arithmetic rewrite is now restored
+  on the live perf hotspot mainline in isolation:
+  recursive helper `div/mod 2` now lowers to `shr/and` again, while the
+  broader recursive-helper bundle remains intentionally un-restored until each
+  remaining sub-pass has its own proof and regression coverage.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

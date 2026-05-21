@@ -10228,3 +10228,26 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 recursive-helper `div/mod 2` restore follow-up:
+  - one earlier kept recursive-helper-local optimization is now live again on
+    the perf hotspot mainline instead of being left parked in the helper file:
+    `value_ssa_recursive_helper_strength_reduce_divmod2(...)`
+  - kept scope:
+    only the recursive helper family and only the narrow binary shapes
+    `div x, 2 -> shr x, 1`
+    `mod x, 2 -> and x, 1`
+    inside those helper regions
+  - current proof boundary:
+    this restore intentionally does **not** reopen the broader recursive
+    helper bundle yet:
+    branch cleanup, repeated `mod998-1` div reuse, iterative helper rewrites,
+    and FFT butterfly-specific rewrites all remain outside this checkpoint
+  - regression/tooling follow-up:
+    a new focused source witness now locks the intended optimized helper dump
+    directly:
+    `VALUE-SSA-PERF-HOTSPOT-SOURCE-RECURSIVE-DIVMOD2`
+  - focused rechecks after this restore:
+    `VALUE_SSA_REG_FILTER=RECURSIVE-DIVMOD2 build/value_ssa/value_ssa_regression_test` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
