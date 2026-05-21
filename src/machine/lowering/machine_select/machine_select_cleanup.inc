@@ -4293,7 +4293,7 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
                     t_addr_copy += machine_select_cleanup_now_s() - stage_start;
                     stage_start = machine_select_cleanup_now_s();
                 }
-                if (0 && !machine_select_skip_cleanup_fold_pure_producer_copy_enabled()) {
+                if (!machine_select_skip_cleanup_fold_pure_producer_copy_enabled()) {
                     if (machine_select_cleanup_fold_pure_producer_copy_pairs_in_block(program, function, block)) {
                         function_changed = 1;
                     }
