@@ -16536,7 +16536,79 @@ static int test_value_ssa_optimize_perf_hotspots_source_fft_mod998_butterfly_dum
 }
 
 static int test_value_ssa_optimize_perf_hotspots_source_spmv_loop_fusion_dump(void) {
-    return 1;
+    static const char *const fragments[] = {
+        "func spmv(n.0, xptr.1, yidx.2, vals.3, b.4, x.5) {\n",
+        "  bb.3:\n",
+        "    ssa.11 = phi [bb.1: 0], [bb.7: ssa.37]\n",
+        "    ssa.15 = load_indirect ssa.14\n",
+        "    ssa.19 = load_indirect ssa.18\n",
+        "    ssa.22 = load_indirect ssa.21\n",
+        "  bb.5:\n",
+        "    ssa.23 = phi [bb.4: ssa.15], [bb.6: ssa.36]\n",
+        "  bb.6:\n",
+        "    ssa.27 = load_indirect ssa.26\n",
+        "    ssa.30 = load_indirect ssa.29\n",
+        "    ssa.33 = load_indirect ssa.32\n",
+        "    ssa.34 = mul ssa.33, ssa.22\n",
+        "    ssa.35 = add ssa.30, ssa.34\n",
+        "    store_indirect ssa.29, ssa.35\n",
+    };
+    static const char *source =
+        "void spmv(int n,int xptr[], int yidx[], int vals[], int b[], int x[]){\n"
+        "    int i, j, k;\n"
+        "    i = 0;\n"
+        "    while (i < n){\n"
+        "        x[i] = 0;\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "\n"
+        "    i = 0;\n"
+        "    while (i < n){\n"
+        "        j = xptr[i];\n"
+        "        while (j < xptr[i + 1]){\n"
+        "            x[yidx[j]] = x[yidx[j]] + vals[j];\n"
+        "            j = j + 1;\n"
+        "        }\n"
+        "\n"
+        "        j = xptr[i];\n"
+        "        while (j < xptr[i + 1]){\n"
+        "            x[yidx[j]] = x[yidx[j]] + vals[j] * (b[i] - 1);\n"
+        "            j = j + 1;\n"
+        "        }\n"
+        "        i = i + 1;\n"
+        "    }\n"
+        "}\n"
+        "\n"
+        "const int N = 100010;\n"
+        "const int M = 3000000;\n"
+        "\n"
+        "int x[N], y[M], v[M];\n"
+        "int a[N], b[N], c[N];\n"
+        "\n"
+        "int main(){\n"
+        "    int n = getarray(x) - 1;\n"
+        "    int m = getarray(y);\n"
+        "    getarray(v);\n"
+        "\n"
+        "    getarray(a);\n"
+        "\n"
+        "    starttime();\n"
+        "\n"
+        "    int i = 0;\n"
+        "    while (i < 100){\n"
+        "        spmv(n, x, y, v, a, b);\n"
+        "        spmv(n, x, y, v, b, a);\n"
+        "        i=i+1;\n"
+        "    }\n"
+        "    stoptime();\n"
+        "    putarray(n, b);\n"
+        "    return 0;\n"
+        "}\n";
+
+    return expect_source_perf_hotspot_fragments("VALUE-SSA-PERF-HOTSPOT-SOURCE-SPMV-FUSION",
+        source,
+        fragments,
+        sizeof(fragments) / sizeof(fragments[0]));
 }
 
 static int test_value_ssa_optimize_perf_hotspots_source_mm_rebuild_dump(void) {
