@@ -10154,3 +10154,25 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 machine-select adjacent compare-branch restore follow-up:
+  - one more previously disabled selected-cleanup helper is now live again,
+    but only in its narrowest correctness-closed form:
+    adjacent `cmp/cmpi` producer plus `br cond` consumer in the same block
+  - kept restore:
+    `machine_select_cleanup_fuse_branch_with_adjacent_compare_in_block(...)`
+    now runs again inside the pure cleanup fixed-point, while the broader
+    `visible compare` sibling remains intentionally disabled
+  - why this specific slice was safe to restore:
+    the helper only fires when the compare result has exactly one visible use
+    (the branch), is not redefined before the terminator, and is not consumed
+    immediately in successors
+  - regression follow-up:
+    a new focused `machine_select` regression now locks the actual cleanup-hit
+    shape rather than only the earlier lowering-side fusion case:
+    selected `load -> copy -> cmpi -> br` must collapse to
+    `load -> cmpbri`
+  - focused rechecks after this restore:
+    `make test-machine-select` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

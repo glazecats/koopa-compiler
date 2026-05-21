@@ -50,6 +50,13 @@
   dominated repeated-indirect-load forwarding helper, not only the older
   same-block and single-predecessor-edge slices. This is a reusable
   correctness-closed pass-restore checkpoint, not a witness-specific rewrite.
+- 2026-05-21 later machine-select checkpoint:
+  one previously disabled selected-cleanup helper is now restored in a narrow
+  correctness-closed form:
+  adjacent same-block `cmp/cmpi` plus `br` fusion is live again inside the
+  selected pure-cleanup fixed-point, while the broader visible-compare sibling
+  remains intentionally disabled until it has its own proof and regression
+  coverage.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

@@ -4317,7 +4317,7 @@ static int machine_select_cleanup_pure_program(MachineSelectProgram *program, Ma
                             program, function, block)) {
                         function_changed = 1;
                     }
-                    if (0 && machine_select_cleanup_fuse_branch_with_adjacent_compare_in_block(
+                    if (machine_select_cleanup_fuse_branch_with_adjacent_compare_in_block(
                             program, function, block)) {
                         function_changed = 1;
                     }
