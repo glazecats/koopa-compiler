@@ -291,11 +291,13 @@ static int value_ssa_sccp_try_evaluate_binary(ValueSsaBinaryOp op,
             rhs.kind == VALUE_SSA_SCCP_VALUE_CONSTANT) ||
         (lhs.kind == VALUE_SSA_SCCP_VALUE_CONSTANT &&
             rhs.kind == VALUE_SSA_SCCP_VALUE_NONZERO_ADDRESS)) {
-        if (op == VALUE_SSA_BINARY_EQ) {
+        long long constant = lhs.kind == VALUE_SSA_SCCP_VALUE_CONSTANT ? lhs.constant : rhs.constant;
+
+        if (constant == 0 && op == VALUE_SSA_BINARY_EQ) {
             *out_value = value_ssa_sccp_make_constant(0);
             return 1;
         }
-        if (op == VALUE_SSA_BINARY_NE) {
+        if (constant == 0 && op == VALUE_SSA_BINARY_NE) {
             *out_value = value_ssa_sccp_make_constant(1);
             return 1;
         }

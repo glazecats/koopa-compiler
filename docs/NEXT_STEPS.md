@@ -264,6 +264,24 @@
     `make test-compiler-driver`,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` (`22/22`), and
     `autotest -perf /workspaces/compiler_lab` (`130/130`)
+- 2026-05-21 later SCCP nonzero-address compare follow-up:
+  - the same `nonzero-address` lattice element now also closes the most
+    obvious compare-side gap after phi merges, instead of only helping branch
+    truthiness
+  - kept expansion:
+    when a phi/join merges different address symbols into
+    `nonzero-address`, SCCP now also folds `!= 0` and `== 0` on that merged
+    value to constants rather than dropping back to unknown
+  - regression follow-up:
+    a new focused SCCP witness now locks the joined-global-address family
+    directly:
+    `phi(addr_global g, addr_global h) != 0` must collapse all the way to
+    `ret 1`
+  - focused rechecks after this expansion:
+    `VALUE_SSA_REG_FILTER=VALUE-SSA-SCCP-GLOBAL-ADDRESS-PHI-NONZERO-COMPARE build/value_ssa/value_ssa_regression_test` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
 - 2026-05-20 later tiny-inline nested-call follow-up:
   - the tiny-helper inliner now also accepts a narrow nested-call family:
     a tiny helper may inline another tiny leaf helper, and the current

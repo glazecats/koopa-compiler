@@ -566,6 +566,12 @@
     - current kept effect:
       joined address-family branch shapes keep collapsing under SCCP/CFG
       cleanup instead of regressing to opaque post-phi values
+  - 2026-05-21 later SCCP nonzero-address compare follow-up:
+    - that same merged `nonzero-address` fact now also covers the natural
+      compare-side continuation after joins, not only direct branch truthiness
+    - current kept extension:
+      `phi(addr_*, addr_*) != 0` / `== 0` on a merged nonzero-address value
+      now fold through SCCP as constants instead of falling back to unknown
     - current status:
       `test-value-ssa-regression`, `test-compiler-driver`,
       `autotest -riscv -s lv9 /workspaces/compiler_lab`, and

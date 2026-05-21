@@ -4291,6 +4291,103 @@ static int build_sccp_local_address_phi_compare_program(ValueSsaProgram *program
     return 1;
 }
 
+static int build_sccp_global_address_phi_nonzero_compare_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global_g = NULL;
+    ValueSsaGlobal *global_h = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *entry = NULL;
+    ValueSsaBasicBlock *then_block = NULL;
+    ValueSsaBasicBlock *else_block = NULL;
+    ValueSsaBasicBlock *join_block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaPhiInput phi_inputs[2];
+    size_t local_cond_id;
+    size_t cond_value;
+    size_t addr_g;
+    size_t addr_h;
+    size_t addr_phi;
+    size_t cmp_ne;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global_g, error) ||
+        !value_ssa_program_append_global(program, "h", &global_h, error) ||
+        !value_ssa_program_append_function(program, "main", 1, &function, error) ||
+        !value_ssa_function_append_local(function, "cond", 0, &local_cond_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &entry, error) ||
+        !value_ssa_function_append_block(function, NULL, &then_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &else_block, error) ||
+        !value_ssa_function_append_block(function, NULL, &join_block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    cond_value = value_ssa_function_allocate_value(function);
+    addr_g = value_ssa_function_allocate_value(function);
+    addr_h = value_ssa_function_allocate_value(function);
+    addr_phi = value_ssa_function_allocate_value(function);
+    cmp_ne = value_ssa_function_allocate_value(function);
+    if (cond_value == (size_t)-1 || addr_g == (size_t)-1 || addr_h == (size_t)-1 ||
+        addr_phi == (size_t)-1 || cmp_ne == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cond_value);
+    instruction.as.load_slot = value_ssa_slot_local(local_cond_id);
+    if (!value_ssa_block_append_instruction(entry, &instruction, error) ||
+        !value_ssa_block_set_branch(entry, value_ssa_value_id(cond_value), 1u, 2u, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_ADDR_GLOBAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(addr_g);
+    instruction.as.addr_slot = value_ssa_slot_global(global_g->id);
+    if (!value_ssa_block_append_instruction(then_block, &instruction, error) ||
+        !value_ssa_block_set_jump(then_block, 3u, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    instruction.result = value_ssa_value_id(addr_h);
+    instruction.as.addr_slot = value_ssa_slot_global(global_h->id);
+    if (!value_ssa_block_append_instruction(else_block, &instruction, error) ||
+        !value_ssa_block_set_jump(else_block, 3u, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    phi_inputs[0].predecessor_block_id = 1u;
+    phi_inputs[0].value = value_ssa_value_id(addr_g);
+    phi_inputs[1].predecessor_block_id = 2u;
+    phi_inputs[1].value = value_ssa_value_id(addr_h);
+    if (!value_ssa_block_append_phi(join_block, addr_phi, phi_inputs, 2u, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(cmp_ne);
+    instruction.as.binary.op = VALUE_SSA_BINARY_NE;
+    instruction.as.binary.lhs = value_ssa_value_id(addr_phi);
+    instruction.as.binary.rhs = value_ssa_value_immediate(0);
+    if (!value_ssa_block_append_instruction(join_block, &instruction, error) ||
+        !value_ssa_block_set_return(join_block, value_ssa_value_id(cmp_ne), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int build_sccp_local_indirect_load_does_not_fold_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *block = NULL;
@@ -18915,6 +19012,25 @@ static int test_value_ssa_sccp_local_address_phi_compare(void) {
         "}\n");
 }
 
+static int test_value_ssa_sccp_global_address_phi_nonzero_compare(void) {
+    return expect_sccp_dump("VALUE-SSA-SCCP-GLOBAL-ADDRESS-PHI-NONZERO-COMPARE",
+        build_sccp_global_address_phi_nonzero_compare_program,
+        "global g.0\n"
+        "global h.1\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local cond.0\n"
+        "    br ssa.0, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    jmp bb.3\n"
+        "  bb.2:\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    ret 1\n"
+        "}\n");
+}
+
 static int test_value_ssa_sccp_local_indirect_load_does_not_fold(void) {
     return expect_sccp_dump("VALUE-SSA-SCCP-LOCAL-INDIRECT-LOAD-NO-FOLD",
         build_sccp_local_indirect_load_does_not_fold_program,
@@ -20524,6 +20640,9 @@ int main(void) {
         if (strstr("VALUE-SSA-PERF-HOTSPOT-INDUCTION-ADDRESS", filter) != NULL) {
             return test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_addresses() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-SCCP-GLOBAL-ADDRESS-PHI-NONZERO-COMPARE", filter) != NULL) {
+            return test_value_ssa_sccp_global_address_phi_nonzero_compare() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-INLINE-TINY-HELPER-VOID-NESTED-CALL", filter) != NULL) {
             return test_value_ssa_inline_tiny_internal_helpers_void_nested_call() ? 0 : 1;
         }
@@ -20694,6 +20813,7 @@ int main(void) {
     ok &= test_value_ssa_sccp_readonly_global_indirect_load();
     ok &= test_value_ssa_sccp_readonly_global_indirect_load_phi();
     ok &= test_value_ssa_sccp_local_address_phi_compare();
+    ok &= test_value_ssa_sccp_global_address_phi_nonzero_compare();
     ok &= test_value_ssa_sccp_local_indirect_load_does_not_fold();
     ok &= test_value_ssa_sccp_readonly_global_indirect_load_store_barrier();
     ok &= test_value_ssa_sccp_parameter_pointer_zero_add();
