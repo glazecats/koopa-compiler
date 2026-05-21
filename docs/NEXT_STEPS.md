@@ -10201,3 +10201,30 @@ The execution log is intentionally retained below them as historical record, not
     `make test-compiler-driver` PASS,
     `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
     `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)
+- 2026-05-21 induction-address carrier follow-up:
+  - the perf-side induction-strength-reduction line now also has a first real
+    affine address-carrier slice rather than stopping at plain carried `shl`
+    results only
+  - kept expansion:
+    `value_ssa_perf_strength_reduce_simple_induction_address_exprs(...)` is
+    now live in `value_ssa_optimize_perf_hotspots(...)`
+  - current landed scope:
+    inside the existing simple single-header/single-body loop family, repeated
+    affine address expressions of the form
+    `scale * iv + const`
+    may now be rewritten into carried recurrence families instead of being
+    rebuilt from `shl + add` every iteration
+  - current proof boundary:
+    the new slice is still deliberately narrow and perf-oriented:
+    it only rewrites repeated same-family body-side address expressions, and
+    it chooses one base affine carrier per induction family before rebuilding
+    later same-scale offsets from that carried base
+  - regression/tooling follow-up:
+    the `value_ssa` regression binary now also has a tiny
+    `VALUE_SSA_REG_FILTER` environment hook so one focused perf-hotspot
+    witness can be rerun cheaply while the pass is under construction
+  - focused rechecks after this expansion:
+    `VALUE_SSA_REG_FILTER=INDUCTION-ADDRESS build/value_ssa/value_ssa_regression_test` PASS,
+    `make test-compiler-driver` PASS,
+    `autotest -riscv -s lv9 /workspaces/compiler_lab` PASS (`22/22`),
+    `autotest -perf /workspaces/compiler_lab` PASS (`130/130`)

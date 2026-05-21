@@ -65,6 +65,14 @@
   fixed-point while preserving its existing per-function inline budget across
   rounds, so newly simplified tiny helpers may unlock later callers in the
   same invocation without silently over-expanding code size.
+- 2026-05-21 later induction-address checkpoint:
+  the perf-side induction-strength-reduction line now also has a first live
+  affine address-carrier slice instead of only the earlier carried-`shl`
+  family. Current kept scope remains narrow and loop-shape-specific, but the
+  pass is now able to promote repeated body-side same-family
+  `scale * iv + const`
+  address expressions into carried recurrence families under the existing
+  simple-loop perf hotspot lane.
 
 1. `void call` pointless-code cleanup
    - Audit all remaining `void call`-adjacent no-op materialization such as

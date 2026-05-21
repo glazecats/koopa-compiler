@@ -1100,6 +1100,17 @@ typedef struct {
     long long step_immediate;
 } ValueSsaPerfSimpleInduction;
 
+static int value_ssa_perf_try_strength_reduce_induction_address_expr(ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaPerfSimpleLoop *loop,
+    const unsigned char *has_induction,
+    const ValueSsaPerfSimpleInduction *inductions,
+    ValueSsaValueRef value,
+    size_t *out_phi_id,
+    long long *out_scale,
+    long long *out_offset,
+    unsigned depth);
+
 static int value_ssa_perf_match_simple_add_immediate_step(const ValueSsaInstruction *instruction,
     size_t base_value_id,
     long long *out_step_immediate) {
@@ -1158,6 +1169,82 @@ static int value_ssa_perf_shift_result_is_worth_carried_recurrence(const ValueSs
     }
 
     return useful_address_uses >= 2u;
+}
+
+static int value_ssa_perf_value_has_multiple_body_binary_uses(const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaPerfSimpleLoop *loop,
+    ValueSsaValueRef value) {
+    size_t use_index;
+    size_t useful_uses = 0u;
+
+    if (!analysis || !loop || value.kind != VALUE_SSA_VALUE_ID || value.value_id >= analysis->value_count ||
+        !analysis->use_counts || !analysis->use_sites || !analysis->use_offsets) {
+        return 0;
+    }
+
+    for (use_index = 0; use_index < analysis->use_counts[value.value_id]; ++use_index) {
+        const ValueSsaUseSite *site = &analysis->use_sites[analysis->use_offsets[value.value_id] + use_index];
+
+        if (site->block_id != loop->body_id) {
+            continue;
+        }
+        if (site->role != VALUE_SSA_USE_ROLE_BINARY_LHS &&
+            site->role != VALUE_SSA_USE_ROLE_BINARY_RHS) {
+            continue;
+        }
+        ++useful_uses;
+        if (useful_uses >= 2u) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int value_ssa_perf_body_has_later_related_induction_address(const ValueSsaFunction *function,
+    const ValueSsaDefUseAnalysis *analysis,
+    const ValueSsaPerfSimpleLoop *loop,
+    const unsigned char *has_induction,
+    const ValueSsaPerfSimpleInduction *inductions,
+    const ValueSsaBasicBlock *body,
+    size_t start_instruction_index,
+    size_t phi_id,
+    long long scale) {
+    size_t instruction_index;
+
+    if (!function || !analysis || !loop || !has_induction || !inductions || !body) {
+        return 0;
+    }
+
+    for (instruction_index = start_instruction_index + 1u; instruction_index < body->instruction_count; ++instruction_index) {
+        const ValueSsaInstruction *instruction = &body->instructions[instruction_index];
+        size_t other_phi_id;
+        long long other_scale;
+        long long other_offset;
+
+        if (instruction->kind != VALUE_SSA_INSTR_BINARY ||
+            instruction->as.binary.op != VALUE_SSA_BINARY_ADD) {
+            continue;
+        }
+        if (!value_ssa_perf_try_strength_reduce_induction_address_expr(
+                (ValueSsaFunction *)function,
+                analysis,
+                loop,
+                has_induction,
+                inductions,
+                instruction->result,
+                &other_phi_id,
+                &other_scale,
+                &other_offset,
+                0u)) {
+            continue;
+        }
+        if (other_phi_id == phi_id && other_scale == scale) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static int value_ssa_perf_collect_simple_inductions_for_loop(const ValueSsaFunction *function,
@@ -1382,19 +1469,38 @@ static int value_ssa_perf_strength_reduce_simple_induction_address_exprs(ValueSs
 
         for (header_id = 0; header_id < function->block_count; ++header_id) {
             ValueSsaPerfSimpleLoop loop;
+            ValueSsaBasicBlock *preheader = NULL;
             ValueSsaBasicBlock *header;
+            ValueSsaBasicBlock *body = NULL;
+            ValueSsaBasicBlock rebuilt_preheader;
+            ValueSsaBasicBlock rebuilt_header;
+            ValueSsaBasicBlock rebuilt_body;
             unsigned char *has_induction = NULL;
             ValueSsaPerfSimpleInduction *inductions = NULL;
+            size_t candidate_instruction_index = (size_t)-1;
+            size_t candidate_phi_id = (size_t)-1;
+            long long candidate_scale = 0;
+            long long candidate_offset = 0;
+            size_t candidate_result_id = (size_t)-1;
+            int have_candidate = 0;
+            size_t new_phi_value_id = (size_t)-1;
+            size_t new_step_value_id = (size_t)-1;
+            size_t init_value_id = (size_t)-1;
             size_t instruction_index;
+            size_t phi_index;
+            size_t step_value_id;
+            long long step_immediate;
+            long long carried_step;
+            ValueSsaInstruction *step_def = NULL;
+            int ok = 1;
 
             if (!value_ssa_perf_find_phi_header_single_body_loop(function, &cfg, header_id, &loop)) {
                 continue;
             }
 
+            preheader = &function->blocks[loop.preheader_id];
             header = &function->blocks[loop.header_id];
-            if (header->instruction_count == 0u) {
-                continue;
-            }
+            body = &function->blocks[loop.body_id];
 
             has_induction = (unsigned char *)calloc(function->next_value_id, sizeof(unsigned char));
             inductions = (ValueSsaPerfSimpleInduction *)calloc(
@@ -1418,20 +1524,14 @@ static int value_ssa_perf_strength_reduce_simple_induction_address_exprs(ValueSs
                 return 0;
             }
 
-            for (instruction_index = 0; instruction_index < header->instruction_count; ++instruction_index) {
-                ValueSsaInstruction *instruction = &header->instructions[instruction_index];
+            for (instruction_index = 0; instruction_index < body->instruction_count; ++instruction_index) {
+                ValueSsaInstruction *instruction = &body->instructions[instruction_index];
                 size_t phi_id;
                 long long scale;
                 long long offset;
-                ValueSsaPhi *phi = NULL;
-                size_t phi_index;
-                size_t step_value_id;
-                long long step_immediate;
-                long long carried_step;
-                ValueSsaInstruction *step_def = NULL;
 
                 if (instruction->kind != VALUE_SSA_INSTR_BINARY ||
-                    instruction->as.binary.op != VALUE_SSA_BINARY_SHIFT_LEFT) {
+                    instruction->as.binary.op != VALUE_SSA_BINARY_ADD) {
                     continue;
                 }
 
@@ -1441,59 +1541,277 @@ static int value_ssa_perf_strength_reduce_simple_induction_address_exprs(ValueSs
                         &loop,
                         has_induction,
                         inductions,
-                        instruction->as.binary.lhs,
+                        instruction->result,
                         &phi_id,
                         &scale,
                         &offset,
                         0u) ||
-                    instruction->as.binary.rhs.kind != VALUE_SSA_VALUE_IMMEDIATE ||
-                    instruction->as.binary.rhs.immediate < 0 ||
-                    instruction->as.binary.rhs.immediate >= 31 ||
                     phi_id >= function->next_value_id ||
-                    !has_induction[phi_id]) {
+                    !has_induction[phi_id] ||
+                    !value_ssa_perf_body_has_later_related_induction_address(
+                        function,
+                        &def_use,
+                        &loop,
+                        has_induction,
+                        inductions,
+                        body,
+                        instruction_index,
+                        phi_id,
+                        scale)) {
                     continue;
                 }
 
-                scale <<= instruction->as.binary.rhs.immediate;
-                offset <<= instruction->as.binary.rhs.immediate;
-                step_value_id = inductions[phi_id].step_result_id;
-                step_immediate = inductions[phi_id].step_immediate;
-                carried_step = scale * step_immediate;
-                if (carried_step == 0) {
+                if (scale == 0) {
                     continue;
                 }
 
-                for (phi_index = 0; phi_index < header->phi_count; ++phi_index) {
-                    if (header->phis[phi_index].result_id == instruction->result.value_id) {
-                        phi = &header->phis[phi_index];
-                        break;
+                if (!have_candidate ||
+                    phi_id != candidate_phi_id ||
+                    scale != candidate_scale ||
+                    offset < candidate_offset ||
+                    (offset == candidate_offset && instruction_index < candidate_instruction_index)) {
+                    candidate_instruction_index = instruction_index;
+                    candidate_phi_id = phi_id;
+                    candidate_scale = scale;
+                    candidate_offset = offset;
+                    candidate_result_id = instruction->result.value_id;
+                    have_candidate = 1;
+                }
+            }
+
+            if (!have_candidate || candidate_instruction_index == (size_t)-1) {
+                free(inductions);
+                free(has_induction);
+                continue;
+            }
+
+            step_value_id = inductions[candidate_phi_id].step_result_id;
+            step_immediate = inductions[candidate_phi_id].step_immediate;
+            carried_step = candidate_scale * step_immediate;
+            if (carried_step == 0) {
+                free(inductions);
+                free(has_induction);
+                continue;
+            }
+
+            step_def = value_ssa_pass_lookup_instruction_definition(function, &def_use, step_value_id);
+            if (!step_def || !value_ssa_perf_match_simple_add_immediate_step(step_def, candidate_phi_id, &step_immediate)) {
+                free(inductions);
+                free(has_induction);
+                continue;
+            }
+
+            new_phi_value_id = value_ssa_function_allocate_value(function);
+            new_step_value_id = value_ssa_function_allocate_value(function);
+            if (inductions[candidate_phi_id].seed_value.kind == VALUE_SSA_VALUE_ID) {
+                init_value_id = value_ssa_function_allocate_value(function);
+            }
+            if (new_phi_value_id == (size_t)-1 ||
+                new_step_value_id == (size_t)-1 ||
+                (inductions[candidate_phi_id].seed_value.kind == VALUE_SSA_VALUE_ID &&
+                    init_value_id == (size_t)-1)) {
+                free(inductions);
+                free(has_induction);
+                value_ssa_def_use_analysis_free(&def_use);
+                value_ssa_cfg_analysis_free(&cfg);
+                value_ssa_set_error(error, 0, 0, "VALUE-SSA-336: failed allocating induction address values");
+                return 0;
+            }
+
+            memset(&rebuilt_preheader, 0, sizeof(rebuilt_preheader));
+            memset(&rebuilt_header, 0, sizeof(rebuilt_header));
+            memset(&rebuilt_body, 0, sizeof(rebuilt_body));
+            rebuilt_preheader.id = preheader->id;
+            rebuilt_header.id = header->id;
+            rebuilt_body.id = body->id;
+
+            for (instruction_index = 0; instruction_index < preheader->instruction_count; ++instruction_index) {
+                if (!value_ssa_block_append_instruction(&rebuilt_preheader, &preheader->instructions[instruction_index], error)) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (ok && inductions[candidate_phi_id].seed_value.kind == VALUE_SSA_VALUE_ID) {
+                ValueSsaInstruction init_instruction;
+
+                memset(&init_instruction, 0, sizeof(init_instruction));
+                init_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                init_instruction.has_result = 1;
+                init_instruction.result = value_ssa_value_id(init_value_id);
+                init_instruction.as.binary.op = VALUE_SSA_BINARY_MUL;
+                init_instruction.as.binary.lhs = inductions[candidate_phi_id].seed_value;
+                init_instruction.as.binary.rhs = value_ssa_value_immediate(candidate_scale);
+                if (!value_ssa_block_append_instruction(&rebuilt_preheader, &init_instruction, error)) {
+                    ok = 0;
+                }
+                if (ok && candidate_offset != 0) {
+                    size_t offset_value_id = value_ssa_function_allocate_value(function);
+                    if (offset_value_id == (size_t)-1) {
+                        ok = 0;
+                    } else {
+                        memset(&init_instruction, 0, sizeof(init_instruction));
+                        init_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                        init_instruction.has_result = 1;
+                        init_instruction.result = value_ssa_value_id(offset_value_id);
+                        init_instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+                        init_instruction.as.binary.lhs = value_ssa_value_id(init_value_id);
+                        init_instruction.as.binary.rhs = value_ssa_value_immediate(candidate_offset);
+                        if (!value_ssa_block_append_instruction(&rebuilt_preheader, &init_instruction, error)) {
+                            ok = 0;
+                        } else {
+                            init_value_id = offset_value_id;
+                        }
                     }
                 }
-                if (!phi || phi->input_count != 2u) {
+            }
+
+            for (phi_index = 0; ok && phi_index < header->phi_count; ++phi_index) {
+                if (!value_ssa_block_append_phi(
+                        &rebuilt_header,
+                        header->phis[phi_index].result_id,
+                        header->phis[phi_index].inputs,
+                        header->phis[phi_index].input_count,
+                        error)) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (ok) {
+                ValueSsaPhiInput new_phi_inputs[2];
+
+                new_phi_inputs[0].predecessor_block_id = loop.preheader_id;
+                if (inductions[candidate_phi_id].seed_value.kind == VALUE_SSA_VALUE_IMMEDIATE) {
+                    new_phi_inputs[0].value = value_ssa_value_immediate(
+                        inductions[candidate_phi_id].seed_value.immediate * candidate_scale + candidate_offset);
+                } else {
+                    new_phi_inputs[0].value = value_ssa_value_id(init_value_id);
+                }
+                new_phi_inputs[1].predecessor_block_id = loop.body_id;
+                new_phi_inputs[1].value = value_ssa_value_id(new_step_value_id);
+                if (!value_ssa_block_append_phi(&rebuilt_header, new_phi_value_id, new_phi_inputs, 2u, error)) {
+                    ok = 0;
+                }
+            }
+
+            for (instruction_index = 0; ok && instruction_index < header->instruction_count; ++instruction_index) {
+                if (!value_ssa_block_append_instruction(&rebuilt_header, &header->instructions[instruction_index], error)) {
+                    ok = 0;
+                    break;
+                }
+            }
+
+            for (instruction_index = 0; ok && instruction_index < body->instruction_count; ++instruction_index) {
+                const ValueSsaInstruction *source = &body->instructions[instruction_index];
+                ValueSsaInstruction replacement;
+
+                if (instruction_index == candidate_instruction_index) {
+                    memset(&replacement, 0, sizeof(replacement));
+                    replacement.kind = VALUE_SSA_INSTR_MOV;
+                    replacement.has_result = 1;
+                    replacement.result = value_ssa_value_id(candidate_result_id);
+                    replacement.as.mov_value = value_ssa_value_id(new_phi_value_id);
+                    if (!value_ssa_block_append_instruction(&rebuilt_body, &replacement, error)) {
+                        ok = 0;
+                        break;
+                    }
                     continue;
                 }
+                if (source->kind == VALUE_SSA_INSTR_BINARY &&
+                    source->as.binary.op == VALUE_SSA_BINARY_ADD) {
+                    size_t other_phi_id;
+                    long long other_scale;
+                    long long other_offset;
 
-                step_def = value_ssa_pass_lookup_instruction_definition(function, &def_use, step_value_id);
-                if (!step_def || !value_ssa_perf_match_simple_add_immediate_step(step_def, phi_id, &step_immediate)) {
-                    continue;
+                    if (value_ssa_perf_try_strength_reduce_induction_address_expr(
+                            function,
+                            &def_use,
+                            &loop,
+                            has_induction,
+                            inductions,
+                            source->result,
+                            &other_phi_id,
+                            &other_scale,
+                            &other_offset,
+                            0u) &&
+                        other_phi_id == candidate_phi_id &&
+                        other_scale == candidate_scale) {
+                        memset(&replacement, 0, sizeof(replacement));
+                        replacement.kind = other_offset == candidate_offset
+                            ? VALUE_SSA_INSTR_MOV
+                            : VALUE_SSA_INSTR_BINARY;
+                        replacement.has_result = 1;
+                        replacement.result = source->result;
+                        if (replacement.kind == VALUE_SSA_INSTR_MOV) {
+                            replacement.as.mov_value = value_ssa_value_id(new_phi_value_id);
+                        } else {
+                            replacement.as.binary.op = VALUE_SSA_BINARY_ADD;
+                            replacement.as.binary.lhs = value_ssa_value_id(new_phi_value_id);
+                            replacement.as.binary.rhs =
+                                value_ssa_value_immediate(other_offset - candidate_offset);
+                        }
+                        if (!value_ssa_block_append_instruction(&rebuilt_body, &replacement, error)) {
+                            ok = 0;
+                            break;
+                        }
+                        continue;
+                    }
                 }
-
-                if (inductions[phi_id].seed_value.kind != VALUE_SSA_VALUE_IMMEDIATE) {
-                    continue;
+                if (!value_ssa_block_append_instruction(&rebuilt_body, source, error)) {
+                    ok = 0;
+                    break;
                 }
-                phi->inputs[0].value = value_ssa_value_immediate(
-                    inductions[phi_id].seed_value.immediate * scale + offset);
-                phi->inputs[1].value = value_ssa_value_id(step_value_id);
-                instruction->kind = VALUE_SSA_INSTR_MOV;
-                instruction->as.mov_value = value_ssa_value_id(instruction->result.value_id);
+            }
 
-                step_def->as.binary.lhs = value_ssa_value_id(instruction->result.value_id);
-                step_def->as.binary.rhs = value_ssa_value_immediate(carried_step);
+            if (ok) {
+                ValueSsaInstruction new_step_instruction;
+
+                memset(&new_step_instruction, 0, sizeof(new_step_instruction));
+                new_step_instruction.kind = VALUE_SSA_INSTR_BINARY;
+                new_step_instruction.has_result = 1;
+                new_step_instruction.result = value_ssa_value_id(new_step_value_id);
+                new_step_instruction.as.binary.op = VALUE_SSA_BINARY_ADD;
+                new_step_instruction.as.binary.lhs = value_ssa_value_id(new_phi_value_id);
+                new_step_instruction.as.binary.rhs = value_ssa_value_immediate(carried_step);
+                if (!value_ssa_block_append_instruction(&rebuilt_body, &new_step_instruction, error)) {
+                    ok = 0;
+                }
+            }
+
+            if (ok) {
+                rebuilt_preheader.has_terminator = preheader->has_terminator;
+                rebuilt_preheader.terminator = preheader->terminator;
+                rebuilt_header.has_terminator = header->has_terminator;
+                rebuilt_header.terminator = header->terminator;
+                rebuilt_body.has_terminator = body->has_terminator;
+                rebuilt_body.terminator = body->terminator;
+
+                value_ssa_basic_block_free(preheader);
+                *preheader = rebuilt_preheader;
+                memset(&rebuilt_preheader, 0, sizeof(rebuilt_preheader));
+
+                value_ssa_basic_block_free(header);
+                *header = rebuilt_header;
+                memset(&rebuilt_header, 0, sizeof(rebuilt_header));
+
+                value_ssa_basic_block_free(body);
+                *body = rebuilt_body;
+                memset(&rebuilt_body, 0, sizeof(rebuilt_body));
                 changed_function = 1;
             }
 
             free(inductions);
             free(has_induction);
+            value_ssa_basic_block_free(&rebuilt_preheader);
+            value_ssa_basic_block_free(&rebuilt_header);
+            value_ssa_basic_block_free(&rebuilt_body);
+            if (!ok) {
+                value_ssa_def_use_analysis_free(&def_use);
+                value_ssa_cfg_analysis_free(&cfg);
+                return 0;
+            }
+            if (changed_function) {
+                break;
+            }
         }
 
         value_ssa_def_use_analysis_free(&def_use);
@@ -1504,6 +1822,9 @@ static int value_ssa_perf_strength_reduce_simple_induction_address_exprs(ValueSs
                 !value_ssa_eliminate_dead_value_defs(program, error) ||
                 !value_ssa_simplify_cfg(program, error))) {
             return 0;
+        }
+        if (changed_function) {
+            --function_index;
         }
     }
 
