@@ -563,7 +563,7 @@ static int value_ssa_perf_mm_rebuild_function(ValueSsaFunction *function, ValueS
     return 1;
 }
 
-static int value_ssa_perf_optimize_mm_functions(ValueSsaProgram *program, ValueSsaError *error) {
+static int __attribute__((unused)) value_ssa_perf_optimize_mm_functions(ValueSsaProgram *program, ValueSsaError *error) {
     size_t function_index;
     int changed_any = 0;
 

@@ -49,6 +49,7 @@ typedef struct {
 typedef struct {
     size_t break_target;
     size_t continue_target;
+    size_t defer_scope_depth;
 } IrLoopTarget;
 
 typedef struct {
@@ -56,6 +57,26 @@ typedef struct {
     size_t count;
     size_t capacity;
 } IrLoopTargetStack;
+
+typedef struct {
+    const AstStatement *payload_stmt;
+} IrDeferEntry;
+
+typedef struct {
+    IrDeferEntry *items;
+    size_t count;
+    size_t capacity;
+} IrDeferEntryStack;
+
+typedef struct {
+    size_t defer_base;
+} IrDeferScopeEntry;
+
+typedef struct {
+    IrDeferScopeEntry *items;
+    size_t count;
+    size_t capacity;
+} IrDeferScopeStack;
 
 typedef struct {
     IrProgram *program;
@@ -66,6 +87,8 @@ typedef struct {
     int has_block;
     IrLowerScopeStack scopes;
     IrLoopTargetStack loop_targets;
+    IrDeferEntryStack defer_entries;
+    IrDeferScopeStack defer_scopes;
     IrError *error;
 } IrLowerContext;
 
@@ -107,6 +130,14 @@ static int ir_lower_scope_stack_clone(const IrLowerScopeStack *src,
 static int ir_lower_scope_stack_merge_const_facts(IrLowerScopeStack *dest,
     const IrLowerScopeStack *lhs,
     const IrLowerScopeStack *rhs);
+static void ir_lower_defer_entry_stack_free(IrDeferEntryStack *stack);
+static int ir_lower_defer_entry_stack_push(IrDeferEntryStack *stack, const AstStatement *payload_stmt);
+static void ir_lower_defer_entry_stack_pop_to(IrDeferEntryStack *stack, size_t new_count);
+static void ir_lower_defer_scope_stack_free(IrDeferScopeStack *stack);
+static int ir_lower_defer_scope_stack_push(IrDeferScopeStack *stack, size_t defer_base);
+static void ir_lower_defer_scope_stack_pop(IrDeferScopeStack *stack);
+static int ir_lower_emit_defer_entries(IrLowerContext *ctx, size_t begin_index);
+static int ir_lower_emit_defer_entries_range(IrLowerContext *ctx, size_t begin_index, size_t end_index);
 
 static void ir_basic_block_free(IrBasicBlock *block);
 static void ir_function_free(IrFunction *function);
@@ -300,6 +331,126 @@ static int ir_next_growth_capacity(size_t current,
     }
 
     *out_next_capacity = next_capacity;
+    return 1;
+}
+
+static void ir_lower_defer_entry_stack_free(IrDeferEntryStack *stack) {
+    if (!stack) {
+        return;
+    }
+
+    free(stack->items);
+    stack->items = NULL;
+    stack->count = 0u;
+    stack->capacity = 0u;
+}
+
+static int ir_lower_defer_entry_stack_push(IrDeferEntryStack *stack, const AstStatement *payload_stmt) {
+    IrDeferEntry *new_items;
+    size_t next_capacity;
+
+    if (!stack || !payload_stmt) {
+        return 0;
+    }
+
+    if (stack->count == stack->capacity) {
+        if (!ir_next_growth_capacity(stack->capacity, 8u, sizeof(IrDeferEntry), &next_capacity)) {
+            return 0;
+        }
+        new_items = (IrDeferEntry *)realloc(stack->items, next_capacity * sizeof(IrDeferEntry));
+        if (!new_items) {
+            return 0;
+        }
+        stack->items = new_items;
+        stack->capacity = next_capacity;
+    }
+
+    stack->items[stack->count].payload_stmt = payload_stmt;
+    stack->count++;
+    return 1;
+}
+
+static void ir_lower_defer_entry_stack_pop_to(IrDeferEntryStack *stack, size_t new_count) {
+    if (!stack) {
+        return;
+    }
+    if (new_count > stack->count) {
+        return;
+    }
+    stack->count = new_count;
+}
+
+static void ir_lower_defer_scope_stack_free(IrDeferScopeStack *stack) {
+    if (!stack) {
+        return;
+    }
+
+    free(stack->items);
+    stack->items = NULL;
+    stack->count = 0u;
+    stack->capacity = 0u;
+}
+
+static int ir_lower_defer_scope_stack_push(IrDeferScopeStack *stack, size_t defer_base) {
+    IrDeferScopeEntry *new_items;
+    size_t next_capacity;
+
+    if (!stack) {
+        return 0;
+    }
+
+    if (stack->count == stack->capacity) {
+        if (!ir_next_growth_capacity(stack->capacity, 8u, sizeof(IrDeferScopeEntry), &next_capacity)) {
+            return 0;
+        }
+        new_items = (IrDeferScopeEntry *)realloc(stack->items, next_capacity * sizeof(IrDeferScopeEntry));
+        if (!new_items) {
+            return 0;
+        }
+        stack->items = new_items;
+        stack->capacity = next_capacity;
+    }
+
+    stack->items[stack->count].defer_base = defer_base;
+    stack->count++;
+    return 1;
+}
+
+static void ir_lower_defer_scope_stack_pop(IrDeferScopeStack *stack) {
+    if (!stack || stack->count == 0u) {
+        return;
+    }
+    stack->count--;
+}
+
+static int ir_lower_emit_defer_entries(IrLowerContext *ctx, size_t begin_index) {
+    if (!ctx) {
+        return 0;
+    }
+    return ir_lower_emit_defer_entries_range(ctx, begin_index, ctx->defer_entries.count);
+}
+
+static int ir_lower_emit_defer_entries_range(IrLowerContext *ctx, size_t begin_index, size_t end_index) {
+    size_t index;
+
+    if (!ctx) {
+        return 0;
+    }
+    if (begin_index > ctx->defer_entries.count || end_index > ctx->defer_entries.count || begin_index > end_index) {
+        return 0;
+    }
+
+    for (index = end_index; index > begin_index; --index) {
+        const AstStatement *payload_stmt = ctx->defer_entries.items[index - 1u].payload_stmt;
+
+        if (!payload_stmt || !ir_lower_statement(ctx, payload_stmt)) {
+            return 0;
+        }
+        if (!ctx->has_block || ir_lower_current_block(ctx)->has_terminator) {
+            return 1;
+        }
+    }
+
     return 1;
 }
 

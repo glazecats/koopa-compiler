@@ -1171,7 +1171,7 @@ static int value_ssa_perf_shift_result_is_worth_carried_recurrence(const ValueSs
     return useful_address_uses >= 2u;
 }
 
-static int value_ssa_perf_value_has_multiple_body_binary_uses(const ValueSsaDefUseAnalysis *analysis,
+static int __attribute__((unused)) value_ssa_perf_value_has_multiple_body_binary_uses(const ValueSsaDefUseAnalysis *analysis,
     const ValueSsaPerfSimpleLoop *loop,
     ValueSsaValueRef value) {
     size_t use_index;

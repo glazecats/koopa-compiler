@@ -84,6 +84,8 @@ const char *ast_statement_kind_name(AstStatementKind kind) {
         return "break";
     case AST_STMT_CONTINUE:
         return "continue";
+    case AST_STMT_DEFER:
+        return "defer";
     default:
         return "unknown";
     }

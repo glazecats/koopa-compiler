@@ -1280,15 +1280,61 @@ static int semantic_scope_check_top_level_initializer_expression(const AstExpres
         error);
 }
 
+static int semantic_defer_body_is_supported(const AstStatement *stmt,
+    SemanticError *error);
+
 static int semantic_scope_check_statement(const AstStatement *stmt,
     const AstProgram *program,
     size_t func_index,
     ScopeStack *scopes,
+    const SemanticAnalyzeConfig *config,
     SemanticError *error) {
     size_t i;
 
     if (!stmt) {
         return 1;
+    }
+
+    if (stmt->extension_origin == AST_EXTENSION_ORIGIN_UNLESS) {
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-006: 'unless' is available only under -extension mode");
+            return 0;
+        }
+    }
+
+    if (stmt->kind == AST_STMT_DEFER) {
+        const AstStatement *payload = NULL;
+
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-001: 'defer' is available only under -extension mode");
+            return 0;
+        }
+
+        if (stmt->child_count == 0u || !stmt->children || !stmt->children[0]) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-002: defer statement requires a non-empty payload");
+            return 0;
+        }
+
+        payload = stmt->children[0];
+        if (!semantic_defer_body_is_supported(payload, error)) {
+            return 0;
+        }
+
+        return semantic_scope_check_statement(payload,
+            program,
+            func_index,
+            scopes,
+            config,
+            error);
     }
 
     if (stmt->kind == AST_STMT_COMPOUND) {
@@ -1305,6 +1351,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 program,
                 func_index,
                 scopes,
+                config,
                 error)) {
                 scope_stack_pop(scopes);
                 return 0;
@@ -1404,6 +1451,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 program,
                 func_index,
                 scopes,
+                config,
                 error)) {
                 scope_stack_pop(scopes);
                 return 0;
@@ -1482,6 +1530,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 program,
                 func_index,
                 scopes,
+                config,
                 error)) {
                 return 0;
             }
@@ -1507,6 +1556,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             program,
             func_index,
             scopes,
+            config,
             error)) {
             return 0;
         }
@@ -1515,9 +1565,70 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
     return 1;
 }
 
+static int semantic_defer_body_is_supported_with_loop_depth(const AstStatement *stmt,
+    size_t loop_depth,
+    SemanticError *error) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    if (stmt->kind == AST_STMT_RETURN) {
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-003: defer body may not contain return in the first extension version");
+        return 0;
+    }
+    if (stmt->kind == AST_STMT_BREAK) {
+        if (loop_depth == 0u) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-004: defer body may not contain break targeting an outer loop in the first extension version");
+            return 0;
+        }
+        return 1;
+    }
+    if (stmt->kind == AST_STMT_CONTINUE) {
+        if (loop_depth == 0u) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-005: defer body may not contain continue targeting an outer loop in the first extension version");
+            return 0;
+        }
+        return 1;
+    }
+
+    if (stmt->kind == AST_STMT_WHILE || stmt->kind == AST_STMT_FOR) {
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!semantic_defer_body_is_supported_with_loop_depth(stmt->children[i], loop_depth + 1u, error)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (!semantic_defer_body_is_supported_with_loop_depth(stmt->children[i], loop_depth, error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int semantic_defer_body_is_supported(const AstStatement *stmt,
+    SemanticError *error) {
+    return semantic_defer_body_is_supported_with_loop_depth(stmt, 0u, error);
+}
+
 static int semantic_check_function_scope_rules(const AstProgram *program,
     size_t func_index,
     const AstExternal *func,
+    const SemanticAnalyzeConfig *config,
     SemanticError *error) {
     ScopeStack scopes;
     const AstStatement *body;
@@ -1576,6 +1687,7 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
                 program,
                 func_index,
                 &scopes,
+                config,
                 error)) {
                 scope_stack_free(&scopes);
                 return 0;
@@ -1585,6 +1697,7 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
         program,
         func_index,
         &scopes,
+        config,
         error)) {
         scope_stack_free(&scopes);
         return 0;

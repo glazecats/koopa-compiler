@@ -38,7 +38,14 @@ typedef enum {
     AST_STMT_RETURN,
     AST_STMT_BREAK,
     AST_STMT_CONTINUE,
+    AST_STMT_DEFER,
 } AstStatementKind;
+
+typedef enum {
+    AST_EXTENSION_ORIGIN_NONE = 0,
+    AST_EXTENSION_ORIGIN_DEFER,
+    AST_EXTENSION_ORIGIN_UNLESS,
+} AstExtensionOrigin;
 
 typedef enum {
     AST_CALL_CALLEE_DIRECT_IDENTIFIER = 0,
@@ -96,6 +103,7 @@ struct AstExpression {
 
 struct AstStatement {
     AstStatementKind kind;
+    AstExtensionOrigin extension_origin;
     int line;
     int column;
     int declaration_is_const;

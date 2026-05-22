@@ -455,6 +455,7 @@ static AstStatement *alloc_ast_statement(Parser *p,
     }
 
     stmt->kind = kind;
+    stmt->extension_origin = AST_EXTENSION_ORIGIN_NONE;
     stmt->line = anchor_tok ? anchor_tok->line : 0;
     stmt->column = anchor_tok ? anchor_tok->column : 0;
     stmt->declaration_is_const = 0;

@@ -537,7 +537,18 @@ static int flow_guard_identifier_index_for_expression(const AstExpression *expr,
     if (out_index) {
         *out_index = 0;
     }
-    if (!base || base->kind != AST_EXPR_IDENTIFIER) {
+    if (!base) {
+        return 0;
+    }
+
+    if (base->kind == AST_EXPR_SUBSCRIPT) {
+        return flow_guard_identifier_index_for_expression(base->as.subscript.base,
+            set,
+            scopes,
+            out_index);
+    }
+
+    if (base->kind != AST_EXPR_IDENTIFIER) {
         return 0;
     }
 
@@ -549,6 +560,42 @@ static int flow_guard_identifier_index_for_expression(const AstExpression *expr,
             base->as.identifier.name_length),
         out_index);
 }
+
+static const FlowGuardIdentifierSet *g_flow_aux_known_ids = NULL;
+static const FlowIdentifierScopeStack *g_flow_aux_known_scopes = NULL;
+static const FlowGuardConstantState *g_flow_aux_known_state = NULL;
+static int flow_try_eval_constant_int(const AstExpression *expr, long long *out_value);
+static int flow_try_eval_guard_constant_int_with_state(const AstExpression *expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state,
+    long long *out_value,
+    size_t depth);
+
+static int flow_try_eval_aux_constant_int(const AstExpression *expr, long long *out_value) {
+    if (!expr || !out_value || !g_flow_aux_known_ids || !g_flow_aux_known_scopes || !g_flow_aux_known_state) {
+        return 0;
+    }
+
+    return flow_try_eval_guard_constant_int_with_state(
+        expr,
+        g_flow_aux_known_ids,
+        g_flow_aux_known_scopes,
+        g_flow_aux_known_state,
+        out_value,
+        0);
+}
+
+static int flow_expression_is_definitely_zero_with_state(const AstExpression *expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state);
+static int flow_expression_range_may_change_guard_state_with_state(const AstStatement *stmt,
+    size_t start_index,
+    size_t end_index,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state);
 
 static const AstExpression *flow_unwrap_paren_expression(const AstExpression *expr) {
     const AstExpression *current = expr;
@@ -634,6 +681,19 @@ static int flow_try_eval_guard_constant_int_with_state(const AstExpression *expr
     case AST_EXPR_INIT_LIST:
         return 0;
     case AST_EXPR_SUBSCRIPT:
+        if (flow_expression_is_definitely_zero_with_state(
+                base->as.subscript.index,
+                set,
+                scopes,
+                state) &&
+            flow_try_eval_guard_constant_int_with_state(base->as.subscript.base,
+                set,
+                scopes,
+                state,
+                out_value,
+                depth + 1)) {
+            return 1;
+        }
         return 0;
     case AST_EXPR_TERNARY:
         if (!flow_try_eval_guard_constant_int_with_state(base->as.ternary.condition,
@@ -1080,7 +1140,28 @@ static int flow_statement_prove_obvious_false_exit_backedge(const AstStatement *
     FlowGuardConstantState *state,
     FlowLoopExitGuardSet *exit_guards,
     int *out_has_fallthrough);
+static void flow_seed_guard_truth_from_condition(const AstExpression *cond_expr,
+    const FlowGuardIdentifierSet *guard_ids,
+    const FlowIdentifierScopeStack *scopes,
+    FlowGuardConstantState *state) {
+    size_t guard_index;
+    const AstExpression *base = flow_unwrap_paren_expression(cond_expr);
+
+    if (!cond_expr || !guard_ids || !state) {
+        return;
+    }
+
+    if (!base || base->kind != AST_EXPR_IDENTIFIER) {
+        return;
+    }
+
+    if (flow_guard_identifier_index_for_expression(cond_expr, guard_ids, scopes, &guard_index)) {
+        state->known[guard_index] = 1u;
+        state->values[guard_index] = 1;
+    }
+}
 static int flow_loop_body_proves_partial_exit_guards_eventually_fire(const AstStatement *body_stmt,
+    const AstExpression *loop_cond_expr,
     const AstExpression *step_expr,
     const FlowGuardIdentifierSet *guard_ids,
     const FlowIdentifierScopeStack *scopes);
@@ -1393,6 +1474,7 @@ static int flow_statement_prove_obvious_false_exit_backedge(const AstStatement *
             !(nested_exit_summary.may_exit_loop &&
                 flow_loop_body_proves_partial_exit_guards_eventually_fire(
                     nested_body_stmt,
+                    nested_cond_expr,
                     nested_step_expr,
                     guard_ids,
                     scopes))) {
@@ -1409,6 +1491,7 @@ static int flow_statement_prove_obvious_false_exit_backedge(const AstStatement *
 }
 
 static int flow_loop_body_proves_partial_exit_guards_false_on_backedge(const AstStatement *body_stmt,
+    const AstExpression *loop_cond_expr,
     const AstExpression *step_expr,
     const FlowGuardIdentifierSet *guard_ids,
     const FlowIdentifierScopeStack *scopes) {
@@ -1421,14 +1504,23 @@ static int flow_loop_body_proves_partial_exit_guards_false_on_backedge(const Ast
         return 0;
     }
 
+    flow_seed_guard_truth_from_condition(loop_cond_expr, guard_ids, scopes, &state);
+
     if (!flow_statement_prove_obvious_false_exit_backedge(body_stmt,
             guard_ids,
             scopes,
             &state,
             &exit_guards,
             &has_fallthrough) ||
-        exit_guards.overflowed ||
-        exit_guards.count == 0) {
+        exit_guards.overflowed) {
+        return 0;
+    }
+
+    if (!has_fallthrough) {
+        return 1;
+    }
+
+    if (exit_guards.count == 0) {
         return 0;
     }
 
@@ -1467,6 +1559,7 @@ static int flow_loop_body_proves_partial_exit_guards_false_on_backedge(const Ast
 }
 
 static int flow_loop_body_proves_partial_exit_guards_eventually_fire(const AstStatement *body_stmt,
+    const AstExpression *loop_cond_expr,
     const AstExpression *step_expr,
     const FlowGuardIdentifierSet *guard_ids,
     const FlowIdentifierScopeStack *scopes) {
@@ -1479,14 +1572,23 @@ static int flow_loop_body_proves_partial_exit_guards_eventually_fire(const AstSt
         return 0;
     }
 
+    flow_seed_guard_truth_from_condition(loop_cond_expr, guard_ids, scopes, &state);
+
     if (!flow_statement_prove_obvious_false_exit_backedge(body_stmt,
             guard_ids,
             scopes,
             &state,
             &exit_guards,
             &has_fallthrough) ||
-        exit_guards.overflowed ||
-        exit_guards.count == 0) {
+        exit_guards.overflowed) {
+        return 0;
+    }
+
+    if (!has_fallthrough) {
+        return 1;
+    }
+
+    if (exit_guards.count == 0) {
         return 0;
     }
 
@@ -1541,9 +1643,226 @@ static int flow_expression_targets_guard_identifier(const AstExpression *expr,
             base->as.identifier.name_length));
 }
 
-static int flow_expression_may_change_guard_state(const AstExpression *expr,
+static int flow_subscript_may_target_guard_identifier(const AstExpression *expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
+    const AstExpression *base = flow_unwrap_paren_expression(expr);
+    long long value = 0;
+
+    if (!base || base->kind != AST_EXPR_SUBSCRIPT) {
+        return 0;
+    }
+    if (!flow_expression_targets_guard_identifier(base->as.subscript.base, set, scopes)) {
+        return 0;
+    }
+
+    if (flow_try_eval_constant_int(base->as.subscript.index, &value) ||
+        flow_try_eval_aux_constant_int(base->as.subscript.index, &value)) {
+        return value == 0;
+    }
+
+    return 1;
+}
+
+static const AstExpression *flow_expression_assigned_lvalue(const AstExpression *expr) {
+    const AstExpression *base = flow_unwrap_paren_expression(expr);
+
+    if (!base) {
+        return NULL;
+    }
+
+    if (base->kind == AST_EXPR_UNARY &&
+        (base->as.unary.op == TOKEN_PLUS_PLUS || base->as.unary.op == TOKEN_MINUS_MINUS)) {
+        return base->as.unary.operand;
+    }
+    if (base->kind == AST_EXPR_POSTFIX &&
+        (base->as.postfix.op == TOKEN_PLUS_PLUS || base->as.postfix.op == TOKEN_MINUS_MINUS)) {
+        return base->as.postfix.operand;
+    }
+    if (base->kind == AST_EXPR_BINARY && flow_expression_is_assignment_op(base->as.binary.op)) {
+        return base->as.binary.left;
+    }
+
+    return NULL;
+}
+
+static int flow_step_write_provably_misses_zero_subscript_guard(const AstExpression *guard_expr,
+    const AstExpression *step_expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
+    const AstExpression *guard_base = flow_unwrap_paren_expression(guard_expr);
+    const AstExpression *target = flow_unwrap_paren_expression(flow_expression_assigned_lvalue(step_expr));
+    long long guard_index_value = 0;
+    long long target_index_value = 0;
+
+    if (!guard_base || !target ||
+        guard_base->kind != AST_EXPR_SUBSCRIPT ||
+        target->kind != AST_EXPR_SUBSCRIPT) {
+        return 0;
+    }
+    if (!flow_expression_targets_guard_identifier(guard_base->as.subscript.base, set, scopes) ||
+        !flow_expression_targets_guard_identifier(target->as.subscript.base, set, scopes)) {
+        return 0;
+    }
+    if (!flow_try_eval_guard_constant_int_with_state(
+            guard_base->as.subscript.index,
+            set,
+            scopes,
+            NULL,
+            &guard_index_value,
+            0) ||
+        guard_index_value != 0) {
+        return 0;
+    }
+    if (!flow_try_eval_aux_constant_int(target->as.subscript.index, &target_index_value)) {
+        return 0;
+    }
+
+    return target_index_value != 0;
+}
+
+static int flow_expression_writes_zero_subscript_guard(const AstExpression *expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
+    const AstExpression *target = flow_unwrap_paren_expression(flow_expression_assigned_lvalue(expr));
+
+    if (!target || target->kind != AST_EXPR_SUBSCRIPT) {
+        return 0;
+    }
+
+    return flow_subscript_may_target_guard_identifier(target, set, scopes);
+}
+
+static int flow_statement_writes_zero_subscript_guard(const AstStatement *stmt,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes) {
+    size_t i;
+
+    if (!stmt) {
+        return 0;
+    }
+
+    for (i = 0; i < stmt->expression_count; ++i) {
+        if (flow_expression_writes_zero_subscript_guard(stmt->expressions[i], set, scopes)) {
+            return 1;
+        }
+    }
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (flow_statement_writes_zero_subscript_guard(stmt->children[i], set, scopes)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int flow_expression_contains_call(const AstExpression *expr) {
+    const AstExpression *base = flow_unwrap_paren_expression(expr);
+
+    if (!base) {
+        return 0;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_CALL: {
+        size_t i;
+
+        if (flow_expression_contains_call(base->as.call.callee)) {
+            return 1;
+        }
+        for (i = 0; i < base->as.call.arg_count; ++i) {
+            if (flow_expression_contains_call(base->as.call.args[i])) {
+                return 1;
+            }
+        }
+        return 1;
+    }
+    case AST_EXPR_UNARY:
+        return flow_expression_contains_call(base->as.unary.operand);
+    case AST_EXPR_POSTFIX:
+        return flow_expression_contains_call(base->as.postfix.operand);
+    case AST_EXPR_SUBSCRIPT:
+        return flow_expression_contains_call(base->as.subscript.base) ||
+            flow_expression_contains_call(base->as.subscript.index);
+    case AST_EXPR_BINARY:
+        return flow_expression_contains_call(base->as.binary.left) ||
+            flow_expression_contains_call(base->as.binary.right);
+    case AST_EXPR_TERNARY:
+        return flow_expression_contains_call(base->as.ternary.condition) ||
+            flow_expression_contains_call(base->as.ternary.then_expr) ||
+            flow_expression_contains_call(base->as.ternary.else_expr);
+    case AST_EXPR_PAREN:
+        return flow_expression_contains_call(base->as.inner);
+    case AST_EXPR_INIT_LIST: {
+        size_t i;
+
+        for (i = 0; i < base->as.init_list.item_count; ++i) {
+            if (flow_expression_contains_call(base->as.init_list.items[i])) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+    default:
+        return 0;
+    }
+}
+
+static int flow_statement_contains_call(const AstStatement *stmt) {
+    size_t i;
+
+    if (!stmt) {
+        return 0;
+    }
+
+    for (i = 0; i < stmt->expression_count; ++i) {
+        if (flow_expression_contains_call(stmt->expressions[i])) {
+            return 1;
+        }
+    }
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (flow_statement_contains_call(stmt->children[i])) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int flow_expression_is_definitely_zero_with_state(const AstExpression *expr,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state) {
+    long long value = 0;
+
+    if (!expr) {
+        return 0;
+    }
+
+    if (!flow_try_eval_guard_constant_int_with_state(expr, set, scopes, state, &value, 0)) {
+        if (!g_flow_aux_known_ids || !g_flow_aux_known_scopes || !g_flow_aux_known_state ||
+            !flow_try_eval_guard_constant_int_with_state(
+                expr,
+                g_flow_aux_known_ids,
+                g_flow_aux_known_scopes,
+                g_flow_aux_known_state,
+                &value,
+                0)) {
+            return 0;
+        }
+    }
+
+    return value == 0;
+}
+
+static int flow_expression_may_change_guard_state_with_state(const AstExpression *expr,
         const FlowGuardIdentifierSet *set,
-        const FlowIdentifierScopeStack *scopes) {
+        const FlowIdentifierScopeStack *scopes,
+        const FlowGuardConstantState *state) {
+    const FlowGuardConstantState *effective_state = state;
+
     if (!expr || !set || set->count == 0 || set->overflowed) {
         return 0;
     }
@@ -1557,29 +1876,37 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
         size_t i;
 
         for (i = 0; i < expr->as.init_list.item_count; ++i) {
-            if (flow_expression_may_change_guard_state(expr->as.init_list.items[i], set, scopes)) {
+            if (flow_expression_may_change_guard_state_with_state(expr->as.init_list.items[i], set, scopes, effective_state)) {
                 return 1;
             }
         }
         return 0;
     }
     case AST_EXPR_PAREN:
-        return flow_expression_may_change_guard_state(expr->as.inner, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.inner, set, scopes, effective_state);
     case AST_EXPR_UNARY:
-        if ((expr->as.unary.op == TOKEN_PLUS_PLUS || expr->as.unary.op == TOKEN_MINUS_MINUS) &&
-            flow_expression_targets_guard_identifier(expr->as.unary.operand, set, scopes)) {
-            return 1;
+        if (expr->as.unary.op == TOKEN_PLUS_PLUS || expr->as.unary.op == TOKEN_MINUS_MINUS) {
+            if (flow_expression_targets_guard_identifier(expr->as.unary.operand, set, scopes)) {
+                return 1;
+            }
+            if (flow_subscript_may_target_guard_identifier(expr->as.unary.operand, set, scopes)) {
+                return 1;
+            }
         }
-        return flow_expression_may_change_guard_state(expr->as.unary.operand, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.unary.operand, set, scopes, effective_state);
     case AST_EXPR_POSTFIX:
-        if ((expr->as.postfix.op == TOKEN_PLUS_PLUS || expr->as.postfix.op == TOKEN_MINUS_MINUS) &&
-            flow_expression_targets_guard_identifier(expr->as.postfix.operand, set, scopes)) {
-            return 1;
+        if (expr->as.postfix.op == TOKEN_PLUS_PLUS || expr->as.postfix.op == TOKEN_MINUS_MINUS) {
+            if (flow_expression_targets_guard_identifier(expr->as.postfix.operand, set, scopes)) {
+                return 1;
+            }
+            if (flow_subscript_may_target_guard_identifier(expr->as.postfix.operand, set, scopes)) {
+                return 1;
+            }
         }
-        return flow_expression_may_change_guard_state(expr->as.postfix.operand, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.postfix.operand, set, scopes, effective_state);
     case AST_EXPR_SUBSCRIPT:
-        return flow_expression_may_change_guard_state(expr->as.subscript.base, set, scopes) ||
-            flow_expression_may_change_guard_state(expr->as.subscript.index, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.subscript.base, set, scopes, effective_state) ||
+            flow_expression_may_change_guard_state_with_state(expr->as.subscript.index, set, scopes, effective_state);
     case AST_EXPR_CALL:
         return 1;
     case AST_EXPR_BINARY:
@@ -1598,16 +1925,19 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
             if (flow_expression_targets_guard_identifier(expr->as.binary.left, set, scopes)) {
                 return 1;
             }
+            if (flow_subscript_may_target_guard_identifier(expr->as.binary.left, set, scopes)) {
+                return 1;
+            }
             break;
         default:
             break;
         }
-        return flow_expression_may_change_guard_state(expr->as.binary.left, set, scopes) ||
-            flow_expression_may_change_guard_state(expr->as.binary.right, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.binary.left, set, scopes, effective_state) ||
+            flow_expression_may_change_guard_state_with_state(expr->as.binary.right, set, scopes, effective_state);
     case AST_EXPR_TERNARY:
-        return flow_expression_may_change_guard_state(expr->as.ternary.condition, set, scopes) ||
-            flow_expression_may_change_guard_state(expr->as.ternary.then_expr, set, scopes) ||
-            flow_expression_may_change_guard_state(expr->as.ternary.else_expr, set, scopes);
+        return flow_expression_may_change_guard_state_with_state(expr->as.ternary.condition, set, scopes, effective_state) ||
+            flow_expression_may_change_guard_state_with_state(expr->as.ternary.then_expr, set, scopes, effective_state) ||
+            flow_expression_may_change_guard_state_with_state(expr->as.ternary.else_expr, set, scopes, effective_state);
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
     default:
@@ -1615,11 +1945,32 @@ static int flow_expression_may_change_guard_state(const AstExpression *expr,
     }
 }
 
+static int flow_expression_may_change_guard_state(const AstExpression *expr,
+        const FlowGuardIdentifierSet *set,
+        const FlowIdentifierScopeStack *scopes) {
+    return flow_expression_may_change_guard_state_with_state(expr, set, scopes, NULL);
+}
+
 static int flow_expression_range_may_change_guard_state(const AstStatement *stmt,
     size_t start_index,
     size_t end_index,
     const FlowGuardIdentifierSet *set,
     const FlowIdentifierScopeStack *scopes) {
+    return flow_expression_range_may_change_guard_state_with_state(
+        stmt,
+        start_index,
+        end_index,
+        set,
+        scopes,
+        NULL);
+}
+
+static int flow_expression_range_may_change_guard_state_with_state(const AstStatement *stmt,
+    size_t start_index,
+    size_t end_index,
+    const FlowGuardIdentifierSet *set,
+    const FlowIdentifierScopeStack *scopes,
+    const FlowGuardConstantState *state) {
     size_t i;
 
     if (!stmt) {
@@ -1631,7 +1982,7 @@ static int flow_expression_range_may_change_guard_state(const AstStatement *stmt
     }
 
     for (i = start_index; i < end_index; ++i) {
-        if (flow_expression_may_change_guard_state(stmt->expressions[i], set, scopes)) {
+        if (flow_expression_may_change_guard_state_with_state(stmt->expressions[i], set, scopes, state)) {
             return 1;
         }
     }
@@ -1812,10 +2163,19 @@ static int flow_statement_proves_must_return_with_state(const AstStatement *stmt
                     child, &local_tracked, &local_scopes, &local_state)) {
                 return 1;
             }
+            g_flow_aux_known_ids = &local_tracked;
+            g_flow_aux_known_scopes = &local_scopes;
+            g_flow_aux_known_state = &local_state;
             if (!semantic_analyze_statement_flow(
                     child, NULL, &child_may_fallthrough, NULL, NULL, NULL)) {
+                g_flow_aux_known_ids = NULL;
+                g_flow_aux_known_scopes = NULL;
+                g_flow_aux_known_state = NULL;
                 return 0;
             }
+            g_flow_aux_known_ids = NULL;
+            g_flow_aux_known_scopes = NULL;
+            g_flow_aux_known_state = NULL;
             if (!child_may_fallthrough) {
                 return 0;
             }
@@ -1842,6 +2202,9 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
     FlowGuardIdentifierSet *set,
     const FlowIdentifierScopeStack *scopes) {
     size_t i;
+    const FlowGuardConstantState *known_state = g_flow_aux_known_state;
+    const FlowGuardIdentifierSet *known_ids = g_flow_aux_known_ids;
+    const FlowIdentifierScopeStack *known_scopes = g_flow_aux_known_scopes;
 
     if (!stmt || !set || set->count == 0 || set->overflowed) {
         return 0;
@@ -1911,7 +2274,16 @@ static int flow_statement_may_change_guard_state(const AstStatement *stmt,
             }
         }
 
-        if (flow_expression_range_may_change_guard_state(stmt,
+        if (known_state && known_ids == set && known_scopes == scopes) {
+            if (flow_expression_range_may_change_guard_state_with_state(stmt,
+                declaration_expr_count,
+                stmt->expression_count,
+                set,
+                &loop_scopes,
+                known_state)) {
+                return 1;
+            }
+        } else if (flow_expression_range_may_change_guard_state(stmt,
             declaration_expr_count,
             stmt->expression_count,
             set,
@@ -2407,11 +2779,32 @@ static int semantic_analyze_loop_statement_flow(const AstExpression *cond_expr,
         body_changes_guard_state = flow_statement_may_change_guard_state(body_stmt,
             &guard_ids,
             &loop_scopes);
+        if (body_changes_guard_state &&
+            cond_expr &&
+            flow_unwrap_paren_expression(cond_expr) &&
+            flow_unwrap_paren_expression(cond_expr)->kind == AST_EXPR_SUBSCRIPT &&
+            !flow_statement_writes_zero_subscript_guard(body_stmt, &guard_ids, &loop_scopes) &&
+            !flow_statement_contains_call(body_stmt)) {
+            body_changes_guard_state = 0;
+        }
     }
     if (step_expr) {
         step_changes_guard_state = flow_expression_may_change_guard_state(step_expr,
             &guard_ids,
             &loop_scopes);
+        if (step_changes_guard_state &&
+            cond_expr &&
+            flow_step_write_provably_misses_zero_subscript_guard(cond_expr, step_expr, &guard_ids, &loop_scopes)) {
+            step_changes_guard_state = 0;
+        }
+        if (step_changes_guard_state &&
+            cond_expr &&
+            flow_unwrap_paren_expression(cond_expr) &&
+            flow_unwrap_paren_expression(cond_expr)->kind == AST_EXPR_SUBSCRIPT &&
+            !flow_expression_writes_zero_subscript_guard(step_expr, &guard_ids, &loop_scopes) &&
+            !flow_expression_contains_call(step_expr)) {
+            step_changes_guard_state = 0;
+        }
     }
 
     if (cond_always_false) {
@@ -2430,6 +2823,19 @@ static int semantic_analyze_loop_statement_flow(const AstExpression *cond_expr,
         guaranteed_return = 0;
         may_fallthrough = 1;
         may_non_terminating = 0;
+    } else if (!cond_always_true &&
+        !guard_ids.overflowed &&
+        guard_ids.count > 0 &&
+        exit_summary.may_exit_loop &&
+        flow_loop_body_proves_partial_exit_guards_false_on_backedge(
+            body_stmt,
+            cond_expr,
+            step_expr,
+            &guard_ids,
+            &loop_scopes)) {
+        guaranteed_return = 0;
+        may_fallthrough = 1;
+        may_non_terminating = 0;
     } else if (!guard_ids.overflowed && guard_ids.count > 0 &&
         !body_changes_guard_state && !step_changes_guard_state) {
         guaranteed_return = 0;
@@ -2442,6 +2848,7 @@ static int semantic_analyze_loop_statement_flow(const AstExpression *cond_expr,
         !body_may_break &&
         flow_loop_body_proves_partial_exit_guards_eventually_fire(
             body_stmt,
+            cond_expr,
             step_expr,
             &guard_ids,
             &loop_scopes)) {
@@ -2453,6 +2860,7 @@ static int semantic_analyze_loop_statement_flow(const AstExpression *cond_expr,
         guard_ids.count > 0 &&
         flow_loop_body_proves_partial_exit_guards_false_on_backedge(
             body_stmt,
+            cond_expr,
             step_expr,
             &guard_ids,
             &loop_scopes)) {
@@ -2547,13 +2955,24 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
                     stmt->children[i], &tracked_ids, &block_scopes, &block_state)) {
                 child_guaranteed_return = 1;
                 child_may_fallthrough = 0;
-            } else if (!semantic_analyze_statement_flow(stmt->children[i],
+            } else {
+                g_flow_aux_known_ids = &tracked_ids;
+                g_flow_aux_known_scopes = &block_scopes;
+                g_flow_aux_known_state = &block_state;
+                if (!semantic_analyze_statement_flow(stmt->children[i],
                 &child_guaranteed_return,
                 &child_may_fallthrough,
                 &child_may_break,
                 &child_may_continue_loop,
                 &child_may_non_terminating)) {
-                return 0;
+                    g_flow_aux_known_ids = NULL;
+                    g_flow_aux_known_scopes = NULL;
+                    g_flow_aux_known_state = NULL;
+                    return 0;
+                }
+                g_flow_aux_known_ids = NULL;
+                g_flow_aux_known_scopes = NULL;
+                g_flow_aux_known_state = NULL;
             }
 
             if (block_may_fallthrough && child_may_break) {

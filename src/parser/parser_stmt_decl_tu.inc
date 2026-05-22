@@ -356,6 +356,111 @@ static int parse_if_statement_with_local_control(Parser *p,
     return 1;
 }
 
+static int parse_unless_statement_with_local_control(Parser *p,
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
+    ParserLocalControl then_local_control;
+    const Token *unless_tok = previous(p);
+    AstStatement *then_stmt = NULL;
+    AstExpression *cond_expr = NULL;
+    AstExpression *negated_cond_expr = NULL;
+    AstStatement **children = NULL;
+    size_t child_count = 0;
+    size_t child_capacity = 0;
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+    parser_local_control_set(out_local_control, 1, 0);
+    parser_local_control_set(&then_local_control, 1, 0);
+
+    if (!consume(p, TOKEN_LPAREN, "'('")) {
+        return 0;
+    }
+    {
+        size_t cond_start = p->current;
+        size_t cond_end;
+        Token bang_tok;
+
+        if (!parse_expression(p)) {
+            return 0;
+        }
+        cond_end = p->current;
+        if (!build_expression_ast_from_slice(p,
+            cond_start,
+            cond_end,
+            out_statement ? &cond_expr : NULL,
+            unless_tok)) {
+            return 0;
+        }
+        if (out_statement && cond_expr) {
+            bang_tok.type = TOKEN_BANG;
+            bang_tok.lexeme = "!";
+            bang_tok.length = 1u;
+            bang_tok.number_value = 0;
+            bang_tok.line = unless_tok->line;
+            bang_tok.column = unless_tok->column;
+            negated_cond_expr = build_unary_expression_node(p, &bang_tok, cond_expr);
+            if (!negated_cond_expr) {
+                return 0;
+            }
+            cond_expr = NULL;
+        }
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        parser_ast_expression_free(cond_expr);
+        parser_ast_expression_free(negated_cond_expr);
+        return 0;
+    }
+    if (!parse_statement_with_local_control(p,
+        &then_local_control,
+        out_statement ? &then_stmt : NULL)) {
+        parser_ast_expression_free(cond_expr);
+        parser_ast_expression_free(negated_cond_expr);
+        return 0;
+    }
+
+    if (out_statement) {
+        AstStatement *if_stmt;
+
+        if (then_stmt &&
+            !append_ast_statement_child(p,
+                &children,
+                &child_count,
+                &child_capacity,
+                then_stmt,
+                unless_tok)) {
+            free_ast_statement_array(children, child_count);
+            parser_ast_expression_free(negated_cond_expr);
+            return 0;
+        }
+
+        if_stmt = alloc_ast_statement(p, AST_STMT_IF, unless_tok);
+        if (!if_stmt) {
+            free_ast_statement_array(children, child_count);
+            parser_ast_expression_free(negated_cond_expr);
+            return 0;
+        }
+        if (negated_cond_expr &&
+            !append_ast_statement_expression(p, if_stmt, negated_cond_expr, unless_tok)) {
+            parser_ast_statement_free(if_stmt);
+            free_ast_statement_array(children, child_count);
+            return 0;
+        }
+        if (negated_cond_expr) {
+            if_stmt->has_condition_expression = 1;
+            if_stmt->condition_expression_index = if_stmt->expression_count - 1;
+        }
+        if_stmt->extension_origin = AST_EXTENSION_ORIGIN_UNLESS;
+        if_stmt->children = children;
+        if_stmt->child_count = child_count;
+        *out_statement = if_stmt;
+    }
+
+    parser_local_control_set(out_local_control, 1, then_local_control.may_break);
+    return 1;
+}
+
 static int parse_while_statement_with_local_control(Parser *p,
     ParserLocalControl *out_local_control,
     AstStatement **out_statement) {
@@ -869,6 +974,70 @@ static int parse_continue_statement(Parser *p, AstStatement **out_statement) {
     return 1;
 }
 
+static int parse_defer_statement(Parser *p,
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
+    const Token *defer_tok = previous(p);
+    AstStatement *payload_stmt = NULL;
+    AstStatement *defer_stmt = NULL;
+    ParserLocalControl payload_control;
+
+    parser_local_control_set(out_local_control, 1, 0);
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
+    if (!parse_statement_with_local_control(p, &payload_control, out_statement ? &payload_stmt : NULL)) {
+        return 0;
+    }
+
+    if (out_statement) {
+        defer_stmt = alloc_ast_statement(p, AST_STMT_DEFER, defer_tok);
+        if (!defer_stmt) {
+            ast_statement_free(payload_stmt);
+            return 0;
+        }
+        defer_stmt->children = (AstStatement **)calloc(1u, sizeof(AstStatement *));
+        if (!defer_stmt->children) {
+            ast_statement_free(defer_stmt);
+            ast_statement_free(payload_stmt);
+            set_error(p, defer_tok, "out of memory allocating defer statement");
+            return 0;
+        }
+        defer_stmt->children[0] = payload_stmt;
+        defer_stmt->child_count = 1u;
+        defer_stmt->extension_origin = AST_EXTENSION_ORIGIN_DEFER;
+        *out_statement = defer_stmt;
+    }
+
+    /*
+     * Registering a defer does not itself change local control flow. The
+     * deferred payload will run later when lowering rewrites scope exits.
+     */
+    return 1;
+}
+
+static int parse_unless_statement(Parser *p,
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
+    const Token *unless_tok = previous(p);
+
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
+    if (!parse_unless_statement_with_local_control(p, out_local_control, out_statement)) {
+        return 0;
+    }
+
+    if (out_statement && *out_statement) {
+        (*out_statement)->line = unless_tok->line;
+        (*out_statement)->column = unless_tok->column;
+    }
+
+    return 1;
+}
+
 static int parse_statement_with_local_control(Parser *p,
     ParserLocalControl *out_local_control,
     AstStatement **out_statement) {
@@ -907,6 +1076,23 @@ static int parse_statement_with_local_control(Parser *p,
         AstStatement *stmt = NULL;
 
         ok = parse_if_statement_with_local_control(p,
+            &local_control,
+            out_statement ? &stmt : NULL);
+        leave_statement_recursion(p);
+        if (ok) {
+            parser_local_control_set(out_local_control,
+                local_control.may_fallthrough,
+                local_control.may_break);
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_UNLESS)) {
+        AstStatement *stmt = NULL;
+
+        ok = parse_unless_statement_with_local_control(p,
             &local_control,
             out_statement ? &stmt : NULL);
         leave_statement_recursion(p);
@@ -987,6 +1173,38 @@ static int parse_statement_with_local_control(Parser *p,
         leave_statement_recursion(p);
         if (ok) {
             parser_local_control_set(out_local_control, 0, 0);
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_DEFER)) {
+        AstStatement *stmt = NULL;
+
+        ok = parse_defer_statement(p,
+            &local_control,
+            out_statement ? &stmt : NULL);
+        leave_statement_recursion(p);
+        if (ok) {
+            parser_local_control_set(out_local_control, 1, 0);
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_UNLESS)) {
+        AstStatement *stmt = NULL;
+
+        ok = parse_unless_statement(p,
+            &local_control,
+            out_statement ? &stmt : NULL);
+        leave_statement_recursion(p);
+        if (ok) {
+            parser_local_control_set(out_local_control,
+                local_control.may_fallthrough,
+                local_control.may_break);
         }
         if (ok && out_statement) {
             *out_statement = stmt;

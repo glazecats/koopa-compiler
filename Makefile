@@ -402,6 +402,7 @@ TEST_TARGETS := \
 	test-machine-log \
 	test-machine-journal \
 	test-compiler-driver \
+	test-extension-runtime \
 	test-compiler-cli \
 	test-compiler-asm \
 	test-memory-ssa-regression \
@@ -409,7 +410,7 @@ TEST_TARGETS := \
 	test-memory-ssa-analysis \
 	test-memory-ssa-pass
 
-.PHONY: all check dirs force lexer parser compiler tools dump-machine-stage dump-middle-stage dump-alloc-stage profile-backend-layers profile-compiler-stages diag-allocator-stages test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-compiler-driver test-compiler-cli test-compiler-asm test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
+.PHONY: all check dirs force lexer parser compiler tools dump-machine-stage dump-middle-stage dump-alloc-stage profile-backend-layers profile-compiler-stages diag-allocator-stages compile-one run-one test test-lexer test-lexer-regression test-parser test-parser-regression test-parser-legacy-link test-semantic-regression test-ir-regression test-ir-verifier test-ir-pass test-lower-ir-regression test-lower-ir-verifier test-value-ssa-regression test-value-ssa-verifier test-value-ssa-analysis test-value-ssa-interp test-value-ssa-oracle test-value-ssa-alloc test-value-ssa-machine test-machine-ir test-machine-select test-machine-layout test-machine-emit test-machine-encode test-machine-bytes test-machine-object test-machine-reloc test-machine-container test-machine-elf test-machine-image test-machine-exec test-machine-load test-machine-runtime test-machine-launch test-machine-step test-machine-decode test-machine-payload-decode test-machine-interp test-machine-transition test-machine-state test-machine-mutation test-machine-writeback test-machine-commit test-machine-apply test-machine-observe test-machine-delta test-machine-trace test-machine-event test-machine-outcome test-machine-history test-machine-timeline test-machine-log test-machine-journal test-compiler-driver test-extension-runtime test-compiler-cli test-compiler-asm test-memory-ssa-regression test-memory-ssa-verifier test-memory-ssa-analysis test-memory-ssa-pass test-fanalyzer test-asan test-strict-warnings clean
 PARSER_REGRESSION_INCLUDES := \
 	tests/parser/parser_regression_intellisense_prelude.inc \
 	tests/parser/parser_regression_cases_core.inc \
@@ -445,6 +446,117 @@ lexer: $(LEXER_TEST_BIN)
 parser: $(PARSER_TEST_BIN)
 
 compiler: $(COMPILER_BIN) tools
+
+compile-one: $(COMPILER_BIN)
+	@src="$(SRC)"; \
+	mode="$(MODE)"; \
+	out="$(OUT)"; \
+	return_check="$(RETURN_CHECK)"; \
+	if [ -z "$$src" ]; then \
+		echo "usage: make compile-one SRC=path/to/file.sy [MODE=riscv|perf|extension] [OUT=path/to/output] [RETURN_CHECK=1]"; \
+		exit 2; \
+	fi; \
+	if [ -z "$$mode" ]; then \
+		mode="riscv"; \
+	fi; \
+	case "$$mode" in \
+		riscv|perf|extension) ;; \
+		*) \
+			echo "unsupported MODE: $$mode"; \
+			echo "expected one of: riscv perf extension"; \
+			exit 2; \
+			;; \
+	esac; \
+	base="$$(basename "$$src")"; \
+	stem="$${base%.*}"; \
+	if [ -z "$$out" ]; then \
+		outdir="build/run-one"; \
+		exe="$$outdir/$$stem.$$mode"; \
+	else \
+		exe="$$out"; \
+		outdir="$$(dirname "$$exe")"; \
+	fi; \
+	compiler_args=""; \
+	if [ "$$return_check" = "1" ]; then \
+		compiler_args="--enforce-all-paths-return-check"; \
+	fi; \
+	asm="$$exe.s"; \
+	obj="$$exe.o"; \
+	mkdir -p "$$outdir" && \
+	echo "[compile-one] compiler $$src -> $$asm" && \
+	./$(COMPILER_BIN) $$compiler_args -$$mode "$$src" -o "$$asm" && \
+	echo "[compile-one] clang $$asm -> $$obj" && \
+	clang "$$asm" -c -o "$$obj" -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32 && \
+	echo "[compile-one] ld.lld $$obj -> $$exe" && \
+	ld.lld "$$obj" -L/opt/lib/riscv32 -lsysy -o "$$exe" && \
+	echo "[compile-one] output: $$exe"
+
+run-one: $(COMPILER_BIN)
+	@src="$(SRC)"; \
+	mode="$(MODE)"; \
+	infile="$(IN)"; \
+	out="$(OUT)"; \
+	runout="$(RUNOUT)"; \
+	return_check="$(RETURN_CHECK)"; \
+	if [ -z "$$src" ]; then \
+		echo "usage: make run-one SRC=path/to/file.sy [MODE=riscv|perf|extension] [IN=path/to/input] [OUT=path/to/output] [RUNOUT=path/to/stdout] [RETURN_CHECK=1]"; \
+		exit 2; \
+	fi; \
+	if [ -z "$$mode" ]; then \
+		mode="riscv"; \
+	fi; \
+	case "$$mode" in \
+		riscv|perf|extension) ;; \
+		*) \
+			echo "unsupported MODE: $$mode"; \
+			echo "expected one of: riscv perf extension"; \
+			exit 2; \
+			;; \
+	esac; \
+	base="$$(basename "$$src")"; \
+	stem="$${base%.*}"; \
+	if [ -z "$$out" ]; then \
+		outdir="build/run-one"; \
+		exe="$$outdir/$$stem.$$mode"; \
+	else \
+		exe="$$out"; \
+		outdir="$$(dirname "$$exe")"; \
+	fi; \
+	compiler_args=""; \
+	if [ "$$return_check" = "1" ]; then \
+		compiler_args="--enforce-all-paths-return-check"; \
+	fi; \
+	asm="$$exe.s"; \
+	obj="$$exe.o"; \
+	mkdir -p "$$outdir" && \
+	echo "[run-one] compiler $$src -> $$asm" && \
+	./$(COMPILER_BIN) $$compiler_args -$$mode "$$src" -o "$$asm" && \
+	echo "[run-one] clang $$asm -> $$obj" && \
+	clang "$$asm" -c -o "$$obj" -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32 && \
+	echo "[run-one] ld.lld $$obj -> $$exe" && \
+	ld.lld "$$obj" -L/opt/lib/riscv32 -lsysy -o "$$exe" && \
+	if [ -n "$$runout" ]; then \
+		mkdir -p "$$(dirname "$$runout")"; \
+	fi && \
+	if [ -n "$$infile" ]; then \
+		if [ -n "$$runout" ]; then \
+			echo "[run-one] qemu-riscv32-static $$exe < $$infile > $$runout"; \
+			qemu-riscv32-static "$$exe" < "$$infile" > "$$runout"; \
+		else \
+			echo "[run-one] qemu-riscv32-static $$exe < $$infile"; \
+			qemu-riscv32-static "$$exe" < "$$infile"; \
+			printf '\n'; \
+		fi; \
+	else \
+		if [ -n "$$runout" ]; then \
+			echo "[run-one] qemu-riscv32-static $$exe > $$runout"; \
+			qemu-riscv32-static "$$exe" > "$$runout"; \
+		else \
+			echo "[run-one] qemu-riscv32-static $$exe"; \
+			qemu-riscv32-static "$$exe"; \
+			printf '\n'; \
+		fi; \
+	fi
 
 $(LEXER_TEST_BIN): src/lexer/lexer.c tests/lexer/lexer_test.c include/lexer.h | dirs
 	$(TEST_LINK_CMD)
@@ -1130,6 +1242,10 @@ test-compiler-driver: $(COMPILER_DRIVER_TEST_BIN)
 	status=$$?; \
 	rm -f "$$tmp"; \
 	exit $$status
+
+test-extension-runtime: $(COMPILER_BIN)
+	@echo "[extension-runtime] running runtime regressions"
+	@./tools/test_extension_runtime.sh
 
 test-compiler-cli: $(COMPILER_BIN)
 	@echo "[compiler] running cli smoke test"

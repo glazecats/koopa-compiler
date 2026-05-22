@@ -27,8 +27,10 @@ static int compiler_write_text_file(const char *path, const char *text) {
 static void compiler_print_usage(const char *argv0) {
     fprintf(stderr, "Usage: %s -riscv <input-file> -o <output-file>\n", argv0);
     fprintf(stderr, "       %s -perf <input-file> -o <output-file>\n", argv0);
+    fprintf(stderr, "       %s -extension <input-file> -o <output-file>\n", argv0);
     fprintf(stderr, "       %s [--enforce-all-paths-return-check] -riscv <input-file> -o <output-file>\n", argv0);
     fprintf(stderr, "       %s [--enforce-all-paths-return-check] -perf <input-file> -o <output-file>\n", argv0);
+    fprintf(stderr, "       %s [--enforce-all-paths-return-check] -extension <input-file> -o <output-file>\n", argv0);
 }
 
 int main(int argc, char **argv) {

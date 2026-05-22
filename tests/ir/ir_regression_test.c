@@ -10,6 +10,7 @@
 
 static int lower_source_to_ir_text_with_options(const char *source,
     int skip_all_paths_return_check,
+    int allow_extension_features,
     char **out_text) {
     TokenArray tokens;
     AstProgram program;
@@ -29,6 +30,7 @@ static int lower_source_to_ir_text_with_options(const char *source,
     ir_program_init(&ir_program);
     memset(&sema_options, 0, sizeof(sema_options));
     sema_options.skip_all_paths_return_check = skip_all_paths_return_check ? 1 : 0;
+    sema_options.allow_extension_features = allow_extension_features ? 1 : 0;
 
     if (!lexer_tokenize(source, &tokens)) {
         fprintf(stderr, "[ir-reg] FAIL: lexer failed for input\n");
@@ -84,7 +86,11 @@ static int lower_source_to_ir_text_with_options(const char *source,
 }
 
 static int lower_source_to_ir_text(const char *source, char **out_text) {
-    return lower_source_to_ir_text_with_options(source, 0, out_text);
+    return lower_source_to_ir_text_with_options(source, 0, 0, out_text);
+}
+
+static int lower_extension_source_to_ir_text(const char *source, char **out_text) {
+    return lower_source_to_ir_text_with_options(source, 0, 1, out_text);
 }
 
 static int expect_ir_dump(const char *case_id,
@@ -115,6 +121,34 @@ static int expect_ir_dump(const char *case_id,
     return ok;
 }
 
+static int expect_extension_ir_dump(const char *case_id,
+    const char *source,
+    const char *expected_text) {
+    char *actual_text = NULL;
+    int ok;
+
+    if (!case_id || !source || !expected_text) {
+        return 0;
+    }
+
+    if (!lower_extension_source_to_ir_text(source, &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = strcmp(actual_text, expected_text) == 0;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s IR mismatch\nexpected:\n%s\nactual:\n%s\n",
+            case_id,
+            expected_text,
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int expect_ir_dump_skip_return_check(const char *case_id,
     const char *source,
     const char *expected_text) {
@@ -125,7 +159,7 @@ static int expect_ir_dump_skip_return_check(const char *case_id,
         return 0;
     }
 
-    if (!lower_source_to_ir_text_with_options(source, 1, &actual_text)) {
+    if (!lower_source_to_ir_text_with_options(source, 1, 0, &actual_text)) {
         free(actual_text);
         return 0;
     }
@@ -288,6 +322,23 @@ static int expect_ir_lower_succeeds(const char *case_id, const char *source) {
         fprintf(stderr,
             "[ir-reg] FAIL: %s unexpectedly failed to lower\n",
             case_id);
+        free(actual_text);
+        return 0;
+    }
+
+    free(actual_text);
+    return 1;
+}
+
+static int expect_extension_ir_lower_succeeds(const char *case_id, const char *source) {
+    char *actual_text = NULL;
+
+    if (!case_id || !source) {
+        return 0;
+    }
+
+    if (!lower_extension_source_to_ir_text(source, &actual_text)) {
+        fprintf(stderr, "[ir-reg] FAIL: %s unexpectedly failed to lower under extension mode\n", case_id);
         free(actual_text);
         return 0;
     }
@@ -1757,6 +1808,212 @@ static int test_ir_lowers_while_backedge(void) {
         "}\n");
 }
 
+static int test_ir_lowers_defer_before_return(void) {
+    return expect_extension_ir_dump("IR-DEFER-RETURN",
+        "int main(){ putint(1); defer putint(2); putint(3); return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(1)\n"
+        "    tmp.1 = call putint(3)\n"
+        "    tmp.2 = call putint(2)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_nested_defer_fallthrough_order(void) {
+    return expect_extension_ir_dump("IR-DEFER-NESTED-FALLTHROUGH",
+        "int main(){ defer putint(1); { defer putint(2); } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(2)\n"
+        "    tmp.1 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_defer_with_loop_break(void) {
+    return expect_extension_ir_lower_succeeds("IR-DEFER-LOOP-BREAK",
+        "int main(){ while(1){ defer putint(1); break; } return 0; }\n");
+}
+
+static int test_ir_lowers_defer_with_loop_continue(void) {
+    return expect_extension_ir_lower_succeeds("IR-DEFER-LOOP-CONTINUE",
+        "int main(){ int i=0; while(i<2){ { defer putint(i); i=i+1; continue; } } return 0; }\n");
+}
+
+static int test_ir_lowers_nested_defer_body_scope_exit_order(void) {
+    return expect_extension_ir_dump("IR-DEFER-NESTED-BODY-SCOPE-EXIT",
+        "int main(){ defer { defer putint(1); { defer putint(2); } putint(3); } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(2)\n"
+        "    tmp.1 = call putint(3)\n"
+        "    tmp.2 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_nested_multi_defer_body_lifo_order(void) {
+    return expect_extension_ir_dump("IR-DEFER-NESTED-BODY-LIFO",
+        "int main(){ defer { defer putint(1); defer putint(2); { defer putint(3); } putint(4); } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(3)\n"
+        "    tmp.1 = call putint(4)\n"
+        "    tmp.2 = call putint(2)\n"
+        "    tmp.3 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_defer_using_exit_time_local_value(void) {
+    return expect_extension_ir_dump("IR-DEFER-EXIT-TIME-LOCAL-VALUE",
+        "int main(){ int x=1; defer putint(x); x=2; return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    x.0 = mov 2\n"
+        "    tmp.0 = call putint(x.0)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_defer_if_else_using_exit_time_condition_value(void) {
+    return expect_extension_ir_dump("IR-DEFER-IF-ELSE-EXIT-TIME-COND",
+        "int main(){ int x=0; defer if(x) putint(1); else putint(2); x=1; return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 0\n"
+        "    x.0 = mov 1\n"
+        "    tmp.0 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_return_unwinding_inner_and_outer_defers(void) {
+    return expect_extension_ir_dump("IR-DEFER-RETURN-UNWIND-INNER-OUTER",
+        "int main(){ defer putint(1); { defer putint(2); return 0; } }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(2)\n"
+        "    tmp.1 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_return_expression_before_defer_side_effects(void) {
+    return expect_extension_ir_dump("IR-DEFER-RETURN-EXPR-BEFORE-DEFER",
+        "int main(){ int x=1; defer x=2; return x; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    tmp.0 = mov x.0\n"
+        "    x.0 = mov 2\n"
+        "    ret tmp.0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_return_expression_side_effect_before_defer_unwind(void) {
+    return expect_extension_ir_dump("IR-DEFER-RETURN-EXPR-SIDE-EFFECT-BEFORE-DEFER",
+        "int main(){ int x=1; defer x=3; return x=2; }\n",
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    x.0 = mov 2\n"
+        "    x.0 = mov 3\n"
+        "    ret 2\n"
+        "}\n");
+}
+
+static int test_ir_lowers_defer_in_for_body_before_step_update(void) {
+    return expect_extension_ir_dump("IR-DEFER-FOR-BODY-BEFORE-STEP",
+        "int main(){ int i=0; for(;i<2;i=i+1){ defer putint(i); } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt i.0, 2\n"
+        "    br tmp.0, bb.2, bb.4\n"
+        "  bb.2:\n"
+        "    tmp.1 = call putint(i.0)\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.2 = add i.0, 1\n"
+        "    i.0 = mov tmp.2\n"
+        "    jmp bb.1\n"
+        "  bb.4:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_for_return_unwinding_body_then_outer_defers_without_step(void) {
+    return expect_extension_ir_dump("IR-DEFER-FOR-RETURN-UNWIND-NO-STEP",
+        "int main(){ defer putint(1); for(int i=0;i<3;i=i+1){ defer putint(2); return 0; } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    jmp bb.2\n"
+        "  bb.2:\n"
+        "    tmp.0 = call putint(2)\n"
+        "    tmp.1 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_for_break_unwinding_body_then_outer_defers_without_step(void) {
+    return expect_extension_ir_dump("IR-DEFER-FOR-BREAK-UNWIND-NO-STEP",
+        "int main(){ defer putint(1); for(int i=0;i<3;i=i+1){ defer putint(2); break; } return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    i.0 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt i.0, 3\n"
+        "    br tmp.0, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    tmp.1 = call putint(2)\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.2 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_unless_as_negated_if_under_extension(void) {
+    return expect_extension_ir_dump("IR-UNLESS-NEGATED-IF",
+        "int main(){ unless(0) putint(1); return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
 static int test_ir_lowers_constant_true_while_return_without_malformed_exit_block(void) {
     return expect_ir_lower_succeeds("IR-WHILE-CONST-TRUE-RET-NO-MALFORMED-EXIT",
         "int f(){while(1){return 1;}}\n");
@@ -2326,6 +2583,21 @@ int main(void) {
     ok &= test_ir_lowers_if_comparison_condition();
     ok &= test_ir_lowers_if_logical_short_circuit_condition();
     ok &= test_ir_lowers_while_backedge();
+    ok &= test_ir_lowers_defer_before_return();
+    ok &= test_ir_lowers_nested_defer_fallthrough_order();
+    ok &= test_ir_lowers_defer_with_loop_break();
+    ok &= test_ir_lowers_defer_with_loop_continue();
+    ok &= test_ir_lowers_nested_defer_body_scope_exit_order();
+    ok &= test_ir_lowers_nested_multi_defer_body_lifo_order();
+    ok &= test_ir_lowers_defer_using_exit_time_local_value();
+    ok &= test_ir_lowers_defer_if_else_using_exit_time_condition_value();
+    ok &= test_ir_lowers_return_unwinding_inner_and_outer_defers();
+    ok &= test_ir_lowers_return_expression_before_defer_side_effects();
+    ok &= test_ir_lowers_return_expression_side_effect_before_defer_unwind();
+    ok &= test_ir_lowers_defer_in_for_body_before_step_update();
+    ok &= test_ir_lowers_for_return_unwinding_body_then_outer_defers_without_step();
+    ok &= test_ir_lowers_for_break_unwinding_body_then_outer_defers_without_step();
+    ok &= test_ir_lowers_unless_as_negated_if_under_extension();
     ok &= test_ir_lowers_constant_true_while_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_or_step_block();

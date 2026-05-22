@@ -230,6 +230,28 @@ static int ir_lower_return_statement(IrLowerContext *ctx, const AstStatement *st
         return 0;
     }
 
+    if (ctx->defer_entries.count > 0 &&
+        (value.kind == IR_VALUE_LOCAL || value.kind == IR_VALUE_GLOBAL)) {
+        size_t temp_id = ir_allocate_temp(ctx->function);
+        IrValueRef temp_ref = ir_value_temp(temp_id);
+
+        if (!ir_emit_mov(ctx, temp_ref, value)) {
+            return 0;
+        }
+        value = temp_ref;
+    }
+
+    if (!ir_lower_emit_defer_entries(ctx, 0u)) {
+        return 0;
+    }
+    block = ir_lower_current_block(ctx);
+    if (!block) {
+        return 0;
+    }
+    if (block->has_terminator) {
+        return 1;
+    }
+
     return ir_block_set_return(block, value, ctx->error);
 }
 

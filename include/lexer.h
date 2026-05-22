@@ -20,6 +20,8 @@ typedef enum {
     TOKEN_KW_FOR,
     TOKEN_KW_BREAK,
     TOKEN_KW_CONTINUE,
+    TOKEN_KW_DEFER,
+    TOKEN_KW_UNLESS,
 
     TOKEN_PLUS,
     TOKEN_MINUS,

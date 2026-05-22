@@ -181,6 +181,7 @@ int main(void) {
     ok &= test_ast_accepts_break_continue_inside_loops();
     ok &= test_ast_rejects_break_outside_loop();
     ok &= test_ast_rejects_continue_outside_loop();
+    ok &= test_ast_unless_desugars_to_if_with_negated_condition();
     ok &= test_ast_records_declaration_initializer_metadata();
     ok &= test_ast_aligns_initializer_slots_with_declarator_order();
     ok &= test_ast_collects_all_top_level_declarators();

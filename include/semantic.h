@@ -11,6 +11,7 @@ typedef struct {
 
 typedef struct {
     int skip_all_paths_return_check;
+    int allow_extension_features;
 } SemanticOptions;
 
 /*

@@ -19,6 +19,8 @@ int semantic_analyze_program_with_options(
 
     config.skip_all_paths_return_check =
         options && options->skip_all_paths_return_check ? 1 : 0;
+    config.allow_extension_features =
+        options && options->allow_extension_features ? 1 : 0;
 
     if (error) {
         error->line = 0;
@@ -86,7 +88,7 @@ int semantic_analyze_program_with_options(
                 return 0;
             }
 
-            if (!semantic_check_function_scope_rules(program, i, lhs, error)) {
+            if (!semantic_check_function_scope_rules(program, i, lhs, &config, error)) {
                 return 0;
             }
 

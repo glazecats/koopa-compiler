@@ -214,9 +214,11 @@ static int compiler_riscv_preview_cache_build(
     const MachineBytesReport *report,
     CompilerRiscvPreviewCache *cache);
 static const char *compiler_find_global_name_for_gp_offset(const MachineBytesProgram *program, int32_t byte_offset);
+static int compiler_mode_uses_small_data_sections(CompilerMode mode);
 static int compiler_emit_global_sections(
     CompilerStringBuilder *builder,
-    const MachineBytesProgram *program);
+    const MachineBytesProgram *program,
+    CompilerMode mode);
 static const MachineBytesFixupSummary *compiler_find_fixup_at_patch_offset_cached(
     const CompilerRiscvPreviewCache *cache,
     size_t patch_byte_offset);
@@ -824,7 +826,8 @@ static const char *compiler_find_global_name_for_gp_offset(const MachineBytesPro
 
 static int compiler_emit_global_sections(
     CompilerStringBuilder *builder,
-    const MachineBytesProgram *program) {
+    const MachineBytesProgram *program,
+    CompilerMode mode) {
     size_t global_index;
     int has_bss = 0;
     int has_data = 0;
@@ -849,7 +852,8 @@ static int compiler_emit_global_sections(
     if (has_bss) {
         if (!compiler_builder_appendf(
                 builder,
-                compiler_use_small_data_sections_enabled()
+                (compiler_mode_uses_small_data_sections(mode) &&
+                    compiler_use_small_data_sections_enabled())
                     ? ".section .sbss,\"aw\",@nobits\n"
                     : ".section .bss,\"aw\",@nobits\n")) {
             return 0;
@@ -880,7 +884,8 @@ static int compiler_emit_global_sections(
     if (has_data) {
         if (!compiler_builder_appendf(
                 builder,
-                compiler_use_small_data_sections_enabled()
+                (compiler_mode_uses_small_data_sections(mode) &&
+                    compiler_use_small_data_sections_enabled())
                     ? ".section .sdata,\"aw\",@progbits\n"
                     : ".section .data,\"aw\",@progbits\n")) {
             return 0;
@@ -5331,10 +5336,202 @@ static char *compiler_read_file_text(const char *path, CompilerError *error) {
 static MachineBytesTargetProfile compiler_backend_profile_for_mode(CompilerMode mode) {
     switch (mode) {
         case COMPILER_MODE_PERF:
+        case COMPILER_MODE_EXTENSION:
         case COMPILER_MODE_RISCV:
         default:
             return MACHINE_BYTES_TARGET_PROFILE_RISCV32_PREVIEW;
     }
+}
+
+static int compiler_mode_allows_extension_features(CompilerMode mode) {
+    return mode == COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_conservative_translation_pipeline(CompilerMode mode) {
+    return mode == COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_final_text_peepholes(CompilerMode mode) {
+    return mode != COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_caller_save_text(CompilerMode mode) {
+    return mode != COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_tail_call_text_rewrite(CompilerMode mode) {
+    return mode != COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_biased_s11_frame_base(CompilerMode mode) {
+    return mode != COMPILER_MODE_EXTENSION;
+}
+
+static int compiler_mode_uses_small_data_sections(CompilerMode mode) {
+    return mode != COMPILER_MODE_EXTENSION;
+}
+
+static void compiler_set_value_ssa_error(ValueSsaError *error, const char *message) {
+    if (!error) {
+        return;
+    }
+
+    error->line = 0;
+    error->column = 0;
+    snprintf(error->message, sizeof(error->message), "%s", message ? message : "");
+}
+
+static int compiler_frontend_lower_to_lower_ir(const char *source,
+    CompilerMode mode,
+    const CompilerOptions *options,
+    TokenArray *tokens,
+    AstProgram *ast_program,
+    IrProgram *ir_program,
+    LowerIrProgram *lower_program,
+    CompilerError *error) {
+    ParserError parser_error;
+    SemanticError semantic_error;
+    IrError ir_error;
+    LowerIrError lower_error;
+    SemanticOptions semantic_options;
+    IrLowerOptions ir_options;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_options, 0, sizeof(lower_options));
+
+    ok = lexer_tokenize(source, tokens);
+    if (!ok) {
+        compiler_set_error(error, 0, 0, "COMPILER-108: lexical analysis failed");
+        return 0;
+    }
+    ok = parser_parse_translation_unit_ast(tokens, ast_program, &parser_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, parser_error.line, parser_error.column, parser_error.message);
+        return 0;
+    }
+    semantic_options.skip_all_paths_return_check =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    semantic_options.allow_extension_features =
+        compiler_mode_allows_extension_features(mode) ? 1 : 0;
+    ok = semantic_analyze_program_with_options(ast_program, &semantic_options, &semantic_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, semantic_error.line, semantic_error.column, semantic_error.message);
+        return 0;
+    }
+    ir_options.allow_implicit_fallthrough_return =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    ok = ir_lower_program(ast_program, &ir_options, ir_program, &ir_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, ir_error.line, ir_error.column, ir_error.message);
+        return 0;
+    }
+    lower_options.allow_implicit_fallthrough_return =
+        options && options->skip_all_paths_return_check ? 1 : 0;
+    ok = lower_ir_lower_from_ir(ir_program, &lower_options, lower_program, &lower_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int compiler_build_value_ssa_translation_core(const LowerIrProgram *lower_program,
+    CompilerMode mode,
+    ValueSsaProgram *value_program,
+    ValueSsaError *value_error,
+    int *out_extreme_straight_line_hotspot) {
+    int extreme_straight_line_hotspot = 0;
+    int ok = 0;
+
+    if (out_extreme_straight_line_hotspot) {
+        *out_extreme_straight_line_hotspot = 0;
+    }
+    if (!lower_program || !value_program) {
+        compiler_set_value_ssa_error(value_error, "VALUE-SSA-EXT-001: invalid translation-core contract");
+        return 0;
+    }
+
+    extreme_straight_line_hotspot = compiler_lower_ir_is_extreme_straight_line_hotspot(lower_program);
+    if (out_extreme_straight_line_hotspot) {
+        *out_extreme_straight_line_hotspot = extreme_straight_line_hotspot;
+    }
+
+    if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
+        ok = value_ssa_build_from_lower_ir(lower_program, value_program, value_error);
+    } else if (mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot) {
+        ok = value_ssa_build_from_lower_ir_with_canonicalization(
+            lower_program, VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC, value_program, value_error);
+    } else if (compiler_use_default_ssa_build_enabled()) {
+        ok = value_ssa_build_default_from_lower_ir(lower_program, value_program, value_error);
+    } else {
+        ok = value_ssa_build_from_lower_ir(lower_program, value_program, value_error);
+    }
+
+    return ok;
+}
+
+static int compiler_run_optional_value_ssa_optimizations(ValueSsaProgram *value_program,
+    const LowerIrProgram *lower_program,
+    CompilerMode mode,
+    int extreme_straight_line_hotspot,
+    ValueSsaError *value_error) {
+    if (!value_program || !lower_program) {
+        compiler_set_value_ssa_error(value_error, "VALUE-SSA-EXT-002: invalid optimization-stage contract");
+        return 0;
+    }
+
+    if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
+        return 1;
+    }
+
+    if (mode == COMPILER_MODE_PERF) {
+        if (!compiler_lower_ir_has_huge_parameter_hotspot(lower_program) &&
+            !extreme_straight_line_hotspot) {
+            if (!memory_ssa_pass_scalar_replace_local_slots(value_program, value_error)) {
+                return 0;
+            }
+        }
+        if (!memory_ssa_pass_scalar_replace_global_slots(value_program, value_error)) {
+            return 0;
+        }
+    }
+    if (compiler_use_perf_hotspots_enabled() &&
+        !(mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot)) {
+        if (!value_ssa_optimize_perf_hotspots(value_program, value_error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int compiler_build_machine_report_translation_core(const ValueSsaProgram *value_program,
+    CompilerMode mode,
+    MachineIrAllocateRewriteReport *machine_report,
+    MachineIrError *machine_error) {
+    if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
+        return machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+            value_program,
+            COMPILER_DEFAULT_COLOR_BUDGET,
+            COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
+            machine_report,
+            machine_error);
+    }
+
+    return machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
+        value_program,
+        COMPILER_DEFAULT_COLOR_BUDGET,
+        COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
+        machine_report,
+        machine_error);
 }
 
 static int compiler_build_riscv_preview_bytes_report_from_machine_ir_report(
@@ -5439,7 +5636,7 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
         goto cleanup;
     }
     if (!compiler_builder_appendf(&builder, ".attribute arch, \"rv32im\"\n") ||
-        !compiler_emit_global_sections(&builder, program) ||
+        !compiler_emit_global_sections(&builder, program, mode) ||
         !compiler_builder_appendf(&builder, ".text\n.p2align 2\n")) {
         compiler_set_error(error, 0, 0, "COMPILER-111: out of memory building riscv text");
         ok = 0;
@@ -5545,12 +5742,14 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
             continue;
         }
         local_storage_bytes = (local_count + spill_slot_count) * 4u;
-        use_biased_s11 = compiler_preview_should_use_biased_s11(local_count, spill_slot_count, function_summary->call_count);
+        use_biased_s11 = compiler_mode_uses_biased_s11_frame_base(mode) &&
+            compiler_preview_should_use_biased_s11(local_count, spill_slot_count, function_summary->call_count);
         frame_bytes = local_storage_bytes > parameter_count * 4u
             ? local_storage_bytes
             : parameter_count * 4u;
         if (function_summary->call_count > 0u) {
-            if (compiler_use_caller_save_text_enabled()) {
+            if (compiler_mode_uses_caller_save_text(mode) &&
+                compiler_use_caller_save_text_enabled()) {
                 frame_bytes += compiler_preview_caller_save_area_size();
                 save_caller_regs_around_call = 1;
             }
@@ -5705,7 +5904,8 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
                         }
                     }
                 }
-                if ((tail_call_target_name || tail_call_cached_label) &&
+                if (compiler_mode_uses_tail_call_text_rewrite(mode) &&
+                    (tail_call_target_name || tail_call_cached_label) &&
                     ((word & 0x7Fu) == 0x6Fu) && (((word >> 7u) & 0x1Fu) == 1u) &&
                     !compiler_function_has_stack_local_storage(
                         function_summary,
@@ -5789,7 +5989,8 @@ int compiler_emit_riscv_preview_text_from_report(const MachineIrAllocateRewriteR
 
     *out_text = builder.data;
     builder.data = NULL;
-    if (compiler_use_final_text_peepholes_enabled() &&
+    if (compiler_mode_uses_final_text_peepholes(mode) &&
+        compiler_use_final_text_peepholes_enabled() &&
         !compiler_optimize_riscv_preview_tail_calls(out_text)) {
         compiler_set_error(error, 0, 0, "COMPILER-123: out of memory optimizing tail calls");
         ok = 0;
@@ -5816,6 +6017,10 @@ int compiler_mode_from_flag(const char *flag, CompilerMode *out_mode) {
         *out_mode = COMPILER_MODE_PERF;
         return 1;
     }
+    if (strcmp(flag, "-extension") == 0) {
+        *out_mode = COMPILER_MODE_EXTENSION;
+        return 1;
+    }
     return 0;
 }
 
@@ -5830,15 +6035,8 @@ int compiler_compile_source_text_with_options(const char *source,
     LowerIrProgram lower_program;
     ValueSsaProgram value_program;
     MachineIrAllocateRewriteReport machine_report;
-    ParserError parser_error;
-    SemanticError semantic_error;
-    IrError ir_error;
-    LowerIrError lower_error;
     ValueSsaError value_error;
     MachineIrError machine_error;
-    SemanticOptions semantic_options;
-    IrLowerOptions ir_options;
-    LowerIrOptions lower_options;
     int extreme_straight_line_hotspot = 0;
     int ok = 0;
 
@@ -5850,13 +6048,6 @@ int compiler_compile_source_text_with_options(const char *source,
         return 0;
     }
 
-    memset(&parser_error, 0, sizeof(parser_error));
-    memset(&semantic_error, 0, sizeof(semantic_error));
-    memset(&semantic_options, 0, sizeof(semantic_options));
-    memset(&ir_error, 0, sizeof(ir_error));
-    memset(&ir_options, 0, sizeof(ir_options));
-    memset(&lower_error, 0, sizeof(lower_error));
-    memset(&lower_options, 0, sizeof(lower_options));
     memset(&value_error, 0, sizeof(value_error));
     memset(&machine_error, 0, sizeof(machine_error));
     lexer_init_tokens(&tokens);
@@ -5866,78 +6057,42 @@ int compiler_compile_source_text_with_options(const char *source,
     value_ssa_program_init(&value_program);
     machine_ir_allocate_rewrite_report_init(&machine_report);
 
-    ok = lexer_tokenize(source, &tokens);
+    ok = compiler_frontend_lower_to_lower_ir(source,
+        mode,
+        options,
+        &tokens,
+        &ast_program,
+        &ir_program,
+        &lower_program,
+        error);
     if (!ok) {
-        compiler_set_error(error, 0, 0, "COMPILER-108: lexical analysis failed");
         goto cleanup;
     }
-    ok = parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error);
-    if (!ok) {
-        compiler_copy_stage_error(error, parser_error.line, parser_error.column, parser_error.message);
-        goto cleanup;
-    }
-    semantic_options.skip_all_paths_return_check =
-        options && options->skip_all_paths_return_check ? 1 : 0;
-    ok = semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error);
-    if (!ok) {
-        compiler_copy_stage_error(error, semantic_error.line, semantic_error.column, semantic_error.message);
-        goto cleanup;
-    }
-    ir_options.allow_implicit_fallthrough_return =
-        options && options->skip_all_paths_return_check ? 1 : 0;
-    ok = ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error);
-    if (!ok) {
-        compiler_copy_stage_error(error, ir_error.line, ir_error.column, ir_error.message);
-        goto cleanup;
-    }
-    lower_options.allow_implicit_fallthrough_return =
-        options && options->skip_all_paths_return_check ? 1 : 0;
-    ok = lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error);
-    if (!ok) {
-        compiler_copy_stage_error(error, lower_error.line, lower_error.column, lower_error.message);
-        goto cleanup;
-    }
-    extreme_straight_line_hotspot = compiler_lower_ir_is_extreme_straight_line_hotspot(&lower_program);
-    if (mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot) {
-        ok = value_ssa_build_from_lower_ir_with_canonicalization(
-            &lower_program, VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC, &value_program, &value_error);
-    } else if (compiler_use_default_ssa_build_enabled()) {
-        ok = value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error);
-    } else {
-        ok = value_ssa_build_from_lower_ir(&lower_program, &value_program, &value_error);
-    }
+    ok = compiler_build_value_ssa_translation_core(&lower_program,
+        mode,
+        &value_program,
+        &value_error,
+        &extreme_straight_line_hotspot);
     if (!ok) {
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    if (mode == COMPILER_MODE_PERF) {
-        if (!compiler_lower_ir_has_huge_parameter_hotspot(&lower_program) &&
-            !extreme_straight_line_hotspot) {
-            if (!memory_ssa_pass_scalar_replace_local_slots(&value_program, &value_error)) {
-                compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-                goto cleanup;
-            }
-        }
-        if (!memory_ssa_pass_scalar_replace_global_slots(&value_program, &value_error)) {
-            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-            goto cleanup;
-        }
-    }
-    if (compiler_use_perf_hotspots_enabled() &&
-        !(mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot)) {
-        if (!value_ssa_optimize_perf_hotspots(&value_program, &value_error)) {
-            compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
-            goto cleanup;
-        }
+    ok = compiler_run_optional_value_ssa_optimizations(&value_program,
+        &lower_program,
+        mode,
+        extreme_straight_line_hotspot,
+        &value_error);
+    if (!ok) {
+        compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
+        goto cleanup;
     }
     if (!value_ssa_verify_program(&value_program, &value_error)) {
         compiler_copy_stage_error(error, value_error.line, value_error.column, value_error.message);
         goto cleanup;
     }
-    ok = machine_ir_build_allocate_and_rewrite_program_single_block_spills_cleaned_flat_report(
+    ok = compiler_build_machine_report_translation_core(
         &value_program,
-        COMPILER_DEFAULT_COLOR_BUDGET,
-        COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
+        mode,
         &machine_report,
         &machine_error);
     if (!ok) {

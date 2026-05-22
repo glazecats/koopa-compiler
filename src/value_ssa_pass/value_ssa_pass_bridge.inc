@@ -1858,7 +1858,7 @@ static int value_ssa_bridge_find_simple_single_body_loop(const ValueSsaFunction 
     return 1;
 }
 
-static int value_ssa_bridge_call_is_reusable_pure_internal_target(const ValueSsaProgram *program,
+static int __attribute__((unused)) value_ssa_bridge_call_is_reusable_pure_internal_target(const ValueSsaProgram *program,
     const unsigned char *readonly_globals,
     const ValueSsaInstruction *instruction) {
     const ValueSsaFunction *callee = NULL;

@@ -50,6 +50,33 @@ static int compiler_test_contains_fragments_in_order(const char *text,
     return 1;
 }
 
+static int compiler_test_contains_putint_imm_sequence(const char *text,
+                                                      const long long *values,
+                                                      size_t value_count) {
+    const char *cursor;
+    size_t i;
+    char fragment[64];
+
+    if (!text || !values) {
+        return 0;
+    }
+
+    cursor = text;
+    for (i = 0; i < value_count; ++i) {
+        snprintf(fragment, sizeof(fragment), "  li a0, %lld\n  call putint\n", values[i]);
+        cursor = strstr(cursor, fragment);
+        if (!cursor) {
+            return 0;
+        }
+        cursor += strlen(fragment);
+    }
+
+    return 1;
+}
+
+
+
+
 static int test_compiler_parses_supported_modes(void) {
     CompilerMode mode;
 
@@ -59,6 +86,10 @@ static int test_compiler_parses_supported_modes(void) {
     }
     if (!compiler_mode_from_flag("-perf", &mode) || mode != COMPILER_MODE_PERF) {
         fprintf(stderr, "[compiler] FAIL: -perf mode parse mismatch\n");
+        return 0;
+    }
+    if (!compiler_mode_from_flag("-extension", &mode) || mode != COMPILER_MODE_EXTENSION) {
+        fprintf(stderr, "[compiler] FAIL: -extension mode parse mismatch\n");
         return 0;
     }
     if (compiler_mode_from_flag("-koopa", &mode)) {
@@ -81,6 +112,86 @@ static int test_compiler_skips_all_paths_return_check_by_default(void) {
         strstr(output, ".globl f\n.type f, @function\nf:\n") == NULL ||
         strstr(output, "  li a0, 0\n") == NULL) {
         fprintf(stderr, "[compiler] FAIL: default skip-all-paths-return-check output mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_defer_outside_extension_mode(void) {
+    static const char *source = "int main(){ defer putint(1); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-001") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: defer should be rejected outside extension mode: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_defer_under_extension_with_return_check_enabled(void) {
+    static const char *source = "int main(){ defer putint(1); return 0; }\n";
+    CompilerError error;
+    CompilerOptions options;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    memset(&options, 0, sizeof(options));
+    options.skip_all_paths_return_check = 0;
+    if (!compiler_compile_source_text_with_options(source,
+            COMPILER_MODE_EXTENSION,
+            &options,
+            &output,
+            &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL ||
+        strstr(output, "  ret\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: extension defer with return-check should compile: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_unless_outside_extension_mode(void) {
+    static const char *source = "int main(){ unless(0) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error)) {
+        fprintf(stderr, "[compiler] FAIL: unless should be rejected outside extension mode\n");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_unless_under_extension(void) {
+    static const char *source = "int main(){ unless(0) putint(1); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  li a0, 1\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension unless should compile: %s\n", error.message);
         ok = 0;
     }
 
@@ -133,6 +244,271 @@ static int test_compiler_builds_perf_backend_dump_from_source(void) {
     free(output);
     return ok;
 }
+
+static int test_compiler_builds_extension_backend_dump_with_defer_return_order(void) {
+    static const char *source =
+        "int main(){ putint(1); defer putint(2); putint(3); return 0; }\n";
+    static const long long expected_values[] = {1, 3, 2};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension defer call ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_defer_lifo_order(void) {
+    static const char *source =
+        "int main(){ defer putint(1); defer putint(2); defer putint(3); return 0; }\n";
+    static const long long expected_values[] = {3, 2, 1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension defer LIFO compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension defer LIFO call ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_nested_defer_scope_order(void) {
+    static const char *source =
+        "int main(){ defer putint(1); { defer putint(2); } return 0; }\n";
+    static const long long expected_values[] = {2, 1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension nested defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension nested defer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_loop_break_defer_order(void) {
+    static const char *source =
+        "int main(){ while(1){ defer putint(1); break; } return 0; }\n";
+    static const long long expected_values[] = {1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension loop-break defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension loop-break defer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_nested_multi_defer_order(void) {
+    static const char *source =
+        "int main(){ defer putint(1); { defer putint(2); defer putint(3); } return 0; }\n";
+    static const long long expected_values[] = {3, 2, 1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension nested-multi defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension nested-multi defer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_nested_defer_body_order(void) {
+    static const char *source =
+        "int main(){ defer { defer putint(1); { defer putint(2); } putint(3); } return 0; }\n";
+    static const long long expected_values[] = {2, 3, 1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension nested defer-body compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension nested defer-body ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_for_body_defer_before_step(void) {
+    static const char *source =
+        "int main(){ int i=0; for(;i<2;i=i+1){ defer putint(i); } return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    const char *call_site = NULL;
+    const char *step_site = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension for-body defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    call_site = strstr(output, "  call putint\n");
+    step_site = strstr(output, "  addi a0, a0, 1\n  sw a0, 0(sp)\n");
+    if (!call_site || !step_site || call_site > step_site) {
+        fprintf(stderr, "[compiler] FAIL: extension for-body defer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_for_return_unwind_without_step(void) {
+    static const char *source =
+        "int main(){ defer putint(1); for(int i=0;i<3;i=i+1){ defer putint(2); return 0; } return 0; }\n";
+    static const long long expected_values[] = {2, 1};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension for-return defer compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension for-return defer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_global_init_call_without_stray_jalr(void) {
+    static const char *source =
+        "int a[8]={1,2,3,4,5,6,7,8};\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    const char *call_site = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension global-init compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    call_site = strstr(output, "  call __global.init\n");
+    if (!call_site ||
+        strstr(call_site, "  jalr ra,") == call_site + strlen("  call __global.init\n")) {
+        fprintf(stderr, "[compiler] FAIL: extension global-init call emitted stray jalr: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 
 static int test_compiler_builds_riscv_backend_dump_for_sort_style_array_program(void) {
     static const char *source =
@@ -2947,8 +3323,21 @@ int main(void) {
 
     ok &= test_compiler_parses_supported_modes();
     ok &= test_compiler_skips_all_paths_return_check_by_default();
+    ok &= test_compiler_rejects_defer_outside_extension_mode();
+    ok &= test_compiler_accepts_defer_under_extension_with_return_check_enabled();
+    ok &= test_compiler_rejects_unless_outside_extension_mode();
+    ok &= test_compiler_accepts_unless_under_extension();
     ok &= test_compiler_builds_riscv_backend_dump_from_source();
     ok &= test_compiler_builds_perf_backend_dump_from_source();
+    ok &= test_compiler_builds_extension_backend_dump_with_defer_return_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_defer_lifo_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_nested_defer_scope_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_loop_break_defer_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_nested_multi_defer_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_nested_defer_body_order();
+    ok &= test_compiler_builds_extension_backend_dump_with_for_body_defer_before_step();
+    ok &= test_compiler_builds_extension_backend_dump_with_for_return_unwind_without_step();
+    ok &= test_compiler_builds_extension_backend_dump_with_global_init_call_without_stray_jalr();
     ok &= test_compiler_builds_riscv_backend_dump_for_sort_style_array_program();
     ok &= test_compiler_pretty_prints_basic_riscv_mnemonics();
     ok &= test_compiler_pretty_prints_calls_and_control_labels();

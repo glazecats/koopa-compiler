@@ -21,6 +21,7 @@ typedef struct {
 
 typedef struct {
     int skip_all_paths_return_check;
+    int allow_extension_features;
 } SemanticAnalyzeConfig;
 
 typedef struct {
@@ -112,6 +113,7 @@ static int semantic_scope_check_top_level_initializer_expression(const AstExpres
 static int semantic_check_function_scope_rules(const AstProgram *program,
     size_t func_index,
     const AstExternal *func,
+    const SemanticAnalyzeConfig *config,
     SemanticError *error);
 static int semantic_check_function_return_shape_rules(const AstExternal *func,
     SemanticError *error);

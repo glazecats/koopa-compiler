@@ -21,3 +21,4 @@ lesson/original_prompt.md
 *.tmp
 *.swp
 *.swo
+tmp/

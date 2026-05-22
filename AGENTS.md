@@ -47,21 +47,25 @@
   prioritization note for missing general-purpose optimization passes.
 - `docs/RUNTIME_RE_SEGFAULT_PLAN.md` is the compact active-plan authority for
   the current hidden runtime-RE line.
+- `docs/language/DEFER_FEATURE_PLAN.md` is the compact active-plan authority
+  for the current language-feature round when `defer` is the active target.
 - Stage-specific design docs under `docs/ir/`, `docs/ssa/`, and
   `docs/backend/` are authoritative only when that layer is active.
 
 ## Current Stage
 
 - Unless the user explicitly redirects the thread, the current default stage is
-  the **optimization-focused round**.
+  the **language-feature round**.
 - In practice this means:
   - keep correctness-closed surfaces green
-  - use `docs/OPTIMIZATION_PLAN.md` as the compact active-plan authority
-  - use `docs/GENERAL_OPT_PASSES_TODO.md` when choosing between reusable-pass
-    work and witness-specific transforms
-  - treat backend stage-expansion, lower-IR expansion, allocator redesign, and
-    hidden runtime-RE investigation as secondary unless the user explicitly
-    reopens one of those lines
+  - treat `docs/language/DEFER_FEATURE_PLAN.md` as the compact active-plan
+    authority while `defer` is the active feature target
+  - prefer parser / semantic / lowering changes that can be regression-locked
+    incrementally
+  - treat optimization work as paused unless the user explicitly reopens it
+  - treat backend stage-expansion, allocator redesign, and hidden runtime-RE
+    investigation as secondary unless the user explicitly reopens one of those
+    lines
 
 ## Optimization Rules
 

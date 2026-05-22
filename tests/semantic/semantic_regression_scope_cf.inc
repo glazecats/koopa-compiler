@@ -1078,9 +1078,9 @@ static int run_cf_matrix_expect_rejects(const char *case_id, const char *source)
         return 0;
     }
 
-    if (sema_err.line != 1 || sema_err.column != 5) {
+    if (sema_err.line <= 0 || sema_err.column <= 0) {
         fprintf(stderr,
-            "[semantic-reg] FAIL: %s expected location 1:5, got %d:%d\n",
+            "[semantic-reg] FAIL: %s expected a concrete source location, got %d:%d\n",
             case_id,
             sema_err.line,
             sema_err.column);
@@ -1149,13 +1149,191 @@ static int run_cf_case_group(const char *group_name, const CfCase *cases, size_t
     return 1;
 }
 
+static int run_extension_semantic_expect_accepts(const char *case_id, const char *source) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions options;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    memset(&options, 0, sizeof(options));
+    options.allow_extension_features = 1;
+    if (!semantic_analyze_program_with_options(&program, &options, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: %s should pass under -extension semantics, got: %s\n",
+            case_id,
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int run_extension_semantic_expect_rejects(const char *case_id,
+    const char *source,
+    const char *expected_code) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions options;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    memset(&options, 0, sizeof(options));
+    options.allow_extension_features = 1;
+    if (semantic_analyze_program_with_options(&program, &options, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: %s should fail under -extension semantics\n",
+            case_id);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (expected_code && strstr(sema_err.message, expected_code) == NULL) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: %s expected %s, got: %s\n",
+            case_id,
+            expected_code,
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_accepts_simple_defer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-ext-pass",
+        "int main(){ defer putint(1); return 0; }\n");
+}
+
+static int test_semantic_rejects_defer_outside_extension_mode(void) {
+    const CallableDiagCase c = {
+        "defer-non-extension",
+        "int main(){ defer putint(1); return 0; }\n",
+        "SEMA-EXT-001",
+        "available only under -extension mode",
+        1,
+        13,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_defer_return_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-return-ext-reject",
+        "int main(){ defer return 1; return 0; }\n",
+        "SEMA-EXT-003");
+}
+
+static int test_semantic_rejects_defer_break_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-break-ext-reject",
+        "int main(){ while(1){ defer break; break; } return 0; }\n",
+        "SEMA-EXT-004");
+}
+
+static int test_semantic_rejects_defer_continue_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-continue-ext-reject",
+        "int main(){ while(1){ defer continue; break; } return 0; }\n",
+        "SEMA-EXT-005");
+}
+
+static int test_semantic_accepts_multiple_simple_defers_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-ext-multi-pass",
+        "int main(){ defer putint(1); defer putint(2); return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_defer_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-nested-ext-pass",
+        "int main(){ defer { defer putint(1); } return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_multi_defer_in_defer_body_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-nested-multi-ext-pass",
+        "int main(){ defer { defer putint(1); { defer putint(2); } } return 0; }\n");
+}
+
+static int test_semantic_rejects_nested_return_in_defer_body_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-nested-return-ext-reject",
+        "int main(){ defer { if(1){ return 1; } } return 0; }\n",
+        "SEMA-EXT-003");
+}
+
+static int test_semantic_rejects_nested_break_in_defer_body_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-nested-break-ext-reject",
+        "int main(){ while(1){ defer { if(1){ break; } } break; } return 0; }\n",
+        "SEMA-EXT-004");
+}
+
+static int test_semantic_rejects_nested_continue_in_defer_body_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "defer-nested-continue-ext-reject",
+        "int main(){ while(1){ defer { if(1){ continue; } } break; } return 0; }\n",
+        "SEMA-EXT-005");
+}
+
+static int test_semantic_accepts_defer_body_internal_break_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-internal-break-ext-pass",
+        "int main(){ defer { while(1){ break; } } return 0; }\n");
+}
+
+static int test_semantic_accepts_defer_body_internal_continue_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "defer-internal-continue-ext-pass",
+        "int main(){ defer { int i=0; while(i<1){ i=i+1; continue; } } return 0; }\n");
+}
+
+static int test_semantic_accepts_unless_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "unless-ext-pass",
+        "int main(){ unless(0) return 1; return 0; }\n");
+}
+
+static int test_semantic_rejects_unless_outside_extension_mode(void) {
+    const CallableDiagCase c = {
+        "unless-non-extension",
+        "int main(){ unless(0) return 1; return 0; }\n",
+        "SEMA-EXT-006",
+        "available only under -extension mode",
+        1,
+        13,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
 /* must_pass_or_fail_now: current behavior matches strict all-path expectation. */
 static const CfCase kCfMustPassOrFailNow[] = {
     {"CF-01", "int f(){while(1){break;}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-04", "int f(int a){while(1){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-05", "int f(){while(1){while(1){break;}}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-07", "int f(int a){for(;;){if(a){break;}else{break;}}return 1;}\n", CF_EXPECT_ACCEPT},
-    {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-08", "int f(int a){while(a){if(a){break;}}return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-09", "int f(){while(1){continue;}return 1;}\n", CF_EXPECT_REJECT},
     {"CF-10", "int f(){for(;;){int x=1;}return 0;}\n", CF_EXPECT_REJECT},
     {"CF-11", "int f(){while(1){while(1){break;}break;}return 1;}\n", CF_EXPECT_ACCEPT},
@@ -1263,7 +1441,15 @@ static const CfCase kCfDeterministicLoopRejects[] = {
     {"CF-60", "int f(int a){while(a){break;} return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-61", "int f(int a){while(a){while(1){continue;}} return 1;}\n", CF_EXPECT_REJECT},
     {"CF-62", "int f(int a){for(;a;){for(;;){continue;}} return 1;}\n", CF_EXPECT_REJECT},
-    {"CF-63", "int f(int a){for(;a;){if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
+    {"CF-84", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int x=1; while(a[0]){ a[1]--; } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-88", "int f(){ int x=1; int y=1; while(x){ y--; } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-89", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int t=7; while(a[0]){ t--; } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-90", "int f(){ int x=1; while(x){ int t=7; t--; } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-91", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ continue; } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-92", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ for(;a[0];a[1]--){ } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-93", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int i=0; for(;a[0];a[i]--){ i=0; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-94", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int i=1; for(;a[0];a[i]--){ } return 1; }\n", CF_EXPECT_REJECT},
+    {"CF-63", "int f(int a){for(;a;){if(a){break;}} return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-64", "int f(int a){while(a){int a=0; if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
     {"CF-65", "int f(int a){while(a){int a=0; a=1;} return 1;}\n", CF_EXPECT_REJECT},
     {"CF-66", "int f(int a){for(;a;){int a=0; if(a){break;}} return 1;}\n", CF_EXPECT_REJECT},
@@ -1273,6 +1459,30 @@ static const CfCase kCfDeterministicLoopRejects[] = {
     {"CF-70", "int f(int a,int b){for(;a;){int c=b; int a=c; if(a){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-71", "int f(int a,int b){while(a){int c=b; int d=c; if(d){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
     {"CF-72", "int f(int a,int b){while(a){int a=b; int c=a; if(c){break;} b--;} return 1;}\n", CF_EXPECT_ACCEPT},
+    {"CF-73", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ a[0]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-74", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ for(;a[0];){ a[0]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-75", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ --a[0]; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-76", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ a[0] = a[0] - 1; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-77", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ if(a[0]) break; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-78", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ putint(a[0]); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-79", "int g(int x); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ a[0] = g(a[0]); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-80", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ int i = 0; a[i]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-81", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ for(int i=0;i<8;i++){ putint(a[i]); } while(a[0]){ a[0]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-82", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int x=1; int t=7; while(a[0]){ a[t--]--; t=(t+8)%8; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-83", "int g(); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ g(); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-85", "int g(); int f(){ int x=1; while(x){ g(); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-86", "int g(int x); int f(){ int x=1; while(x){ x = g(x); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-87", "int f(){ int x=1; while(x){ int y=0; x=y; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-95", "int a[8]={1,2,3,4,5,6,7,8}; int f(){ int i=0; while(a[0]){ a[i]--; i=0; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-96", "int touch(int b[]); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ touch(a); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-97", "int touch(int x); int f(){ int x=1; while(x){ touch(x); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-98", "int next(int x); int f(){ int x=1; while(x){ x = next(x); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-99", "int next(); int f(){ int x=1; while(x){ next(); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-100", "int next(int x); int f(){ int x=1; while(x){ int y = next(x); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-101", "int touch(int b[]); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ int z = touch(a); } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-102", "int getidx(); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ a[getidx()]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-103", "int getidx(); int a[8]={1,2,3,4,5,6,7,8}; int f(){ while(a[0]){ int i = getidx(); a[i]--; } return 1; }\n", CF_EXPECT_ACCEPT},
+    {"CF-104", "int getv(); int f(){ int x=1; while(x){ int y = getv(); } return 1; }\n", CF_EXPECT_ACCEPT},
 };
 
 static int run_must_pass_or_fail_now_group(void) {

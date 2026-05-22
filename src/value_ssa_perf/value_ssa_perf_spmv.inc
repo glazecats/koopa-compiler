@@ -66,7 +66,7 @@ static int value_ssa_perf_spmv_append_binary(ValueSsaBasicBlock *block,
     return value_ssa_block_append_instruction(block, &instruction, error);
 }
 
-static int value_ssa_perf_spmv_extract_param_load(const ValueSsaFunction *function,
+static int __attribute__((unused)) value_ssa_perf_spmv_extract_param_load(const ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *analysis,
     ValueSsaValueRef value,
     size_t *out_local_id,
@@ -98,7 +98,7 @@ static int value_ssa_perf_spmv_extract_param_load(const ValueSsaFunction *functi
     }
 }
 
-static int value_ssa_perf_spmv_extract_indexed_array_access(const ValueSsaFunction *function,
+static int __attribute__((unused)) value_ssa_perf_spmv_extract_indexed_array_access(const ValueSsaFunction *function,
     const ValueSsaDefUseAnalysis *analysis,
     ValueSsaValueRef addr,
     size_t *out_base_local_id,

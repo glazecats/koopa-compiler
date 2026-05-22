@@ -4,6 +4,7 @@
 typedef enum {
     COMPILER_MODE_RISCV = 0,
     COMPILER_MODE_PERF,
+    COMPILER_MODE_EXTENSION,
 } CompilerMode;
 
 typedef struct {

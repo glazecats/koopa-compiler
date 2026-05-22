@@ -39,6 +39,60 @@
 ## Quick Start Snapshot
 
 - Read this section first after a restart; only then drop into the long log below.
+- Current user-directed priority has changed:
+  the optimization-focused round is paused, and the active implementation line
+  is now the language-feature round starting with `defer`.
+- Current active feature-plan authority:
+  [docs/language/DEFER_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/DEFER_FEATURE_PLAN.md)
+- Next active feature candidate now also has a first concrete plan and partial
+  implementation:
+  [docs/language/UNLESS_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/UNLESS_FEATURE_PLAN.md)
+- Another follow-up feature candidate now also has a first design plan:
+  [docs/language/FUNCTION_EXIT_DEFER_PLAN.md](/workspaces/compiler_lab/docs/language/FUNCTION_EXIT_DEFER_PLAN.md)
+- Current defer checkpoint:
+  - `defer` is extension-only
+  - first-version semantic restrictions are active
+  - first lowering slice covers block fallthrough, `return`, `break`, and
+    `continue`
+  - semantic and compiler-driver regressions are green on the landed defer
+  - nested `defer` inside a deferred body is now regression-locked too, with
+    current semantics matching ordinary execution of the deferred body at
+    unwind time: inner blocks flush first, then the surrounding deferred-body
+    scope flushes its own registered defers on that scope's exit
+  - that nested-defer timing is now also locked at the canonical-IR layer, not
+    only by compiler/runtime output probes
+  - deferred reads also use exit-time state rather than registration-time
+    snapshots; this is now locked at both canonical-IR and runtime levels
+  - deferred `if/else` statements are also locked to exit-time condition
+    evaluation, since the whole control-flow statement is deferred as one unit
+  - nested early `return` now also has explicit unwind coverage: every active
+    defer scope on the path out runs from inner to outer before the final
+    return completes
+  - `return expr` under active defer now also freezes the return result before
+    deferred side effects run; deferred code may still mutate/read locals
+    afterward, but it does not retroactively change the chosen return value
+  - side effects that occur while evaluating `return expr` itself are also
+    locked to happen before defer unwind, because they are part of computing
+    the frozen return result
+  - defer inside a `for` body is now also explicitly locked to run before the
+    loop step updates next-iteration state
+  - `for` bodies that exit via `return` or `break` now also have explicit
+    coverage that body/outer defers unwind normally and the loop step does not
+    run afterward
+  - `defer` should now be treated as the first stable language-feature
+    checkpoint on the live tree
+- Current `unless` checkpoint:
+  - keyword + parser desugar landed
+  - parser lowers `unless (cond) stmt` to ordinary `if (!cond) stmt`
+  - extension-origin metadata keeps non-extension rejection available after
+    desugar
+  - semantic / IR / compiler-driver regressions are green on the first slice
+- Current function-exit-defer checkpoint:
+  - design-only
+  - no implementation landed yet
+  - current recommended first-version safety boundary is:
+    globals + parameters + function-top-level locals declared before the
+    registration point
 - Current checkpoint status:
   - stable recovery checkpoint: **kept**
   - `03_sort1` / `03_sort3`: reclosed

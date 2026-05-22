@@ -62,7 +62,7 @@ static char *tool_read_file(const char *path) {
 
 static void tool_print_usage(const char *argv0) {
     fprintf(stderr,
-        "usage: %s <ir|lower-ir|value-ssa-direct|value-ssa-classic|value-ssa-memory-value|"
+        "usage: %s [--extension] <ir|lower-ir|value-ssa-direct|value-ssa-classic|value-ssa-memory-value|"
         "value-ssa-memory-full|value-ssa-default|value-ssa-perf> <input.sy>\n",
         argv0);
 }
@@ -234,6 +234,7 @@ static void tool_print_value_ssa_summary(const ValueSsaProgram *program) {
 
 int main(int argc, char **argv) {
     ToolStage stage;
+    int allow_extension_features = 0;
     char *source = NULL;
     char *dump_text = NULL;
     TokenArray tokens;
@@ -251,6 +252,11 @@ int main(int argc, char **argv) {
     ValueSsaError value_error;
     int ok = 0;
 
+    if (argc == 4 && strcmp(argv[1], "--extension") == 0) {
+        allow_extension_features = 1;
+        argv += 1;
+        argc -= 1;
+    }
     if (argc != 3) {
         tool_print_usage(argv[0]);
         return 2;
@@ -275,6 +281,7 @@ int main(int argc, char **argv) {
     memset(&value_error, 0, sizeof(value_error));
 
     semantic_options.skip_all_paths_return_check = 1;
+    semantic_options.allow_extension_features = allow_extension_features;
     ir_options.allow_implicit_fallthrough_return = 1;
     lower_options.allow_implicit_fallthrough_return = 1;
 

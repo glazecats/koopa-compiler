@@ -1223,7 +1223,8 @@ static void ir_loop_target_stack_free(IrLoopTargetStack *stack) {
 
 static int ir_loop_target_stack_push(IrLoopTargetStack *stack,
     size_t break_target,
-    size_t continue_target) {
+    size_t continue_target,
+    size_t defer_scope_depth) {
     IrLoopTarget *new_items;
     size_t next_capacity;
 
@@ -1249,6 +1250,7 @@ static int ir_loop_target_stack_push(IrLoopTargetStack *stack,
 
     stack->items[stack->count].break_target = break_target;
     stack->items[stack->count].continue_target = continue_target;
+    stack->items[stack->count].defer_scope_depth = defer_scope_depth;
     stack->count += 1;
     return 1;
 }
@@ -1275,6 +1277,7 @@ static int ir_lower_loop_control_statement(IrLowerContext *ctx,
     const IrLoopTarget *loop_target;
     IrBasicBlock *block;
     size_t target_block_id;
+    size_t scope_index;
 
     if (!ctx || !stmt || !ctx->has_block) {
         return 0;
@@ -1294,6 +1297,20 @@ static int ir_lower_loop_control_statement(IrLowerContext *ctx,
     block = ir_lower_current_block(ctx);
     if (!block) {
         return 0;
+    }
+
+    for (scope_index = ctx->defer_scopes.count; scope_index > loop_target->defer_scope_depth; --scope_index) {
+        size_t defer_base = ctx->defer_scopes.items[scope_index - 1u].defer_base;
+        size_t defer_end = (scope_index < ctx->defer_scopes.count)
+            ? ctx->defer_scopes.items[scope_index].defer_base
+            : ctx->defer_entries.count;
+
+        if (!ir_lower_emit_defer_entries_range(ctx, defer_base, defer_end)) {
+            return 0;
+        }
+        if (!ctx->has_block || ir_lower_current_block(ctx)->has_terminator) {
+            return 1;
+        }
     }
 
     target_block_id = is_continue ? loop_target->continue_target : loop_target->break_target;
@@ -2430,7 +2447,8 @@ static int ir_lower_while_statement(IrLowerContext *ctx, const AstStatement *stm
 
     if (!ir_loop_target_stack_push(&ctx->loop_targets,
             needs_exit_block ? exit_block_id : header_block_id,
-            header_block_id)) {
+            header_block_id,
+            ctx->defer_scopes.count)) {
         ir_set_error(ctx->error,
             stmt->line,
             stmt->column,
@@ -2693,7 +2711,8 @@ static int ir_lower_for_statement(IrLowerContext *ctx, const AstStatement *stmt)
     ctx->has_block = 1;
     if (!ir_loop_target_stack_push(&ctx->loop_targets,
             needs_exit_block ? exit_block_id : header_block_id,
-            continue_target_block_id)) {
+            continue_target_block_id,
+            ctx->defer_scopes.count)) {
         ir_set_error(ctx->error,
             stmt->line,
             stmt->column,
@@ -2827,7 +2846,6 @@ static int ir_lower_if_statement(IrLowerContext *ctx, const AstStatement *stmt) 
     }
 
     has_else = stmt->child_count >= 2;
-
     if (!ir_try_eval_condition_truthiness_with_scope(ctx,
             condition_expr,
             &condition_known,
@@ -3022,7 +3040,9 @@ static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {
     }
 
     switch (stmt->kind) {
-    case AST_STMT_COMPOUND:
+    case AST_STMT_COMPOUND: {
+        size_t defer_base = ctx->defer_entries.count;
+
         if (!ir_lower_scope_stack_push(&ctx->scopes)) {
             ir_set_error(ctx->error,
                 stmt->line,
@@ -3030,8 +3050,17 @@ static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {
                 "IR-INT-016: failed to extend IR lowering scope stack");
             return 0;
         }
+        if (!ir_lower_defer_scope_stack_push(&ctx->defer_scopes, defer_base)) {
+            ir_lower_scope_stack_pop(&ctx->scopes);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-070: failed to extend defer scope stack during IR lowering");
+            return 0;
+        }
         for (i = 0; i < stmt->child_count; ++i) {
             if (!ir_lower_statement(ctx, stmt->children[i])) {
+                ir_lower_defer_scope_stack_pop(&ctx->defer_scopes);
                 ir_lower_scope_stack_pop(&ctx->scopes);
                 return 0;
             }
@@ -3039,7 +3068,32 @@ static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {
                 break;
             }
         }
+        if (ctx->has_block && !ir_lower_current_block(ctx)->has_terminator &&
+            !ir_lower_emit_defer_entries(ctx, defer_base)) {
+            ir_lower_defer_scope_stack_pop(&ctx->defer_scopes);
+            ir_lower_scope_stack_pop(&ctx->scopes);
+            return 0;
+        }
+        ir_lower_defer_entry_stack_pop_to(&ctx->defer_entries, defer_base);
+        ir_lower_defer_scope_stack_pop(&ctx->defer_scopes);
         ir_lower_scope_stack_pop(&ctx->scopes);
+        return 1;
+    }
+    case AST_STMT_DEFER:
+        if (stmt->child_count != 1u || !stmt->children || !stmt->children[0]) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-025: malformed defer statement payload during IR lowering");
+            return 0;
+        }
+        if (!ir_lower_defer_entry_stack_push(&ctx->defer_entries, stmt->children[0])) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-071: failed to register defer payload during IR lowering");
+            return 0;
+        }
         return 1;
     case AST_STMT_DECLARATION:
         return ir_lower_declaration_names(ctx, stmt, stmt->expression_count);

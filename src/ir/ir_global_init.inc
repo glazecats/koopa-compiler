@@ -1425,6 +1425,8 @@ cleanup:
     }
     ir_lower_scope_stack_free(&ctx.scopes);
     ir_loop_target_stack_free(&ctx.loop_targets);
+    ir_lower_defer_scope_stack_free(&ctx.defer_scopes);
+    ir_lower_defer_entry_stack_free(&ctx.defer_entries);
     return ok;
 }
 

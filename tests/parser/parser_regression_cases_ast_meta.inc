@@ -235,7 +235,7 @@ static int test_ast_parses_function_declaration_external(void) {
 
 static int test_ast_statement_expression_slots_for_control_flow(void) {
     const char *source =
-        "int f(int n){while(n){n=n-1;}for(n=0;n;n=n-1){n=n-1;}if(n){return n;}return 0;}\n";
+        "int f(int n){while(n){n=n-1;}for(n=0;n;n=n-1){n=n-1;}if(n){return n;}defer return n;return 0;}\n";
     TokenArray tokens;
     AstProgram program;
     ParserError err;
@@ -243,6 +243,7 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     AstStatement *while_stmt;
     AstStatement *for_stmt;
     AstStatement *if_stmt;
+    AstStatement *defer_stmt;
     AstStatement *ret_stmt;
 
     lexer_init_tokens(&tokens);
@@ -273,9 +274,9 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     }
 
     body = program.externals[0].function_body;
-    if (body->kind != AST_STMT_COMPOUND || body->child_count != 4) {
+    if (body->kind != AST_STMT_COMPOUND || body->child_count != 5) {
         fprintf(stderr,
-            "[parser-reg] FAIL: expected compound body with 4 statements, got kind=%d count=%zu\n",
+            "[parser-reg] FAIL: expected compound body with 5 statements, got kind=%d count=%zu\n",
             (int)body->kind,
             body->child_count);
         lexer_free_tokens(&tokens);
@@ -286,7 +287,8 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
     while_stmt = body->children[0];
     for_stmt = body->children[1];
     if_stmt = body->children[2];
-    ret_stmt = body->children[3];
+    defer_stmt = body->children[3];
+    ret_stmt = body->children[4];
 
     if (!while_stmt || while_stmt->kind != AST_STMT_WHILE || !while_stmt->has_condition_expression ||
         while_stmt->condition_expression_index != 0 || while_stmt->expression_count != 1) {
@@ -317,10 +319,77 @@ static int test_ast_statement_expression_slots_for_control_flow(void) {
         return 0;
     }
 
+    if (!defer_stmt || defer_stmt->kind != AST_STMT_DEFER ||
+        defer_stmt->child_count != 1 || !defer_stmt->children[0] ||
+        defer_stmt->children[0]->kind != AST_STMT_RETURN ||
+        !defer_stmt->children[0]->has_primary_expression ||
+        defer_stmt->children[0]->primary_expression_index != 0 ||
+        defer_stmt->children[0]->expression_count != 1) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: defer statement payload metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
     if (!ret_stmt || ret_stmt->kind != AST_STMT_RETURN || !ret_stmt->has_primary_expression ||
         ret_stmt->primary_expression_index != 0 || ret_stmt->expression_count != 1) {
         fprintf(stderr,
             "[parser-reg] FAIL: return statement primary slot metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_unless_desugars_to_if_with_negated_condition(void) {
+    const char *source = "int main(){ unless(x) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *unless_stmt;
+    AstExpression *cond_expr;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for unless AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for unless input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.count == 1 ? program.externals[0].function_body : NULL;
+    unless_stmt = body && body->child_count >= 1 ? body->children[0] : NULL;
+    cond_expr = unless_stmt && unless_stmt->has_condition_expression &&
+            unless_stmt->condition_expression_index < unless_stmt->expression_count
+        ? unless_stmt->expressions[unless_stmt->condition_expression_index]
+        : NULL;
+
+    if (!body || body->kind != AST_STMT_COMPOUND || body->child_count != 2 ||
+        !unless_stmt || unless_stmt->kind != AST_STMT_IF ||
+        !cond_expr || cond_expr->kind != AST_EXPR_UNARY ||
+        cond_expr->as.unary.op != TOKEN_BANG ||
+        !cond_expr->as.unary.operand ||
+        cond_expr->as.unary.operand->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(cond_expr->as.unary.operand->as.identifier.name, "x") != 0) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: unless should desugar to if(!x) in AST\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;

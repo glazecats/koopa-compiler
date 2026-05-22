@@ -1736,7 +1736,7 @@ static int value_ssa_recursive_helper_rewrite_iterative_helpers(ValueSsaProgram 
     return value_ssa_verify_program(program, error);
 }
 
-static int value_ssa_optimize_recursive_helpers(ValueSsaProgram *program, ValueSsaError *error) {
+static int __attribute__((unused)) value_ssa_optimize_recursive_helpers(ValueSsaProgram *program, ValueSsaError *error) {
     if (!value_ssa_recursive_helper_reuse_same_block_repeated_pure_internal_calls(program, error)) {
         return 0;
     }
