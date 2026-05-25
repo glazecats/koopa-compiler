@@ -380,6 +380,18 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_semantic_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
         }
@@ -626,6 +638,8 @@ int main(void) {
     ok &= test_semantic_rejects_unary_call_ternary_value_plus_int_under_extension();
     ok &= test_semantic_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_semantic_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
+    ok &= test_semantic_rejects_float_helper_wrapped_ternary_call_plus_int_under_extension();
+    ok &= test_semantic_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_semantic_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_assignment_to_int_under_extension();
@@ -635,6 +649,8 @@ int main(void) {
     ok &= test_semantic_rejects_float_ternary_value_compare_against_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_semantic_rejects_unary_call_ternary_value_compare_against_float_under_extension();
+    ok &= test_semantic_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension();
+    ok &= test_semantic_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension();
     ok &= test_semantic_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_semantic_accepts_same_type_float_ternary_value_call_argument_to_float_under_extension();

@@ -2005,6 +2005,48 @@ static int test_semantic_accepts_unary_call_helper_wrapped_ternary_call_compare_
         "int main(){ return 0; }\n");
 }
 
+static int test_semantic_rejects_float_helper_wrapped_ternary_call_plus_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-helper-ternary-call-plus-int-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "float add(){ return pick() + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_semantic_rejects_unary_call_helper_wrapped_ternary_call_plus_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-unary-helper-ternary-call-plus-int-ext-reject",
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "float add(float x){ return pick(x) + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_semantic_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-helper-ternary-call-compare-int-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int eq(){ return pick() == 0; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-007");
+}
+
+static int test_semantic_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-unary-helper-ternary-call-compare-int-ext-reject",
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int eq(float x){ return pick(x) == 0; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-007");
+}
+
 static int test_semantic_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-ternary-value-init-int-ext-reject",
