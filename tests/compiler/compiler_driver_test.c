@@ -1596,6 +1596,53 @@ static int test_compiler_accepts_unary_call_ternary_value_call_argument_to_float
     return 1;
 }
 
+static int test_compiler_accepts_chained_float_addition_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float wrap(float x){ return x; }\n"
+        "float get(float x, float y, float z){ return wrap((x + y) + z); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float addition call argument to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_float_mul_div_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float wrap(float x){ return x; }\n"
+        "float f(float a, float b, float c){ return wrap(-a * (b / c)); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div call argument to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -6377,6 +6424,12 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_unary_call_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_float_mul_div_call_argument_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
         }
@@ -6545,6 +6598,8 @@ int main(void) {
     ok &= test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_compiler_accepts_unary_call_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_compiler_accepts_chained_float_addition_call_argument_to_float_under_extension();
+    ok &= test_compiler_accepts_nested_float_mul_div_call_argument_to_float_under_extension();
     ok &= test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_compiler_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_compiler_accepts_float_helper_wrapped_ternary_call_compare_under_extension();

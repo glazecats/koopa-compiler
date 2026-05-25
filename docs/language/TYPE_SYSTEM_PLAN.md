@@ -182,6 +182,14 @@
     `SEMA-TYPE-005/004/006/003` split for both the global-root and
     unary-call-root helper variants, with focused semantic / compiler /
     default-`ValueSSA` regression locks in place
+  - latest recursive-float-callarg closure:
+    the already-implemented pure-float helper-backed tree family now also has
+    a narrow same-type float call-argument checkpoint. Shapes such as
+    `wrap((x + y) + z)` and `wrap(-a * (b / c))` are now regression-locked
+    across semantic / compiler / IR / lower-IR plus default `ValueSSA`,
+    `machine_ir`, and `machine_select` surfaces, while the still-closed
+    ternary-derived arithmetic neighbor `wrap((g ? h : h) + h)` remains out
+    of scope
   - latest implementation note after that follow-up:
     landing that slice also closed a real canonical-IR lowering bug in the
     helper-backed float path. Nested helper-backed arithmetic such as

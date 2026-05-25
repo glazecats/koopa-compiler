@@ -639,6 +639,15 @@
     `x = pick()` stays on `SEMA-TYPE-006`, and `sink(pick())` stays on
     `SEMA-TYPE-003`; focused semantic / compiler / default-`ValueSSA`
     regressions now lock that whole neighbor matrix explicitly
+  - latest recursive-float-callarg closure:
+    one more narrow value-producing float family is now formally checkpointed
+    on top of the already-implemented recursive pure-float tree support:
+    same-type float call arguments may now consume helper-backed pure-float
+    trees such as `wrap((x + y) + z)` and `wrap(-a * (b / c))`. That family
+    is now locked through semantic / compiler / IR / lower-IR plus default
+    `ValueSSA` / `machine_ir` / `machine_select`, while the still-closed
+    ternary-derived arithmetic neighbor `wrap((g ? h : h) + h)` remains on
+    the old reject boundary
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float

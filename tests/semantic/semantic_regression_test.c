@@ -368,6 +368,12 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_unary_call_same_type_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_float_mul_div_call_argument_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
         }
@@ -679,6 +685,8 @@ int main(void) {
     ok &= test_semantic_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_semantic_accepts_same_type_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_semantic_accepts_unary_call_same_type_float_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_semantic_accepts_chained_float_addition_call_argument_to_float_under_extension();
+    ok &= test_semantic_accepts_nested_float_mul_div_call_argument_to_float_under_extension();
     ok &= test_semantic_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_semantic_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_semantic_accepts_float_helper_wrapped_ternary_call_compare_under_extension();

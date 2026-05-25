@@ -1967,6 +1967,22 @@ static int test_semantic_accepts_unary_call_same_type_float_ternary_value_call_a
         "int main(){ return 0; }\n");
 }
 
+static int test_semantic_accepts_chained_float_addition_call_argument_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-chain-add-callarg-float-ext-pass",
+        "float wrap(float x){ return x; }\n"
+        "float get(float x, float y, float z){ return wrap((x + y) + z); }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_float_mul_div_call_argument_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-nested-mul-div-callarg-float-ext-pass",
+        "float wrap(float x){ return x; }\n"
+        "float f(float a, float b, float c){ return wrap(-a * (b / c)); }\n"
+        "int main(){ return 0; }\n");
+}
+
 static int test_semantic_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "float-helper-ternary-call-arith-ext-pass",

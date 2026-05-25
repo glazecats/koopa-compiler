@@ -5708,6 +5708,93 @@ cleanup:
     return ok;
 }
 
+static int test_machine_select_accepts_chained_float_addition_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float wrap(float x){ return x; }\n"
+        "float get(float x, float y, float z){ return wrap((x + y) + z); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "get") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_float_mul_div_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float wrap(float x){ return x; }\n"
+        "float f(float a, float b, float c){ return wrap(-a * (b / c)); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "f") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 static int test_machine_select_rejects_float_ternary_value_compare_against_int_under_extension(void) {
     MachineIrProgram machine_program;
     MachineIrError machine_error;
@@ -14473,6 +14560,12 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_float_mul_div_call_argument_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
         }
@@ -14728,6 +14821,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_chained_float_addition_call_argument_to_float_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_float_mul_div_call_argument_to_float_under_extension()) {
         return 1;
     }
     if (!test_machine_select_accepts_nested_float_mul_div_under_extension()) {

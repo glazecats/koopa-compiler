@@ -2805,6 +2805,65 @@ static int test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float
     return ok;
 }
 
+static int test_ir_accepts_chained_float_addition_call_argument_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float wrap(float x){ return x; }\n"
+            "float get(float x, float y, float z){ return wrap((x + y) + z); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func wrap(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "func get(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(") != NULL &&
+        strstr(actual_text, "tmp.2 = call wrap(tmp.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.2\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_float_mul_div_call_argument_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float wrap(float x){ return x; }\n"
+            "float f(float a, float b, float c){ return wrap(-a * (b / c)); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func wrap(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(") != NULL &&
+        strstr(actual_text, "tmp.3 = call wrap(tmp.2)\n") != NULL &&
+        strstr(actual_text, "ret tmp.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -4586,6 +4645,12 @@ int main(void) {
         if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-CHAIN-ADD-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_addition_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_float_mul_div_call_argument_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
             return test_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
         }
@@ -4769,6 +4834,8 @@ int main(void) {
     ok &= test_ir_accepts_float_ternary_value_initializer_to_float_under_extension();
     ok &= test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_ir_accepts_chained_float_addition_call_argument_to_float_under_extension();
+    ok &= test_ir_accepts_nested_float_mul_div_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
     ok &= test_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension();
