@@ -2651,6 +2651,102 @@ static int test_ir_accepts_float_logical_condition_composition_under_extension(v
     return ok;
 }
 
+static int test_ir_accepts_recursive_float_if_condition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int f(float x, float y, float z){ if((x + y) + z) return 1; return 0; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(tmp.0, z.2)\n") != NULL &&
+        strstr(actual_text, "and tmp.1, 2147483647\n") != NULL &&
+        strstr(actual_text, "ne tmp.2, 0\n") != NULL &&
+        strstr(actual_text, "br tmp.3, bb.1, bb.2\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-RECURSIVE-IF-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_recursive_float_while_condition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int f(float a, float b, float c){ while(-a * (b / c)) return 1; return 0; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor a.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(b.1, c.2)\n") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(tmp.0, tmp.1)\n") != NULL &&
+        strstr(actual_text, "and tmp.2, 2147483647\n") != NULL &&
+        strstr(actual_text, "br tmp.4, bb.2, bb.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-RECURSIVE-WHILE-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_recursive_float_for_condition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int f(float x, float y, float z){ for(;(x + y) + z;) return 1; return 0; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "jmp bb.1\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(tmp.0, z.2)\n") != NULL &&
+        strstr(actual_text, "and tmp.1, 2147483647\n") != NULL &&
+        strstr(actual_text, "br tmp.3, bb.2, bb.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-RECURSIVE-FOR-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ if((g ? h : h) + h) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
 static int test_ir_rejects_float_ternary_value_under_extension(void) {
     return expect_extension_semantic_reject(
         "IR-FLOAT-TERNARY-VALUE-SEMANTIC-REJECT",
@@ -4825,6 +4921,18 @@ int main(void) {
         if (strstr("IR-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
             return test_ir_rejects_float_for_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-RECURSIVE-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_recursive_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_recursive_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
+            return test_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
             return test_ir_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
         }
@@ -5172,6 +5280,10 @@ int main(void) {
     ok &= test_ir_rejects_float_if_condition_under_extension();
     ok &= test_ir_rejects_float_while_condition_under_extension();
     ok &= test_ir_rejects_float_for_condition_under_extension();
+    ok &= test_ir_accepts_recursive_float_if_condition_under_extension();
+    ok &= test_ir_accepts_recursive_float_while_condition_under_extension();
+    ok &= test_ir_accepts_recursive_float_for_condition_under_extension();
+    ok &= test_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension();
     ok &= test_ir_accepts_float_logical_condition_composition_under_extension();
     ok &= test_ir_accepts_float_equality_compare_under_extension();
     ok &= test_ir_accepts_float_inequality_compare_under_extension();

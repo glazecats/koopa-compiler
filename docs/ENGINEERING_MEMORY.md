@@ -269,6 +269,11 @@
   “implemented and directly observed”, not “still speculative”. The open item
   is regression-lock breadth, especially on noisier aggregate runners, rather
   than whether helper-backed recursive lowering itself works.
+- That same recursive pure-float helper-backed family now also extends into
+  control-flow condition roots under `-extension`: `if((x + y) + z)`,
+  `while(-a * (b / c))`, and `for(;(x + y) + z;)` are now intentionally
+  accepted, while ternary-derived arithmetic neighbors such as
+  `if((g ? h : h) + h)` remain on `SEMA-EXT-035`.
 - The conservative float arithmetic gate must distinguish “opened recursive
   pure-float tree” from “any expression whose final type is float”. In
   practice that means `float` arithmetic usage may recurse through same-type

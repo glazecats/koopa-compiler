@@ -209,6 +209,15 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-TERNARY-COND-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_float_ternary_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-RECURSIVE-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_recursive_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_recursive_float_for_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_same_type_float_ternary_value_under_extension() ? 0 : 1;
         }
@@ -391,6 +400,9 @@ int main(void) {
         }
         if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-COMPARE-FLOAT-REJECT", filter) != NULL) {
             return test_semantic_rejects_unary_call_ternary_value_compare_against_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
+            return test_semantic_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
         }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
             return test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
@@ -666,6 +678,9 @@ int main(void) {
     ok &= test_semantic_accepts_float_and_condition_under_extension();
     ok &= test_semantic_accepts_float_or_condition_under_extension();
     ok &= test_semantic_accepts_float_ternary_condition_under_extension();
+    ok &= test_semantic_accepts_recursive_float_if_condition_under_extension();
+    ok &= test_semantic_accepts_recursive_float_while_condition_under_extension();
+    ok &= test_semantic_accepts_recursive_float_for_condition_under_extension();
     ok &= test_semantic_accepts_same_type_float_ternary_value_under_extension();
     ok &= test_semantic_rejects_global_float_operator_expression_under_extension();
     ok &= test_semantic_rejects_global_float_operator_expression_in_initializer_under_extension();
@@ -727,6 +742,7 @@ int main(void) {
     ok &= test_semantic_rejects_float_ternary_value_compare_against_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_semantic_rejects_unary_call_ternary_value_compare_against_float_under_extension();
+    ok &= test_semantic_rejects_recursive_float_condition_with_ternary_neighbor_under_extension();
     ok &= test_semantic_rejects_float_helper_wrapped_ternary_call_compare_int_under_extension();
     ok &= test_semantic_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension();

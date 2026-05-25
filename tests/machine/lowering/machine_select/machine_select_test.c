@@ -3537,6 +3537,74 @@ cleanup:
     return ok;
 }
 
+static int test_machine_select_accepts_recursive_float_if_condition_under_extension(void) {
+    static const char *source =
+        "int f(float x, float y, float z){ if((x + y) + z) return 1; return 0; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-IF-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function f params=3 locals=3 spills=0") ||
+        !strstr(actual_text, "__builtin_fadd32") ||
+        !strstr(actual_text, "cmpbri") ||
+        !strstr(actual_text, "reti 1") ||
+        !strstr(actual_text, "reti 0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-IF-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ if((g ? h : h) + h) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+
+    if (build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_ir_allocate_rewrite_report_free(&machine_report);
+        return 0;
+    }
+
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return 1;
+}
+
 static int test_machine_select_accepts_float_equality_compare_under_extension(void) {
     static const char *source =
         "int eq(float x, float y){ return x == y; }\n"
@@ -14934,6 +15002,12 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_float_for_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
         }
@@ -15282,6 +15356,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_accepts_float_for_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_recursive_float_if_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension()) {
         return 1;
     }
     if (!test_machine_select_accepts_float_logical_condition_composition_under_extension()) {

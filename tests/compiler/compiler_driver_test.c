@@ -479,6 +479,91 @@ static int test_compiler_rejects_float_for_condition_under_extension(void) {
     return 1;
 }
 
+static int test_compiler_accepts_recursive_float_if_condition_under_extension(void) {
+    static const char *source =
+        "int f(float x, float y, float z){ if((x + y) + z) return 1; return 0; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: recursive float if-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_recursive_float_while_condition_under_extension(void) {
+    static const char *source =
+        "int f(float a, float b, float c){ while(-a * (b / c)) return 1; return 0; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: recursive float while-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_recursive_float_for_condition_under_extension(void) {
+    static const char *source =
+        "int f(float x, float y, float z){ for(;(x + y) + z;) return 1; return 0; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: recursive float for-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ if((g ? h : h) + h) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: recursive float ternary-neighbor condition should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_array_local_declaration_under_extension(void) {
     static const char *source = "int main(){ float a[2]; return 0; }\n";
     CompilerError error;
@@ -6541,6 +6626,18 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
             return test_compiler_rejects_float_for_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-RECURSIVE-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_recursive_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_recursive_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
+            return test_compiler_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
         }
@@ -6858,6 +6955,10 @@ int main(void) {
     ok &= test_compiler_rejects_float_if_condition_under_extension();
     ok &= test_compiler_rejects_float_while_condition_under_extension();
     ok &= test_compiler_rejects_float_for_condition_under_extension();
+    ok &= test_compiler_accepts_recursive_float_if_condition_under_extension();
+    ok &= test_compiler_accepts_recursive_float_while_condition_under_extension();
+    ok &= test_compiler_accepts_recursive_float_for_condition_under_extension();
+    ok &= test_compiler_rejects_recursive_float_condition_with_ternary_neighbor_under_extension();
     ok &= test_compiler_accepts_float_logical_condition_composition_under_extension();
     ok &= test_compiler_rejects_float_array_local_declaration_under_extension();
     ok &= test_compiler_rejects_float_array_global_declaration_under_extension();

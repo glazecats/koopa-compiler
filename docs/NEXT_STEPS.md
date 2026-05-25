@@ -672,6 +672,15 @@
     downstream aggregation confidence check, the next most natural narrow
     opening is now documented separately in
     [docs/language/FLOAT_RECURSIVE_CONDITION_PLAN.md](/workspaces/compiler_lab/docs/language/FLOAT_RECURSIVE_CONDITION_PLAN.md)
+  - latest recursive-float condition closure:
+    that planned narrow opening is now also checkpointed. Recursive
+    pure-float helper-backed trees now work in control-flow condition
+    positions under `-extension`, with focused witnesses such as
+    `if((x + y) + z)`, `while(-a * (b / c))`, and `for(;(x + y) + z;)`
+    locked through semantic / compiler / IR / lower-IR plus focused
+    `ValueSSA` / `machine_ir` / `machine_select` surfaces. The adjacent
+    ternary-derived arithmetic neighbor `if((g ? h : h) + h)` remains
+    explicitly closed on `SEMA-EXT-035`
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float

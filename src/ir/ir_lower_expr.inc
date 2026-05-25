@@ -572,7 +572,8 @@ static const char *ir_extract_direct_call_callee_name(const AstExpression *calle
 
 static int ir_expression_is_direct_float_condition(const IrLowerContext *ctx,
     const AstExpression *expr) {
-    return ir_expression_is_direct_float_transport_root(ctx, expr);
+    return ir_expression_is_direct_float_transport_root(ctx, expr) ||
+        ir_expression_is_float_arithmetic(ctx, expr);
 }
 
 static int ir_expression_is_signed_float_literal(const AstExpression *expr) {

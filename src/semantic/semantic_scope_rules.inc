@@ -90,6 +90,11 @@ static int semantic_expression_is_direct_float_transport_root(const AstExpressio
     size_t func_index,
     int include_current_external,
     const ScopeStack *scopes);
+static int semantic_expression_is_float_condition_root(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes);
 
 static int scope_next_growth_capacity(size_t current,
     size_t initial,
@@ -1519,6 +1524,61 @@ static int semantic_expression_is_non_global_direct_float_arithmetic_typecheck_r
     }
 }
 
+static int semantic_expression_is_float_condition_root(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor scalar_type;
+
+    if (!base) {
+        return 0;
+    }
+    if (semantic_expression_is_direct_float_transport_root(
+            base,
+            program,
+            func_index,
+            include_current_external,
+            scopes)) {
+        return 1;
+    }
+    if (base->kind != AST_EXPR_BINARY ||
+        (base->as.binary.op != TOKEN_PLUS &&
+            base->as.binary.op != TOKEN_MINUS &&
+            base->as.binary.op != TOKEN_STAR &&
+            base->as.binary.op != TOKEN_SLASH) ||
+        !semantic_expression_resolve_scalar_type(
+            base,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &scalar_type,
+            NULL) ||
+        scalar_type.kind != SEMANTIC_TYPE_KIND_FLOAT) {
+        return 0;
+    }
+    if ((unwrap_paren_expression(base->as.binary.left) &&
+            unwrap_paren_expression(base->as.binary.left)->kind == AST_EXPR_TERNARY) ||
+        (unwrap_paren_expression(base->as.binary.right) &&
+            unwrap_paren_expression(base->as.binary.right)->kind == AST_EXPR_TERNARY)) {
+        return 0;
+    }
+    return semantic_expression_is_float_condition_root(
+            base->as.binary.left,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        semantic_expression_is_float_condition_root(
+            base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes);
+}
+
 static int semantic_scope_call_callee_is_function_parameter_name(const AstExpression *callee,
     const AstExternal *func) {
     const AstExpression *base = unwrap_paren_expression(callee);
@@ -2924,7 +2984,7 @@ static int semantic_validate_control_condition_type(const AstExpression *expr,
     }
     if (actual_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
         (!base ||
-            !semantic_expression_is_direct_float_transport_root(
+            !semantic_expression_is_float_condition_root(
                 base,
                 program,
                 func_index,
@@ -2933,7 +2993,7 @@ static int semantic_validate_control_condition_type(const AstExpression *expr,
         semantic_set_error(error,
             expr->line,
             expr->column,
-            "SEMA-EXT-036: float control-flow conditions currently support only direct transport roots");
+            "SEMA-EXT-036: float control-flow conditions currently support only direct transport roots and recursive pure-float arithmetic");
         return 0;
     }
     return 1;

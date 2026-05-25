@@ -1576,6 +1576,27 @@ static int test_semantic_accepts_float_ternary_condition_under_extension(void) {
         "int main(){ return g ? 1 : 0; }\n");
 }
 
+static int test_semantic_accepts_recursive_float_if_condition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-recursive-if-cond-ext-pass",
+        "int f(float x, float y, float z){ if((x + y) + z) return 1; return 0; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_recursive_float_while_condition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-recursive-while-cond-ext-pass",
+        "int f(float a, float b, float c){ while(-a * (b / c)) return 1; return 0; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_recursive_float_for_condition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-recursive-for-cond-ext-pass",
+        "int f(float x, float y, float z){ for(;(x + y) + z;) return 1; return 0; }\n"
+        "int main(){ return 0; }\n");
+}
+
 static int test_semantic_accepts_same_type_float_ternary_value_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "float-ternary-value-ext-pass",
@@ -2065,6 +2086,15 @@ static int test_semantic_accepts_nested_float_mul_div_call_argument_to_float_und
         "float wrap(float x){ return x; }\n"
         "float f(float a, float b, float c){ return wrap(-a * (b / c)); }\n"
         "int main(){ return 0; }\n");
+}
+
+static int test_semantic_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-recursive-cond-ternary-neighbor-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ if((g ? h : h) + h) return 1; return 0; }\n",
+        "SEMA-EXT-035");
 }
 
 static int test_semantic_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
