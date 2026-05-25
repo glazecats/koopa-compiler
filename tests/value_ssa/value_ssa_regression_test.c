@@ -26050,6 +26050,10 @@ int main(void) {
     ok &= test_value_ssa_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_value_ssa_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_value_ssa_rejects_float_ternary_value_compare_against_float_under_extension();
+    ok &= test_value_ssa_rejects_unary_call_ternary_value_compare_against_float_under_extension();
     ok &= test_value_ssa_rejects_float_assignment_to_int_under_extension();
     ok &= test_value_ssa_accepts_float_if_condition_under_extension();
     ok &= test_value_ssa_accepts_float_while_condition_under_extension();

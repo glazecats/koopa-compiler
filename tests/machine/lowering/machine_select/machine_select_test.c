@@ -14530,6 +14530,18 @@ int main(void) {
     if (!test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension()) {
         return 1;
     }
+    if (!test_machine_select_rejects_float_ternary_value_plus_float_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_ternary_value_compare_against_float_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_unary_call_ternary_value_compare_against_float_under_extension()) {
+        return 1;
+    }
     if (!test_machine_select_conservative_no_phi_report_bridge_rejects_phi_input()) {
         return 1;
     }
