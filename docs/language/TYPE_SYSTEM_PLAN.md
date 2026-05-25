@@ -175,6 +175,13 @@
     root may now participate in later same-type float arithmetic/comparison
     families such as `pick() + h`, `pick(x) + x`, `pick() == h`, and
     `pick(x) == x`
+  - latest helper-membrane int-context closure:
+    the neighboring still-closed `int` value contexts are now also explicit
+    on that same helper-return family. `return pick()`, `int x = pick()`,
+    `x = pick()`, and `sink(pick())` now stay on the existing
+    `SEMA-TYPE-005/004/006/003` split for both the global-root and
+    unary-call-root helper variants, with focused semantic / compiler /
+    default-`ValueSSA` regression locks in place
   - latest implementation note after that follow-up:
     landing that slice also closed a real canonical-IR lowering bug in the
     helper-backed float path. Nested helper-backed arithmetic such as

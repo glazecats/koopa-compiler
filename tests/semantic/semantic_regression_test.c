@@ -392,6 +392,30 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
             return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_semantic_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
         }

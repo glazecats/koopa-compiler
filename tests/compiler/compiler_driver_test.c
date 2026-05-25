@@ -1786,6 +1786,192 @@ static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_compare_
     return 1;
 }
 
+static int test_compiler_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int bad(){ return pick(); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call return to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int bad(float x){ return pick(x); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call return to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_helper_wrapped_ternary_call_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int x = pick();\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call initializer to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int y = pick(1.0);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call initializer to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_helper_wrapped_ternary_call_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int main(){ int x = 0; x = pick(); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call assignment to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int main(){ int y = 0; y = pick(1.0); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call assignment to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int main(){ return sink(pick()); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call argument to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int main(){ return sink(pick(1.0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call argument to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -6214,6 +6400,30 @@ int main(void) {
         }
         if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_compare_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-RETURN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_helper_wrapped_ternary_call_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_helper_wrapped_ternary_call_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_helper_wrapped_ternary_call_argument_to_int_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;

@@ -631,6 +631,14 @@
     accepted and regression-locked through semantic / compiler / IR /
     lower-IR plus focused default `ValueSSA` / `machine_ir` /
     `machine_select` surfaces
+  - latest helper-membrane int-context reject closure:
+    the corresponding still-closed `int` value contexts are now also
+    checkpointed on that same helper-return family. For both the global-root
+    and unary-call-root helper variants, `return pick()` stays on
+    `SEMA-TYPE-005`, `int x = pick()` stays on `SEMA-TYPE-004`,
+    `x = pick()` stays on `SEMA-TYPE-006`, and `sink(pick())` stays on
+    `SEMA-TYPE-003`; focused semantic / compiler / default-`ValueSSA`
+    regressions now lock that whole neighbor matrix explicitly
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float
