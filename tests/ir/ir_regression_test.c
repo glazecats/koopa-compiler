@@ -3720,6 +3720,27 @@ static int test_ir_rejects_unary_call_ternary_value_plus_int_under_extension(voi
         "SEMA-EXT-035");
 }
 
+static int test_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float wrap(float x){ return x; }\n"
+        "float get(){ return wrap((g ? h : h) + h); }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT",
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return x; }\n"
+        "float f(float x){ return wrap(((-id(x) ? x : x)) + x); }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
 static int test_ir_lowers_pair_copy_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -4414,6 +4435,12 @@ int main(void) {
         if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
             return test_ir_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
             return test_ir_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
         }
@@ -4626,6 +4653,8 @@ int main(void) {
     ok &= test_ir_rejects_nested_float_muldiv_plus_int_under_extension();
     ok &= test_ir_rejects_float_ternary_value_plus_int_under_extension();
     ok &= test_ir_rejects_unary_call_ternary_value_plus_int_under_extension();
+    ok &= test_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_ir_rejects_float_ternary_value_under_extension();
     ok &= test_ir_lowers_pair_copy_under_extension();
     ok &= test_ir_lowers_struct_copy_under_extension();

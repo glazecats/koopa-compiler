@@ -603,6 +603,25 @@
     ternary values immediately feeding later float arithmetic/value-comparison
     families such as `(g ? h : h) + h`, still remain outside the current
     slice
+  - latest ternary-derived-family repair:
+    one real semantic leak on that boundary is now fixed and regression-
+    locked. The implementation had started accepting
+    `wrap((g ? h : h) + h)`, `wrap(((-id(x) ? x : x)) + x)`,
+    `(g ? h : h) == h`, and `(-id(x) ? x : x) == x` even though that
+    ternary-derived float family was still meant to stay closed
+  - latest gate-hardening detail:
+    the repair lives in the shared semantic float-usage gate:
+    ternary-valued float operands are rejected again when nested under later
+    float arithmetic/comparison operators, and float call expressions now
+    recurse into their arguments for float-usage validation instead of
+    letting nested float-derived subexpressions bypass the kept boundary just
+    because the outer node was a call
+  - latest regression-lock follow-up:
+    the repaired boundary is now covered through semantic / compiler /
+    IR / lower-IR plus focused `ValueSSA` / `machine_ir` /
+    `machine_select` reject probes, while the already-open direct
+    ternary-to-float-callarg witnesses remain green as neighboring accept
+    checkpoints
   - latest explicit-conversion lowering fix:
     helper-backed conversion builtins are now also predeclared before IR
     function-body lowering, so nested call/conversion shapes such as

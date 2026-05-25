@@ -1829,6 +1829,27 @@ static int test_semantic_rejects_unary_call_ternary_value_plus_int_under_extensi
         "SEMA-EXT-035");
 }
 
+static int test_semantic_rejects_float_ternary_value_plus_float_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-ternary-plus-float-callarg-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float wrap(float x){ return x; }\n"
+        "float get(){ return wrap((g ? h : h) + h); }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_semantic_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-unary-call-ternary-plus-float-callarg-ext-reject",
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return x; }\n"
+        "float f(float x){ return wrap(((-id(x) ? x : x)) + x); }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
 static int test_semantic_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-ternary-value-assign-int-ext-reject",
@@ -1886,6 +1907,25 @@ static int test_semantic_rejects_unary_call_ternary_value_compare_against_int_un
         "float id(float x){ return x; }\n"
         "int main(){ return (-id(1.0) ? 1.0 : 2.0) == 0; }\n",
         "SEMA-TYPE-007");
+}
+
+static int test_semantic_rejects_float_ternary_value_compare_against_float_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-ternary-value-compare-float-ext-reject",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int eq(){ return (g ? h : h) == h; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_semantic_rejects_unary_call_ternary_value_compare_against_float_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-unary-call-ternary-compare-float-ext-reject",
+        "float id(float x){ return x; }\n"
+        "int eq(float x){ return (-id(x) ? x : x) == x; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
 }
 
 static int test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension(void) {

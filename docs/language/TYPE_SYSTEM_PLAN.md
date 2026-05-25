@@ -175,6 +175,19 @@
     call itself away, and the unary-call-root witness may fold all the way to
     a direct float-literal return. Those folds are now treated as the current
     expected checkpoint, not as regressions
+  - latest boundary-repair follow-up:
+    the neighboring still-closed family is now explicitly back under control
+    too: same-type float ternary values may feed a same-type float call
+    argument directly, but they still may not first pass through a later
+    float arithmetic/comparison family such as
+    `wrap((g ? h : h) + h)` or `(g ? h : h) == h`
+  - latest gate-hardening note:
+    that repair required tightening the shared semantic float-usage gate on
+    two fronts: ternary-valued float operands are now rejected again when
+    nested under later float arithmetic/comparison operators, and float call
+    expressions now recurse into their arguments for float-usage validation
+    instead of treating “call returns float” as blanket permission for all
+    float subexpressions in the argument list
   - current kept boundary after that follow-up:
     mixed ternary branches such as `g ? h : 0`, and ternary-float values
     immediately feeding later float arithmetic families, still remain closed

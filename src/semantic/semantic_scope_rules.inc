@@ -3131,6 +3131,10 @@ static int semantic_validate_scalar_expression_usage_impl(const AstExpression *e
             &lhs_type,
             NULL) &&
         lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+        !(unwrap_paren_expression(base->as.binary.left) &&
+            unwrap_paren_expression(base->as.binary.left)->kind == AST_EXPR_TERNARY) &&
+        !(unwrap_paren_expression(base->as.binary.right) &&
+            unwrap_paren_expression(base->as.binary.right)->kind == AST_EXPR_TERNARY) &&
         !semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
             base->as.binary.left,
             program,
@@ -3156,8 +3160,23 @@ static int semantic_validate_scalar_expression_usage_impl(const AstExpression *e
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
     case AST_EXPR_FLOAT_LITERAL:
-    case AST_EXPR_CALL:
         return 1;
+    case AST_EXPR_CALL: {
+        size_t arg_index;
+
+        for (arg_index = 0u; arg_index < base->as.call.arg_count; ++arg_index) {
+            if (!semantic_validate_scalar_expression_usage_impl(
+                    base->as.call.args[arg_index],
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
     case AST_EXPR_CONVERSION:
         if (base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT ||
             base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
@@ -3227,6 +3246,12 @@ static int semantic_validate_scalar_expression_usage_impl(const AstExpression *e
                 NULL) &&
             lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
             rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) {
+            if ((unwrap_paren_expression(base->as.binary.left) &&
+                    unwrap_paren_expression(base->as.binary.left)->kind == AST_EXPR_TERNARY) ||
+                (unwrap_paren_expression(base->as.binary.right) &&
+                    unwrap_paren_expression(base->as.binary.right)->kind == AST_EXPR_TERNARY)) {
+                return semantic_set_float_expression_usage_error(base, error);
+            }
             return semantic_validate_scalar_expression_usage_impl(
                     base->as.binary.left,
                     program,
@@ -3248,6 +3273,12 @@ static int semantic_validate_scalar_expression_usage_impl(const AstExpression *e
             base->as.binary.op == TOKEN_LE ||
             base->as.binary.op == TOKEN_GT ||
             base->as.binary.op == TOKEN_GE) {
+            if ((unwrap_paren_expression(base->as.binary.left) &&
+                    unwrap_paren_expression(base->as.binary.left)->kind == AST_EXPR_TERNARY) ||
+                (unwrap_paren_expression(base->as.binary.right) &&
+                    unwrap_paren_expression(base->as.binary.right)->kind == AST_EXPR_TERNARY)) {
+                return semantic_set_float_expression_usage_error(base, error);
+            }
             return semantic_validate_scalar_expression_usage_impl(
                     base->as.binary.left,
                     program,

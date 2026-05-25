@@ -4334,6 +4334,81 @@ static int test_lower_ir_rejects_unary_call_ternary_value_plus_int_under_extensi
     return ok;
 }
 
+static int test_lower_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float wrap(float x){ return x; }\n"
+            "float get(){ return wrap((g ? h : h) + h); }\n"
+            "int main(){ return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_lower_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "float id(float x){ return x; }\n"
+            "float wrap(float x){ return x; }\n"
+            "float f(float x){ return wrap(((-id(x) ? x : x)) + x); }\n"
+            "int main(){ return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int test_lower_ir_lowers_assignment_and_return_via_store_and_load(void) {
     return expect_lowered_source_dump("LOWER-IR-LOWER-ASSIGN-RET",
         "int f(int a,int b){a=b+1; return a;}\n",
@@ -5121,6 +5196,12 @@ int main(void) {
         }
         if (strstr("LOWER-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
             return test_lower_ir_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
         }
         if (strstr("LOWER-IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
             return test_lower_ir_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;

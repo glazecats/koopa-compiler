@@ -4926,6 +4926,79 @@ static int test_machine_select_rejects_unary_call_ternary_value_plus_int_under_e
     return 1;
 }
 
+static int test_machine_select_rejects_float_ternary_value_plus_float_call_argument_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float wrap(float x){ return x; }\n"
+            "float get(){ return wrap((g ? h : h) + h); }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float wrap(float x){ return x; }\n"
+            "float f(float x){ return wrap(((-id(x) ? x : x)) + x); }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
 static int test_machine_select_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
     MachineIrProgram machine_program;
     MachineIrError machine_error;
@@ -5502,6 +5575,77 @@ static int test_machine_select_rejects_unary_call_ternary_value_compare_against_
     if (strstr(machine_error.message, "SEMA-TYPE-007") == NULL) {
         fprintf(stderr,
             "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_compare_against_float_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int eq(){ return (g ? h : h) == h; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_compare_against_float_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int eq(float x){ return (-id(x) ? x : x) == x; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-FLOAT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-FLOAT-REJECT mismatch: %s\n",
             machine_error.message);
         machine_select_program_free(&select_program);
         machine_ir_program_free(&machine_program);
@@ -14096,6 +14240,12 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
         }
@@ -14140,6 +14290,12 @@ int main(void) {
         }
         if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_compare_against_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-FLOAT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_compare_against_float_under_extension() ? 0 : 1;
         }
     }
 

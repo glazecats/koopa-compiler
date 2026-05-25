@@ -1258,6 +1258,53 @@ static int test_compiler_rejects_unary_call_ternary_value_plus_int_under_extensi
     return 1;
 }
 
+static int test_compiler_rejects_float_ternary_value_plus_float_call_argument_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float wrap(float x){ return x; }\n"
+        "float get(){ return wrap((g ? h : h) + h); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value plus float call argument should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return x; }\n"
+        "float f(float x){ return wrap(((-id(x) ? x : x)) + x); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value plus float call argument should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -1402,6 +1449,51 @@ static int test_compiler_rejects_unary_call_ternary_value_compare_against_int_un
         strstr(error.message, "SEMA-TYPE-007") == NULL) {
         fprintf(stderr,
             "[compiler] FAIL: unary-call ternary float value compare against int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_compare_against_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int eq(){ return (g ? h : h) == h; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value compare against float should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_compare_against_float_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int eq(float x){ return (-id(x) ? x : x) == x; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value compare against float should still be rejected under extension: %s\n",
             error.message);
         free(output);
         return 0;
@@ -5864,6 +5956,12 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-PLUS-FLOAT-CALLARG-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
         }
@@ -5884,6 +5982,12 @@ int main(void) {
         }
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-COMPARE-FLOAT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_compare_against_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-COMPARE-FLOAT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_compare_against_float_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
@@ -6004,11 +6108,15 @@ int main(void) {
     ok &= test_compiler_rejects_nested_float_muldiv_plus_int_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_plus_int_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_plus_int_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_plus_float_call_argument_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_compare_against_int_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_compare_against_float_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_compare_against_float_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_call_argument_to_float_under_extension();
