@@ -1392,6 +1392,51 @@ static int test_compiler_accepts_unary_call_float_ternary_value_assignment_to_fl
     return 1;
 }
 
+static int test_compiler_accepts_chained_float_addition_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float f(float x, float y, float z){ float t; t = (x + y) + z; return t; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float addition assignment to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_float_mul_div_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ float t; t = -a * (b / c); return t; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div assignment to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -1406,6 +1451,51 @@ static int test_compiler_accepts_float_ternary_value_initializer_to_float_under_
         !output) {
         fprintf(stderr,
             "[compiler] FAIL: float ternary value initializer to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_chained_float_addition_initializer_to_float_under_extension(void) {
+    static const char *source =
+        "float f(float x, float y, float z){ float t = (x + y) + z; return t; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float addition initializer to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_float_mul_div_initializer_to_float_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ float t = -a * (b / c); return t; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div initializer to float should compile under extension: %s\n",
             error.message);
         free(output);
         return 0;
@@ -6397,8 +6487,20 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_addition_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_float_mul_div_assignment_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_addition_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_float_mul_div_initializer_to_float_under_extension() ? 0 : 1;
         }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
@@ -6590,7 +6692,11 @@ int main(void) {
     ok &= test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_compiler_accepts_chained_float_addition_assignment_to_float_under_extension();
+    ok &= test_compiler_accepts_nested_float_mul_div_assignment_to_float_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_compiler_accepts_chained_float_addition_initializer_to_float_under_extension();
+    ok &= test_compiler_accepts_nested_float_mul_div_initializer_to_float_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_compare_against_int_under_extension();
     ok &= test_compiler_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_compiler_rejects_unary_call_ternary_value_compare_against_float_under_extension();

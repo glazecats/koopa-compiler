@@ -2744,6 +2744,116 @@ static int test_ir_accepts_float_ternary_value_initializer_to_float_under_extens
     return ok;
 }
 
+static int test_ir_accepts_chained_float_addition_assignment_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float f(float x, float y, float z){ float t; t = (x + y) + z; return t; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(") != NULL &&
+        strstr(actual_text, "t.3 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret t.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-ASSIGN-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_float_mul_div_assignment_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float f(float a, float b, float c){ float t; t = -a * (b / c); return t; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(") != NULL &&
+        strstr(actual_text, "t.3 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret t.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-ASSIGN-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_chained_float_addition_initializer_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float f(float x, float y, float z){ float t = (x + y) + z; return t; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(") != NULL &&
+        strstr(actual_text, "t.3 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret t.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-INIT-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_float_mul_div_initializer_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float f(float a, float b, float c){ float t = -a * (b / c); return t; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(") != NULL &&
+        strstr(actual_text, "t.3 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret t.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-INIT-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -4639,6 +4749,18 @@ int main(void) {
         if (strstr("IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
             return test_ir_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-CHAIN-ADD-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_addition_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_float_mul_div_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-CHAIN-ADD-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_addition_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_float_mul_div_initializer_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
@@ -4832,6 +4954,10 @@ int main(void) {
     ok &= test_ir_accepts_same_type_float_ternary_value_under_extension();
     ok &= test_ir_accepts_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_ir_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_ir_accepts_chained_float_addition_assignment_to_float_under_extension();
+    ok &= test_ir_accepts_nested_float_mul_div_assignment_to_float_under_extension();
+    ok &= test_ir_accepts_chained_float_addition_initializer_to_float_under_extension();
+    ok &= test_ir_accepts_nested_float_mul_div_initializer_to_float_under_extension();
     ok &= test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_chained_float_addition_call_argument_to_float_under_extension();

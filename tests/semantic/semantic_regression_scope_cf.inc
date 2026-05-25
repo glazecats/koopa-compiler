@@ -1482,6 +1482,34 @@ static int test_semantic_accepts_float_local_call_chain_transport_under_extensio
         "int main(){ return 0; }\n");
 }
 
+static int test_semantic_accepts_chained_float_addition_assignment_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-chain-add-assign-float-ext-pass",
+        "float f(float x, float y, float z){ float t; t = (x + y) + z; return t; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_float_mul_div_assignment_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-nested-mul-div-assign-float-ext-pass",
+        "float f(float a, float b, float c){ float t; t = -a * (b / c); return t; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_chained_float_addition_initializer_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-chain-add-init-float-ext-pass",
+        "float f(float x, float y, float z){ float t = (x + y) + z; return t; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_float_mul_div_initializer_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-nested-mul-div-init-float-ext-pass",
+        "float f(float a, float b, float c){ float t = -a * (b / c); return t; }\n"
+        "int main(){ return 0; }\n");
+}
+
 static int test_semantic_rejects_global_float_operator_expression_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "global-float-op-ext-reject",

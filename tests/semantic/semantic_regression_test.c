@@ -341,8 +341,20 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_unary_call_same_type_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_addition_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_float_mul_div_assignment_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_same_type_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_addition_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_float_mul_div_initializer_to_float_under_extension() ? 0 : 1;
         }
         if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
             return test_semantic_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
@@ -675,7 +687,11 @@ int main(void) {
     ok &= test_semantic_rejects_float_ternary_value_assignment_to_int_under_extension();
     ok &= test_semantic_accepts_same_type_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_semantic_accepts_unary_call_same_type_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_semantic_accepts_chained_float_addition_assignment_to_float_under_extension();
+    ok &= test_semantic_accepts_nested_float_mul_div_assignment_to_float_under_extension();
     ok &= test_semantic_accepts_same_type_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_semantic_accepts_chained_float_addition_initializer_to_float_under_extension();
+    ok &= test_semantic_accepts_nested_float_mul_div_initializer_to_float_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_compare_against_int_under_extension();
     ok &= test_semantic_rejects_float_ternary_value_compare_against_float_under_extension();
     ok &= test_semantic_rejects_unary_call_ternary_value_compare_against_float_under_extension();

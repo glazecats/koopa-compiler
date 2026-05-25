@@ -648,6 +648,13 @@
     `ValueSSA` / `machine_ir` / `machine_select`, while the still-closed
     ternary-derived arithmetic neighbor `wrap((g ? h : h) + h)` remains on
     the old reject boundary
+  - latest recursive-float local-value closure:
+    the same recursive pure-float tree support is now also checkpointed in
+    same-type local value contexts. Assignment and initializer forms such as
+    `float t; t = (x + y) + z;`, `float t = (x + y) + z;`,
+    `float t; t = -a * (b / c);`, and `float t = -a * (b / c);` are now
+    locked through semantic / compiler / IR / lower-IR plus default
+    `ValueSSA` / `machine_ir` / `machine_select`
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float
