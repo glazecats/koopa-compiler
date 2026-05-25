@@ -138,6 +138,7 @@ static int consume_token(Parser *p, TokenType type, const char *what, const Toke
 }
 
 static AstExpression *parse_expression_ast_primary_only(Parser *p);
+static AstExpression *try_parse_expression_ast_conversion(Parser *p);
 static AstExpression *parse_expression_ast_postfix(Parser *p);
 static AstExpression *parse_expression_ast_unary(Parser *p);
 static AstExpression *parse_expression_ast_multiplicative(Parser *p);
@@ -278,6 +279,14 @@ static int token_slice_is_parenthesized_lvalue_form(const TokenArray *tokens,
         size_t bracket_depth = 0u;
         size_t paren_depth = 0u;
 
+        if (tokens->data[i].type == TOKEN_DOT) {
+            if (i + 1u >= end || tokens->data[i + 1u].type != TOKEN_IDENTIFIER) {
+                return 0;
+            }
+            i += 2u;
+            continue;
+        }
+
         if (tokens->data[i].type != TOKEN_LBRACKET) {
             return 0;
         }
@@ -326,6 +335,14 @@ static int token_slice_is_assignment_lvalue_form(const TokenArray *tokens,
     while (i < end) {
         size_t bracket_depth = 0u;
         size_t paren_depth = 0u;
+
+        if (tokens->data[i].type == TOKEN_DOT) {
+            if (i + 1u >= end || tokens->data[i + 1u].type != TOKEN_IDENTIFIER) {
+                return 0;
+            }
+            i += 2u;
+            continue;
+        }
 
         if (tokens->data[i].type != TOKEN_LBRACKET) {
             return 0;
@@ -461,8 +478,12 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->declaration_is_const = 0;
     stmt->declaration_names = NULL;
     stmt->declaration_name_count = 0;
+    stmt->declaration_value_kinds = NULL;
     stmt->declaration_array_ranks = NULL;
     stmt->declaration_array_extent_exprs = NULL;
+    stmt->declaration_function_return_types = NULL;
+    stmt->declaration_function_parameter_counts = NULL;
+    stmt->declaration_type_names = NULL;
     stmt->expressions = NULL;
     stmt->expression_count = 0;
     stmt->has_primary_expression = 0;
@@ -473,6 +494,10 @@ static AstStatement *alloc_ast_statement(Parser *p,
     stmt->for_init_expression_index = 0;
     stmt->has_for_step_expression = 0;
     stmt->for_step_expression_index = 0;
+    stmt->capture_names = NULL;
+    stmt->capture_name_count = 0u;
+    stmt->capture_expressions = NULL;
+    stmt->capture_expression_count = 0u;
     stmt->children = NULL;
     stmt->child_count = 0;
     return stmt;
@@ -573,6 +598,48 @@ static int append_name_array_item(Parser *p,
     return 1;
 }
 
+static int append_nullable_name_array_item(Parser *p,
+    char ***names,
+    size_t index,
+    size_t *capacity,
+    char *name,
+    const Token *anchor_tok) {
+    char **new_items;
+    size_t old_capacity;
+    size_t next_capacity;
+
+    if (!names || !capacity) {
+        free(name);
+        return 0;
+    }
+
+    if (index >= *capacity) {
+        old_capacity = *capacity;
+        if (!parser_next_growth_capacity(*capacity, 4, sizeof(char *), &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST identifier metadata");
+            free(name);
+            return 0;
+        }
+        new_items = (char **)realloc(*names, next_capacity * sizeof(char *));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST identifier metadata");
+            free(name);
+            return 0;
+        }
+        *names = new_items;
+        *capacity = next_capacity;
+        while (old_capacity < next_capacity) {
+            (*names)[old_capacity++] = NULL;
+        }
+    }
+    (*names)[index] = name;
+    return 1;
+}
+
 static int append_size_t_array_item(Parser *p,
     size_t **items,
     size_t count,
@@ -598,6 +665,41 @@ static int append_size_t_array_item(Parser *p,
             set_error(p,
                 anchor_tok ? anchor_tok : peek(p),
                 "Out of memory while building AST array metadata");
+            return 0;
+        }
+        *items = new_items;
+        *capacity = next_capacity;
+    }
+
+    (*items)[count] = value;
+    return 1;
+}
+
+static int append_int_array_item(Parser *p,
+    int **items,
+    size_t count,
+    size_t *capacity,
+    int value,
+    const Token *anchor_tok) {
+    int *new_items;
+    size_t next_capacity;
+
+    if (!items || !capacity) {
+        return 0;
+    }
+
+    if (count == *capacity) {
+        if (!parser_next_growth_capacity(*capacity, 4, sizeof(int), &next_capacity)) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST declaration metadata");
+            return 0;
+        }
+        new_items = (int *)realloc(*items, next_capacity * sizeof(int));
+        if (!new_items) {
+            set_error(p,
+                anchor_tok ? anchor_tok : peek(p),
+                "Out of memory while building AST declaration metadata");
             return 0;
         }
         *items = new_items;
@@ -825,6 +927,34 @@ static AstExpression *build_subscript_expression_node(Parser *p,
     return expr;
 }
 
+static AstExpression *build_member_expression_node(Parser *p,
+    const Token *dot_tok,
+    AstExpression *base,
+    const Token *field_tok) {
+    AstExpression *expr = alloc_ast_expression(AST_EXPR_MEMBER, dot_tok->line, dot_tok->column);
+
+    if (!expr) {
+        set_error(p, dot_tok, "Out of memory while building expression AST");
+        parser_ast_expression_free(base);
+        return NULL;
+    }
+
+    expr->as.member.base = base;
+    expr->as.member.field_name = NULL;
+    if (field_tok && field_tok->lexeme && field_tok->length > 0u) {
+        expr->as.member.field_name = (char *)malloc(field_tok->length + 1u);
+    }
+    if (!expr->as.member.field_name) {
+        set_error(p, field_tok, "Out of memory while building expression AST");
+        parser_ast_expression_free(expr);
+        return NULL;
+    }
+    memcpy(expr->as.member.field_name, field_tok->lexeme, field_tok->length);
+    expr->as.member.field_name[field_tok->length] = '\0';
+    expr->as.member.field_name_length = field_tok ? field_tok->length : 0u;
+    return expr;
+}
+
 static void free_ast_expression_array(AstExpression **items, size_t count) {
     size_t i;
 
@@ -1022,6 +1152,10 @@ static int ast_expression_is_identifier_lvalue(const AstExpression *expr) {
         return 1;
     }
 
+    if (expr->kind == AST_EXPR_MEMBER) {
+        return 1;
+    }
+
     return 0;
 }
 
@@ -1030,7 +1164,9 @@ static int ast_expression_is_assignment_lvalue(const AstExpression *expr) {
         return 0;
     }
 
-    return expr->kind == AST_EXPR_IDENTIFIER || expr->kind == AST_EXPR_SUBSCRIPT;
+    return expr->kind == AST_EXPR_IDENTIFIER ||
+        expr->kind == AST_EXPR_SUBSCRIPT ||
+        expr->kind == AST_EXPR_MEMBER;
 }
 
 static int ast_expression_is_callable_callee(const AstExpression *expr) {
@@ -1092,6 +1228,51 @@ static AstExpression *parse_parenthesized_expression_ast_primary_only(Parser *p,
     return paren_expr;
 }
 
+static AstExpression *try_parse_expression_ast_conversion(Parser *p) {
+    size_t saved_current;
+    const Token *type_tok;
+    AstDeclarationValueKind target_type_kind;
+    AstExpression *operand = NULL;
+    AstExpression *expr = NULL;
+
+    if (!check(p, TOKEN_KW_INT) && !check(p, TOKEN_KW_FLOAT)) {
+        return NULL;
+    }
+
+    saved_current = p->current;
+    advance(p);
+    type_tok = previous(p);
+    if (!match(p, TOKEN_LPAREN)) {
+        p->current = saved_current;
+        return NULL;
+    }
+
+    target_type_kind = type_tok->type == TOKEN_KW_FLOAT
+        ? AST_DECLARATION_VALUE_FLOAT
+        : AST_DECLARATION_VALUE_INT;
+
+    operand = parse_expression_ast_comma(p);
+    if (!operand) {
+        p->current = saved_current;
+        return NULL;
+    }
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        parser_ast_expression_free(operand);
+        p->current = saved_current;
+        return NULL;
+    }
+
+    expr = alloc_ast_expression(AST_EXPR_CONVERSION, type_tok->line, type_tok->column);
+    if (!expr) {
+        set_error(p, type_tok, "Out of memory while building expression AST");
+        parser_ast_expression_free(operand);
+        return NULL;
+    }
+    expr->as.conversion.target_type_kind = target_type_kind;
+    expr->as.conversion.operand = operand;
+    return expr;
+}
+
 static AstExpression *parse_expression_ast_primary_only(Parser *p) {
     const Token *tok;
     AstExpression *expr;
@@ -1131,6 +1312,25 @@ static AstExpression *parse_expression_ast_primary_only(Parser *p) {
             return NULL;
         }
         expr->as.number_value = tok->number_value;
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    if (match(p, TOKEN_FLOAT_NUMBER)) {
+        tok = previous(p);
+        expr = alloc_ast_expression(AST_EXPR_FLOAT_LITERAL, tok->line, tok->column);
+        if (!expr) {
+            set_error(p, tok, "Out of memory while building expression AST");
+            leave_expression_recursion(p);
+            return NULL;
+        }
+        expr->as.float_number_value = tok->float_number_value;
+        leave_expression_recursion(p);
+        return expr;
+    }
+
+    expr = try_parse_expression_ast_conversion(p);
+    if (expr) {
         leave_expression_recursion(p);
         return expr;
     }
@@ -1262,6 +1462,22 @@ static AstExpression *parse_expression_ast_postfix(Parser *p) {
             }
 
             expr = build_subscript_expression_node(p, lbracket_tok, expr, index_expr);
+            if (!expr) {
+                return NULL;
+            }
+            continue;
+        }
+
+        if (match(p, TOKEN_DOT)) {
+            const Token *dot_tok = previous(p);
+            const Token *field_tok = NULL;
+
+            if (!consume_token(p, TOKEN_IDENTIFIER, "field name", &field_tok)) {
+                parser_ast_expression_free(expr);
+                return NULL;
+            }
+
+            expr = build_member_expression_node(p, dot_tok, expr, field_tok);
             if (!expr) {
                 return NULL;
             }
@@ -1671,6 +1887,7 @@ static int parse_primary_with_flags(Parser *p,
     int *out_is_identifier_lvalue,
     int *out_is_callable_target) {
     size_t expr_start_index;
+    size_t saved_current;
 
     if (out_is_identifier_lvalue) {
         *out_is_identifier_lvalue = 0;
@@ -1691,6 +1908,27 @@ static int parse_primary_with_flags(Parser *p,
 
     if (match(p, TOKEN_NUMBER)) {
         return 1;
+    }
+
+    if (match(p, TOKEN_FLOAT_NUMBER)) {
+        return 1;
+    }
+
+    if (check(p, TOKEN_KW_INT) || check(p, TOKEN_KW_FLOAT)) {
+        saved_current = p->current;
+        advance(p);
+        if (match(p, TOKEN_LPAREN)) {
+            if (!parse_expression(p)) {
+                p->current = saved_current;
+                return 0;
+            }
+            if (!consume(p, TOKEN_RPAREN, "')'")) {
+                p->current = saved_current;
+                return 0;
+            }
+            return 1;
+        }
+        p->current = saved_current;
     }
 
     if (match(p, TOKEN_LPAREN)) {
@@ -1757,6 +1995,15 @@ static int parse_postfix(Parser *p) {
                 return 0;
             }
             if (!consume(p, TOKEN_RBRACKET, "']'")) {
+                return 0;
+            }
+            is_identifier_lvalue = 1;
+            is_callable_target = 0;
+            continue;
+        }
+
+        if (match(p, TOKEN_DOT)) {
+            if (!consume(p, TOKEN_IDENTIFIER, "field name")) {
                 return 0;
             }
             is_identifier_lvalue = 1;

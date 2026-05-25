@@ -9,9 +9,11 @@ typedef enum {
 
     TOKEN_IDENTIFIER,
     TOKEN_NUMBER,
+    TOKEN_FLOAT_NUMBER,
 
     TOKEN_KW_CONST,
     TOKEN_KW_INT,
+    TOKEN_KW_FLOAT,
     TOKEN_KW_VOID,
     TOKEN_KW_RETURN,
     TOKEN_KW_IF,
@@ -21,7 +23,11 @@ typedef enum {
     TOKEN_KW_BREAK,
     TOKEN_KW_CONTINUE,
     TOKEN_KW_DEFER,
+    TOKEN_KW_FNDEFER,
+    TOKEN_KW_CAPDEFER,
     TOKEN_KW_UNLESS,
+    TOKEN_KW_PAIR,
+    TOKEN_KW_STRUCT,
 
     TOKEN_PLUS,
     TOKEN_MINUS,
@@ -65,6 +71,7 @@ typedef enum {
     TOKEN_RBRACE,
     TOKEN_SEMICOLON,
     TOKEN_COMMA,
+    TOKEN_DOT,
     TOKEN_QUESTION,
     TOKEN_COLON,
 } TokenType;
@@ -74,6 +81,7 @@ typedef struct {
     const char *lexeme;
     size_t length;
     long long number_value;
+    double float_number_value;
     int line;
     int column;
 } Token;

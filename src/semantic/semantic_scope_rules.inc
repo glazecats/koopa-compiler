@@ -7,6 +7,8 @@
 typedef struct {
     const char **names;
     unsigned char *is_const_flags;
+    unsigned char *value_kinds;
+    const char **type_names;
     size_t count;
     size_t capacity;
     size_t *name_index_slots;
@@ -18,6 +20,76 @@ typedef struct {
     size_t count;
     size_t capacity;
 } ScopeStack;
+
+static int semantic_expression_resolve_scalar_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticTypeDescriptor *out_type,
+    SemanticError *error);
+static int semantic_expression_contains_float_scalar(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes);
+static int semantic_validate_scalar_expression_usage(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_set_float_expression_usage_error(const AstExpression *expr,
+    SemanticError *error);
+static int semantic_set_float_conversion_usage_error(const AstExpression *expr,
+    SemanticError *error);
+static int semantic_validate_call_argument_scalar_types(const AstExpression *call_expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_scalar_initializer_type(const AstExpression *expr,
+    const SemanticTypeDescriptor *expected_type,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_scalar_assignment_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_scalar_comparison_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_scalar_arithmetic_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_control_condition_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_validate_return_expression_type(const AstExpression *expr,
+    const SemanticTypeDescriptor *expected_type,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error);
+static int semantic_expression_is_signed_float_literal(const AstExpression *expr);
+static int semantic_expression_is_direct_float_transport_root(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes);
 
 static int scope_next_growth_capacity(size_t current,
     size_t initial,
@@ -168,9 +240,13 @@ static void scope_frame_free(ScopeFrame *frame) {
 
     free(frame->names);
     free(frame->is_const_flags);
+    free(frame->value_kinds);
+    free(frame->type_names);
     free(frame->name_index_slots);
     frame->names = NULL;
     frame->is_const_flags = NULL;
+    frame->value_kinds = NULL;
+    frame->type_names = NULL;
     frame->name_index_slots = NULL;
     frame->count = 0;
     frame->capacity = 0;
@@ -219,6 +295,8 @@ static int scope_stack_push(ScopeStack *stack) {
 
     stack->frames[stack->count].names = NULL;
     stack->frames[stack->count].is_const_flags = NULL;
+    stack->frames[stack->count].value_kinds = NULL;
+    stack->frames[stack->count].type_names = NULL;
     stack->frames[stack->count].name_index_slots = NULL;
     stack->frames[stack->count].count = 0;
     stack->frames[stack->count].capacity = 0;
@@ -259,10 +337,16 @@ static int scope_stack_contains_local_name(const ScopeStack *stack, const char *
     return 0;
 }
 
-static int scope_stack_add_to_current(ScopeStack *stack, const char *name, int is_const_qualified) {
+static int scope_stack_add_to_current(ScopeStack *stack,
+    const char *name,
+    int is_const_qualified,
+    int declaration_value_kind,
+    const char *type_name) {
     ScopeFrame *frame;
     const char **new_names;
     unsigned char *new_flags;
+    unsigned char *new_value_kinds;
+    const char **new_type_names;
     size_t next_capacity;
 
     if (!stack || stack->count == 0 || !name || name[0] == '\0') {
@@ -285,13 +369,25 @@ static int scope_stack_add_to_current(ScopeStack *stack, const char *name, int i
         if (!new_flags) {
             return 0;
         }
+        new_value_kinds = (unsigned char *)realloc(frame->value_kinds, next_capacity * sizeof(unsigned char));
+        if (!new_value_kinds) {
+            return 0;
+        }
+        new_type_names = (const char **)realloc(frame->type_names, next_capacity * sizeof(const char *));
+        if (!new_type_names) {
+            return 0;
+        }
         frame->names = new_names;
         frame->is_const_flags = new_flags;
+        frame->value_kinds = new_value_kinds;
+        frame->type_names = new_type_names;
         frame->capacity = next_capacity;
     }
 
     frame->names[frame->count] = name;
     frame->is_const_flags[frame->count] = (unsigned char)(is_const_qualified != 0);
+    frame->value_kinds[frame->count] = (unsigned char)declaration_value_kind;
+    frame->type_names[frame->count] = type_name;
     frame->count++;
     if (!scope_frame_ensure_name_index_capacity(frame, frame->count)) {
         return 0;
@@ -341,6 +437,74 @@ static int scope_stack_lookup_local_const_flag(const ScopeStack *stack,
     return 0;
 }
 
+static int scope_stack_lookup_local_value_kind(const ScopeStack *stack,
+    const char *name,
+    int *out_found,
+    int *out_value_kind) {
+    size_t frame_index;
+
+    if (out_found) {
+        *out_found = 0;
+    }
+    if (out_value_kind) {
+        *out_value_kind = AST_DECLARATION_VALUE_INT;
+    }
+    if (!stack || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        const ScopeFrame *frame = &stack->frames[frame_index - 1];
+        size_t name_index = 0u;
+
+        if (scope_frame_lookup_name_index(frame, name, &name_index)) {
+            if (out_found) {
+                *out_found = 1;
+            }
+            if (out_value_kind) {
+                *out_value_kind = frame->value_kinds ? frame->value_kinds[name_index] : AST_DECLARATION_VALUE_INT;
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int scope_stack_lookup_local_type_name(const ScopeStack *stack,
+    const char *name,
+    int *out_found,
+    const char **out_type_name) {
+    size_t frame_index;
+
+    if (out_found) {
+        *out_found = 0;
+    }
+    if (out_type_name) {
+        *out_type_name = NULL;
+    }
+    if (!stack || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        const ScopeFrame *frame = &stack->frames[frame_index - 1];
+        size_t name_index = 0u;
+
+        if (scope_frame_lookup_name_index(frame, name, &name_index)) {
+            if (out_found) {
+                *out_found = 1;
+            }
+            if (out_type_name) {
+                *out_type_name = frame->type_names ? frame->type_names[name_index] : NULL;
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int semantic_top_level_name_visible(const AstProgram *program,
     size_t func_index,
     int include_current_external,
@@ -378,6 +542,10 @@ static int semantic_scope_name_resolved(const AstProgram *program,
     const ScopeStack *scopes,
     const char *name) {
     if (scope_stack_contains_local_name(scopes, name)) {
+        return 1;
+    }
+
+    if (semantic_find_builtin_function(name)) {
         return 1;
     }
 
@@ -431,6 +599,71 @@ static int semantic_scope_name_is_const(const AstProgram *program,
     return semantic_top_level_name_is_const(program, func_index, include_current_external, name);
 }
 
+static int semantic_scope_lookup_local_scalar_type_descriptor(const ScopeStack *scopes,
+    const char *name,
+    SemanticTypeDescriptor *out_type) {
+    int found = 0;
+    int value_kind = AST_DECLARATION_VALUE_INT;
+
+    if (out_type) {
+        memset(out_type, 0, sizeof(*out_type));
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    }
+    if (!scopes || !name || name[0] == '\0' || !out_type) {
+        return 0;
+    }
+
+    if (!scope_stack_lookup_local_value_kind(scopes, name, &found, &value_kind) || !found) {
+        return 0;
+    }
+
+    switch (value_kind) {
+    case AST_DECLARATION_VALUE_INT:
+        out_type->kind = SEMANTIC_TYPE_KIND_INT;
+        return 1;
+    case AST_DECLARATION_VALUE_FLOAT:
+        out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int semantic_scope_parameter_value_kind_to_declaration_value_kind(int parameter_value_kind) {
+    switch (parameter_value_kind) {
+    case AST_PARAMETER_VALUE_FLOAT:
+        return AST_DECLARATION_VALUE_FLOAT;
+    case AST_PARAMETER_VALUE_INT:
+    case AST_PARAMETER_VALUE_FUNCTION:
+    default:
+        return AST_DECLARATION_VALUE_INT;
+    }
+}
+
+static int scope_stack_find_local_frame_index(const ScopeStack *stack,
+    const char *name,
+    size_t *out_frame_index) {
+    size_t frame_index;
+
+    if (out_frame_index) {
+        *out_frame_index = 0u;
+    }
+    if (!stack || !name || name[0] == '\0') {
+        return 0;
+    }
+
+    for (frame_index = stack->count; frame_index > 0; --frame_index) {
+        if (scope_frame_contains_name(&stack->frames[frame_index - 1u], name)) {
+            if (out_frame_index) {
+                *out_frame_index = frame_index - 1u;
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int semantic_binary_op_is_assignment(TokenType op) {
     switch (op) {
     case TOKEN_ASSIGN:
@@ -462,11 +695,526 @@ static const char *semantic_mutated_lvalue_identifier_name(const AstExpression *
         return base->as.identifier.name;
     case AST_EXPR_SUBSCRIPT:
         return semantic_mutated_lvalue_identifier_name(base->as.subscript.base);
+    case AST_EXPR_MEMBER:
+        return semantic_mutated_lvalue_identifier_name(base->as.member.base);
     case AST_EXPR_PAREN:
         return semantic_mutated_lvalue_identifier_name(base->as.inner);
     default:
         return NULL;
     }
+}
+
+static const AstStructType *semantic_find_struct_type(const AstProgram *program, const char *name) {
+    size_t i;
+
+    if (!program || !name || name[0] == '\0' || !program->struct_types) {
+        return NULL;
+    }
+    for (i = 0u; i < program->struct_type_count; ++i) {
+        if (program->struct_types[i].name &&
+            strcmp(program->struct_types[i].name, name) == 0) {
+            return &program->struct_types[i];
+        }
+    }
+    return NULL;
+}
+
+static int semantic_scope_lookup_local_aggregate_type_descriptor(const ScopeStack *scopes,
+    const char *name,
+    SemanticTypeDescriptor *out_type) {
+    int found = 0;
+    int value_kind = AST_DECLARATION_VALUE_INT;
+    const char *type_name = NULL;
+
+    if (out_type) {
+        memset(out_type, 0, sizeof(*out_type));
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    }
+
+    if (!scopes || !name || name[0] == '\0' || !out_type) {
+        return 0;
+    }
+
+    if (!scope_stack_lookup_local_value_kind(scopes, name, &found, &value_kind) || !found) {
+        return 0;
+    }
+
+    out_type->aggregate_kind = semantic_aggregate_kind_from_declaration_value_kind(value_kind);
+    out_type->kind = out_type->aggregate_kind == SEMANTIC_AGGREGATE_KIND_NONE
+        ? SEMANTIC_TYPE_KIND_INVALID
+        : SEMANTIC_TYPE_KIND_AGGREGATE;
+    if (out_type->kind != SEMANTIC_TYPE_KIND_AGGREGATE) {
+        return 0;
+    }
+
+    if (out_type->aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT) {
+        if (!scope_stack_lookup_local_type_name(scopes, name, &found, &type_name) || !found || !type_name) {
+            return 0;
+        }
+        out_type->named_type_name = type_name;
+    }
+
+    return 1;
+}
+
+static int semantic_scope_build_declaration_type_descriptor(const AstProgram *program,
+    const ScopeStack *scopes,
+    const AstStatement *stmt,
+    size_t declaration_index,
+    SemanticTypeDescriptor *out_type,
+    SemanticError *error) {
+    int declaration_value_kind;
+    const char *type_name = NULL;
+
+    if (out_type) {
+        memset(out_type, 0, sizeof(*out_type));
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    }
+    if (!stmt || !out_type || declaration_index >= stmt->declaration_name_count) {
+        return 0;
+    }
+    (void)scopes;
+
+    declaration_value_kind = stmt->declaration_value_kinds
+        ? stmt->declaration_value_kinds[declaration_index]
+        : AST_DECLARATION_VALUE_INT;
+
+    switch (declaration_value_kind) {
+    case AST_DECLARATION_VALUE_INT:
+        out_type->kind = SEMANTIC_TYPE_KIND_INT;
+        break;
+    case AST_DECLARATION_VALUE_FLOAT:
+        out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
+        break;
+    case AST_DECLARATION_VALUE_PAIR:
+    case AST_DECLARATION_VALUE_STRUCT:
+        out_type->kind = SEMANTIC_TYPE_KIND_AGGREGATE;
+        out_type->aggregate_kind = semantic_aggregate_kind_from_declaration_value_kind(declaration_value_kind);
+        break;
+    default:
+        return 0;
+    }
+
+    if (stmt->declaration_array_ranks && stmt->declaration_array_ranks[declaration_index] > 0u) {
+        out_type->array_rank = stmt->declaration_array_ranks[declaration_index];
+        out_type->array_extent_exprs = stmt->declaration_array_extent_exprs
+            ? stmt->declaration_array_extent_exprs[declaration_index]
+            : NULL;
+    }
+
+    if (out_type->kind == SEMANTIC_TYPE_KIND_AGGREGATE &&
+        out_type->aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT) {
+        type_name = stmt->declaration_type_names ? stmt->declaration_type_names[declaration_index] : NULL;
+        if (!type_name) {
+            if (error) {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-STRUCT-004: unknown struct type in local declaration");
+            }
+            return 0;
+        }
+        out_type->named_type_name = type_name;
+        if (!semantic_find_struct_type(program, type_name)) {
+            if (error) {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-STRUCT-004: unknown struct type in local declaration");
+            }
+            return 0;
+        }
+    }
+
+    if (out_type->kind == SEMANTIC_TYPE_KIND_AGGREGATE &&
+        out_type->aggregate_kind == SEMANTIC_AGGREGATE_KIND_PAIR &&
+        stmt->declaration_array_ranks &&
+        stmt->declaration_array_ranks[declaration_index] > 0u) {
+        if (error) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-AGG-001: arrays of 'pair' are not supported in the current extension slice");
+        }
+        return 0;
+    }
+
+    if (out_type->kind == SEMANTIC_TYPE_KIND_AGGREGATE &&
+        out_type->aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT &&
+        stmt->declaration_array_ranks &&
+        stmt->declaration_array_ranks[declaration_index] > 0u) {
+        if (error) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-STRUCT-005: arrays of extension structs are not supported in the current slice");
+        }
+        return 0;
+    }
+
+    if (out_type->kind == SEMANTIC_TYPE_KIND_FLOAT &&
+        stmt->declaration_array_ranks &&
+        stmt->declaration_array_ranks[declaration_index] > 0u) {
+        if (error) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-037: arrays of 'float' are not supported in the current extension slice");
+        }
+        return 0;
+    }
+
+    return 1;
+}
+
+static int semantic_scope_build_function_return_type_descriptor(const AstExternal *func,
+    SemanticTypeDescriptor *out_type) {
+    if (!func || !out_type) {
+        return 0;
+    }
+
+    memset(out_type, 0, sizeof(*out_type));
+    switch (func->function_return_type) {
+    case AST_FUNCTION_RETURN_INT:
+        out_type->kind = SEMANTIC_TYPE_KIND_INT;
+        return 1;
+    case AST_FUNCTION_RETURN_FLOAT:
+        out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
+        return 1;
+    case AST_FUNCTION_RETURN_VOID:
+        out_type->kind = SEMANTIC_TYPE_KIND_VOID;
+        return 1;
+    default:
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+        return 0;
+    }
+}
+
+static int semantic_expression_is_local_aggregate_member_access(const AstExpression *expr,
+    const AstProgram *program,
+    const ScopeStack *scopes,
+    SemanticAggregateKind aggregate_kind,
+    const char **out_base_name,
+    const char **out_type_name,
+    size_t *out_field_index) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    const AstExpression *aggregate_base = NULL;
+    const AstStructType *struct_type = NULL;
+    SemanticTypeDescriptor aggregate_type;
+    size_t field_index;
+
+    if (out_base_name) {
+        *out_base_name = NULL;
+    }
+    if (out_type_name) {
+        *out_type_name = NULL;
+    }
+    if (out_field_index) {
+        *out_field_index = 0u;
+    }
+    if (!base || base->kind != AST_EXPR_MEMBER || !base->as.member.field_name) {
+        return 0;
+    }
+
+    aggregate_base = unwrap_paren_expression(base->as.member.base);
+    if (!aggregate_base || aggregate_base->kind != AST_EXPR_IDENTIFIER || !aggregate_base->as.identifier.name) {
+        return 0;
+    }
+
+    if (!semantic_scope_lookup_local_aggregate_type_descriptor(scopes,
+            aggregate_base->as.identifier.name,
+            &aggregate_type) ||
+        aggregate_type.aggregate_kind != aggregate_kind) {
+        return 0;
+    }
+
+    if (aggregate_kind == SEMANTIC_AGGREGATE_KIND_PAIR) {
+        if (!(strcmp(base->as.member.field_name, "first") == 0 ||
+            strcmp(base->as.member.field_name, "second") == 0)) {
+            return 0;
+        }
+        if (out_field_index) {
+            *out_field_index = strcmp(base->as.member.field_name, "second") == 0 ? 1u : 0u;
+        }
+    } else if (aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT) {
+        struct_type = semantic_find_struct_type(program, aggregate_type.named_type_name);
+        if (!struct_type || !struct_type->field_names) {
+            return 0;
+        }
+        for (field_index = 0u; field_index < struct_type->field_count; ++field_index) {
+            if (struct_type->field_names[field_index] &&
+                strcmp(struct_type->field_names[field_index], base->as.member.field_name) == 0) {
+                if (out_field_index) {
+                    *out_field_index = field_index;
+                }
+                break;
+            }
+        }
+        if (field_index >= struct_type->field_count) {
+            return 0;
+        }
+        if (out_type_name) {
+            *out_type_name = aggregate_type.named_type_name;
+        }
+    }
+
+    if (out_base_name) {
+        *out_base_name = aggregate_base->as.identifier.name;
+    }
+    return 1;
+}
+
+static int semantic_expression_get_local_aggregate_kind(const AstExpression *expr,
+    const ScopeStack *scopes,
+    SemanticAggregateKind *out_kind,
+    const char **out_name,
+    const char **out_type_name) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor aggregate_type;
+
+    if (out_kind) {
+        *out_kind = SEMANTIC_AGGREGATE_KIND_NONE;
+    }
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (out_type_name) {
+        *out_type_name = NULL;
+    }
+    if (!base || base->kind != AST_EXPR_IDENTIFIER || !base->as.identifier.name) {
+        return 0;
+    }
+    if (!semantic_scope_lookup_local_aggregate_type_descriptor(scopes, base->as.identifier.name, &aggregate_type)) {
+        return 0;
+    }
+
+    if (out_kind) {
+        *out_kind = aggregate_type.aggregate_kind;
+    }
+    if (out_name) {
+        *out_name = base->as.identifier.name;
+    }
+    if (out_type_name) {
+        *out_type_name = aggregate_type.named_type_name;
+    }
+    return 1;
+}
+
+static int semantic_aggregate_expression_usage_is_supported(const AstExpression *expr,
+    const AstProgram *program,
+    const ScopeStack *scopes,
+    int allow_aggregate_value_root,
+    SemanticError *error,
+    size_t depth) {
+    size_t i;
+
+    if (!expr) {
+        return 1;
+    }
+    if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+        return 0;
+    }
+
+    if (semantic_expression_get_local_aggregate_kind(expr,
+            scopes,
+            NULL,
+            NULL,
+            NULL)) {
+        if (allow_aggregate_value_root) {
+            return 1;
+        }
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-AGG-004: plain aggregate values are not yet enabled in this expression position");
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
+        return 1;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0u; i < expr->as.init_list.item_count; ++i) {
+            if (!semantic_aggregate_expression_usage_is_supported(
+                    expr->as.init_list.items ? expr->as.init_list.items[i] : NULL,
+                    program,
+                    scopes,
+                    0,
+                    error,
+                    depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_PAREN:
+        return semantic_aggregate_expression_usage_is_supported(
+            expr->as.inner, program, scopes, allow_aggregate_value_root, error, depth + 1u);
+    case AST_EXPR_UNARY:
+        return semantic_aggregate_expression_usage_is_supported(
+            expr->as.unary.operand, program, scopes, 0, error, depth + 1u);
+    case AST_EXPR_POSTFIX:
+        return semantic_aggregate_expression_usage_is_supported(
+            expr->as.postfix.operand, program, scopes, 0, error, depth + 1u);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_aggregate_expression_usage_is_supported(
+                expr->as.subscript.base, program, scopes, 0, error, depth + 1u) &&
+            semantic_aggregate_expression_usage_is_supported(
+                expr->as.subscript.index, program, scopes, 0, error, depth + 1u);
+    case AST_EXPR_MEMBER:
+        if (!semantic_expression_is_local_aggregate_member_access(expr,
+                program,
+                scopes,
+                SEMANTIC_AGGREGATE_KIND_PAIR,
+                NULL,
+                NULL,
+                NULL) &&
+            !semantic_expression_is_local_aggregate_member_access(expr,
+                program,
+                scopes,
+                SEMANTIC_AGGREGATE_KIND_STRUCT,
+                NULL,
+                NULL,
+                NULL)) {
+            semantic_set_error(error,
+                expr->line,
+                expr->column,
+                "SEMA-AGG-003: aggregate field access currently requires a supported local pair/struct value and a declared field");
+            return 0;
+        }
+        return semantic_aggregate_expression_usage_is_supported(
+            expr->as.member.base, program, scopes, 1, error, depth + 1u);
+    case AST_EXPR_CALL:
+        if (!semantic_aggregate_expression_usage_is_supported(
+                expr->as.call.callee, program, scopes, 0, error, depth + 1u)) {
+            return 0;
+        }
+        for (i = 0u; i < expr->as.call.arg_count; ++i) {
+            if (!semantic_aggregate_expression_usage_is_supported(
+                    expr->as.call.args ? expr->as.call.args[i] : NULL,
+                    program,
+                    scopes,
+                    0,
+                    error,
+                    depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_BINARY:
+        if (expr->as.binary.op == TOKEN_ASSIGN) {
+            SemanticTypeDescriptor lhs_type;
+            SemanticTypeDescriptor rhs_type;
+            const AstExpression *rhs = unwrap_paren_expression(expr->as.binary.right);
+            const AstExpression *lhs_base = unwrap_paren_expression(expr->as.binary.left);
+
+            if (!semantic_expression_get_local_aggregate_kind(expr->as.binary.left,
+                    scopes,
+                    NULL,
+                    NULL,
+                    NULL)) {
+                break;
+            }
+            if (!lhs_base || lhs_base->kind != AST_EXPR_IDENTIFIER || !lhs_base->as.identifier.name) {
+                break;
+            }
+            if (!semantic_scope_lookup_local_aggregate_type_descriptor(scopes,
+                    lhs_base->as.identifier.name,
+                    &lhs_type)) {
+                break;
+            }
+
+            if (rhs && rhs->kind == AST_EXPR_INIT_LIST) {
+                size_t aggregate_limit = 2u;
+
+                if (lhs_type.aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT) {
+                    const AstStructType *target_struct = semantic_find_struct_type(program, lhs_type.named_type_name);
+
+                    if (target_struct && target_struct->field_count > 0u) {
+                        aggregate_limit = target_struct->field_count;
+                    }
+                }
+                if (rhs->as.init_list.item_count > aggregate_limit) {
+                    semantic_set_error(error,
+                        expr->line,
+                        expr->column,
+                        "SEMA-AGG-002: aggregate initializers currently require no more items than declared fields");
+                    return 0;
+                }
+                for (i = 0u; i < rhs->as.init_list.item_count; ++i) {
+                    if (!semantic_aggregate_expression_usage_is_supported(
+                            rhs->as.init_list.items ? rhs->as.init_list.items[i] : NULL,
+                            program,
+                            scopes,
+                            0,
+                            error,
+                            depth + 1u)) {
+                        return 0;
+                    }
+                }
+                return 1;
+            }
+
+            if (!semantic_expression_get_local_aggregate_kind(rhs,
+                    scopes,
+                    NULL,
+                    NULL,
+                    NULL)) {
+                semantic_set_error(error,
+                    expr->line,
+                    expr->column,
+                    "SEMA-AGG-005: aggregate assignment currently requires another local aggregate value or initializer list on the right-hand side");
+                return 0;
+            }
+            if (!rhs || rhs->kind != AST_EXPR_IDENTIFIER || !rhs->as.identifier.name ||
+                !semantic_scope_lookup_local_aggregate_type_descriptor(scopes,
+                    rhs->as.identifier.name,
+                    &rhs_type)) {
+                semantic_set_error(error,
+                    expr->line,
+                    expr->column,
+                    "SEMA-AGG-005: aggregate assignment currently requires another local aggregate value or initializer list on the right-hand side");
+                return 0;
+            }
+            if (lhs_type.aggregate_kind != rhs_type.aggregate_kind) {
+                semantic_set_error(error,
+                    expr->line,
+                    expr->column,
+                    "SEMA-AGG-006: aggregate assignment currently requires matching aggregate kinds");
+                return 0;
+            }
+            if (lhs_type.aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT &&
+                lhs_type.named_type_name && rhs_type.named_type_name &&
+                strcmp(lhs_type.named_type_name, rhs_type.named_type_name) != 0) {
+                semantic_set_error(error,
+                    expr->line,
+                    expr->column,
+                    "SEMA-AGG-006: struct assignment currently requires matching struct types");
+                return 0;
+            }
+            return 1;
+        }
+        return semantic_aggregate_expression_usage_is_supported(
+                expr->as.binary.left, program, scopes, 0, error, depth + 1u) &&
+            semantic_aggregate_expression_usage_is_supported(
+                expr->as.binary.right, program, scopes, 0, error, depth + 1u);
+    case AST_EXPR_TERNARY:
+        return semantic_aggregate_expression_usage_is_supported(
+                expr->as.ternary.condition, program, scopes, 0, error, depth + 1u) &&
+            semantic_aggregate_expression_usage_is_supported(
+                expr->as.ternary.then_expr, program, scopes, 0, error, depth + 1u) &&
+            semantic_aggregate_expression_usage_is_supported(
+                expr->as.ternary.else_expr, program, scopes, 0, error, depth + 1u);
+    default:
+        return 1;
+    }
+
+    return 1;
 }
 
 static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
@@ -475,6 +1223,8 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
     ScopeStack *mutable_scopes,
     char *const *names,
     const int *is_const_flags,
+    const int *declaration_value_kinds,
+    char *const *declaration_type_names,
     size_t name_count,
     int line,
     int column,
@@ -516,13 +1266,119 @@ static int semantic_scope_add_declaration_names(const ScopeStack *scopes,
         if (!scope_stack_add_to_current(
                 mutable_scopes,
                 name,
-                is_const_flags ? is_const_flags[i] : 0)) {
+                is_const_flags ? is_const_flags[i] : 0,
+                declaration_value_kinds ? declaration_value_kinds[i] : AST_DECLARATION_VALUE_INT,
+                declaration_type_names ? declaration_type_names[i] : NULL)) {
             semantic_set_error(error,
                 line,
                 column,
-                "SEMA-INT-010: failed to extend semantic scope stack");
+                "SEMA-INT-011: failed to record declaration name in scope");
             return 0;
         }
+    }
+
+    return 1;
+}
+
+static int semantic_aggregate_declaration_is_supported(const AstExpression *init_expr,
+    const AstProgram *program,
+    const ScopeStack *scopes,
+    const SemanticTypeDescriptor *declaration_type,
+    int line,
+    int column,
+    SemanticError *error) {
+    const AstStructType *struct_type = NULL;
+    const AstExpression *init_base = NULL;
+    SemanticAggregateKind aggregate_kind;
+    SemanticTypeDescriptor source_type;
+
+    if (!declaration_type) {
+        return 1;
+    }
+
+    aggregate_kind = declaration_type->aggregate_kind;
+
+    if (aggregate_kind == SEMANTIC_AGGREGATE_KIND_PAIR) {
+        if (init_expr) {
+            init_base = unwrap_paren_expression(init_expr);
+            if (init_base && init_base->kind == AST_EXPR_INIT_LIST &&
+                init_base->as.init_list.item_count > 2u) {
+                semantic_set_error(error,
+                    line,
+                    column,
+                    "SEMA-AGG-002: aggregate initializers currently require no more items than declared fields");
+                return 0;
+            }
+            if (init_base && init_base->kind != AST_EXPR_INIT_LIST) {
+                if (!semantic_expression_get_local_aggregate_kind(init_base, scopes, NULL, NULL, NULL) ||
+                    init_base->kind != AST_EXPR_IDENTIFIER ||
+                    !init_base->as.identifier.name ||
+                    !semantic_scope_lookup_local_aggregate_type_descriptor(
+                        scopes,
+                        init_base->as.identifier.name,
+                        &source_type) ||
+                    source_type.aggregate_kind != SEMANTIC_AGGREGATE_KIND_PAIR) {
+                    semantic_set_error(error,
+                        line,
+                        column,
+                        "SEMA-AGG-005: aggregate initialization currently requires another local aggregate value or initializer list");
+                    return 0;
+                }
+            }
+        }
+        if (init_expr &&
+            !semantic_aggregate_expression_usage_is_supported(init_expr, program, scopes, 1, error, 0u)) {
+            return 0;
+        }
+        return 1;
+    }
+
+    if (aggregate_kind == SEMANTIC_AGGREGATE_KIND_STRUCT) {
+        struct_type = semantic_find_struct_type(program, declaration_type->named_type_name);
+        if (!struct_type) {
+            semantic_set_error(error,
+                line,
+                column,
+                "SEMA-STRUCT-004: unknown struct type in local declaration");
+            return 0;
+        }
+        if (init_expr) {
+            init_base = unwrap_paren_expression(init_expr);
+            if (init_base && init_base->kind == AST_EXPR_INIT_LIST &&
+                init_base->as.init_list.item_count > struct_type->field_count) {
+                semantic_set_error(error,
+                    line,
+                    column,
+                    "SEMA-AGG-002: aggregate initializers currently require no more items than declared fields");
+                return 0;
+            }
+            if (init_base && init_base->kind != AST_EXPR_INIT_LIST) {
+                if (!semantic_expression_get_local_aggregate_kind(init_base, scopes, NULL, NULL, NULL) ||
+                    init_base->kind != AST_EXPR_IDENTIFIER ||
+                    !init_base->as.identifier.name ||
+                    !semantic_scope_lookup_local_aggregate_type_descriptor(
+                        scopes,
+                        init_base->as.identifier.name,
+                        &source_type)) {
+                    semantic_set_error(error,
+                        line,
+                        column,
+                        "SEMA-AGG-005: aggregate initialization currently requires another local aggregate value or initializer list");
+                    return 0;
+                }
+                if (source_type.aggregate_kind != SEMANTIC_AGGREGATE_KIND_STRUCT ||
+                    !source_type.named_type_name ||
+                    !declaration_type->named_type_name ||
+                    strcmp(source_type.named_type_name, declaration_type->named_type_name) != 0) {
+                    semantic_set_error(error,
+                        line,
+                        column,
+                        "SEMA-AGG-006: struct initialization currently requires matching struct types");
+                    return 0;
+                }
+            }
+        }
+        return 1;
     }
 
     return 1;
@@ -553,6 +1409,127 @@ static int semantic_scope_callee_shadowed_by_local_non_function(const AstExpress
     return 1;
 }
 
+static int semantic_expression_is_signed_float_literal(const AstExpression *expr) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    const AstExpression *operand = NULL;
+
+    if (!base) {
+        return 0;
+    }
+    if (base->kind == AST_EXPR_FLOAT_LITERAL) {
+        return 1;
+    }
+    if (base->kind != AST_EXPR_UNARY ||
+        (base->as.unary.op != TOKEN_PLUS && base->as.unary.op != TOKEN_MINUS)) {
+        return 0;
+    }
+
+    operand = unwrap_paren_expression(base->as.unary.operand);
+    return operand && operand->kind == AST_EXPR_FLOAT_LITERAL;
+}
+
+static int semantic_expression_is_direct_float_transport_root(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor scalar_type;
+
+    if (!base) {
+        return 0;
+    }
+
+    if (semantic_expression_is_signed_float_literal(base)) {
+        return 1;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_CALL:
+    case AST_EXPR_FLOAT_LITERAL:
+        return semantic_expression_resolve_scalar_type(base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &scalar_type,
+                NULL) &&
+            scalar_type.kind == SEMANTIC_TYPE_KIND_FLOAT;
+    case AST_EXPR_UNARY:
+        if (base->as.unary.op == TOKEN_PLUS || base->as.unary.op == TOKEN_MINUS) {
+            return semantic_expression_is_direct_float_transport_root(
+                base->as.unary.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes);
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static int semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+    const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor scalar_type;
+
+    if (!base) {
+        return 0;
+    }
+    if (semantic_expression_is_signed_float_literal(base)) {
+        return 1;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_IDENTIFIER:
+        return base->as.identifier.name &&
+            semantic_scope_lookup_local_scalar_type_descriptor(
+                scopes,
+                base->as.identifier.name,
+                &scalar_type) &&
+            scalar_type.kind == SEMANTIC_TYPE_KIND_FLOAT;
+    case AST_EXPR_CALL:
+        return semantic_expression_resolve_scalar_type(base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &scalar_type,
+                NULL) &&
+            scalar_type.kind == SEMANTIC_TYPE_KIND_FLOAT;
+    case AST_EXPR_UNARY:
+        if (base->as.unary.op == TOKEN_PLUS || base->as.unary.op == TOKEN_MINUS) {
+            return semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+                base->as.unary.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes);
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static int semantic_scope_call_callee_is_function_parameter_name(const AstExpression *callee,
+    const AstExternal *func) {
+    const AstExpression *base = unwrap_paren_expression(callee);
+
+    if (!base || base->kind != AST_EXPR_IDENTIFIER || !base->as.identifier.name) {
+        return 0;
+    }
+
+    return semantic_function_parameter_name_is_function_valued(func, base->as.identifier.name);
+}
+
 static int semantic_expression_call_returns_void(const AstExpression *expr,
     const AstProgram *program,
     size_t func_index,
@@ -560,6 +1537,7 @@ static int semantic_expression_call_returns_void(const AstExpression *expr,
     const char *called_name = NULL;
     const AstExternal *external = NULL;
     const SemanticBuiltinFunctionInfo *builtin = NULL;
+    SemanticTypeDescriptor return_type;
 
     if (!expr || expr->kind != AST_EXPR_CALL) {
         return 0;
@@ -572,7 +1550,10 @@ static int semantic_expression_call_returns_void(const AstExpression *expr,
 
     external = semantic_find_visible_function_external(program, func_index, include_current_external, called_name);
     if (external) {
-        return external->function_return_type == AST_FUNCTION_RETURN_VOID;
+        if (!semantic_build_function_return_type_descriptor(external, &return_type)) {
+            return 0;
+        }
+        return return_type.kind == SEMANTIC_TYPE_KIND_VOID;
     }
 
     builtin = semantic_find_builtin_function(called_name);
@@ -582,6 +1563,8 @@ static int semantic_expression_call_returns_void(const AstExpression *expr,
 static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
     char *const *names,
     const int *is_const_flags,
+    const int *declaration_value_kinds,
+    char *const *declaration_type_names,
     size_t name_count,
     int line,
     int column,
@@ -611,7 +1594,11 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
             continue;
         }
 
-        if (!scope_stack_add_to_current(scopes, name, is_const_flags ? is_const_flags[i] : 0)) {
+        if (!scope_stack_add_to_current(scopes,
+                name,
+                is_const_flags ? is_const_flags[i] : 0,
+                declaration_value_kinds ? declaration_value_kinds[i] : AST_DECLARATION_VALUE_INT,
+                declaration_type_names ? declaration_type_names[i] : NULL)) {
             semantic_set_error(error,
                 line,
                 column,
@@ -625,6 +1612,7 @@ static int semantic_scope_add_declaration_names_shadow_pass(ScopeStack *scopes,
 
 static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpression *expr,
     const ScopeStack *scopes,
+    const AstExternal *current_func,
     SemanticError *error,
     size_t depth) {
     size_t i;
@@ -646,6 +1634,7 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
         for (i = 0; i < expr->as.init_list.item_count; ++i) {
             if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.init_list.items[i],
                     scopes,
+                    current_func,
                     error,
                     depth + 1)) {
                 return 0;
@@ -655,52 +1644,69 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
     case AST_EXPR_PAREN:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.inner,
             scopes,
+            current_func,
             error,
             depth + 1);
     case AST_EXPR_UNARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.unary.operand,
             scopes,
+            current_func,
             error,
             depth + 1);
     case AST_EXPR_POSTFIX:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.postfix.operand,
             scopes,
+            current_func,
             error,
             depth + 1);
     case AST_EXPR_SUBSCRIPT:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.subscript.base,
                 scopes,
+                current_func,
                 error,
                 depth + 1) &&
             semantic_scope_check_call_shadow_expression_with_depth(expr->as.subscript.index,
                 scopes,
+                current_func,
                 error,
                 depth + 1);
+    case AST_EXPR_MEMBER:
+        return semantic_scope_check_call_shadow_expression_with_depth(expr->as.member.base,
+            scopes,
+            current_func,
+            error,
+            depth + 1);
     case AST_EXPR_BINARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.left,
             scopes,
+            current_func,
             error,
             depth + 1) &&
             semantic_scope_check_call_shadow_expression_with_depth(expr->as.binary.right,
                 scopes,
+                current_func,
                 error,
                 depth + 1);
     case AST_EXPR_TERNARY:
         return semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.condition,
             scopes,
+            current_func,
             error,
             depth + 1) &&
             semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.then_expr,
                 scopes,
+                current_func,
                 error,
                 depth + 1) &&
             semantic_scope_check_call_shadow_expression_with_depth(expr->as.ternary.else_expr,
                 scopes,
+                current_func,
                 error,
                 depth + 1);
     case AST_EXPR_CALL: {
         const char *shadowed_callee_name = NULL;
-        if (semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
+        if (!semantic_scope_call_callee_is_function_parameter_name(expr->as.call.callee, current_func) &&
+            semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
             scopes,
             &shadowed_callee_name)) {
             if (error) {
@@ -718,6 +1724,7 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
 
         if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.call.callee,
             scopes,
+            current_func,
             error,
             depth + 1)) {
             return 0;
@@ -726,6 +1733,7 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
         for (i = 0; i < expr->as.call.arg_count; ++i) {
             if (!semantic_scope_check_call_shadow_expression_with_depth(expr->as.call.args[i],
                 scopes,
+                current_func,
                 error,
                 depth + 1)) {
                 return 0;
@@ -736,6 +1744,7 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
     }
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         return 1;
     }
@@ -743,12 +1752,14 @@ static int semantic_scope_check_call_shadow_expression_with_depth(const AstExpre
 
 static int semantic_scope_check_call_shadow_expression(const AstExpression *expr,
     const ScopeStack *scopes,
+    const AstExternal *current_func,
     SemanticError *error) {
-    return semantic_scope_check_call_shadow_expression_with_depth(expr, scopes, error, 0);
+    return semantic_scope_check_call_shadow_expression_with_depth(expr, scopes, current_func, error, 0);
 }
 
 static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
     ScopeStack *scopes,
+    const AstExternal *current_func,
     SemanticError *error) {
     size_t i;
 
@@ -766,7 +1777,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
-            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, error)) {
+            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, current_func, error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
@@ -803,7 +1814,7 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
                 const AstExpression *init_expr =
                     (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
 
-                if (!semantic_scope_check_call_shadow_expression(init_expr, scopes, error)) {
+                if (!semantic_scope_check_call_shadow_expression(init_expr, scopes, current_func, error)) {
                     scope_stack_pop(scopes);
                     return 0;
                 }
@@ -811,6 +1822,8 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
                 if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
                     &single_name,
                     NULL,
+                    stmt->declaration_value_kinds ? &stmt->declaration_value_kinds[i] : NULL,
+                    stmt->declaration_type_names ? &stmt->declaration_type_names[i] : NULL,
                     1,
                     stmt->line,
                     stmt->column,
@@ -824,14 +1837,14 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
         }
 
         for (i = expression_start_index; i < stmt->expression_count; ++i) {
-            if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, error)) {
+            if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, current_func, error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
-            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, error)) {
+            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, current_func, error)) {
                 scope_stack_pop(scopes);
                 return 0;
             }
@@ -849,13 +1862,15 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
             const AstExpression *init_expr =
                 (stmt->expressions && i < stmt->expression_count) ? stmt->expressions[i] : NULL;
 
-            if (!semantic_scope_check_call_shadow_expression(init_expr, scopes, error)) {
+            if (!semantic_scope_check_call_shadow_expression(init_expr, scopes, current_func, error)) {
                 return 0;
             }
 
             if (!semantic_scope_add_declaration_names_shadow_pass(scopes,
                 &single_name,
                 NULL,
+                stmt->declaration_value_kinds ? &stmt->declaration_value_kinds[i] : NULL,
+                stmt->declaration_type_names ? &stmt->declaration_type_names[i] : NULL,
                 1,
                 stmt->line,
                 stmt->column,
@@ -870,13 +1885,13 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
         }
 
         for (i = expression_start_index; i < stmt->expression_count; ++i) {
-            if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, error)) {
+            if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, current_func, error)) {
                 return 0;
             }
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
-            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, error)) {
+            if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, current_func, error)) {
                 return 0;
             }
         }
@@ -885,13 +1900,13 @@ static int semantic_scope_check_call_shadow_statement(const AstStatement *stmt,
     }
 
     for (i = 0; i < stmt->expression_count; ++i) {
-        if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, error)) {
+        if (!semantic_scope_check_call_shadow_expression(stmt->expressions[i], scopes, current_func, error)) {
             return 0;
         }
     }
 
     for (i = 0; i < stmt->child_count; ++i) {
-        if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, error)) {
+        if (!semantic_scope_check_call_shadow_statement(stmt->children[i], scopes, current_func, error)) {
             return 0;
         }
     }
@@ -932,6 +1947,8 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
     if (!semantic_scope_add_declaration_names_shadow_pass(&scopes,
         func->parameter_names,
         func->parameter_is_const,
+        NULL,
+        NULL,
         func->parameter_count,
         func->line,
         func->column,
@@ -943,12 +1960,12 @@ static int semantic_check_function_callable_scope_shadow_rules(const AstExternal
     body = func->function_body;
     if (body && body->kind == AST_STMT_COMPOUND) {
         for (i = 0; i < body->child_count; ++i) {
-            if (!semantic_scope_check_call_shadow_statement(body->children[i], &scopes, error)) {
+            if (!semantic_scope_check_call_shadow_statement(body->children[i], &scopes, func, error)) {
                 scope_stack_free(&scopes);
                 return 0;
             }
         }
-    } else if (!semantic_scope_check_call_shadow_statement(body, &scopes, error)) {
+    } else if (!semantic_scope_check_call_shadow_statement(body, &scopes, func, error)) {
         scope_stack_free(&scopes);
         return 0;
     }
@@ -1002,6 +2019,7 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
         }
         return 1;
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
         return 1;
     case AST_EXPR_INIT_LIST:
         for (i = 0; i < expr->as.init_list.item_count; ++i) {
@@ -1107,6 +2125,83 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 0,
                 error,
                 depth + 1);
+    case AST_EXPR_MEMBER: {
+        const char *base_name = NULL;
+
+        if (!semantic_scope_check_expression_with_visibility_impl(expr->as.member.base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                0,
+                error,
+                depth + 1)) {
+            return 0;
+        }
+        if (!semantic_expression_is_local_aggregate_member_access(expr,
+                program,
+                scopes,
+                SEMANTIC_AGGREGATE_KIND_PAIR,
+                &base_name,
+                NULL,
+                NULL) &&
+            !semantic_expression_is_local_aggregate_member_access(expr,
+                program,
+                scopes,
+                SEMANTIC_AGGREGATE_KIND_STRUCT,
+                &base_name,
+                NULL,
+                NULL)) {
+            semantic_set_error(error,
+                expr->line,
+                expr->column,
+                "SEMA-AGG-003: aggregate field access currently requires a supported local pair/struct value and a declared field");
+            return 0;
+        }
+        return 1;
+    }
+    case AST_EXPR_CONVERSION:
+        if (!semantic_scope_check_expression_with_visibility_impl(
+                expr->as.conversion.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                in_call_callee,
+                0,
+                error,
+                depth + 1)) {
+            return 0;
+        }
+        if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT) {
+            SemanticTypeDescriptor operand_type;
+            if (semantic_expression_resolve_scalar_type(
+                    expr->as.conversion.operand,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &operand_type,
+                    NULL) &&
+                operand_type.kind == SEMANTIC_TYPE_KIND_FLOAT) {
+                return 1;
+            }
+        } else if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
+            SemanticTypeDescriptor operand_type;
+            if (semantic_expression_resolve_scalar_type(
+                    expr->as.conversion.operand,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &operand_type,
+                    NULL) &&
+                operand_type.kind == SEMANTIC_TYPE_KIND_INT) {
+                return 1;
+            }
+        }
+        return semantic_set_float_conversion_usage_error(expr, error);
     case AST_EXPR_BINARY:
         if (semantic_binary_op_is_assignment(expr->as.binary.op) &&
             semantic_scope_name_is_const(
@@ -1176,7 +2271,15 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 depth + 1);
     case AST_EXPR_CALL: {
         const char *shadowed_callee_name = NULL;
-        if (semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
+        const AstExternal *current_func = NULL;
+        if (program &&
+            include_current_external &&
+            func_index < program->count &&
+            program->externals[func_index].kind == AST_EXTERNAL_FUNCTION) {
+            current_func = &program->externals[func_index];
+        }
+        if (!semantic_scope_call_callee_is_function_parameter_name(expr->as.call.callee, current_func) &&
+            semantic_scope_callee_shadowed_by_local_non_function(expr->as.call.callee,
             scopes,
             &shadowed_callee_name)) {
             if (error) {
@@ -1223,6 +2326,15 @@ static int semantic_scope_check_expression_with_visibility_impl(const AstExpress
                 "SEMA-CALL-007: void call result cannot be used in a value context");
             return 0;
         }
+        if (!semantic_validate_call_argument_scalar_types(
+                expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                error)) {
+            return 0;
+        }
         return 1;
     }
     default:
@@ -1256,13 +2368,49 @@ static int semantic_scope_check_expression(const AstExpression *expr,
     int in_call_callee,
     int allow_void_result,
     SemanticError *error) {
-    return semantic_scope_check_expression_with_visibility(expr,
+    if (!semantic_scope_check_expression_with_visibility(expr,
         program,
         func_index,
         1,
         scopes,
         in_call_callee,
         allow_void_result,
+        error)) {
+        return 0;
+    }
+    if (!semantic_validate_scalar_assignment_type(
+            expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            error)) {
+        return 0;
+    }
+    if (!semantic_validate_scalar_comparison_type(
+            expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            error)) {
+        return 0;
+    }
+    if (!semantic_validate_scalar_arithmetic_type(
+            expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            error)) {
+        return 0;
+    }
+    return semantic_validate_scalar_expression_usage(
+        expr,
+        program,
+        func_index,
+        1,
+        scopes,
         error);
 }
 
@@ -1270,24 +2418,1454 @@ static int semantic_scope_check_top_level_initializer_expression(const AstExpres
     const AstProgram *program,
     size_t external_index,
     SemanticError *error) {
-    return semantic_scope_check_expression_with_visibility(expr,
+    if (!semantic_scope_check_expression_with_visibility(expr,
         program,
         external_index,
         0,
         NULL,
         0,
         0,
+        error)) {
+        return 0;
+    }
+    return semantic_validate_scalar_expression_usage(
+        expr,
+        program,
+        external_index,
+        0,
+        NULL,
         error);
+}
+
+static int semantic_expression_resolve_scalar_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticTypeDescriptor *out_type,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    const AstExternal *external = NULL;
+    const SemanticBuiltinFunctionInfo *builtin = NULL;
+    SemanticTypeDescriptor local_type;
+
+    if (out_type) {
+        memset(out_type, 0, sizeof(*out_type));
+        out_type->kind = SEMANTIC_TYPE_KIND_INVALID;
+    }
+    if (!base || !out_type) {
+        return 0;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_NUMBER:
+        out_type->kind = SEMANTIC_TYPE_KIND_INT;
+        return 1;
+    case AST_EXPR_FLOAT_LITERAL:
+        out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
+        return 1;
+    case AST_EXPR_CONVERSION: {
+        SemanticTypeDescriptor operand_type;
+        SemanticTypeDescriptor target_type;
+
+        if (!base->as.conversion.operand ||
+            !semantic_expression_resolve_scalar_type(base->as.conversion.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &operand_type,
+                error)) {
+            return 0;
+        }
+
+        if (base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT) {
+            target_type.kind = SEMANTIC_TYPE_KIND_INT;
+        } else if (base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
+            target_type.kind = SEMANTIC_TYPE_KIND_FLOAT;
+        } else {
+            return 0;
+        }
+
+        if (!((operand_type.kind == SEMANTIC_TYPE_KIND_INT &&
+                target_type.kind == SEMANTIC_TYPE_KIND_FLOAT) ||
+              (operand_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+                target_type.kind == SEMANTIC_TYPE_KIND_INT))) {
+            return 0;
+        }
+
+        *out_type = target_type;
+        return 1;
+    }
+    case AST_EXPR_IDENTIFIER:
+        if (base->as.identifier.name &&
+            semantic_scope_lookup_local_scalar_type_descriptor(scopes,
+                base->as.identifier.name,
+                &local_type)) {
+            *out_type = local_type;
+            return 1;
+        }
+        if (base->as.identifier.name) {
+            external = semantic_find_visible_external(
+                program,
+                func_index,
+                include_current_external,
+                base->as.identifier.name);
+            if (external && external->kind == AST_EXTERNAL_DECLARATION &&
+                semantic_build_top_level_declaration_type_descriptor(external, out_type) &&
+                out_type->array_rank == 0u) {
+                return out_type->kind == SEMANTIC_TYPE_KIND_INT ||
+                    out_type->kind == SEMANTIC_TYPE_KIND_FLOAT;
+            }
+        }
+        return 0;
+    case AST_EXPR_CALL: {
+        const char *called_name = NULL;
+
+        if (classify_ast_call_callee(base->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+            !called_name || called_name[0] == '\0') {
+            return 0;
+        }
+        external = semantic_find_visible_function_external(
+            program,
+            func_index,
+            include_current_external,
+            called_name);
+        if (external && external->kind == AST_EXTERNAL_FUNCTION &&
+            semantic_build_function_return_type_descriptor(external, out_type)) {
+            return out_type->kind == SEMANTIC_TYPE_KIND_INT ||
+                out_type->kind == SEMANTIC_TYPE_KIND_FLOAT ||
+                out_type->kind == SEMANTIC_TYPE_KIND_VOID;
+        }
+        builtin = semantic_find_builtin_function(called_name);
+        if (builtin) {
+            out_type->kind = builtin->return_type == AST_FUNCTION_RETURN_VOID
+                ? SEMANTIC_TYPE_KIND_VOID
+                : SEMANTIC_TYPE_KIND_INT;
+            return 1;
+        }
+        return 0;
+    }
+    case AST_EXPR_UNARY: {
+        SemanticTypeDescriptor operand_type;
+
+        if (base->as.unary.op == TOKEN_PLUS || base->as.unary.op == TOKEN_MINUS) {
+            if (semantic_expression_is_direct_float_transport_root(
+                    base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes)) {
+                out_type->kind = SEMANTIC_TYPE_KIND_FLOAT;
+                return 1;
+            }
+            return 0;
+        }
+        if (base->as.unary.op == TOKEN_BANG) {
+            if (!semantic_expression_resolve_scalar_type(base->as.unary.operand,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &operand_type,
+                    error) ||
+                (operand_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                    operand_type.kind != SEMANTIC_TYPE_KIND_FLOAT)) {
+                return 0;
+            }
+            out_type->kind = SEMANTIC_TYPE_KIND_INT;
+            return 1;
+        }
+        return 0;
+    }
+    case AST_EXPR_BINARY: {
+        SemanticTypeDescriptor lhs_type;
+        SemanticTypeDescriptor rhs_type;
+
+        if (base->as.binary.op == TOKEN_ASSIGN) {
+            return semantic_expression_resolve_scalar_type(base->as.binary.left,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                out_type,
+                error);
+        }
+        if (base->as.binary.op == TOKEN_EQ ||
+            base->as.binary.op == TOKEN_NE ||
+            base->as.binary.op == TOKEN_LT ||
+            base->as.binary.op == TOKEN_LE ||
+            base->as.binary.op == TOKEN_GT ||
+            base->as.binary.op == TOKEN_GE) {
+            if (!semantic_expression_resolve_scalar_type(base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &lhs_type,
+                    error) ||
+                !semantic_expression_resolve_scalar_type(base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &rhs_type,
+                    error) ||
+                lhs_type.kind != rhs_type.kind ||
+                (lhs_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                    lhs_type.kind != SEMANTIC_TYPE_KIND_FLOAT)) {
+                return 0;
+            }
+            out_type->kind = SEMANTIC_TYPE_KIND_INT;
+            return 1;
+        }
+        if (base->as.binary.op == TOKEN_PLUS ||
+            base->as.binary.op == TOKEN_MINUS ||
+            base->as.binary.op == TOKEN_STAR ||
+            base->as.binary.op == TOKEN_SLASH) {
+            if (!semantic_expression_resolve_scalar_type(base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &lhs_type,
+                    error) ||
+                !semantic_expression_resolve_scalar_type(base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &rhs_type,
+                    error) ||
+                lhs_type.kind != rhs_type.kind ||
+                (lhs_type.kind != SEMANTIC_TYPE_KIND_FLOAT &&
+                    lhs_type.kind != SEMANTIC_TYPE_KIND_INT)) {
+                return 0;
+            }
+            out_type->kind = lhs_type.kind;
+            return 1;
+        }
+        if (base->as.binary.op != TOKEN_AND_AND &&
+            base->as.binary.op != TOKEN_OR_OR) {
+            return 0;
+        }
+        if (!semantic_expression_resolve_scalar_type(base->as.binary.left,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &lhs_type,
+                error) ||
+            !semantic_expression_resolve_scalar_type(base->as.binary.right,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                error) ||
+            (lhs_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                lhs_type.kind != SEMANTIC_TYPE_KIND_FLOAT) ||
+            (rhs_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                rhs_type.kind != SEMANTIC_TYPE_KIND_FLOAT)) {
+            return 0;
+        }
+        out_type->kind = SEMANTIC_TYPE_KIND_INT;
+        return 1;
+    }
+    case AST_EXPR_TERNARY: {
+        SemanticTypeDescriptor condition_type;
+        SemanticTypeDescriptor then_type;
+        SemanticTypeDescriptor else_type;
+
+        if (!semantic_expression_resolve_scalar_type(base->as.ternary.condition,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &condition_type,
+                error) ||
+            (condition_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                condition_type.kind != SEMANTIC_TYPE_KIND_FLOAT) ||
+            !semantic_expression_resolve_scalar_type(base->as.ternary.then_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &then_type,
+                error) ||
+            !semantic_expression_resolve_scalar_type(base->as.ternary.else_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &else_type,
+                error) ||
+            then_type.kind != else_type.kind ||
+            (then_type.kind != SEMANTIC_TYPE_KIND_INT &&
+                then_type.kind != SEMANTIC_TYPE_KIND_FLOAT)) {
+            return 0;
+        }
+        *out_type = then_type;
+        return 1;
+    }
+    default:
+        (void)error;
+        return 0;
+    }
+}
+
+static int semantic_validate_scalar_initializer_type(const AstExpression *expr,
+    const SemanticTypeDescriptor *expected_type,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    SemanticTypeDescriptor actual_type;
+
+    if (!expr || !expected_type) {
+        return 1;
+    }
+    if (expected_type->kind != SEMANTIC_TYPE_KIND_INT &&
+        expected_type->kind != SEMANTIC_TYPE_KIND_FLOAT) {
+        return 1;
+    }
+    if (!semantic_expression_resolve_scalar_type(expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            &actual_type,
+            error)) {
+        return 1;
+    }
+    if (actual_type.kind != expected_type->kind) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-TYPE-004: declaration initializer scalar type mismatch");
+        return 0;
+    }
+    return 1;
+}
+
+static int semantic_validate_return_expression_type(const AstExpression *expr,
+    const SemanticTypeDescriptor *expected_type,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    SemanticTypeDescriptor actual_type;
+
+    if (!expr || !expected_type) {
+        return 1;
+    }
+    if (expected_type->kind != SEMANTIC_TYPE_KIND_INT &&
+        expected_type->kind != SEMANTIC_TYPE_KIND_FLOAT) {
+        return 1;
+    }
+    if (!semantic_expression_resolve_scalar_type(expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            &actual_type,
+            error)) {
+        return 1;
+    }
+    if (actual_type.kind != expected_type->kind) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-TYPE-005: return expression scalar type mismatch");
+        return 0;
+    }
+    return 1;
+}
+
+static int semantic_validate_scalar_assignment_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    const AstExpression *rhs_base = NULL;
+    SemanticTypeDescriptor lhs_type;
+    SemanticTypeDescriptor rhs_type;
+
+    if (!base || base->kind != AST_EXPR_BINARY ||
+        base->as.binary.op != TOKEN_ASSIGN) {
+        return 1;
+    }
+    rhs_base = unwrap_paren_expression(base->as.binary.right);
+    if (semantic_expression_contains_float_scalar(
+            base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        !semantic_expression_resolve_scalar_type(base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &rhs_type,
+            NULL)) {
+        return semantic_set_float_expression_usage_error(base->as.binary.right, error);
+    }
+    if (semantic_expression_contains_float_scalar(
+            base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        rhs_base &&
+        !(rhs_base->kind == AST_EXPR_CONVERSION &&
+            semantic_expression_resolve_scalar_type(
+                rhs_base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                NULL) &&
+            (rhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+                rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT)) &&
+        !(rhs_base->kind == AST_EXPR_TERNARY &&
+            semantic_expression_resolve_scalar_type(
+                rhs_base,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                NULL) &&
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        !semantic_expression_is_direct_float_transport_root(
+            rhs_base,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        !(rhs_base->kind == AST_EXPR_BINARY &&
+            (rhs_base->as.binary.op == TOKEN_PLUS ||
+                rhs_base->as.binary.op == TOKEN_MINUS ||
+                rhs_base->as.binary.op == TOKEN_STAR ||
+                rhs_base->as.binary.op == TOKEN_SLASH) &&
+            semantic_expression_resolve_scalar_type(
+                rhs_base->as.binary.left,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &lhs_type,
+                NULL) &&
+            semantic_expression_resolve_scalar_type(
+                rhs_base->as.binary.right,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                NULL) &&
+            lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT)) {
+        return semantic_set_float_expression_usage_error(rhs_base, error);
+    }
+    if (!semantic_expression_resolve_scalar_type(base->as.binary.left,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &lhs_type,
+            error) ||
+        !semantic_expression_resolve_scalar_type(base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &rhs_type,
+            error)) {
+        return 1;
+    }
+    if ((lhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        (rhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        lhs_type.kind != rhs_type.kind) {
+        semantic_set_error(error,
+            base->line,
+            base->column,
+            "SEMA-TYPE-006: assignment scalar type mismatch");
+        return 0;
+    }
+    return 1;
+}
+
+static int semantic_validate_control_condition_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor actual_type;
+
+    if (!expr) {
+        return 1;
+    }
+    if (!semantic_expression_resolve_scalar_type(expr,
+            program,
+            func_index,
+            1,
+            scopes,
+            &actual_type,
+            error)) {
+        return 1;
+    }
+    if (actual_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+        (!base ||
+            !semantic_expression_is_direct_float_transport_root(
+                base,
+                program,
+                func_index,
+                1,
+                scopes))) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-EXT-036: float control-flow conditions currently support only direct transport roots");
+        return 0;
+    }
+    return 1;
+}
+
+static int semantic_validate_scalar_comparison_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor lhs_type;
+    SemanticTypeDescriptor rhs_type;
+
+    if (!base || base->kind != AST_EXPR_BINARY ||
+        (base->as.binary.op != TOKEN_EQ &&
+            base->as.binary.op != TOKEN_NE &&
+            base->as.binary.op != TOKEN_LT &&
+            base->as.binary.op != TOKEN_LE &&
+            base->as.binary.op != TOKEN_GT &&
+            base->as.binary.op != TOKEN_GE) ||
+        !semantic_expression_contains_float_scalar(base,
+            program,
+            func_index,
+            include_current_external,
+            scopes)) {
+        return 1;
+    }
+
+    if (!semantic_expression_resolve_scalar_type(base->as.binary.left,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &lhs_type,
+            error) ||
+        !semantic_expression_resolve_scalar_type(base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &rhs_type,
+            error)) {
+        return 1;
+    }
+
+    if ((lhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        (rhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        lhs_type.kind != rhs_type.kind) {
+        semantic_set_error(error,
+            base->line,
+            base->column,
+            "SEMA-TYPE-007: comparison scalar type mismatch");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int semantic_validate_scalar_arithmetic_type(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor lhs_type;
+    SemanticTypeDescriptor rhs_type;
+    const AstExpression *lhs = NULL;
+    const AstExpression *rhs = NULL;
+    int lhs_typecheck_root = 0;
+    int rhs_typecheck_root = 0;
+
+    if (!base || base->kind != AST_EXPR_BINARY ||
+        (base->as.binary.op != TOKEN_PLUS &&
+            base->as.binary.op != TOKEN_MINUS &&
+            base->as.binary.op != TOKEN_STAR &&
+            base->as.binary.op != TOKEN_SLASH) ||
+        !semantic_expression_contains_float_scalar(base,
+            program,
+            func_index,
+            include_current_external,
+            scopes)) {
+        return 1;
+    }
+
+    lhs = base->as.binary.left;
+    rhs = base->as.binary.right;
+    lhs_typecheck_root = semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+            lhs,
+            program,
+            func_index,
+            include_current_external,
+            scopes);
+    rhs_typecheck_root = semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+            rhs,
+            program,
+            func_index,
+            include_current_external,
+            scopes);
+
+    if (!semantic_expression_resolve_scalar_type(lhs,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &lhs_type,
+            error) ||
+        !semantic_expression_resolve_scalar_type(rhs,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &rhs_type,
+            error)) {
+        return 1;
+    }
+
+    if ((lhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        (rhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+        lhs_type.kind != rhs_type.kind &&
+        (lhs_typecheck_root || rhs_typecheck_root)) {
+        semantic_set_error(error,
+            base->line,
+            base->column,
+            "SEMA-TYPE-008: arithmetic scalar type mismatch");
+        return 0;
+    }
+
+    return 1;
+}
+
+static int semantic_set_float_expression_usage_error(const AstExpression *expr,
+    SemanticError *error) {
+    if (!expr) {
+        return 0;
+    }
+    semantic_set_error(error,
+        expr->line,
+        expr->column,
+        "SEMA-EXT-035: float expressions currently support only direct transport, unary-sign transport, same-type + - * / on direct roots, logical-condition composition, same-type float comparisons, and same-type float ternary values");
+    return 0;
+}
+
+static int semantic_set_float_conversion_usage_error(const AstExpression *expr,
+    SemanticError *error) {
+    if (!expr) {
+        return 0;
+    }
+    semantic_set_error(error,
+        expr->line,
+        expr->column,
+        "SEMA-EXT-038: explicit scalar conversion currently supports only int(float_expr) and float(int_expr) on scalar operands");
+    return 0;
+}
+
+static int semantic_validate_scalar_expression_usage_impl(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor lhs_type;
+    SemanticTypeDescriptor rhs_type;
+
+    if (!expr || !base) {
+        return 1;
+    }
+    if (!semantic_expression_contains_float_scalar(
+            base,
+            program,
+            func_index,
+            include_current_external,
+            scopes)) {
+        return 1;
+    }
+
+    if (base->kind == AST_EXPR_BINARY &&
+        (base->as.binary.op == TOKEN_PLUS ||
+            base->as.binary.op == TOKEN_MINUS ||
+            base->as.binary.op == TOKEN_STAR ||
+            base->as.binary.op == TOKEN_SLASH) &&
+        semantic_expression_resolve_scalar_type(
+            base,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &lhs_type,
+            NULL) &&
+        lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+        !semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+            base->as.binary.left,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        !semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+            base->as.binary.right,
+            program,
+            func_index,
+            include_current_external,
+            scopes) &&
+        !semantic_expression_is_signed_float_literal(base->as.binary.left) &&
+        !semantic_expression_is_signed_float_literal(base->as.binary.right) &&
+        !(unwrap_paren_expression(base->as.binary.left) &&
+            unwrap_paren_expression(base->as.binary.left)->kind == AST_EXPR_BINARY) &&
+        !(unwrap_paren_expression(base->as.binary.right) &&
+            unwrap_paren_expression(base->as.binary.right)->kind == AST_EXPR_BINARY)) {
+        return semantic_set_float_expression_usage_error(base, error);
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_IDENTIFIER:
+    case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
+    case AST_EXPR_CALL:
+        return 1;
+    case AST_EXPR_CONVERSION:
+        if (base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT ||
+            base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
+            SemanticTypeDescriptor conversion_type;
+            if (semantic_expression_resolve_scalar_type(
+                    base,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &conversion_type,
+                    NULL) &&
+                (conversion_type.kind == SEMANTIC_TYPE_KIND_INT ||
+                    conversion_type.kind == SEMANTIC_TYPE_KIND_FLOAT)) {
+                return 1;
+            }
+        }
+        (void)lhs_type;
+        return semantic_set_float_conversion_usage_error(base, error);
+    case AST_EXPR_UNARY:
+        if (base->as.unary.op == TOKEN_BANG) {
+            return semantic_validate_scalar_expression_usage_impl(
+                base->as.unary.operand,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                error);
+        }
+        if ((base->as.unary.op == TOKEN_PLUS || base->as.unary.op == TOKEN_MINUS) &&
+            semantic_expression_is_direct_float_transport_root(
+                base,
+                program,
+                func_index,
+                include_current_external,
+                scopes)) {
+            return 1;
+        }
+        return semantic_set_float_expression_usage_error(base, error);
+    case AST_EXPR_POSTFIX:
+    case AST_EXPR_SUBSCRIPT:
+    case AST_EXPR_MEMBER:
+        return semantic_set_float_expression_usage_error(base, error);
+    case AST_EXPR_BINARY:
+        if (base->as.binary.op == TOKEN_ASSIGN) {
+            return 1;
+        }
+        if ((base->as.binary.op == TOKEN_PLUS ||
+                base->as.binary.op == TOKEN_MINUS ||
+                base->as.binary.op == TOKEN_STAR ||
+                base->as.binary.op == TOKEN_SLASH) &&
+            semantic_expression_resolve_scalar_type(
+                base->as.binary.left,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &lhs_type,
+                NULL) &&
+            semantic_expression_resolve_scalar_type(
+                base->as.binary.right,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                NULL) &&
+            lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT &&
+            rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) {
+            return semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error) &&
+                semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error);
+        }
+        if (base->as.binary.op == TOKEN_EQ ||
+            base->as.binary.op == TOKEN_NE ||
+            base->as.binary.op == TOKEN_LT ||
+            base->as.binary.op == TOKEN_LE ||
+            base->as.binary.op == TOKEN_GT ||
+            base->as.binary.op == TOKEN_GE) {
+            return semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error) &&
+                semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error);
+        }
+        if (base->as.binary.op == TOKEN_AND_AND ||
+            base->as.binary.op == TOKEN_OR_OR) {
+            return semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error) &&
+                semantic_validate_scalar_expression_usage_impl(
+                    base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                scopes,
+                error);
+        }
+        if ((base->as.binary.op == TOKEN_PLUS ||
+                base->as.binary.op == TOKEN_MINUS ||
+                base->as.binary.op == TOKEN_STAR ||
+                base->as.binary.op == TOKEN_SLASH) &&
+            semantic_expression_resolve_scalar_type(
+                base->as.binary.left,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &lhs_type,
+                NULL) &&
+            semantic_expression_resolve_scalar_type(
+                base->as.binary.right,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &rhs_type,
+                NULL) &&
+            (lhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+                lhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+            (rhs_type.kind == SEMANTIC_TYPE_KIND_INT ||
+                rhs_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+            lhs_type.kind != rhs_type.kind) {
+            if (semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+                    base->as.binary.left,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes) ||
+                semantic_expression_is_non_global_direct_float_arithmetic_typecheck_root(
+                    base->as.binary.right,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes)) {
+                return 1;
+            }
+            return semantic_set_float_expression_usage_error(base, error);
+        }
+        return semantic_set_float_expression_usage_error(base, error);
+    case AST_EXPR_TERNARY:
+        if (!semantic_validate_scalar_expression_usage_impl(
+                base->as.ternary.condition,
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                error)) {
+            return 0;
+        }
+        if (semantic_expression_contains_float_scalar(
+                base->as.ternary.then_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes) ||
+            semantic_expression_contains_float_scalar(
+                base->as.ternary.else_expr,
+                program,
+                func_index,
+                include_current_external,
+                scopes)) {
+            SemanticTypeDescriptor then_type;
+            SemanticTypeDescriptor else_type;
+
+            if (!semantic_expression_resolve_scalar_type(
+                    base->as.ternary.then_expr,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &then_type,
+                    NULL) ||
+                !semantic_expression_resolve_scalar_type(
+                    base->as.ternary.else_expr,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    &else_type,
+                    NULL) ||
+                then_type.kind != SEMANTIC_TYPE_KIND_FLOAT ||
+                else_type.kind != SEMANTIC_TYPE_KIND_FLOAT) {
+                return semantic_set_float_expression_usage_error(base, error);
+            }
+            return semantic_validate_scalar_expression_usage_impl(
+                    base->as.ternary.then_expr,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error) &&
+                semantic_validate_scalar_expression_usage_impl(
+                    base->as.ternary.else_expr,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes,
+                    error);
+        }
+        return 1;
+    default:
+        return 1;
+    }
+}
+
+static int semantic_expression_contains_float_scalar(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes) {
+    size_t i;
+    const AstExpression *base = unwrap_paren_expression(expr);
+    SemanticTypeDescriptor scalar_type;
+
+    if (!base) {
+        return 0;
+    }
+
+    if (semantic_expression_resolve_scalar_type(base,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &scalar_type,
+            NULL) &&
+        scalar_type.kind == SEMANTIC_TYPE_KIND_FLOAT) {
+        return 1;
+    }
+
+    switch (base->kind) {
+    case AST_EXPR_INIT_LIST:
+        for (i = 0u; i < base->as.init_list.item_count; ++i) {
+            if (semantic_expression_contains_float_scalar(
+                    base->as.init_list.items ? base->as.init_list.items[i] : NULL,
+                    program,
+                    func_index,
+                    include_current_external,
+                    scopes)) {
+                return 1;
+            }
+        }
+        return 0;
+    case AST_EXPR_PAREN:
+        return semantic_expression_contains_float_scalar(
+            base->as.inner, program, func_index, include_current_external, scopes);
+    case AST_EXPR_UNARY:
+        return semantic_expression_contains_float_scalar(
+            base->as.unary.operand, program, func_index, include_current_external, scopes);
+    case AST_EXPR_POSTFIX:
+        return semantic_expression_contains_float_scalar(
+            base->as.postfix.operand, program, func_index, include_current_external, scopes);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_expression_contains_float_scalar(
+                base->as.subscript.base, program, func_index, include_current_external, scopes) ||
+            semantic_expression_contains_float_scalar(
+                base->as.subscript.index, program, func_index, include_current_external, scopes);
+    case AST_EXPR_MEMBER:
+        return semantic_expression_contains_float_scalar(
+            base->as.member.base, program, func_index, include_current_external, scopes);
+    case AST_EXPR_BINARY:
+        return semantic_expression_contains_float_scalar(
+                base->as.binary.left, program, func_index, include_current_external, scopes) ||
+            semantic_expression_contains_float_scalar(
+                base->as.binary.right, program, func_index, include_current_external, scopes);
+    case AST_EXPR_TERNARY:
+        return semantic_expression_contains_float_scalar(
+                base->as.ternary.condition, program, func_index, include_current_external, scopes) ||
+            semantic_expression_contains_float_scalar(
+                base->as.ternary.then_expr, program, func_index, include_current_external, scopes) ||
+            semantic_expression_contains_float_scalar(
+                base->as.ternary.else_expr, program, func_index, include_current_external, scopes);
+    default:
+        return 0;
+    }
+}
+
+static int semantic_validate_scalar_expression_usage(const AstExpression *expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    return semantic_validate_scalar_expression_usage_impl(
+        expr,
+        program,
+        func_index,
+        include_current_external,
+        scopes,
+        error);
+}
+
+static int semantic_validate_call_argument_scalar_types(const AstExpression *call_expr,
+    const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    const char *called_name = NULL;
+    const AstExternal *callee_external = NULL;
+    size_t arg_index;
+
+    if (!call_expr || call_expr->kind != AST_EXPR_CALL || !program) {
+        return 1;
+    }
+    if (classify_ast_call_callee(call_expr->as.call.callee, &called_name) != AST_CALL_CALLEE_DIRECT_IDENTIFIER ||
+        !called_name || called_name[0] == '\0') {
+        return 1;
+    }
+
+    callee_external = semantic_find_visible_function_external(
+        program,
+        func_index,
+        include_current_external,
+        called_name);
+    if (!callee_external || callee_external->kind != AST_EXTERNAL_FUNCTION) {
+        return 1;
+    }
+
+    for (arg_index = 0u;
+         arg_index < call_expr->as.call.arg_count && arg_index < callee_external->parameter_count;
+         ++arg_index) {
+        SemanticTypeDescriptor expected_type;
+        SemanticTypeDescriptor actual_type;
+
+        if (!semantic_build_function_parameter_type_descriptor(callee_external, arg_index, &expected_type) ||
+            expected_type.kind == SEMANTIC_TYPE_KIND_FUNCTION ||
+            expected_type.kind == SEMANTIC_TYPE_KIND_VOID) {
+            continue;
+        }
+        if (semantic_expression_contains_float_scalar(
+                call_expr->as.call.args[arg_index],
+                program,
+                func_index,
+                include_current_external,
+                scopes) &&
+            !semantic_expression_resolve_scalar_type(call_expr->as.call.args[arg_index],
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &actual_type,
+                NULL)) {
+            return semantic_set_float_expression_usage_error(
+                call_expr->as.call.args[arg_index],
+                error);
+        }
+        if (!semantic_expression_resolve_scalar_type(call_expr->as.call.args[arg_index],
+                program,
+                func_index,
+                include_current_external,
+                scopes,
+                &actual_type,
+                error)) {
+            continue;
+        }
+        if ((expected_type.kind == SEMANTIC_TYPE_KIND_INT ||
+                expected_type.kind == SEMANTIC_TYPE_KIND_FLOAT) &&
+            actual_type.kind != expected_type.kind) {
+            semantic_set_error(error,
+                call_expr->line,
+                call_expr->column,
+                "SEMA-TYPE-003: call argument scalar type mismatch");
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int semantic_fndefer_expression_uses_only_stable_function_scope_names(
+    const AstExpression *expr,
+    const ScopeStack *scopes,
+    SemanticError *error,
+    size_t depth) {
+    size_t i;
+
+    if (!expr) {
+        return 1;
+    }
+    if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER: {
+        size_t frame_index = 0u;
+
+        if (expr->as.identifier.name &&
+            expr->as.identifier.name[0] != '\0' &&
+            scope_stack_find_local_frame_index(scopes, expr->as.identifier.name, &frame_index) &&
+            frame_index != 0u) {
+            semantic_set_error(error,
+                expr->line,
+                expr->column,
+                "SEMA-EXT-013: fndefer may reference only globals, parameters, or function-top-level locals; loop-local and nested-block locals are rejected");
+            return 0;
+        }
+        return 1;
+    }
+    case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
+        return 1;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                    expr->as.init_list.items[i], scopes, error, depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_PAREN:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+            expr->as.inner, scopes, error, depth + 1u);
+    case AST_EXPR_UNARY:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+            expr->as.unary.operand, scopes, error, depth + 1u);
+    case AST_EXPR_POSTFIX:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+            expr->as.postfix.operand, scopes, error, depth + 1u);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.subscript.base, scopes, error, depth + 1u) &&
+            semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.subscript.index, scopes, error, depth + 1u);
+    case AST_EXPR_MEMBER:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+            expr->as.member.base, scopes, error, depth + 1u);
+    case AST_EXPR_CALL:
+        if (!semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.call.callee, scopes, error, depth + 1u)) {
+            return 0;
+        }
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            if (!semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                    expr->as.call.args[i], scopes, error, depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_BINARY:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.binary.left, scopes, error, depth + 1u) &&
+            semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.binary.right, scopes, error, depth + 1u);
+    case AST_EXPR_TERNARY:
+        return semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.ternary.condition, scopes, error, depth + 1u) &&
+            semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.ternary.then_expr, scopes, error, depth + 1u) &&
+            semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                expr->as.ternary.else_expr, scopes, error, depth + 1u);
+    default:
+        return 1;
+    }
+}
+
+static int semantic_fndefer_statement_uses_only_stable_function_scope_names(
+    const AstStatement *stmt,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    for (i = 0; i < stmt->expression_count; ++i) {
+        if (!semantic_fndefer_expression_uses_only_stable_function_scope_names(
+                stmt->expressions ? stmt->expressions[i] : NULL,
+                scopes,
+                error,
+                0u)) {
+            return 0;
+        }
+    }
+
+    for (i = 0; i < stmt->child_count; ++i) {
+        if (!semantic_fndefer_statement_uses_only_stable_function_scope_names(
+                stmt->children ? stmt->children[i] : NULL,
+                scopes,
+                error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int semantic_capdefer_expression_is_capture_safe(const AstExpression *expr,
+    const ScopeStack *scopes,
+    SemanticError *error,
+    size_t depth) {
+    size_t i;
+
+    if (!expr) {
+        return 1;
+    }
+    if (depth > SEMANTIC_MAX_EXPRESSION_DEPTH) {
+        semantic_set_error(error,
+            expr->line,
+            expr->column,
+            "SEMA-INT-012: expression depth exceeds semantic analysis limit");
+        return 0;
+    }
+
+    switch (expr->kind) {
+    case AST_EXPR_IDENTIFIER: {
+        size_t frame_index = 0u;
+
+        if (expr->as.identifier.name &&
+            expr->as.identifier.name[0] != '\0' &&
+            scope_stack_find_local_frame_index(scopes, expr->as.identifier.name, &frame_index) &&
+            frame_index != 0u) {
+            semantic_set_error(error,
+                expr->line,
+                expr->column,
+                "SEMA-EXT-022: capdefer may reference only globals, parameters, or function-top-level locals");
+            return 0;
+        }
+        return 1;
+    }
+    case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
+        return 1;
+    case AST_EXPR_INIT_LIST:
+        for (i = 0; i < expr->as.init_list.item_count; ++i) {
+            if (!semantic_capdefer_expression_is_capture_safe(
+                    expr->as.init_list.items ? expr->as.init_list.items[i] : NULL,
+                    scopes,
+                    error,
+                    depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_PAREN:
+        return semantic_capdefer_expression_is_capture_safe(
+            expr->as.inner, scopes, error, depth + 1u);
+    case AST_EXPR_UNARY:
+        return semantic_capdefer_expression_is_capture_safe(
+            expr->as.unary.operand, scopes, error, depth + 1u);
+    case AST_EXPR_POSTFIX:
+        return semantic_capdefer_expression_is_capture_safe(
+            expr->as.postfix.operand, scopes, error, depth + 1u);
+    case AST_EXPR_SUBSCRIPT:
+        return semantic_capdefer_expression_is_capture_safe(
+                expr->as.subscript.base, scopes, error, depth + 1u) &&
+            semantic_capdefer_expression_is_capture_safe(
+                expr->as.subscript.index, scopes, error, depth + 1u);
+    case AST_EXPR_MEMBER:
+        return semantic_capdefer_expression_is_capture_safe(
+            expr->as.member.base, scopes, error, depth + 1u);
+    case AST_EXPR_CALL:
+        if (!semantic_capdefer_expression_is_capture_safe(
+                expr->as.call.callee, scopes, error, depth + 1u)) {
+            return 0;
+        }
+        for (i = 0; i < expr->as.call.arg_count; ++i) {
+            if (!semantic_capdefer_expression_is_capture_safe(
+                    expr->as.call.args[i], scopes, error, depth + 1u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_EXPR_BINARY:
+        return semantic_capdefer_expression_is_capture_safe(
+                expr->as.binary.left, scopes, error, depth + 1u) &&
+            semantic_capdefer_expression_is_capture_safe(
+                expr->as.binary.right, scopes, error, depth + 1u);
+    case AST_EXPR_TERNARY:
+        return semantic_capdefer_expression_is_capture_safe(
+                expr->as.ternary.condition, scopes, error, depth + 1u) &&
+            semantic_capdefer_expression_is_capture_safe(
+                expr->as.ternary.then_expr, scopes, error, depth + 1u) &&
+            semantic_capdefer_expression_is_capture_safe(
+                expr->as.ternary.else_expr, scopes, error, depth + 1u);
+    default:
+        return 1;
+    }
+}
+
+static int semantic_capdefer_body_is_supported(const AstStatement *stmt,
+    const ScopeStack *scopes,
+    SemanticError *error) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_EXPRESSION:
+        for (i = 0; i < stmt->expression_count; ++i) {
+            if (!semantic_capdefer_expression_is_capture_safe(
+                    stmt->expressions ? stmt->expressions[i] : NULL,
+                    scopes,
+                    error,
+                    0u)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_COMPOUND:
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!semantic_capdefer_body_is_supported(
+                    stmt->children ? stmt->children[i] : NULL,
+                    scopes,
+                    error)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_IF:
+        for (i = 0; i < stmt->expression_count; ++i) {
+            if (!semantic_capdefer_expression_is_capture_safe(
+                    stmt->expressions ? stmt->expressions[i] : NULL,
+                    scopes,
+                    error,
+                    0u)) {
+                return 0;
+            }
+        }
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!semantic_capdefer_body_is_supported(
+                    stmt->children ? stmt->children[i] : NULL,
+                    scopes,
+                    error)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_RETURN:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-023: capdefer body may not contain return in the first extension version");
+        return 0;
+    case AST_STMT_BREAK:
+    case AST_STMT_CONTINUE:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-024: capdefer body may not contain loop control in the first extension version");
+        return 0;
+    case AST_STMT_DEFER:
+    case AST_STMT_FNDEFER:
+    case AST_STMT_CAPDEFER:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-025: capdefer body may not contain nested defer/fndefer/capdefer in the first extension version");
+        return 0;
+    case AST_STMT_DECLARATION:
+    case AST_STMT_WHILE:
+    case AST_STMT_FOR:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-026: capdefer body currently supports only expression/if/compound statements");
+        return 0;
+    default:
+        return 1;
+    }
 }
 
 static int semantic_defer_body_is_supported(const AstStatement *stmt,
     SemanticError *error);
-
+static int semantic_fndefer_body_is_supported(const AstStatement *stmt,
+    SemanticError *error);
+static int semantic_check_loop_nested_fndefer_site_limit(const AstStatement *stmt,
+    size_t loop_depth,
+    size_t *io_loop_nested_site_count,
+    SemanticError *error);
 static int semantic_scope_check_statement(const AstStatement *stmt,
     const AstProgram *program,
     size_t func_index,
     ScopeStack *scopes,
     const SemanticAnalyzeConfig *config,
+    int in_dynamic_registration_context,
     SemanticError *error) {
     size_t i;
 
@@ -1301,6 +3879,33 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 stmt->line,
                 stmt->column,
                 "SEMA-EXT-006: 'unless' is available only under -extension mode");
+            return 0;
+        }
+    }
+    if (stmt->extension_origin == AST_EXTENSION_ORIGIN_PAIR) {
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-020: 'pair' is available only under -extension mode");
+            return 0;
+        }
+    }
+    if (stmt->extension_origin == AST_EXTENSION_ORIGIN_STRUCT) {
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-021: 'struct' is available only under -extension mode");
+            return 0;
+        }
+    }
+    if (stmt->extension_origin == AST_EXTENSION_ORIGIN_CAPDEFER) {
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-027: 'capdefer' is available only under -extension mode");
             return 0;
         }
     }
@@ -1334,7 +3939,161 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             func_index,
             scopes,
             config,
+            in_dynamic_registration_context,
             error);
+    }
+
+    if (stmt->kind == AST_STMT_FNDEFER) {
+        const AstStatement *payload = NULL;
+
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-007: 'fndefer' is available only under -extension mode");
+            return 0;
+        }
+
+        if (stmt->child_count == 0u || !stmt->children || !stmt->children[0]) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-014: fndefer statement requires a non-empty payload");
+            return 0;
+        }
+
+        payload = stmt->children[0];
+        if (!semantic_fndefer_body_is_supported(payload, error)) {
+            return 0;
+        }
+        if (!semantic_fndefer_statement_uses_only_stable_function_scope_names(
+                payload,
+                scopes,
+                error)) {
+            return 0;
+        }
+
+        return semantic_scope_check_statement(payload,
+            program,
+            func_index,
+            scopes,
+            config,
+            in_dynamic_registration_context,
+            error);
+    }
+
+    if (stmt->kind == AST_STMT_CAPDEFER) {
+        const AstStatement *payload = NULL;
+        size_t capture_index;
+        int ok = 0;
+
+        if (!config || !config->allow_extension_features) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-027: 'capdefer' is available only under -extension mode");
+            return 0;
+        }
+        if (stmt->capture_name_count == 0u || !stmt->capture_names ||
+            stmt->capture_expression_count != stmt->capture_name_count ||
+            !stmt->capture_expressions) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-028: capdefer requires one or more capture bindings");
+            return 0;
+        }
+        if (stmt->child_count == 0u || !stmt->children || !stmt->children[0]) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-029: capdefer statement requires a non-empty payload");
+            return 0;
+        }
+
+        for (capture_index = 0u; capture_index < stmt->capture_name_count; ++capture_index) {
+            const char *capture_name = stmt->capture_names[capture_index];
+
+            if (!capture_name || capture_name[0] == '\0') {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-EXT-030: capdefer capture names must be non-empty identifiers");
+                return 0;
+            }
+            if (!semantic_capdefer_expression_is_capture_safe(
+                    stmt->capture_expressions[capture_index],
+                    scopes,
+                    error,
+                    0u)) {
+                return 0;
+            }
+            if (!semantic_scope_check_expression(stmt->capture_expressions[capture_index],
+                    program,
+                    func_index,
+                    scopes,
+                    0,
+                    0,
+                    error)) {
+                return 0;
+            }
+        }
+
+        payload = stmt->children[0];
+        if (!semantic_capdefer_body_is_supported(payload, scopes, error)) {
+            return 0;
+        }
+        if (in_dynamic_registration_context) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-034: capdefer sites inside conditional or loop control flow are not yet supported in the first extension version");
+            return 0;
+        }
+
+        if (!scope_stack_push(scopes)) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-INT-010: failed to extend semantic scope stack");
+            return 0;
+        }
+
+        for (capture_index = 0u; capture_index < stmt->capture_name_count; ++capture_index) {
+            const char *capture_name = stmt->capture_names[capture_index];
+
+            if (scope_stack_contains_local_name(scopes, capture_name)) {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-EXT-031: capdefer capture names may not shadow an existing local name");
+                scope_stack_pop(scopes);
+                return 0;
+            }
+            if (!scope_stack_add_to_current(
+                    scopes,
+                    capture_name,
+                    0,
+                    AST_DECLARATION_VALUE_INT,
+                    NULL)) {
+                semantic_set_error(error,
+                    stmt->line,
+                    stmt->column,
+                    "SEMA-INT-011: failed to record capdefer capture name in scope");
+                scope_stack_pop(scopes);
+                return 0;
+            }
+        }
+
+        ok = semantic_scope_check_statement(payload,
+            program,
+            func_index,
+            scopes,
+            config,
+            in_dynamic_registration_context,
+            error);
+        scope_stack_pop(scopes);
+        return ok;
     }
 
     if (stmt->kind == AST_STMT_COMPOUND) {
@@ -1352,6 +4111,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 config,
+                1,
                 error)) {
                 scope_stack_pop(scopes);
                 return 0;
@@ -1388,6 +4148,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 char *single_name = stmt->declaration_names ? stmt->declaration_names[i] : NULL;
                 const AstExpression *init_expr =
                     (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
+                SemanticTypeDescriptor declaration_type;
 
                 if (stmt->declaration_is_const && !init_expr) {
                     if (error) {
@@ -1404,6 +4165,27 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     return 0;
                 }
 
+                if (!semantic_scope_build_declaration_type_descriptor(
+                        program,
+                        scopes,
+                        stmt,
+                        i,
+                        &declaration_type,
+                        error)) {
+                    scope_stack_pop(scopes);
+                    return 0;
+                }
+                if (!semantic_aggregate_declaration_is_supported(init_expr,
+                        program,
+                        scopes,
+                        &declaration_type,
+                        stmt->line,
+                        stmt->column,
+                        error)) {
+                    scope_stack_pop(scopes);
+                    return 0;
+                }
+
                 if (!semantic_scope_check_expression(init_expr,
                     program,
                     func_index,
@@ -1414,6 +4196,15 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     scope_stack_pop(scopes);
                     return 0;
                 }
+                if (!semantic_validate_scalar_initializer_type(init_expr,
+                        &declaration_type,
+                        program,
+                        func_index,
+                        scopes,
+                        error)) {
+                    scope_stack_pop(scopes);
+                    return 0;
+                }
 
                 if (!semantic_scope_add_declaration_names(scopes,
                     program,
@@ -1421,6 +4212,8 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     scopes,
                     &single_name,
                     stmt->declaration_is_const ? (const int[]){1} : NULL,
+                    stmt->declaration_value_kinds ? &stmt->declaration_value_kinds[i] : NULL,
+                    stmt->declaration_type_names ? &stmt->declaration_type_names[i] : NULL,
                     1,
                     stmt->line,
                     stmt->column,
@@ -1428,6 +4221,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                     scope_stack_pop(scopes);
                     return 0;
                 }
+
             }
 
             expression_start_index = init_expr_limit;
@@ -1444,6 +4238,22 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 scope_stack_pop(scopes);
                 return 0;
             }
+            if (!semantic_aggregate_expression_usage_is_supported(
+                    stmt->expressions[i], program, scopes, 0, error, 0u)) {
+                scope_stack_pop(scopes);
+                return 0;
+            }
+            if (stmt->has_condition_expression &&
+                stmt->condition_expression_index == i &&
+                !semantic_validate_control_condition_type(
+                    stmt->expressions[i],
+                    program,
+                    func_index,
+                    scopes,
+                    error)) {
+                scope_stack_pop(scopes);
+                return 0;
+            }
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
@@ -1452,6 +4262,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 config,
+                1,
                 error)) {
                 scope_stack_pop(scopes);
                 return 0;
@@ -1469,6 +4280,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             char *single_name = stmt->declaration_names ? stmt->declaration_names[i] : NULL;
             const AstExpression *init_expr =
                 (stmt->expressions && i < stmt->expression_count) ? stmt->expressions[i] : NULL;
+            SemanticTypeDescriptor declaration_type;
 
             if (stmt->declaration_is_const && !init_expr) {
                 if (error) {
@@ -1484,6 +4296,25 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 return 0;
             }
 
+            if (!semantic_scope_build_declaration_type_descriptor(
+                    program,
+                    scopes,
+                    stmt,
+                    i,
+                    &declaration_type,
+                    error)) {
+                return 0;
+            }
+            if (!semantic_aggregate_declaration_is_supported(init_expr,
+                    program,
+                    scopes,
+                    &declaration_type,
+                    stmt->line,
+                    stmt->column,
+                    error)) {
+                return 0;
+            }
+
             if (!semantic_scope_check_expression(init_expr,
                 program,
                 func_index,
@@ -1493,6 +4324,14 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 error)) {
                 return 0;
             }
+            if (!semantic_validate_scalar_initializer_type(init_expr,
+                    &declaration_type,
+                    program,
+                    func_index,
+                    scopes,
+                    error)) {
+                return 0;
+            }
 
             if (!semantic_scope_add_declaration_names(scopes,
                 program,
@@ -1500,12 +4339,15 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 scopes,
                 &single_name,
                 stmt->declaration_is_const ? (const int[]){1} : NULL,
+                stmt->declaration_value_kinds ? &stmt->declaration_value_kinds[i] : NULL,
+                stmt->declaration_type_names ? &stmt->declaration_type_names[i] : NULL,
                 1,
                 stmt->line,
                 stmt->column,
                 error)) {
                 return 0;
             }
+
         }
 
         expression_start_index = stmt->declaration_name_count;
@@ -1523,6 +4365,10 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 error)) {
                 return 0;
             }
+            if (!semantic_aggregate_expression_usage_is_supported(
+                    stmt->expressions[i], program, scopes, 0, error, 0u)) {
+                return 0;
+            }
         }
 
         for (i = 0; i < stmt->child_count; ++i) {
@@ -1531,6 +4377,7 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
                 func_index,
                 scopes,
                 config,
+                1,
                 error)) {
                 return 0;
             }
@@ -1549,6 +4396,37 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             error)) {
             return 0;
         }
+        if (!semantic_aggregate_expression_usage_is_supported(
+                stmt->expressions[i], program, scopes, 0, error, 0u)) {
+            return 0;
+        }
+        if ((stmt->kind == AST_STMT_IF || stmt->kind == AST_STMT_WHILE || stmt->kind == AST_STMT_FOR) &&
+            stmt->has_condition_expression &&
+            stmt->condition_expression_index == i &&
+            !semantic_validate_control_condition_type(
+                stmt->expressions[i],
+                program,
+                func_index,
+                scopes,
+                error)) {
+            return 0;
+        }
+        if (stmt->kind == AST_STMT_RETURN && program && func_index < program->count) {
+            SemanticTypeDescriptor return_type;
+
+            if (!semantic_scope_build_function_return_type_descriptor(
+                    &program->externals[func_index],
+                    &return_type) ||
+                !semantic_validate_return_expression_type(
+                    stmt->expressions[i],
+                    &return_type,
+                    program,
+                    func_index,
+                    scopes,
+                    error)) {
+                return 0;
+            }
+        }
     }
 
     for (i = 0; i < stmt->child_count; ++i) {
@@ -1557,6 +4435,8 @@ static int semantic_scope_check_statement(const AstStatement *stmt,
             func_index,
             scopes,
             config,
+            in_dynamic_registration_context || stmt->kind == AST_STMT_IF ||
+                stmt->kind == AST_STMT_WHILE || stmt->kind == AST_STMT_FOR,
             error)) {
             return 0;
         }
@@ -1625,6 +4505,116 @@ static int semantic_defer_body_is_supported(const AstStatement *stmt,
     return semantic_defer_body_is_supported_with_loop_depth(stmt, 0u, error);
 }
 
+static int semantic_fndefer_body_is_supported(const AstStatement *stmt,
+    SemanticError *error) {
+    size_t i;
+
+    if (!stmt) {
+        return 1;
+    }
+
+    switch (stmt->kind) {
+    case AST_STMT_EXPRESSION:
+        return 1;
+    case AST_STMT_COMPOUND:
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!semantic_fndefer_body_is_supported(stmt->children[i], error)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_IF:
+        for (i = 0; i < stmt->child_count; ++i) {
+            if (!semantic_fndefer_body_is_supported(stmt->children[i], error)) {
+                return 0;
+            }
+        }
+        return 1;
+    case AST_STMT_RETURN:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-008: fndefer body may not contain return in the first extension version");
+        return 0;
+    case AST_STMT_BREAK:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-009: fndefer body may not contain break in the first extension version");
+        return 0;
+    case AST_STMT_CONTINUE:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-010: fndefer body may not contain continue in the first extension version");
+        return 0;
+    case AST_STMT_DEFER:
+    case AST_STMT_FNDEFER:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-011: fndefer body may not contain nested defer/fndefer in the first extension version");
+        return 0;
+    case AST_STMT_DECLARATION:
+    case AST_STMT_WHILE:
+    case AST_STMT_FOR:
+        semantic_set_error(error,
+            stmt->line,
+            stmt->column,
+            "SEMA-EXT-012: fndefer body currently supports only expression/if/compound statements");
+        return 0;
+    default:
+        return 1;
+    }
+}
+
+static int semantic_check_loop_nested_fndefer_site_limit(const AstStatement *stmt,
+    size_t loop_depth,
+    size_t *io_loop_nested_site_count,
+    SemanticError *error) {
+    size_t i;
+
+    if (!stmt || !io_loop_nested_site_count) {
+        return 1;
+    }
+
+    if (stmt->kind == AST_STMT_FNDEFER && loop_depth > 0u) {
+        if (*io_loop_nested_site_count > 0u) {
+            semantic_set_error(error,
+                stmt->line,
+                stmt->column,
+                "SEMA-EXT-033: multiple loop-nested fndefer sites are not yet supported in the first extension version");
+            return 0;
+        }
+        *io_loop_nested_site_count += 1u;
+    }
+
+    if (stmt->kind == AST_STMT_WHILE || stmt->kind == AST_STMT_FOR) {
+        for (i = 0u; i < stmt->child_count; ++i) {
+            if (!semantic_check_loop_nested_fndefer_site_limit(
+                    stmt->children ? stmt->children[i] : NULL,
+                    loop_depth + 1u,
+                    io_loop_nested_site_count,
+                    error)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    for (i = 0u; i < stmt->child_count; ++i) {
+        if (!semantic_check_loop_nested_fndefer_site_limit(
+                stmt->children ? stmt->children[i] : NULL,
+                loop_depth,
+                io_loop_nested_site_count,
+                error)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int semantic_check_function_scope_rules(const AstProgram *program,
     size_t func_index,
     const AstExternal *func,
@@ -1633,6 +4623,7 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
     ScopeStack scopes;
     const AstStatement *body;
     size_t i;
+    size_t loop_nested_fndefer_site_count = 0u;
 
     if (!program || !func || !func->function_body) {
         return 1;
@@ -1655,6 +4646,13 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
             char *single_name = func->parameter_names[i];
             int declaration_line = func->line;
             int declaration_column = func->column;
+            int parameter_decl_value_kind =
+                semantic_scope_parameter_value_kind_to_declaration_value_kind(
+                    func->parameter_value_kinds
+                        ? func->parameter_value_kinds[i]
+                        : AST_PARAMETER_VALUE_INT);
+            size_t parameter_array_rank =
+                func->parameter_array_ranks ? func->parameter_array_ranks[i] : 0u;
             if (!single_name || single_name[0] == '\0') {
                 continue;
             }
@@ -1664,12 +4662,23 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
             if (func->parameter_name_columns && func->parameter_name_columns[i] > 0) {
                 declaration_column = func->parameter_name_columns[i];
             }
+            if (parameter_decl_value_kind == AST_DECLARATION_VALUE_FLOAT &&
+                parameter_array_rank > 0u) {
+                semantic_set_error(error,
+                    declaration_line,
+                    declaration_column,
+                    "SEMA-EXT-037: arrays of 'float' are not supported in the current extension slice");
+                scope_stack_free(&scopes);
+                return 0;
+            }
             if (!semantic_scope_add_declaration_names(&scopes,
                 program,
                 func_index,
                 &scopes,
                 &single_name,
                 func->parameter_is_const ? &func->parameter_is_const[i] : NULL,
+                &parameter_decl_value_kind,
+                NULL,
                 1,
                 declaration_line,
                 declaration_column,
@@ -1688,6 +4697,7 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
                 func_index,
                 &scopes,
                 config,
+                0,
                 error)) {
                 scope_stack_free(&scopes);
                 return 0;
@@ -1698,7 +4708,16 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
         func_index,
         &scopes,
         config,
+        0,
         error)) {
+        scope_stack_free(&scopes);
+        return 0;
+    }
+
+    if (!semantic_check_loop_nested_fndefer_site_limit(body,
+            0u,
+            &loop_nested_fndefer_site_count,
+            error)) {
         scope_stack_free(&scopes);
         return 0;
     }
@@ -1712,8 +4731,12 @@ static int semantic_check_return_statement_shape(const AstExternal *func,
     SemanticError *error) {
     size_t i;
     int has_return_expression = 0;
+    SemanticTypeDescriptor return_type;
 
     if (!func || !stmt) {
+        return 1;
+    }
+    if (!semantic_scope_build_function_return_type_descriptor(func, &return_type)) {
         return 1;
     }
 
@@ -1721,7 +4744,7 @@ static int semantic_check_return_statement_shape(const AstExternal *func,
         has_return_expression = stmt->has_primary_expression ||
             stmt->expression_count > 0;
 
-        if (func->function_return_type == AST_FUNCTION_RETURN_VOID) {
+        if (return_type.kind == SEMANTIC_TYPE_KIND_VOID) {
             if (has_return_expression) {
                 semantic_set_error(error,
                     stmt->line,

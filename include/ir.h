@@ -61,12 +61,14 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    AstFunctionReturnType value_type;
     size_t array_rank;
 } IrLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    AstFunctionReturnType value_type;
     size_t array_rank;
     size_t *array_extents;
     size_t byte_size;

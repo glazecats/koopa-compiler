@@ -199,6 +199,2298 @@ static int test_compiler_accepts_unless_under_extension(void) {
     return ok;
 }
 
+static int test_compiler_accepts_float_transport_under_extension(void) {
+    static const char *source = "float g; float id(float x){ return x; } int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl id\n.type id, @function\nid:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: float transport slice should compile under extension: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_literal_transport_under_extension(void) {
+    static const char *source = "float id(float x){ return x; } int main(){ float x = 1.25; id(1.25); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl id\n.type id, @function\nid:\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: float literal transport slice should compile under extension: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_global_initializer_transport_from_identifier_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float global initializer from identifier should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_global_initializer_transport_from_call_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float global initializer from call should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_return_transport_from_global_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float get(){ return g; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float return from global should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_return_transport_from_global_call_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float get(){ return id(g); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float return from global call should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_parameter_forward_transport_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float forward(float x){ return id(x); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float parameter forward transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_parameter_local_forward_transport_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float bounce(float x){ float y; y = x; return id(y); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float parameter local forward transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_global_call_chain_transport_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float getg(){ return wrap(g); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float global call-chain transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_local_call_chain_transport_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float bounce(float x){ float y; y = x; return wrap(y); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float local call-chain transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_if_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float if-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_while_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ while(g) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float while-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_for_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ for(;g;) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float for-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_array_local_declaration_under_extension(void) {
+    static const char *source = "int main(){ float a[2]; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-037") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float array local declaration should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_array_global_declaration_under_extension(void) {
+    static const char *source = "float a[2];\nint main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-037") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float array global declaration should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_array_parameter_under_extension(void) {
+    static const char *source = "float f(float a[]){ return 0; }\nint main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-037") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float array parameter should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_operator_expression_with_global_literal_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ return g + 1; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float operator expression with global literal should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_operator_expression_in_top_level_initializer_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int h = g + 1;\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float operator expression in top-level initializer should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_call_result_in_top_level_initializer_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int h = id(g);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float call result in top-level initializer should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_assignment_transport_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ float y; y = id(g); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float assignment transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ int x = 0; x = g; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float assignment to int should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_return_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int bad(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value return to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_return_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int bad(){ return -id(1.0) ? 1.0 : 2.0; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value return to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_logical_condition_composition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(!g || (g && 1.25)) return g ? 1 : 0; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float logical condition composition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_same_type_float_ternary_value_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 1.25;\n"
+        "float mainf(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: same-type float ternary value should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y){ return x == y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float equality compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y){ return x < y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float relational compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_literal_transport_under_extension(void) {
+    static const char *source =
+        "float neg(){ return -1.25; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float literal transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_unary_minus_float_identifier_transport_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float neg(){ return -g; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary minus float identifier transport should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_relational_compare_against_zero_under_extension(void) {
+    static const char *source =
+        "int lt(){ return -1.25 < 0.0; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float compare against zero should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_addition_under_extension(void) {
+    static const char *source =
+        "float add(float x, float y){ return x + y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float addition should lower through helper under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_subtraction_under_extension(void) {
+    static const char *source =
+        "float sub(float x, float y){ return x - y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fsub32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float subtraction should lower through helper under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_addition_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float add(float y){ return -g + y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float addition combo should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_subtraction_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float sub(float y){ return y - -g; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fsub32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float subtraction combo should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_multiplication_under_extension(void) {
+    static const char *source =
+        "float mul(float x, float y){ return x * y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float multiplication should lower through helper under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_division_under_extension(void) {
+    static const char *source =
+        "float divv(float x, float y){ return x / y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float division should lower through helper under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_multiplication_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float mul(float y){ return -g * y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float multiplication combo should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_negative_float_division_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float divv(float y){ return y / -g; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float division combo should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_chained_float_addition_under_extension(void) {
+    static const char *source =
+        "float add3(float x, float y, float z){ return (x + y) + z; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float addition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_float_mul_div_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return -a * (b / c); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_mixed_float_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float add(float x){ return x + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: mixed float/int arithmetic should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_call_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return id(x) + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float-call/int arithmetic should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_literal_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float add(){ return 1.25 + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float-literal/int arithmetic should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_negative_float_call_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return -id(x) * 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: negative float-call/int arithmetic should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_compare_against_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ return g == 1; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float compare against int should be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_nested_float_tree_plus_int_under_extension(void) {
+    static const char *source =
+        "float add(float x, float y){ return (x + y) + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float tree plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_nested_float_muldiv_plus_int_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return (-a * (b / c)) + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_plus_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return (g ? h : h) + 1; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_plus_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return (-id(x) ? x : x) + 1; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ int x=0; x = (g ? h : h); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value assignment to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ int y=0; y = (-id(1.0) ? 1.0 : 2.0); return y; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value assignment to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ float y; y = (g ? h : h); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value assignment to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float f(float x){ float y; y = (-id(x) ? x : x); return y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call float ternary value assignment to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float y = (g ? h : h);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value initializer to float should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_compare_against_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return (g ? h : h) == 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value compare against int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_compare_against_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ return (-id(1.0) ? 1.0 : 2.0) == 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value compare against int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return sink((g ? h : h)); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value call argument to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ return sink((-id(1.0) ? 1.0 : 2.0)); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary value call argument to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int x = (g ? h : h);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float ternary value initializer to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_unary_call_ternary_value_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int y = (-id(1.0) ? 1.0 : 2.0);\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call ternary float value initializer to int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ return int(g); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct-root explicit int(float) conversion should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_from_int_conversion_under_extension(void) {
+    static const char *source =
+        "float conv(int x, int y){ return float(x + y); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_i2f32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float(int) conversion should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_redundant_explicit_same_type_conversion_for_now(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ return float(g) == g; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-038") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: redundant explicit same-type conversion should still be rejected for now: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_float_conversion_under_extension(void) {
+    static const char *source =
+        "int conv(float x, float y){ return int(x + y); }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(float) conversion should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_float_ternary_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(float ternary) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return sink(int(add3(1.0, 2.0, 3.0))); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(recursive float call) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int x = int(add3(1.0, 2.0, 3.0));\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__global.init") == NULL ||
+        strstr(output, "__builtin_fadd32") == NULL ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(recursive float initializer) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ int x=0; x = int(add3(1.0, 2.0, 3.0)); return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(recursive float assignment) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_float_compare_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h) == 2; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(float compare) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return int(add3(1.0, 2.0, 3.0)) + 1; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL ||
+        strstr(output, "__builtin_f2i32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit int(recursive float arithmetic) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float z = float(add3(1, 2, 3));\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__global.init") == NULL ||
+        strstr(output, "__builtin_i2f32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float(recursive int initializer) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ float y; y = float(add3(1, 2, 3)); return y; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_i2f32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float(recursive int assignment) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_from_int_compare_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ return float(add3(1, 2, 3)) == float(6); }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_i2f32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float(int compare) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ return float(add3(1, 2, 3)) + 1.25; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_i2f32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float(recursive int arithmetic) bridge should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_fndefer_outside_extension_mode(void) {
+    static const char *source = "int main(){ fndefer putint(1); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error)) {
+        fprintf(stderr, "[compiler] FAIL: fndefer should be rejected outside extension mode\n");
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_fndefer_under_extension(void) {
+    static const char *source = "int main(){ int x=1; fndefer putint(x); x=2; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension fndefer should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_fndefer_inside_conditional_registration_under_extension(void) {
+    static const char *source = "int main(){ int x=1; if(x){ fndefer putint(x); } return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: conditional fndefer registration should compile under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_capdefer_under_extension(void) {
+    static const char *source = "int main(){ int x=1; capdefer(y=x) putint(y); x=2; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension capdefer should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_capdefer_inside_loop_registration_under_extension(void) {
+    static const char *source = "int main(){ int x=1; for(;x<2;x=x+1){ capdefer(y=x) putint(y); } return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-034") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: loop capdefer registration should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_capdefer_multiple_bindings_under_extension(void) {
+    static const char *source = "int main(){ int x=1; int z=2; capdefer(y=x, w=z) putint(y+w); x=3; z=4; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension capdefer multi-binding should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_capdefer_outside_extension_mode(void) {
+    static const char *source = "int main(){ int x=1; capdefer(y=x) putint(y); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-027") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: capdefer should be rejected outside extension mode: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_parameter_under_extension_with_honest_diagnostic(void) {
+    static const char *source = "pair id(pair x){ return x; }\nint main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "'pair' parameters/returns are not supported in this extension slice") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair parameter diagnostic mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_struct_parameter_under_extension_with_honest_diagnostic(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "struct Point id(struct Point x){ return x; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "'struct' parameters/returns are not supported in this extension slice") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct parameter diagnostic mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_outside_extension_mode(void) {
+    static const char *source = "int main(){ pair p={1,2}; return p.first; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-020") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair should be rejected outside extension mode: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_under_extension(void) {
+    static const char *source =
+        "int main(){ pair p={3,4}; p.first = p.first + p.second; putint(p.first); return p.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension pair should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_pair_copy_under_extension(void) {
+    static const char *source =
+        "int main(){ pair a={1,2}; pair b=a; b=a; putint(b.first); return b.second; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension pair copy should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_init_from_scalar_under_extension(void) {
+    static const char *source = "int main(){ pair a=1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-005") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: pair scalar initialization should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_invalid_pair_field_under_extension(void) {
+    static const char *source = "int main(){ pair p={1,2}; return p.third; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: invalid pair field should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_plain_pair_value_under_extension(void) {
+    static const char *source = "int main(){ pair a={1,2}; return a; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-004") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: plain pair value should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_struct_copy_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; int z; };\n"
+        "int main(){ struct Point a={1,2,3}; struct Point b=a; b=a; putint(b.x); putint(b.z); return b.y; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension struct copy should compile: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_struct_init_from_scalar_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p=1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-005") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: struct scalar initialization should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_mismatched_struct_copy_init_under_extension(void) {
+    static const char *source =
+        "struct A { int x; int y; };\n"
+        "struct B { int x; int y; };\n"
+        "int main(){ struct B b={1,2}; struct A a=b; return a.x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: mismatched struct copy init should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_invalid_struct_field_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ struct Point p={1,2}; return p.z; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-003") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: invalid struct field should be rejected under extension: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_pair_struct_assignment_mismatch_under_extension(void) {
+    static const char *source =
+        "struct Point { int x; int y; };\n"
+        "int main(){ pair a={1,2}; struct Point b={3,4}; a=b; return a.first; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-AGG-006") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: pair/struct assignment mismatch should be rejected under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_function_valued_parameter_outside_extension_mode(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ return apply(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_RISCV, &output, &error)) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued parameter syntax should be rejected outside extension mode\n");
+        ok = 0;
+    } else if (strstr(error.message, "SEMA-EXT-015") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: expected SEMA-EXT-015 for non-extension function-valued parameter, got: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_function_valued_parameter_extension_slice_for_now(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return f; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error)) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued parameter extension slice should still reject before lowering\n");
+        ok = 0;
+    } else if (strstr(error.message, "SEMA-EXT-017") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: expected SEMA-EXT-017 for extension function-valued parameter direct use, got: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_unused_function_valued_parameter_declaration_under_extension(void) {
+    static const char *source =
+        "int apply(int f(int), int x){ return x; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply\n.type apply, @function\napply:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unused function-valued parameter declaration should compile under extension: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_passing_top_level_function_value_to_unused_function_parameter_under_extension(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return x; }\n"
+        "int main(){ return apply(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl add1\n.type add1, @function\nadd1:\n") == NULL ||
+        strstr(output, ".globl apply\n.type apply, @function\napply:\n") == NULL ||
+        strstr(output, ".globl main\n.type main, @function\nmain:\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: passing top-level function value to unused parameter should compile in current extension slice: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_rejects_top_level_function_value_in_plain_value_position_under_extension_for_now(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int main(){ return add1; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error)) {
+        fprintf(stderr,
+            "[compiler] FAIL: plain top-level function value should still reject in current extension slice\n");
+        ok = 0;
+    } else if (strstr(error.message, "SEMA-EXT-019") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: expected SEMA-EXT-019 for plain top-level function value, got: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_call_of_function_valued_parameter_with_specialization_lowering(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ return apply(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
+        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: direct call of function-valued parameter should compile via specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_direct_call_of_function_valued_parameter_with_multiple_specialized_bindings(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int double1(int x){ return x*2; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int main(){ return apply(add1, 3) + apply(double1, 6); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
+        strstr(output, ".globl apply__fv_0_double1\n.type apply__fv_0_double1, @function\napply__fv_0_double1:\n") == NULL ||
+        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call apply__fv_0_double1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL ||
+        strstr(output, "  call double1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued parameter specialization should support multiple top-level bindings: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_forwarding_function_valued_parameter_with_specialization_lowering(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int apply(int f(int), int x){ return f(x); }\n"
+        "int wrapper(int f(int), int x){ return apply(f, x); }\n"
+        "int main(){ return wrapper(add1, 41); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl wrapper__fv_0_add1\n.type wrapper__fv_0_add1, @function\nwrapper__fv_0_add1:\n") == NULL ||
+        strstr(output, ".globl apply__fv_0_add1\n.type apply__fv_0_add1, @function\napply__fv_0_add1:\n") == NULL ||
+        strstr(output, "  call wrapper__fv_0_add1\n") == NULL ||
+        strstr(output, "  call apply__fv_0_add1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: function-valued parameter forwarding should compile via chained specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_multiple_function_valued_parameters_with_specialization_lowering(void) {
+    static const char *source =
+        "int add1(int x){ return x+1; }\n"
+        "int double1(int x){ return x*2; }\n"
+        "int compose(int f(int), int g(int), int x){ return f(g(x)); }\n"
+        "int main(){ return compose(add1, double1, 20); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output,
+            ".globl compose__fv_0_add1_1_double1\n.type compose__fv_0_add1_1_double1, @function\ncompose__fv_0_add1_1_double1:\n") == NULL ||
+        strstr(output, "  call compose__fv_0_add1_1_double1\n") == NULL ||
+        strstr(output, "  call double1\n") == NULL ||
+        strstr(output, "  call add1\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: multiple function-valued parameters should compile via specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_void_function_valued_parameter_with_builtin_binding(void) {
+    static const char *source =
+        "void apply(void f(int), int x){ f(x); }\n"
+        "int main(){ apply(putint, 7); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply__fv_0_putint\n.type apply__fv_0_putint, @function\napply__fv_0_putint:\n") == NULL ||
+        strstr(output, "  call apply__fv_0_putint\n") == NULL ||
+        strstr(output, "  call putint\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: void function-valued parameter should compile with builtin binding: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_function_valued_parameter_with_specialization_lowering(void) {
+    static const char *source =
+        "int next(){ return 9; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ return apply0(next); }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_next\n.type apply0__fv_0_next, @function\napply0__fv_0_next:\n") == NULL ||
+        strstr(output, "  call apply0__fv_0_next\n") == NULL ||
+        strstr(output, "  call next\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg function-valued parameter should compile with specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_accepts_zero_arg_void_function_valued_parameter_with_specialization_lowering(void) {
+    static const char *source =
+        "void ping(){ putint(1); }\n"
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ apply0(ping); return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, ".globl apply0__fv_0_ping\n.type apply0__fv_0_ping, @function\napply0__fv_0_ping:\n") == NULL ||
+        strstr(output, "  call apply0__fv_0_ping\n") == NULL ||
+        strstr(output, "  call ping\n") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: zero-arg void function-valued parameter should compile with specialization lowering: %s\n",
+            error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_builds_riscv_backend_dump_from_source(void) {
     static const char *source = "int main(){return 0;}\n";
     CompilerError error;
@@ -482,9 +2774,63 @@ static int test_compiler_builds_extension_backend_dump_with_for_return_unwind_wi
     return ok;
 }
 
+static int test_compiler_builds_extension_backend_dump_with_fndefer_lifo_after_defer(void) {
+    static const char *source =
+        "int main(){ defer putint(1); fndefer putint(2); fndefer putint(3); return 0; }\n";
+    static const long long expected_values[] = {1, 3, 2};
+    CompilerError error;
+    char *output = NULL;
+    char *ret_line = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) || !output) {
+        fprintf(stderr, "[compiler] FAIL: extension fndefer LIFO compile failed: %s\n", error.message);
+        free(output);
+        return 0;
+    }
+
+    ret_line = strstr(output, "  ret\n");
+    if (!ret_line ||
+        !compiler_test_contains_putint_imm_sequence(
+            output,
+            expected_values,
+            sizeof(expected_values) / sizeof(expected_values[0]))) {
+        fprintf(stderr, "[compiler] FAIL: extension fndefer ordering mismatch: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
+static int test_compiler_builds_extension_backend_dump_with_fndefer_return_value_frozen(void) {
+    static const char *source =
+        "int main(){ int x=1; fndefer x=2; return x; }\n";
+    CompilerError error;
+    char *output = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "  sw t6, 4(sp)\n") == NULL ||
+        strstr(output, "  lw a0, 4(sp)\n") == NULL ||
+        strstr(output, "  sw a0, 8(sp)\n") == NULL ||
+        strstr(output, "  li t6, 2\n") == NULL ||
+        strstr(output, "  ret\n") == NULL) {
+        fprintf(stderr, "[compiler] FAIL: extension fndefer return-freeze compile failed: %s\n", error.message);
+        ok = 0;
+    }
+
+    free(output);
+    return ok;
+}
+
 static int test_compiler_builds_extension_backend_dump_with_global_init_call_without_stray_jalr(void) {
     static const char *source =
-        "int a[8]={1,2,3,4,5,6,7,8};\n"
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
         "int main(){ return 0; }\n";
     CompilerError error;
     char *output = NULL;
@@ -3319,7 +5665,238 @@ cleanup:
 }
 
 int main(void) {
+    const char *filter = getenv("COMPILER_DRIVER_REG_FILTER");
     int ok = 1;
+
+    if (filter && filter[0] != '\0') {
+        if (strstr("COMPILER-FLOAT-TRANSPORT", filter) != NULL) {
+            return test_compiler_accepts_float_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_compiler_accepts_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-IDENT-INIT", filter) != NULL) {
+            return test_compiler_accepts_float_global_initializer_transport_from_identifier_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-CALL-INIT", filter) != NULL) {
+            return test_compiler_accepts_float_global_initializer_transport_from_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-RETURN-GLOBAL", filter) != NULL) {
+            return test_compiler_accepts_float_return_transport_from_global_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-RETURN-GLOBAL-CALL", filter) != NULL) {
+            return test_compiler_accepts_float_return_transport_from_global_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-PARAM-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_float_parameter_forward_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-PARAM-LOCAL-FORWARD", filter) != NULL) {
+            return test_compiler_accepts_float_parameter_local_forward_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-CALL-CHAIN", filter) != NULL) {
+            return test_compiler_accepts_float_global_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-LOCAL-CALL-CHAIN", filter) != NULL) {
+            return test_compiler_accepts_float_local_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_rejects_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_rejects_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_rejects_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_same_type_float_ternary_value_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ARRAY-LOCAL-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_array_local_declaration_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ARRAY-GLOBAL-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_array_global_declaration_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ARRAY-PARAM-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_array_parameter_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-OP-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_operator_expression_with_global_literal_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-OP-INIT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_operator_expression_in_top_level_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_call_result_in_top_level_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ASSIGN-TRANSPORT", filter) != NULL) {
+            return test_compiler_accepts_float_assignment_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-IDENT-TRANSPORT", filter) != NULL) {
+            return test_compiler_accepts_unary_minus_float_identifier_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_relational_compare_against_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ADD-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-SUB-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_subtraction_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-ADD-COMBO-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_addition_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-SUB-COMBO-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_subtraction_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-MUL-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_multiplication_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-DIV-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_division_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-MUL-COMBO-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_multiplication_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-DIV-COMBO-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_negative_float_division_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_unary_call_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-FLOAT-DIRECT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-FLOAT-FROM-INT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_from_int_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-SAME-TYPE-REJECT", filter) != NULL) {
+            return test_compiler_rejects_redundant_explicit_same_type_conversion_for_now() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-FLOAT-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-FLOAT-TERNARY-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_float_ternary_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-CALLARG-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-FLOAT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_float_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-FLOAT-FROM-INT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_from_int_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-GLOBAL-INIT", filter) != NULL) {
+            return test_compiler_builds_extension_backend_dump_with_global_init_call_without_stray_jalr() ? 0 : 1;
+        }
+        fprintf(stderr, "[compiler] FAIL: unknown filter '%s'\n", filter);
+        return 1;
+    }
 
     ok &= test_compiler_parses_supported_modes();
     ok &= test_compiler_skips_all_paths_return_check_by_default();
@@ -3327,6 +5904,106 @@ int main(void) {
     ok &= test_compiler_accepts_defer_under_extension_with_return_check_enabled();
     ok &= test_compiler_rejects_unless_outside_extension_mode();
     ok &= test_compiler_accepts_unless_under_extension();
+    ok &= test_compiler_accepts_float_transport_under_extension();
+    ok &= test_compiler_accepts_float_literal_transport_under_extension();
+    ok &= test_compiler_accepts_float_global_initializer_transport_from_identifier_under_extension();
+    ok &= test_compiler_accepts_float_global_initializer_transport_from_call_under_extension();
+    ok &= test_compiler_accepts_float_return_transport_from_global_under_extension();
+    ok &= test_compiler_accepts_float_return_transport_from_global_call_under_extension();
+    ok &= test_compiler_accepts_float_parameter_forward_transport_under_extension();
+    ok &= test_compiler_accepts_float_parameter_local_forward_transport_under_extension();
+    ok &= test_compiler_accepts_float_global_call_chain_transport_under_extension();
+    ok &= test_compiler_accepts_float_local_call_chain_transport_under_extension();
+    ok &= test_compiler_rejects_float_if_condition_under_extension();
+    ok &= test_compiler_rejects_float_while_condition_under_extension();
+    ok &= test_compiler_rejects_float_for_condition_under_extension();
+    ok &= test_compiler_accepts_float_logical_condition_composition_under_extension();
+    ok &= test_compiler_rejects_float_array_local_declaration_under_extension();
+    ok &= test_compiler_rejects_float_array_global_declaration_under_extension();
+    ok &= test_compiler_rejects_float_array_parameter_under_extension();
+    ok &= test_compiler_rejects_float_operator_expression_with_global_literal_under_extension();
+    ok &= test_compiler_rejects_float_operator_expression_in_top_level_initializer_under_extension();
+    ok &= test_compiler_rejects_float_call_result_in_top_level_initializer_under_extension();
+    ok &= test_compiler_accepts_float_assignment_transport_under_extension();
+    ok &= test_compiler_rejects_float_assignment_to_int_under_extension();
+    ok &= test_compiler_accepts_float_equality_compare_under_extension();
+    ok &= test_compiler_accepts_float_relational_compare_under_extension();
+    ok &= test_compiler_accepts_negative_float_literal_transport_under_extension();
+    ok &= test_compiler_accepts_unary_minus_float_identifier_transport_under_extension();
+    ok &= test_compiler_accepts_negative_float_relational_compare_against_zero_under_extension();
+    ok &= test_compiler_accepts_float_addition_under_extension();
+    ok &= test_compiler_accepts_float_subtraction_under_extension();
+    ok &= test_compiler_accepts_negative_float_addition_combo_under_extension();
+    ok &= test_compiler_accepts_negative_float_subtraction_combo_under_extension();
+    ok &= test_compiler_accepts_float_multiplication_under_extension();
+    ok &= test_compiler_accepts_float_division_under_extension();
+    ok &= test_compiler_accepts_negative_float_multiplication_combo_under_extension();
+    ok &= test_compiler_accepts_negative_float_division_combo_under_extension();
+    ok &= test_compiler_accepts_chained_float_addition_under_extension();
+    ok &= test_compiler_accepts_nested_float_mul_div_under_extension();
+    ok &= test_compiler_rejects_mixed_float_int_arithmetic_under_extension();
+    ok &= test_compiler_rejects_float_call_int_arithmetic_under_extension();
+    ok &= test_compiler_rejects_float_literal_int_arithmetic_under_extension();
+    ok &= test_compiler_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_compiler_rejects_float_compare_against_int_under_extension();
+    ok &= test_compiler_rejects_nested_float_tree_plus_int_under_extension();
+    ok &= test_compiler_rejects_nested_float_muldiv_plus_int_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_plus_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_plus_int_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_assignment_to_int_under_extension();
+    ok &= test_compiler_accepts_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_compiler_accepts_unary_call_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_compiler_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_compare_against_int_under_extension();
+    ok &= test_compiler_rejects_float_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension();
+    ok &= test_compiler_accepts_explicit_float_from_int_conversion_under_extension();
+    ok &= test_compiler_rejects_redundant_explicit_same_type_conversion_for_now();
+    ok &= test_compiler_accepts_explicit_int_from_float_conversion_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_float_ternary_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_float_compare_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_float_from_int_compare_bridge_under_extension();
+    ok &= test_compiler_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension();
+    ok &= test_compiler_accepts_same_type_float_ternary_value_under_extension();
+    ok &= test_compiler_rejects_fndefer_outside_extension_mode();
+    ok &= test_compiler_accepts_fndefer_under_extension();
+    ok &= test_compiler_accepts_fndefer_inside_conditional_registration_under_extension();
+    ok &= test_compiler_accepts_capdefer_under_extension();
+    ok &= test_compiler_rejects_capdefer_inside_loop_registration_under_extension();
+    ok &= test_compiler_accepts_capdefer_multiple_bindings_under_extension();
+    ok &= test_compiler_rejects_capdefer_outside_extension_mode();
+    ok &= test_compiler_rejects_pair_parameter_under_extension_with_honest_diagnostic();
+    ok &= test_compiler_rejects_struct_parameter_under_extension_with_honest_diagnostic();
+    ok &= test_compiler_rejects_pair_outside_extension_mode();
+    ok &= test_compiler_accepts_pair_under_extension();
+    ok &= test_compiler_accepts_pair_copy_under_extension();
+    ok &= test_compiler_rejects_pair_init_from_scalar_under_extension();
+    ok &= test_compiler_rejects_invalid_pair_field_under_extension();
+    ok &= test_compiler_rejects_plain_pair_value_under_extension();
+    ok &= test_compiler_accepts_struct_copy_under_extension();
+    ok &= test_compiler_rejects_struct_init_from_scalar_under_extension();
+    ok &= test_compiler_rejects_mismatched_struct_copy_init_under_extension();
+    ok &= test_compiler_rejects_invalid_struct_field_under_extension();
+    ok &= test_compiler_rejects_pair_struct_assignment_mismatch_under_extension();
+    ok &= test_compiler_rejects_function_valued_parameter_outside_extension_mode();
+    ok &= test_compiler_rejects_function_valued_parameter_extension_slice_for_now();
+    ok &= test_compiler_accepts_unused_function_valued_parameter_declaration_under_extension();
+    ok &= test_compiler_accepts_passing_top_level_function_value_to_unused_function_parameter_under_extension();
+    ok &= test_compiler_rejects_top_level_function_value_in_plain_value_position_under_extension_for_now();
+    ok &= test_compiler_accepts_direct_call_of_function_valued_parameter_with_specialization_lowering();
+    ok &= test_compiler_accepts_direct_call_of_function_valued_parameter_with_multiple_specialized_bindings();
+    ok &= test_compiler_accepts_forwarding_function_valued_parameter_with_specialization_lowering();
+    ok &= test_compiler_accepts_multiple_function_valued_parameters_with_specialization_lowering();
+    ok &= test_compiler_accepts_void_function_valued_parameter_with_builtin_binding();
+    ok &= test_compiler_accepts_zero_arg_function_valued_parameter_with_specialization_lowering();
+    ok &= test_compiler_accepts_zero_arg_void_function_valued_parameter_with_specialization_lowering();
     ok &= test_compiler_builds_riscv_backend_dump_from_source();
     ok &= test_compiler_builds_perf_backend_dump_from_source();
     ok &= test_compiler_builds_extension_backend_dump_with_defer_return_order();
@@ -3337,6 +6014,8 @@ int main(void) {
     ok &= test_compiler_builds_extension_backend_dump_with_nested_defer_body_order();
     ok &= test_compiler_builds_extension_backend_dump_with_for_body_defer_before_step();
     ok &= test_compiler_builds_extension_backend_dump_with_for_return_unwind_without_step();
+    ok &= test_compiler_builds_extension_backend_dump_with_fndefer_lifo_after_defer();
+    ok &= test_compiler_builds_extension_backend_dump_with_fndefer_return_value_frozen();
     ok &= test_compiler_builds_extension_backend_dump_with_global_init_call_without_stray_jalr();
     ok &= test_compiler_builds_riscv_backend_dump_for_sort_style_array_program();
     ok &= test_compiler_pretty_prints_basic_riscv_mnemonics();

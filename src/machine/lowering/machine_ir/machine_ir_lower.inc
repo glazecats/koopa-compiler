@@ -415,6 +415,7 @@ static int machine_ir_copy_globals_from_value_ssa(const ValueSsaProgram *program
         if (!machine_ir_program_append_global(out_program, program->globals[global_index].name, &global, error) || !global) {
             return 0;
         }
+        global->value_type = program->globals[global_index].value_type;
         global->byte_size = program->globals[global_index].byte_size;
         global->has_initializer = program->globals[global_index].has_initializer;
         global->initializer_value = program->globals[global_index].initializer_value;
@@ -535,6 +536,7 @@ int machine_ir_lower_function_from_value_ssa(const ValueSsaFunction *function,
             machine_ir_function_free(out_function);
             return 0;
         }
+        out_function->locals[local_index].value_type = function->locals[local_index].value_type;
     }
 
     for (block_index = 0; block_index < function->block_count; ++block_index) {

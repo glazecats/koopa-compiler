@@ -30,6 +30,46 @@ static char *dup_text(const char *text) {
     return copy;
 }
 
+static void machine_ir_test_set_build_error(ValueSsaError *error,
+    const ParserError *parser_error,
+    const SemanticError *semantic_error,
+    const IrError *ir_error,
+    const LowerIrError *lower_error,
+    const char *fallback_message) {
+    if (!error || error->message[0] != '\0') {
+        return;
+    }
+
+    if (lower_error && lower_error->message[0] != '\0') {
+        error->line = lower_error->line;
+        error->column = lower_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", lower_error->message);
+        return;
+    }
+    if (ir_error && ir_error->message[0] != '\0') {
+        error->line = ir_error->line;
+        error->column = ir_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", ir_error->message);
+        return;
+    }
+    if (semantic_error && semantic_error->message[0] != '\0') {
+        error->line = semantic_error->line;
+        error->column = semantic_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", semantic_error->message);
+        return;
+    }
+    if (parser_error && parser_error->message[0] != '\0') {
+        error->line = parser_error->line;
+        error->column = parser_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", parser_error->message);
+        return;
+    }
+    snprintf(error->message,
+        sizeof(error->message),
+        "%s",
+        fallback_message ? fallback_message : "machine-ir source builder failed");
+}
+
 static int build_value_ssa_program_from_source_text(const char *source,
     ValueSsaProgram *program,
     ValueSsaError *error) {
@@ -79,27 +119,154 @@ static int build_value_ssa_program_from_source_text(const char *source,
         !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
         !value_ssa_build_default_from_lower_ir(&lower_program, program, error) ||
         !value_ssa_optimize_perf_hotspots(program, error)) {
-        if (error && error->message[0] == '\0') {
-            if (lower_error.message[0] != '\0') {
-                error->line = lower_error.line;
-                error->column = lower_error.column;
-                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
-            } else if (ir_error.message[0] != '\0') {
-                error->line = ir_error.line;
-                error->column = ir_error.column;
-                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
-            } else if (semantic_error.message[0] != '\0') {
-                error->line = semantic_error.line;
-                error->column = semantic_error.column;
-                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
-            } else if (parser_error.message[0] != '\0') {
-                error->line = parser_error.line;
-                error->column = parser_error.column;
-                snprintf(error->message, sizeof(error->message), "%s", parser_error.message);
-            } else {
-                snprintf(error->message, sizeof(error->message), "machine-ir source builder failed");
-            }
+        machine_ir_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            "machine-ir source builder failed");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_value_ssa_program_from_extension_source_text(const char *source,
+    ValueSsaProgram *program,
+    ValueSsaError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "machine-ir source builder received invalid input");
         }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        machine_ir_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            "machine-ir source builder failed");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_default_value_ssa_program_from_extension_source_text(const char *source,
+    ValueSsaProgram *program,
+    ValueSsaError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "machine-ir default source builder received invalid input");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, program, error)) {
+        machine_ir_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            "machine-ir default source builder failed");
         goto cleanup;
     }
 
@@ -1180,6 +1347,2664 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_translation_only_preserves_float_metadata(void) {
+    ValueSsaProgram program;
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    size_t param_local_id = 0u;
+    size_t loaded_value_id = 0u;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!value_ssa_program_append_global(&program, "g", &global, &value_error) ||
+        !global ||
+        !value_ssa_program_append_function(&program, "id", 1, &function, &value_error) ||
+        !function ||
+        !value_ssa_function_append_local(function, "x", 1, &param_local_id, &value_error) ||
+        !value_ssa_function_append_block(function, NULL, &block, &value_error)) {
+        fprintf(stderr, "[machine-ir] FAIL: float translation-only program setup failed: %s\n", value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    global->value_type = AST_FUNCTION_RETURN_FLOAT;
+    function->locals[param_local_id].value_type = AST_FUNCTION_RETURN_FLOAT;
+    loaded_value_id = value_ssa_function_allocate_value(function);
+    if (loaded_value_id == (size_t)-1) {
+        fprintf(stderr, "[machine-ir] FAIL: float translation-only value allocation failed\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(loaded_value_id);
+    instruction.as.load_slot = value_ssa_slot_local(param_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, &value_error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(loaded_value_id), &value_error) ||
+        !machine_ir_build_translation_only_report(
+            &program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: float translation-only setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=0:float") ||
+        !strstr(actual_text, "function id params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "param local.0:float name=x")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: float translation-only dump missing metadata\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_translation_only_lowers_extension_float_transport(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; } int main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &program,
+            &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: extension float translation-only setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "param local.0:float name=x") ||
+        !strstr(actual_text, "store local.0, 1067450368") ||
+        !strstr(actual_text, "call id(1067450368)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: extension float translation-only dump missing literal transport\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_translation_only_lowers_extension_float_global_literal_runtime_init(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &program,
+            &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: extension float global literal runtime-init setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function __global.init params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "store global.0, 1067450368")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: extension float global literal runtime-init dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_rejects_global_float_operator_expression_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nint main(){ return g + 1; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-OP-SEMANTIC-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-OP-SEMANTIC-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_global_float_operator_expression_in_initializer_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nint h = g + 1;\nint main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-OP-INIT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-OP-INIT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_global_float_call_result_in_initializer_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint h = id(g);\nint main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_assignment_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nint main(){ int x = 0; x = g; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ASSIGN-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ASSIGN-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_return_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int bad(){ return g ? h : h; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_return_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int bad(){ return -id(1.0) ? 1.0 : 2.0; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_accepts_float_if_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g) return 1; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-IF-COND-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "ret 1")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-IF-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_while_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ while(g) return 1; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-WHILE-COND-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "ret 1")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-WHILE-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_for_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ for(;g;) return 1; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-FOR-COND-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "ret 1")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-FOR-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_logical_condition_composition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(!g || (g && 1.25)) return g ? 1 : 0; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "load global.0") ||
+        !strstr(actual_text, "and reg.0(r0), 2147483647") ||
+        !strstr(actual_text, "br reg.0(r0), bb.2, bb.3") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y){ return x == y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "and") ||
+        !strstr(actual_text, " ne ") ||
+        !strstr(actual_text, "mul") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y){ return x < y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LT-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "and") ||
+        !strstr(actual_text, " ne ") ||
+        !strstr(actual_text, "mul") ||
+        !strstr(actual_text, "shr") ||
+        !strstr(actual_text, "or") ||
+        !strstr(actual_text, "xor") ||
+        !strstr(actual_text, " lt ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_signed_zero_float_equality_under_extension(void) {
+    static const char *source =
+        "int z(){ return 0.0 == -0.0; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-SIGNED-ZERO-EQ-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function z params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "ret 1")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-SIGNED-ZERO-EQ-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_negative_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(){ return -1.25 < 0.0; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-LT-ZERO-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "ret 0")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-LT-ZERO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_addition_under_extension(void) {
+    static const char *source =
+        "float add(float x, float y){ return x + y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ADD-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ADD-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_subtraction_under_extension(void) {
+    static const char *source =
+        "float sub(float x, float y){ return x - y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-SUB-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sub params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "load local.1") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-SUB-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_negative_float_addition_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float add(float y){ return -g + y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-ADD-COMBO-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function __builtin_fadd32 params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "load global.0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "xor reg.") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-ADD-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_negative_float_subtraction_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float sub(float y){ return y - -g; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-SUB-COMBO-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sub params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function __builtin_fsub32 params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "load global.0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "xor reg.") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-SUB-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_multiplication_under_extension(void) {
+    static const char *source =
+        "float mul(float x, float y){ return x * y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-MUL-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mul params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-MUL-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_division_under_extension(void) {
+    static const char *source =
+        "float divv(float x, float y){ return x / y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-DIV-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function divv params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-DIV-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_negative_float_multiplication_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float mul(float y){ return -g * y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-MUL-COMBO-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mul params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "load global.0") ||
+        !strstr(actual_text, "xor reg.") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-MUL-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_negative_float_division_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float divv(float y){ return y / -g; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-DIV-COMBO-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function divv params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "load global.0") ||
+        !strstr(actual_text, "xor reg.") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-DIV-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_chained_float_addition_under_extension(void) {
+    static const char *source =
+        "float add3(float x, float y, float z){ return (x + y) + z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    const char *first_add = NULL;
+    const char *second_add = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    first_add = actual_text ? strstr(actual_text, "call __builtin_fadd32(") : NULL;
+    second_add = first_add ? strstr(first_add + 1, "call __builtin_fadd32(") : NULL;
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !first_add ||
+        !second_add ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension(void) {
+    static const char *source =
+        "int conv(float x, float y){ return int(x + y); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-CONVERT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function conv params=2") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-CONVERT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_float_from_int_conversion_under_extension(void) {
+    static const char *source =
+        "float conv(int x, int y){ return float(x + y); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-CONVERT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function conv params=2") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-CONVERT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float z = float(add3(1, 2, 3));\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 z") ||
+        !strstr(actual_text, "function __global.init") ||
+        !strstr(actual_text, "call __builtin_i2f32(6)") ||
+        !strstr(actual_text, "store global.0")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ float y; y = float(add3(1, 2, 3)); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mainf params=0") ||
+        !strstr(actual_text, "call __builtin_i2f32(6)") ||
+        !strstr(actual_text, "store local.0") ||
+        !strstr(actual_text, "load local.0")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_float_from_int_compare_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ return float(add3(1, 2, 3)) == float(6); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "spill.0 = call __builtin_i2f32(6)") ||
+        !strstr(actual_text, "reg.0(r0) = call __builtin_i2f32(6)") ||
+        !strstr(actual_text, " eq spill.0, reg.0(r0)") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ return float(add3(1, 2, 3)) + 1.25; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mainf params=0") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0") ||
+        !strstr(actual_text, "store global.0, 1067450368") ||
+        !strstr(actual_text, "store global.1, 1075838976") ||
+        !strstr(actual_text, "call __builtin_f2i32(1075838976)") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return sink(int(add3(1.0, 2.0, 3.0))); }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "function sink params=1") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ int x=0; x = int(add3(1.0, 2.0, 3.0)); return x; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "store local.0") ||
+        !strstr(actual_text, "load local.0") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_float_compare_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h) == 2; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return int(add3(1.0, 2.0, 3.0)) + 1; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_float_mul_div_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return -a * (b / c); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function f params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float add(float x){ return x + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ARITH-INT-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_call_int_arithmetic_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return id(x) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CALL-ARITH-INT-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CALL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_literal_int_arithmetic_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float add(){ return 1.25 + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_negative_float_call_int_arithmetic_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return -id(x) * 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_float_tree_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float add(float x, float y){ return (x + y) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_float_muldiv_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float f(float a, float b, float c){ return (-a * (b / c)) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return (g ? h : h) + 1; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_plus_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return (-id(x) ? x : x) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ int x=0; x = (g ? h : h); return x; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_assignment_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ int y=0; y = (-id(1.0) ? 1.0 : 2.0); return y; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_recursive_float_call_result_in_initializer_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int x = add3(1.0, 2.0, 3.0);\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_recursive_float_call_argument_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int main(){ return sink(add3(1.0, 2.0, 3.0)); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_call_argument_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return sink((g ? h : h)); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_call_argument_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float id(float x){ return x; }\n"
+            "int main(){ return sink((-id(1.0) ? 1.0 : 2.0)); }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int x = (g ? h : h);\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_initializer_to_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int y = (-id(1.0) ? 1.0 : 2.0);\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_accepts_float_ternary_value_return_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 1.25;\n"
+        "float mainf(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "global.1 h init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function mainf params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.1") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_ternary_value_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float mainf(){ float y; y = (g ? h : h); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "global.1 h init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function mainf params=0 locals=1 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.1") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float y = (g ? h : h);\n"
+            "int main(){ return 0; }\n",
+            &program,
+            &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.2 y") ||
+        !strstr(actual_text, "function __global.init") ||
+        !strstr(actual_text, "store global.2")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_rejects_float_ternary_value_compare_against_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return (g ? h : h) == 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_unary_call_ternary_value_compare_against_int_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ return (-id(1.0) ? 1.0 : 2.0) == 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_translation_only_float_report_query_surface(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    const MachineIrProgram *report_program = NULL;
+    const MachineIrFunction *report_function = NULL;
+    const MachineIrFunctionShapeSummary *shape = NULL;
+    const MachineIrBlockShapeSummary *block_shape = NULL;
+    size_t allocation_rounds = 0u;
+    size_t rewrite_rounds = 0u;
+    size_t register_count = 0u;
+    size_t global_count = 0u;
+    size_t function_count = 0u;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &program,
+            &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: float report query setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_ir_allocate_rewrite_report_get_summary(
+            &report,
+            &allocation_rounds,
+            &rewrite_rounds,
+            &register_count,
+            &global_count,
+            &function_count) ||
+        allocation_rounds != 1u ||
+        rewrite_rounds != 0u ||
+        register_count != 8u ||
+        global_count != 1u ||
+        function_count != 3u) {
+        fprintf(stderr, "[machine-ir] FAIL: float report summary query mismatch\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_ir_allocate_rewrite_report_get_program(&report, &report_program) ||
+        !report_program ||
+        report_program->global_count < 1u ||
+        report_program->globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !machine_ir_allocate_rewrite_report_get_function_by_name(&report, "id", &function_index, &report_function) ||
+        function_index == (size_t)-1 ||
+        !report_function ||
+        report_function->parameter_count != 1u ||
+        report_function->local_count < 1u ||
+        report_function->locals[0].value_type != AST_FUNCTION_RETURN_FLOAT) {
+        fprintf(stderr, "[machine-ir] FAIL: float report program/function query mismatch\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_ir_allocate_rewrite_report_get_function_shape_summary_artifact(&report, function_index, &shape) ||
+        !shape ||
+        shape->block_count != 1u ||
+        shape->spill_slot_count != 0u ||
+        !machine_ir_allocate_rewrite_report_get_block_shape_summary(&report, function_index, 0, &block_shape) ||
+        !block_shape ||
+        block_shape->block_id != 0u ||
+        !block_shape->has_return_terminator) {
+        fprintf(stderr, "[machine-ir] FAIL: float report shape query mismatch\n");
+        ok = 0;
+    }
+
+cleanup:
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_translation_only_float_global_literal_report_query_surface(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    const MachineIrProgram *report_program = NULL;
+    const MachineIrFunction *global_init_function = NULL;
+    const MachineIrFunctionShapeSummary *shape = NULL;
+    const MachineIrBlockShapeSummary *block_shape = NULL;
+    size_t allocation_rounds = 0u;
+    size_t rewrite_rounds = 0u;
+    size_t register_count = 0u;
+    size_t global_count = 0u;
+    size_t function_count = 0u;
+    size_t function_index = (size_t)-1;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &program,
+            &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: float global literal report query setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_ir_allocate_rewrite_report_get_summary(
+            &report,
+            &allocation_rounds,
+            &rewrite_rounds,
+            &register_count,
+            &global_count,
+            &function_count) ||
+        allocation_rounds != 1u ||
+        rewrite_rounds != 0u ||
+        global_count != 1u ||
+        function_count != 3u ||
+        !machine_ir_allocate_rewrite_report_get_program(&report, &report_program) ||
+        !report_program ||
+        report_program->global_count < 1u ||
+        report_program->globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !report_program->globals[0].has_runtime_initializer ||
+        !machine_ir_allocate_rewrite_report_get_function_by_name(
+            &report, "__global.init", &function_index, &global_init_function) ||
+        !global_init_function ||
+        !machine_ir_allocate_rewrite_report_get_function_shape_summary_artifact(&report, function_index, &shape) ||
+        !shape ||
+        shape->block_count != 1u ||
+        shape->store_global_count == 0u ||
+        !machine_ir_allocate_rewrite_report_get_block_shape_summary(&report, function_index, 0, &block_shape) ||
+        !block_shape ||
+        !block_shape->has_return_terminator ||
+        block_shape->store_global_count == 0u) {
+        fprintf(stderr, "[machine-ir] FAIL: float global literal report query mismatch\n");
+        ok = 0;
+    }
+
+cleanup:
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_default_pipeline_preserves_live_extension_float_assignment_transport(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float mainf(){ float y; y = id(g); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ASSIGN-LIVE-DEFAULT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function mainf params=0 locals=1 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.0") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-ASSIGN-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_default_pipeline_preserves_float_return_transport_from_global(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float get(){ return g; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.0") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_default_pipeline_preserves_float_return_transport_from_global_call(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float get(){ return id(g); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function id params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.0") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_default_pipeline_preserves_float_global_identifier_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-IDENT-INIT-DEFAULT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "global.1 h init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "store global.0, 1067450368") ||
+        !strstr(actual_text, "store global.1, 1067450368")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-IDENT-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_default_pipeline_preserves_float_global_call_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-DEFAULT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "global.0 g init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "global.1 h init=0 runtime-init=1:float") ||
+        !strstr(actual_text, "function id params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "store global.0, 1067450368") ||
+        !strstr(actual_text, "store global.1, 1067450368")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_shape_stable(void) {
     static const char *source =
         "int g0=4973,g1=1981,g2=8998,g3=6006,g4=3014,g5=22;\n"
@@ -1219,21 +4044,17 @@ static int test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_
 
     if (!strstr(actual_text, "function wide1 params=12 locals=16 spills=4") ||
         !strstr(actual_text,
-            "    reg.7(r7) = load local.11\n"
-            "    store local.12, reg.7(r7)\n"
-            "    reg.6(r6) = load local.10\n"
-            "    store local.13, reg.6(r6)\n"
-            "    reg.5(r5) = load local.9\n"
-            "    store local.14, reg.5(r5)\n"
-            "    reg.4(r4) = load local.8\n"
-            "    store local.15, reg.4(r4)\n") ||
+            "    spill.0 = load local.11\n"
+            "    spill.1 = load local.10\n"
+            "    spill.2 = load local.9\n"
+            "    spill.3 = load local.8\n") ||
         !strstr(actual_text,
-            "    spill.0 = load local.7\n"
-            "    spill.1 = load local.6\n"
-            "    spill.2 = load local.5\n"
-            "    spill.3 = load local.4\n") ||
+            "    reg.7(r7) = load local.7\n"
+            "    reg.6(r6) = load local.6\n"
+            "    reg.5(r5) = load local.5\n"
+            "    reg.4(r4) = load local.4\n") ||
         !strstr(actual_text,
-            "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), spill.0, spill.1, spill.2, spill.3, reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n") ||
+            "    reg.0(r0) = call wide0(spill.0, spill.1, spill.2, spill.3, reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n") ||
         strstr(actual_text,
             "    reg.0(r0) = call wide0(reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.7(r7), reg.6(r6), reg.5(r5), reg.4(r4), reg.3(r3), reg.2(r2), reg.1(r1), reg.0(r0))\n")) {
         fprintf(stderr,
@@ -1291,6 +4112,11 @@ static int test_machine_ir_allocate_and_rewrite_protects_branch_condition_from_l
                 "  bb.1:\n"
                 "    reg.0(r0) = load local.1\n"
                 "    reg.0(r0) = lt reg.0(r0), 5\n"
+                "    br reg.0(r0), bb.2, bb.3\n") &&
+            !strstr(actual_text,
+                "  bb.1:\n"
+                "    spill.0 = load local.1\n"
+                "    reg.0(r0) = lt spill.0, 5\n"
                 "    br reg.0(r0), bb.2, bb.3\n")) ||
         !strstr(actual_text,
             "  bb.2:\n"
@@ -10761,6 +13587,209 @@ static int test_machine_ir_phi_elimination_skips_trivial_critical_edge_split(voi
 }
 
 int main(void) {
+    const char *filter = getenv("MACHINE_IR_REG_FILTER");
+
+    if (filter && filter[0] != '\0') {
+        if (strstr("MACHINE-IR-FLOAT-TRANSPORT", filter) != NULL) {
+            return test_machine_ir_translation_only_preserves_float_metadata() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
+            return test_machine_ir_translation_only_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
+            return test_machine_ir_translation_only_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-REPORT-QUERY", filter) != NULL) {
+            return test_machine_ir_translation_only_float_report_query_surface() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-LITERAL-REPORT-QUERY", filter) != NULL) {
+            return test_machine_ir_translation_only_float_global_literal_report_query_surface() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-ASSIGN-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_ir_default_pipeline_preserves_live_extension_float_assignment_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_ir_default_pipeline_preserves_float_return_transport_from_global() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_ir_default_pipeline_preserves_float_return_transport_from_global_call() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-IDENT-INIT-DEFAULT", filter) != NULL) {
+            return test_machine_ir_default_pipeline_preserves_float_global_identifier_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-DEFAULT", filter) != NULL) {
+            return test_machine_ir_default_pipeline_preserves_float_global_call_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-OP-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_global_float_operator_expression_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-OP-INIT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_global_float_operator_expression_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_global_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-SIGNED-ZERO-EQ-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_signed_zero_float_equality_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_negative_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-ADD-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-SUB-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_subtraction_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-ADD-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_negative_float_addition_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-SUB-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_negative_float_subtraction_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-MUL-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_multiplication_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-DIV-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_division_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-MUL-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_negative_float_multiplication_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-DIV-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_negative_float_division_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_chained_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-CONVERT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-INT-TO-FLOAT-CONVERT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_float_from_int_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_float_from_int_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_float_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_recursive_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_recursive_float_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_ternary_value_return_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+    }
+
     if (!test_machine_ir_manual_verify_accepts_valid_program()) {
         return 1;
     }
@@ -10789,6 +13818,147 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_allocate_and_rewrite_reallocates_functions_after_post_rewrite_canonicalize()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_preserves_float_metadata()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_lowers_extension_float_transport()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_lowers_extension_float_global_literal_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_float_report_query_surface()) {
+        return 1;
+    }
+    if (!test_machine_ir_translation_only_float_global_literal_report_query_surface()) {
+        return 1;
+    }
+    if (!test_machine_ir_default_pipeline_preserves_live_extension_float_assignment_transport()) {
+        return 1;
+    }
+    if (!test_machine_ir_default_pipeline_preserves_float_return_transport_from_global()) {
+        return 1;
+    }
+    if (!test_machine_ir_default_pipeline_preserves_float_return_transport_from_global_call()) {
+        return 1;
+    }
+    if (!test_machine_ir_default_pipeline_preserves_float_global_identifier_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_ir_default_pipeline_preserves_float_global_call_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_global_float_operator_expression_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_global_float_operator_expression_in_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_global_float_call_result_in_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_assignment_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_if_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_while_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_for_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_logical_condition_composition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_signed_zero_float_equality_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_negative_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_addition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_subtraction_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_negative_float_addition_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_negative_float_subtraction_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_multiplication_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_division_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_negative_float_multiplication_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_negative_float_division_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_chained_float_addition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_float_from_int_conversion_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_float_from_int_compare_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_float_compare_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_float_mul_div_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_mixed_float_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_call_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_literal_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_negative_float_call_int_arithmetic_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_allocate_and_rewrite_keeps_rewritten_many_args_spill_shape_stable()) {

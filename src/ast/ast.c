@@ -5,6 +5,9 @@ void ast_program_init(AstProgram *program) {
     if (!program) {
         return;
     }
+    program->struct_types = NULL;
+    program->struct_type_count = 0;
+    program->struct_type_capacity = 0;
     program->externals = NULL;
     program->count = 0;
     program->capacity = 0;
@@ -39,6 +42,10 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "identifier";
     case AST_EXPR_NUMBER:
         return "number";
+    case AST_EXPR_FLOAT_LITERAL:
+        return "float_literal";
+    case AST_EXPR_CONVERSION:
+        return "conversion";
     case AST_EXPR_INIT_LIST:
         return "init_list";
     case AST_EXPR_PAREN:
@@ -49,6 +56,8 @@ const char *ast_expression_kind_name(AstExpressionKind kind) {
         return "postfix";
     case AST_EXPR_SUBSCRIPT:
         return "subscript";
+    case AST_EXPR_MEMBER:
+        return "member";
     case AST_EXPR_CALL:
         return "call";
     case AST_EXPR_BINARY:
@@ -86,6 +95,10 @@ const char *ast_statement_kind_name(AstStatementKind kind) {
         return "continue";
     case AST_STMT_DEFER:
         return "defer";
+    case AST_STMT_FNDEFER:
+        return "fndefer";
+    case AST_STMT_CAPDEFER:
+        return "capdefer";
     default:
         return "unknown";
     }

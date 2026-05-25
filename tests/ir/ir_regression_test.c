@@ -149,6 +149,63 @@ static int expect_extension_ir_dump(const char *case_id,
     return ok;
 }
 
+static int expect_extension_semantic_reject(const char *case_id,
+    const char *source,
+    const char *expected_fragment) {
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+
+    if (!case_id || !source || !expected_fragment) {
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[ir-reg] FAIL: %s lexer failed\n", case_id);
+        return 0;
+    }
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &parse_err)) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s parser failed at %d:%d: %s\n",
+            case_id,
+            parse_err.line,
+            parse_err.column,
+            parse_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+    if (semantic_analyze_program_with_options(&program, &sema_options, &sema_err)) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s should fail semantic analysis under -extension\n",
+            case_id);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+    if (strstr(sema_err.message, expected_fragment) == NULL) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: %s expected semantic fragment '%s', got: %s\n",
+            case_id,
+            expected_fragment,
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int expect_ir_dump_skip_return_check(const char *case_id,
     const char *source,
     const char *expected_text) {
@@ -519,6 +576,32 @@ static int test_ir_lowers_local_shadow_over_global(void) {
         "    ret g.0\n"
         "}\n");
     }
+
+static int test_ir_lowers_float_literal_runtime_global_initializer_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "global g.0:float\n") != NULL &&
+        strstr(actual_text, "func __global.init() {\n") != NULL &&
+        strstr(actual_text, "g.0 = mov 1067450368\n") != NULL &&
+        strstr(actual_text, "call __global.init()") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
 
     static int test_ir_exports_program_initializer_when_main_is_absent(void) {
         return expect_ir_dump("IR-GLOBAL-RUNTIME-INIT-NO-MAIN",
@@ -2014,6 +2097,1624 @@ static int test_ir_lowers_unless_as_negated_if_under_extension(void) {
         "}\n");
 }
 
+static int test_ir_lowers_zero_arg_function_valued_parameter_specialization_under_extension(void) {
+    return expect_extension_ir_dump("IR-FNVAL-ZERO-ARG-SPECIALIZATION",
+        "int next(){ return 9; }\n"
+        "int apply0(int f()){ return f(); }\n"
+        "int main(){ return apply0(next); }\n",
+        "func next() {\n"
+        "  bb.0:\n"
+        "    ret 9\n"
+        "}\n"
+        "\n"
+        "declare apply0(f.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call apply0__fv_0_next(0)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func apply0__fv_0_next(f.0) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call next()\n"
+        "    ret tmp.0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_zero_arg_void_function_valued_parameter_specialization_under_extension(void) {
+    return expect_extension_ir_dump("IR-FNVAL-ZERO-ARG-VOID-SPECIALIZATION",
+        "void ping(){ putint(1); }\n"
+        "void apply0(void f()){ f(); }\n"
+        "int main(){ apply0(ping); return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func ping() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call putint(1)\n"
+        "    ret\n"
+        "}\n"
+        "\n"
+        "declare apply0(f.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call apply0__fv_0_ping(0)\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func apply0__fv_0_ping(f.0) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call ping()\n"
+        "    ret\n"
+        "}\n");
+}
+
+static int test_ir_lowers_capdefer_snapshot_bindings_under_extension(void) {
+    return expect_extension_ir_dump("IR-CAPDEFER-SNAPSHOT-BINDINGS",
+        "int main(){ int x=1; capdefer(y=x) putint(y); x=2; return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    __capdefer_0_y.1 = mov x.0\n"
+        "    x.0 = mov 2\n"
+        "    tmp.0 = call putint(__capdefer_0_y.1)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_capdefer_multiple_snapshot_bindings_under_extension(void) {
+    return expect_extension_ir_dump("IR-CAPDEFER-MULTIPLE-SNAPSHOT-BINDINGS",
+        "int main(){ int x=1; int z=2; capdefer(y=x, w=z) putint(y+w); x=3; z=4; return 0; }\n",
+        "declare putint(param0.0)\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    x.0 = mov 1\n"
+        "    z.1 = mov 2\n"
+        "    __capdefer_0_y.2 = mov x.0\n"
+        "    __capdefer_1_w.3 = mov z.1\n"
+        "    x.0 = mov 3\n"
+        "    z.1 = mov 4\n"
+        "    tmp.0 = add __capdefer_0_y.2, __capdefer_1_w.3\n"
+        "    tmp.1 = call putint(tmp.0)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_multiple_fndefer_registrations_inside_loop_under_extension(void) {
+    return expect_extension_ir_dump(
+        "IR-FNDEFER-LOOP-DYNAMIC-REPLAY",
+        "int a[8]={1,2,3,4,5,6,7,8};\n"
+        "int main(){ for(int i=0;i<8;i=i+1){ fndefer putint(a[2]); } return 0; }\n",
+        "global a.0[rank=1]\n"
+        "\n"
+        "declare putint(param0.0)\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = addr_global global.0\n"
+        "    0 = store_indirect tmp.0, 1\n"
+        "    tmp.1 = add tmp.0, 4\n"
+        "    0 = store_indirect tmp.1, 2\n"
+        "    tmp.2 = add tmp.0, 8\n"
+        "    0 = store_indirect tmp.2, 3\n"
+        "    tmp.3 = add tmp.0, 12\n"
+        "    0 = store_indirect tmp.3, 4\n"
+        "    tmp.4 = add tmp.0, 16\n"
+        "    0 = store_indirect tmp.4, 5\n"
+        "    tmp.5 = add tmp.0, 20\n"
+        "    0 = store_indirect tmp.5, 6\n"
+        "    tmp.6 = add tmp.0, 24\n"
+        "    0 = store_indirect tmp.6, 7\n"
+        "    tmp.7 = add tmp.0, 28\n"
+        "    0 = store_indirect tmp.7, 8\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.13 = call __global.init()\n"
+        "    __fndefer_count_0.0 = mov 0\n"
+        "    i.1 = mov 0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = lt i.1, 8\n"
+        "    br tmp.0, bb.2, bb.4\n"
+        "  bb.2:\n"
+        "    tmp.1 = mov __fndefer_count_0.0\n"
+        "    tmp.2 = add tmp.1, 1\n"
+        "    __fndefer_count_0.0 = mov tmp.2\n"
+        "    jmp bb.3\n"
+        "  bb.3:\n"
+        "    tmp.3 = add i.1, 1\n"
+        "    i.1 = mov tmp.3\n"
+        "    jmp bb.1\n"
+        "  bb.4:\n"
+        "    __fndefer_ret.2 = mov 0\n"
+        "    __fndefer_i.3 = mov 0\n"
+        "    jmp bb.5\n"
+        "  bb.5:\n"
+        "    tmp.4 = mov __fndefer_i.3\n"
+        "    tmp.5 = mov __fndefer_count_0.0\n"
+        "    tmp.6 = lt tmp.4, tmp.5\n"
+        "    br tmp.6, bb.6, bb.7\n"
+        "  bb.6:\n"
+        "    tmp.7 = addr_global global.0\n"
+        "    tmp.8 = mul 2, 4\n"
+        "    tmp.9 = add tmp.7, tmp.8\n"
+        "    tmp.10 = load_indirect tmp.9\n"
+        "    tmp.11 = call putint(tmp.10)\n"
+        "    tmp.12 = add __fndefer_i.3, 1\n"
+        "    __fndefer_i.3 = mov tmp.12\n"
+        "    jmp bb.5\n"
+        "  bb.7:\n"
+        "    ret __fndefer_ret.2\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_transport_signature_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-TRANSPORT-SIGNATURE",
+        "float g; float id(float x){ return x; } int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_literal_transport_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float id(float x){ return x; }\nint main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func id(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "x.0 = mov 1067450368") != NULL &&
+        strstr(actual_text, "call id(1067450368)") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-LITERAL-TRANSPORT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_lowers_float_global_initializer_transport_from_identifier_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-GLOBAL-IDENT-INIT",
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "global h.1:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    h.1 = mov g.0\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_global_initializer_transport_from_call_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-GLOBAL-CALL-INIT",
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "global h.1:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    tmp.0 = call id(g.0)\n"
+        "    h.1 = mov tmp.0\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_return_transport_from_global_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-RETURN-GLOBAL",
+        "float g = 1.25;\n"
+        "float get(){ return g; }\n"
+        "int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func get() {\n"
+        "  bb.0:\n"
+        "    ret g.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_return_transport_from_global_call_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-RETURN-GLOBAL-CALL",
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float get(){ return id(g); }\n"
+        "int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func get() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call id(g.0)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_global_call_chain_transport_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-GLOBAL-CALL-CHAIN",
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float getg(){ return wrap(g); }\n"
+        "int main(){ return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func wrap(x.0:float) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call id(x.0)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func getg() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call wrap(g.0)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_lowers_float_local_call_chain_transport_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-LOCAL-CALL-CHAIN",
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float bounce(float x){ float y; y = x; return wrap(y); }\n"
+        "int main(){ return 0; }\n",
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func wrap(x.0:float) {\n"
+        "  bb.0:\n"
+        "    tmp.0 = call id(x.0)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func bounce(x.0:float) {\n"
+        "  bb.0:\n"
+        "    y.1 = mov x.0\n"
+        "    tmp.0 = call wrap(y.1)\n"
+        "    ret tmp.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_rejects_global_float_operator_expression_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-GLOBAL-OP-SEMANTIC-REJECT",
+        "float g = 1.25;\nint main(){ return g + 1; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_global_float_operator_expression_in_initializer_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-GLOBAL-OP-INIT-SEMANTIC-REJECT",
+        "float g = 1.25;\nint h = g + 1;\nint main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_global_float_call_result_in_initializer_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT",
+        "float g = 1.25;\nfloat id(float x){ return x; }\nint h = id(g);\nint main(){ return 0; }\n",
+        "SEMA-TYPE-004");
+}
+
+static int test_ir_accepts_float_assignment_transport_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-ASSIGN-TRANSPORT",
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ float y; y = id(g); return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ret x.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.1 = call __global.init()\n"
+        "    tmp.0 = call id(g.0)\n"
+        "    y.0 = mov tmp.0\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_rejects_float_assignment_to_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-ASSIGN-TYPE-REJECT",
+        "float g = 1.25;\nint main(){ int x = 0; x = g; return 0; }\n",
+        "SEMA-TYPE-006");
+}
+
+static int test_ir_rejects_float_ternary_value_return_to_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int bad(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-005");
+}
+
+static int test_ir_rejects_unary_call_ternary_value_return_to_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT",
+        "float id(float x){ return x; }\n"
+        "int bad(){ return -id(1.0) ? 1.0 : 2.0; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-005");
+}
+
+static int test_ir_rejects_float_if_condition_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-IF-COND-ACCEPT",
+        "float g = 1.25;\nint main(){ if(g) return 1; return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.2 = call __global.init()\n"
+        "    tmp.0 = and g.0, 2147483647\n"
+        "    tmp.1 = ne tmp.0, 0\n"
+        "    br tmp.1, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ret 1\n"
+        "  bb.2:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_rejects_float_while_condition_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-WHILE-COND-ACCEPT",
+        "float g = 1.25;\nint main(){ while(g) return 1; return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.2 = call __global.init()\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = and g.0, 2147483647\n"
+        "    tmp.1 = ne tmp.0, 0\n"
+        "    br tmp.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ret 1\n"
+        "  bb.3:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_rejects_float_for_condition_under_extension(void) {
+    return expect_extension_ir_dump("IR-FLOAT-FOR-COND-ACCEPT",
+        "float g = 1.25;\nint main(){ for(;g;) return 1; return 0; }\n",
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    g.0 = mov 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    tmp.2 = call __global.init()\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    tmp.0 = and g.0, 2147483647\n"
+        "    tmp.1 = ne tmp.0, 0\n"
+        "    br tmp.1, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ret 1\n"
+        "  bb.3:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_ir_accepts_float_logical_condition_composition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "int main(){ if(!g || (g && 1.25)) return g ? 1 : 0; return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "and g.0, 2147483647") != NULL &&
+        strstr(actual_text, "and 1067450368, 2147483647") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL &&
+        strstr(actual_text, "ret 0") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_rejects_float_ternary_value_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-TERNARY-VALUE-SEMANTIC-REJECT",
+        "float g = 1.25;\nfloat h = 1.25;\nint main(){ return g ? h : 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_accepts_same_type_float_ternary_value_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 1.25;\n"
+            "float mainf(){ return g ? h : h; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func mainf() {\n") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "mov h.1") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-TERNARY-VALUE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_ternary_value_assignment_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ float y; y = (g ? h : h); return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func main() {\n") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "y.0 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret 0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float y = (g ? h : h);\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "global y.2:float\n") != NULL &&
+        strstr(actual_text, "func __global.init() {\n") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "y.2 = mov tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_equality_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int eq(float x, float y){ return x == y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func eq(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "and x.0, 2147483647\n") != NULL &&
+        strstr(actual_text, "and y.1, 2147483647\n") != NULL &&
+        strstr(actual_text, "mul x.0, tmp.") != NULL &&
+        strstr(actual_text, "mul y.1, tmp.") != NULL &&
+        strstr(actual_text, "eq tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EQ-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_inequality_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int ne(float x, float y){ return x != y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func ne(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "and x.0, 2147483647\n") != NULL &&
+        strstr(actual_text, "and y.1, 2147483647\n") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NE-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_relational_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int lt(float x, float y){ return x < y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func lt(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "and x.0, 2147483647\n") != NULL &&
+        strstr(actual_text, "mul x.0, tmp.") != NULL &&
+        strstr(actual_text, "shr tmp.") != NULL &&
+        strstr(actual_text, "and y.1, 2147483647\n") != NULL &&
+        strstr(actual_text, "mul y.1, tmp.") != NULL &&
+        strstr(actual_text, "or tmp.") != NULL &&
+        strstr(actual_text, "xor tmp.") != NULL &&
+        strstr(actual_text, "lt tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-LT-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_literal_transport_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float neg(){ return -1.25; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func neg() {\n") != NULL &&
+        strstr(actual_text, "ret 3214934016\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-LITERAL-TRANSPORT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_unary_minus_float_identifier_transport_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float neg(){ return -g; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func neg() {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor g.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "ret tmp.0\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-IDENT-TRANSPORT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_zero_float_condition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ if(-0.0) return 1; return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "and 2147483648, 2147483647\n") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-ZERO-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_relational_compare_against_zero_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int lt(){ return -1.25 < 0.0; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func lt() {\n") != NULL &&
+        strstr(actual_text, "and 3214934016, 2147483647\n") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "mul 3214934016, tmp.") != NULL &&
+        strstr(actual_text, "shr tmp.") != NULL &&
+        strstr(actual_text, "or tmp.") != NULL &&
+        strstr(actual_text, "xor tmp.") != NULL &&
+        strstr(actual_text, "lt tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-LT-ZERO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_zero_le_zero_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int le(){ return -0.0 <= 0.0; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func le() {\n") != NULL &&
+        strstr(actual_text, "and 2147483648, 2147483647\n") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "mul 2147483648, tmp.") != NULL &&
+        strstr(actual_text, "shr tmp.") != NULL &&
+        strstr(actual_text, "or tmp.") != NULL &&
+        strstr(actual_text, "xor tmp.") != NULL &&
+        strstr(actual_text, "le tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-ZERO-LE-ZERO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_addition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float add(float x, float y){ return x + y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func add(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL &&
+        strstr(actual_text, "declare __builtin_fadd32(param0.0:float, param1.1:float)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-ADD-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_subtraction_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float sub(float x, float y){ return x - y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func sub(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fsub32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL &&
+        strstr(actual_text, "declare __builtin_fsub32(param0.0:float, param1.1:float)\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-SUB-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_float_conversion_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int conv(float x, float y){ return int(x + y); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_fadd32(param0.0:float, param1.1:float)\n") != NULL &&
+        strstr(actual_text, "declare __builtin_f2i32(param0.0:float)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call __builtin_fadd32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_f2i32(tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_float_from_int_conversion_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float conv(int x, int y){ return float(x + y); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_i2f32(param0.0)\n") != NULL &&
+        strstr(actual_text, "tmp.0 = add x.0, y.1\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_i2f32(tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-FLOAT-FROM-INT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return int(g ? h : h); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_f2i32(param0.0:float)\n") != NULL &&
+        strstr(actual_text, "func main() {\n") != NULL &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, "br ") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-TERNARY-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int sink(int x){ return x; }\n"
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int main(){ return sink(int(add3(1.0, 2.0, 3.0))); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_fadd32(param0.0:float, param1.1:float)\n") != NULL &&
+        strstr(actual_text, "declare __builtin_f2i32(param0.0:float)\n") != NULL &&
+        strstr(actual_text, "call add3(") != NULL &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, "call sink(") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-CALLARG-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int x = int(add3(1.0, 2.0, 3.0));\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "global x.0\n") != NULL &&
+        strstr(actual_text, "func __global.init() {\n") != NULL &&
+        strstr(actual_text, "call add3(") != NULL &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, "x.0 = mov tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int main(){ int x=0; x = int(add3(1.0, 2.0, 3.0)); return x; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call add3(") != NULL &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, "x.0 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret x.0") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_float_compare_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return int(g ? h : h) == 2; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, " = eq tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-COMPARE-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int main(){ return int(add3(1.0, 2.0, 3.0)) + 1; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call add3(") != NULL &&
+        strstr(actual_text, "call __builtin_f2i32(") != NULL &&
+        strstr(actual_text, " = add tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+            "float z = float(add3(1, 2, 3));\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "global z.0:float\n") != NULL &&
+        strstr(actual_text, "func __global.init() {\n") != NULL &&
+        strstr(actual_text, "call add3(1, 2, 3)\n") != NULL &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, "z.0 = mov tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+            "float mainf(){ float y; y = float(add3(1, 2, 3)); return y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call add3(1, 2, 3)\n") != NULL &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, "y.0 = mov tmp.") != NULL &&
+        strstr(actual_text, "ret y.0") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_float_from_int_compare_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+            "int main(){ return float(add3(1, 2, 3)) == float(6); }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, " = eq tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-FLOAT-FROM-INT-COMPARE-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+            "float mainf(){ return float(add3(1, 2, 3)) + 1.25; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, " = add tmp.1, 1067450368") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_addition_combo_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float add(float y){ return -g + y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func add(y.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor g.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(tmp.0, y.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-ADD-COMBO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_subtraction_combo_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float sub(float y){ return y - -g; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func sub(y.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor g.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "call __builtin_fsub32(y.0, tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-SUB-COMBO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_multiplication_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float mul(float x, float y){ return x * y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_fmul32(param0.0:float, param1.1:float)\n") != NULL &&
+        strstr(actual_text, "func mul(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-MUL-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_float_division_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float divv(float x, float y){ return x / y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "declare __builtin_fdiv32(param0.0:float, param1.1:float)\n") != NULL &&
+        strstr(actual_text, "func divv(x.0:float, y.1:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-DIV-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_multiplication_combo_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float mul(float y){ return -g * y; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func mul(y.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor g.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(tmp.0, y.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-MUL-COMBO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_negative_float_division_combo_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float divv(float y){ return y / -g; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func divv(y.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor g.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(y.0, tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NEG-DIV-COMBO-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_chained_float_addition_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float add3(float x, float y, float z){ return (x + y) + z; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func add3(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call __builtin_fadd32(x.0, y.1)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_fadd32(tmp.0, z.2)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_float_mul_div_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float f(float a, float b, float c){ return -a * (b / c); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = xor a.0, 2147483648\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_fdiv32(b.1, c.2)\n") != NULL &&
+        strstr(actual_text, "tmp.2 = call __builtin_fmul32(tmp.0, tmp.1)\n") != NULL &&
+        strstr(actual_text, "ret tmp.2") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_rejects_mixed_float_int_arithmetic_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-ARITH-INT-TYPE-REJECT",
+        "float add(float x){ return x + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_float_literal_int_arithmetic_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT",
+        "float add(){ return 1.25 + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_float_call_int_arithmetic_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-CALL-ARITH-INT-TYPE-REJECT",
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return id(x) + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_negative_float_call_int_arithmetic_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT",
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return -id(x) * 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_float_compare_against_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-COMPARE-INT-TYPE-REJECT",
+        "float g = 1.25;\nint main(){ return g == 1; }\n",
+        "SEMA-TYPE-007");
+}
+
+static int test_ir_rejects_nested_float_tree_plus_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT",
+        "float add(float x, float y){ return (x + y) + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_nested_float_muldiv_plus_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT",
+        "float f(float a, float b, float c){ return (-a * (b / c)) + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_float_ternary_value_plus_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return (g ? h : h) + 1; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_unary_call_ternary_value_plus_int_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT",
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return (-id(x) ? x : x) + 1; }\n"
+        "int main(){ return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_lowers_pair_copy_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int main(){ pair a={1,2}; pair b=a; b=a; return b.first + b.second; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "a$first.0 = mov 1") != NULL &&
+        strstr(actual_text, "a$second.1 = mov 2") != NULL &&
+        strstr(actual_text, "b$first.2 = mov a$first.0") != NULL &&
+        strstr(actual_text, "b$second.3 = mov a$second.1") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: pair copy lowering should use split scalar locals\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_lowers_struct_copy_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "struct Point { int x; int y; int z; };\n"
+            "int main(){ struct Point a={1,2,3}; struct Point b=a; b=a; return b.x + b.y + b.z; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "a$x.0 = mov 1") != NULL &&
+        strstr(actual_text, "a$y.1 = mov 2") != NULL &&
+        strstr(actual_text, "a$z.2 = mov 3") != NULL &&
+        strstr(actual_text, "b$x.3 = mov a$x.0") != NULL &&
+        strstr(actual_text, "b$y.4 = mov a$y.1") != NULL &&
+        strstr(actual_text, "b$z.5 = mov a$z.2") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: struct copy lowering should use split scalar locals across all fields\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_lowers_constant_true_while_return_without_malformed_exit_block(void) {
     return expect_ir_lower_succeeds("IR-WHILE-CONST-TRUE-RET-NO-MALFORMED-EXIT",
         "int f(){while(1){return 1;}}\n");
@@ -2477,7 +4178,200 @@ static int test_ir_lowers_nested_loop_break_continue(void) {
 #include "strict_loop_return_alias.cases.inc"
 
 int main(void) {
+    const char *filter = getenv("IR_REG_FILTER");
     int ok = 1;
+
+    if (filter && filter[0] != '\0') {
+        if (strstr("IR-FLOAT-TRANSPORT-SIGNATURE", filter) != NULL) {
+            return test_ir_lowers_float_transport_signature_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_ir_lowers_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-IDENT-INIT", filter) != NULL) {
+            return test_ir_lowers_float_global_initializer_transport_from_identifier_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-CALL-INIT", filter) != NULL) {
+            return test_ir_lowers_float_global_initializer_transport_from_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-RETURN-GLOBAL", filter) != NULL) {
+            return test_ir_lowers_float_return_transport_from_global_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-RETURN-GLOBAL-CALL", filter) != NULL) {
+            return test_ir_lowers_float_return_transport_from_global_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-CALL-CHAIN", filter) != NULL) {
+            return test_ir_lowers_float_global_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-LOCAL-CALL-CHAIN", filter) != NULL) {
+            return test_ir_lowers_float_local_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
+            return test_ir_lowers_float_literal_runtime_global_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-OP-SEMANTIC-REJECT", filter) != NULL) {
+            return test_ir_rejects_global_float_operator_expression_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-OP-INIT-SEMANTIC-REJECT", filter) != NULL) {
+            return test_ir_rejects_global_float_operator_expression_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_global_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-ASSIGN-TRANSPORT", filter) != NULL) {
+            return test_ir_accepts_float_assignment_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_ir_rejects_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_ir_rejects_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_ir_rejects_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_ir_accepts_negative_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-IDENT-TRANSPORT", filter) != NULL) {
+            return test_ir_accepts_unary_minus_float_identifier_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-ZERO-COND-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_zero_float_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_float_relational_compare_against_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-ZERO-LE-ZERO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_zero_le_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-ADD-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-SUB-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_subtraction_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-FLOAT-FROM-INT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_float_from_int_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-TERNARY-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-CALLARG-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-FLOAT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_float_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-FLOAT-FROM-INT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_float_from_int_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-ADD-COMBO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_float_addition_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-SUB-COMBO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_float_subtraction_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-MUL-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_multiplication_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-DIV-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_division_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-MUL-COMBO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_float_multiplication_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-DIV-COMBO-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_negative_float_division_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-SEMANTIC-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_ternary_value_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_same_type_float_ternary_value_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+    }
 
     ok &= test_ir_lowers_return_literal();
     ok &= test_ir_reports_runtime_global_dependency_cycle_chain_with_callee_segments();
@@ -2598,6 +4492,74 @@ int main(void) {
     ok &= test_ir_lowers_for_return_unwinding_body_then_outer_defers_without_step();
     ok &= test_ir_lowers_for_break_unwinding_body_then_outer_defers_without_step();
     ok &= test_ir_lowers_unless_as_negated_if_under_extension();
+    ok &= test_ir_lowers_zero_arg_function_valued_parameter_specialization_under_extension();
+    ok &= test_ir_lowers_zero_arg_void_function_valued_parameter_specialization_under_extension();
+    ok &= test_ir_lowers_capdefer_snapshot_bindings_under_extension();
+    ok &= test_ir_lowers_capdefer_multiple_snapshot_bindings_under_extension();
+    ok &= test_ir_lowers_multiple_fndefer_registrations_inside_loop_under_extension();
+    ok &= test_ir_lowers_float_transport_signature_under_extension();
+    ok &= test_ir_lowers_float_literal_transport_under_extension();
+    ok &= test_ir_lowers_float_global_initializer_transport_from_identifier_under_extension();
+    ok &= test_ir_lowers_float_global_initializer_transport_from_call_under_extension();
+    ok &= test_ir_lowers_float_return_transport_from_global_under_extension();
+    ok &= test_ir_lowers_float_return_transport_from_global_call_under_extension();
+    ok &= test_ir_lowers_float_global_call_chain_transport_under_extension();
+    ok &= test_ir_lowers_float_local_call_chain_transport_under_extension();
+    ok &= test_ir_lowers_float_literal_runtime_global_initializer_under_extension();
+    ok &= test_ir_rejects_global_float_operator_expression_under_extension();
+    ok &= test_ir_rejects_global_float_operator_expression_in_initializer_under_extension();
+    ok &= test_ir_rejects_global_float_call_result_in_initializer_under_extension();
+    ok &= test_ir_accepts_float_assignment_transport_under_extension();
+    ok &= test_ir_rejects_float_assignment_to_int_under_extension();
+    ok &= test_ir_rejects_float_if_condition_under_extension();
+    ok &= test_ir_rejects_float_while_condition_under_extension();
+    ok &= test_ir_rejects_float_for_condition_under_extension();
+    ok &= test_ir_accepts_float_logical_condition_composition_under_extension();
+    ok &= test_ir_accepts_float_equality_compare_under_extension();
+    ok &= test_ir_accepts_float_inequality_compare_under_extension();
+    ok &= test_ir_accepts_float_relational_compare_under_extension();
+    ok &= test_ir_accepts_negative_float_literal_transport_under_extension();
+    ok &= test_ir_accepts_unary_minus_float_identifier_transport_under_extension();
+    ok &= test_ir_accepts_negative_zero_float_condition_under_extension();
+    ok &= test_ir_accepts_negative_float_relational_compare_against_zero_under_extension();
+    ok &= test_ir_accepts_negative_zero_le_zero_under_extension();
+    ok &= test_ir_accepts_float_addition_under_extension();
+    ok &= test_ir_accepts_float_subtraction_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_float_conversion_under_extension();
+    ok &= test_ir_accepts_explicit_float_from_int_conversion_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_float_ternary_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_float_compare_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_float_from_int_compare_bridge_under_extension();
+    ok &= test_ir_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension();
+    ok &= test_ir_accepts_same_type_float_ternary_value_under_extension();
+    ok &= test_ir_accepts_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_ir_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_ir_accepts_negative_float_addition_combo_under_extension();
+    ok &= test_ir_accepts_negative_float_subtraction_combo_under_extension();
+    ok &= test_ir_accepts_float_multiplication_under_extension();
+    ok &= test_ir_accepts_float_division_under_extension();
+    ok &= test_ir_accepts_negative_float_multiplication_combo_under_extension();
+    ok &= test_ir_accepts_negative_float_division_combo_under_extension();
+    ok &= test_ir_accepts_chained_float_addition_under_extension();
+    ok &= test_ir_accepts_nested_float_mul_div_under_extension();
+    ok &= test_ir_rejects_mixed_float_int_arithmetic_under_extension();
+    ok &= test_ir_rejects_float_literal_int_arithmetic_under_extension();
+    ok &= test_ir_rejects_float_call_int_arithmetic_under_extension();
+    ok &= test_ir_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_ir_rejects_float_compare_against_int_under_extension();
+    ok &= test_ir_rejects_nested_float_tree_plus_int_under_extension();
+    ok &= test_ir_rejects_nested_float_muldiv_plus_int_under_extension();
+    ok &= test_ir_rejects_float_ternary_value_plus_int_under_extension();
+    ok &= test_ir_rejects_unary_call_ternary_value_plus_int_under_extension();
+    ok &= test_ir_rejects_float_ternary_value_under_extension();
+    ok &= test_ir_lowers_pair_copy_under_extension();
+    ok &= test_ir_lowers_struct_copy_under_extension();
     ok &= test_ir_lowers_constant_true_while_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_return_without_malformed_exit_block();
     ok &= test_ir_lowers_infinite_for_with_step_return_without_malformed_exit_or_step_block();

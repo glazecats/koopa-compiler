@@ -3968,6 +3968,11 @@ static int machine_select_cleanup_fold_addr_copy_pairs_in_block(const MachineSel
         if (total_uses != 1u) {
             continue;
         }
+        if (machine_select_terminator_has_successor(&block->terminator) &&
+            !machine_select_cleanup_successor_paths_kill_operand_before_use(
+                program, function, block, producer->result)) {
+            continue;
+        }
 
         producer->result = copy_op->result;
         machine_select_remove_op_at(block, op_index);
@@ -4015,6 +4020,11 @@ static int machine_select_cleanup_fold_pure_producer_copy_pairs_in_block(const M
         total_uses = machine_select_count_visible_result_uses_in_block(
             program, function, block, producer_index, producer->result, &redefined_before_terminator);
         if (total_uses != 1u || redefined_before_terminator) {
+            continue;
+        }
+        if (machine_select_terminator_has_successor(&block->terminator) &&
+            !machine_select_cleanup_successor_paths_kill_operand_before_use(
+                program, function, block, producer->result)) {
             continue;
         }
 
@@ -4512,6 +4522,12 @@ static int machine_select_cleanup_forward_trivial_defs_in_block(const MachineSel
             if (replacement.kind != MACHINE_SELECT_OPERAND_IMMEDIATE &&
                 machine_select_operand_redefined_before_result_uses_end_in_block(
                     program, function, block, op_index - 1, op->result, replacement)) {
+                continue;
+            }
+            if (replacement.kind != MACHINE_SELECT_OPERAND_IMMEDIATE &&
+                machine_select_terminator_has_successor(&block->terminator) &&
+                !machine_select_cleanup_successor_paths_kill_operand_before_use(
+                    program, function, block, replacement)) {
                 continue;
             }
             machine_select_rewrite_visible_uses_in_block(

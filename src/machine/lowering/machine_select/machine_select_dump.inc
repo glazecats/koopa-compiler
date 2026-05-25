@@ -20,6 +20,17 @@ static int machine_select_dump_operand(MachineSelectStringBuilder *builder, Mach
     }
 }
 
+static int machine_select_append_scalar_type_suffix(MachineSelectStringBuilder *builder,
+    AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+    if (value_type == AST_FUNCTION_RETURN_FLOAT) {
+        return machine_select_append_format(builder, "%s", ":float");
+    }
+    return 1;
+}
+
 int machine_select_dump_program(const MachineSelectProgram *program,
     char **out_text,
     MachineSelectError *error) {
@@ -63,6 +74,21 @@ int machine_select_dump_program(const MachineSelectProgram *program,
                 function->spill_slot_count)) {
             free(builder.data);
             return 0;
+        }
+        for (size_t param_index = 0; param_index < function->parameter_count; ++param_index) {
+            if (function->locals[param_index].value_type == AST_FUNCTION_RETURN_INT) {
+                continue;
+            }
+            if (!machine_select_append_format(&builder, "  param local.%zu", function->locals[param_index].id) ||
+                !machine_select_append_scalar_type_suffix(&builder, function->locals[param_index].value_type) ||
+                !machine_select_append_format(&builder,
+                    " name=%s\n",
+                    function->locals[param_index].source_name
+                        ? function->locals[param_index].source_name
+                        : "<unnamed>")) {
+                free(builder.data);
+                return 0;
+            }
         }
 
         for (block_index = 0; block_index < function->block_count; ++block_index) {

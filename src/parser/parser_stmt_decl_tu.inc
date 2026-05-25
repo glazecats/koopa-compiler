@@ -4,6 +4,12 @@
 #include "parser.c"
 #else
 
+static int parse_capture_list(Parser *p,
+    char ***out_capture_names,
+    size_t *out_capture_name_count,
+    AstExpression ***out_capture_expressions,
+    size_t *out_capture_expression_count);
+
 static int parse_expression_statement(Parser *p, AstStatement **out_statement) {
     const Token *anchor_tok = peek(p);
     AstStatement *stmt = NULL;
@@ -128,12 +134,20 @@ static int parse_compound_statement_with_local_control(Parser *p,
     }
 
     while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
-        if (check(p, TOKEN_KW_INT) || parser_check_const_int_declaration_start(p)) {
+        if (check(p, TOKEN_KW_INT) || check(p, TOKEN_KW_FLOAT) || check(p, TOKEN_KW_PAIR) || check(p, TOKEN_KW_STRUCT) ||
+            parser_check_const_int_declaration_start(p) ||
+            (check(p, TOKEN_KW_CONST) &&
+                p->current + 1u < p->tokens->size &&
+                (p->tokens->data[p->current + 1u].type == TOKEN_KW_FLOAT ||
+                    p->tokens->data[p->current + 1u].type == TOKEN_KW_PAIR ||
+                    p->tokens->data[p->current + 1u].type == TOKEN_KW_STRUCT))) {
             const Token *decl_tok = peek(p);
             int decl_is_const = 0;
             AstStatement *decl_stmt = NULL;
             char **decl_names = NULL;
             size_t decl_name_count = 0;
+            int *decl_value_kinds = NULL;
+            char **decl_type_names = NULL;
             size_t *decl_array_ranks = NULL;
             AstExpression ***decl_array_extent_exprs = NULL;
             AstExpression **decl_init_exprs = NULL;
@@ -144,6 +158,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 &decl_is_const,
                 out_statement ? &decl_names : NULL,
                 out_statement ? &decl_name_count : NULL,
+                out_statement ? &decl_value_kinds : NULL,
+                out_statement ? &decl_type_names : NULL,
                 out_statement ? &decl_array_ranks : NULL,
                 out_statement ? &decl_array_extent_exprs : NULL,
                 out_statement ? &decl_init_exprs : NULL,
@@ -155,6 +171,8 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt = alloc_ast_statement(p, AST_STMT_DECLARATION, decl_tok);
                 if (!decl_stmt) {
                     free_name_array(decl_names, decl_name_count);
+                    free(decl_value_kinds);
+                    free_name_array(decl_type_names, decl_name_count);
                     free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
                     free(decl_array_ranks);
                     free_ast_expression_array(decl_init_exprs, decl_init_expr_count);
@@ -164,10 +182,21 @@ static int parse_compound_statement_with_local_control(Parser *p,
                 decl_stmt->declaration_is_const = decl_is_const;
                 decl_stmt->declaration_names = decl_names;
                 decl_stmt->declaration_name_count = decl_name_count;
+                decl_stmt->declaration_value_kinds = decl_value_kinds;
+                decl_stmt->declaration_type_names = decl_type_names;
                 decl_stmt->declaration_array_ranks = decl_array_ranks;
                 decl_stmt->declaration_array_extent_exprs = decl_array_extent_exprs;
                 decl_stmt->expressions = decl_init_exprs;
                 decl_stmt->expression_count = decl_init_expr_count;
+                if (decl_value_kinds &&
+                    decl_name_count > 0u &&
+                    decl_value_kinds[0] == AST_DECLARATION_VALUE_PAIR) {
+                    decl_stmt->extension_origin = AST_EXTENSION_ORIGIN_PAIR;
+                } else if (decl_value_kinds &&
+                    decl_name_count > 0u &&
+                    decl_value_kinds[0] == AST_DECLARATION_VALUE_STRUCT) {
+                    decl_stmt->extension_origin = AST_EXTENSION_ORIGIN_STRUCT;
+                }
                 if (!append_ast_statement_child(p,
                     &children,
                     &child_count,
@@ -564,6 +593,8 @@ static int parse_for_statement_with_local_control(Parser *p,
     size_t for_init_decl_expr_count = 0;
     char **for_init_decl_names = NULL;
     size_t for_init_decl_name_count = 0;
+    int *for_init_decl_value_kinds = NULL;
+    char **for_init_decl_type_names = NULL;
     size_t *for_init_decl_array_ranks = NULL;
     AstExpression ***for_init_decl_array_extent_exprs = NULL;
     const Token *for_tok = previous(p);
@@ -578,12 +609,19 @@ static int parse_for_statement_with_local_control(Parser *p,
         return 0;
     }
 
-    if (check(p, TOKEN_KW_INT) || parser_check_const_int_declaration_start(p)) {
+    if (check(p, TOKEN_KW_INT) || check(p, TOKEN_KW_PAIR) || check(p, TOKEN_KW_STRUCT) ||
+        parser_check_const_int_declaration_start(p) ||
+        (check(p, TOKEN_KW_CONST) &&
+            p->current + 1u < p->tokens->size &&
+            (p->tokens->data[p->current + 1u].type == TOKEN_KW_PAIR ||
+                p->tokens->data[p->current + 1u].type == TOKEN_KW_STRUCT))) {
         if (!parse_declaration(p,
             NULL,
             out_statement ? &for_init_decl_is_const : NULL,
             out_statement ? &for_init_decl_names : NULL,
             out_statement ? &for_init_decl_name_count : NULL,
+            out_statement ? &for_init_decl_value_kinds : NULL,
+            out_statement ? &for_init_decl_type_names : NULL,
             out_statement ? &for_init_decl_array_ranks : NULL,
             out_statement ? &for_init_decl_array_extent_exprs : NULL,
             out_statement ? &for_init_decl_exprs : NULL,
@@ -601,6 +639,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                     for_init_decl_array_extent_exprs,
                     for_init_decl_array_ranks,
                     for_init_decl_name_count);
+                free(for_init_decl_value_kinds);
+                free_name_array(for_init_decl_type_names, for_init_decl_name_count);
                 free(for_init_decl_array_ranks);
                 return 0;
             }
@@ -615,6 +655,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                     for_init_decl_array_extent_exprs,
                     for_init_decl_array_ranks,
                     for_init_decl_name_count);
+                free(for_init_decl_value_kinds);
+                free_name_array(for_init_decl_type_names, for_init_decl_name_count);
                 free(for_init_decl_array_ranks);
                 return 0;
             }
@@ -625,6 +667,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                 for_init_decl_array_extent_exprs,
                 for_init_decl_array_ranks,
                 for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -640,6 +684,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                 for_init_decl_array_extent_exprs,
                 for_init_decl_array_ranks,
                 for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -651,6 +697,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             out_statement ? &cond_expr : NULL,
             for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -666,6 +714,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             for_init_decl_array_extent_exprs,
             for_init_decl_array_ranks,
             for_init_decl_name_count);
+        free(for_init_decl_value_kinds);
+        free_name_array(for_init_decl_type_names, for_init_decl_name_count);
         free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
@@ -683,6 +733,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                 for_init_decl_array_extent_exprs,
                 for_init_decl_array_ranks,
                 for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_expression_free(init_expr);
@@ -713,6 +765,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             for_init_decl_array_extent_exprs,
             for_init_decl_array_ranks,
             for_init_decl_name_count);
+        free(for_init_decl_value_kinds);
+        free_name_array(for_init_decl_type_names, for_init_decl_name_count);
         free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
@@ -731,6 +785,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             for_init_decl_array_extent_exprs,
             for_init_decl_array_ranks,
             for_init_decl_name_count);
+        free(for_init_decl_value_kinds);
+        free_name_array(for_init_decl_type_names, for_init_decl_name_count);
         free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
         parser_ast_expression_free(init_expr);
@@ -764,6 +820,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                 for_init_decl_array_extent_exprs,
                 for_init_decl_array_ranks,
                 for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
             parser_ast_statement_free(for_stmt);
@@ -804,6 +862,8 @@ static int parse_for_statement_with_local_control(Parser *p,
                 for_init_decl_array_extent_exprs,
                 for_init_decl_array_ranks,
                 for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
@@ -816,6 +876,8 @@ static int parse_for_statement_with_local_control(Parser *p,
         }
         if (step_expr && !append_ast_statement_expression(p, for_stmt, step_expr, for_tok)) {
             free_name_array(for_init_decl_names, for_init_decl_name_count);
+            free(for_init_decl_value_kinds);
+            free_name_array(for_init_decl_type_names, for_init_decl_name_count);
             free(for_init_decl_array_ranks);
             parser_ast_statement_free(for_stmt);
             parser_ast_statement_free(body_stmt);
@@ -828,8 +890,19 @@ static int parse_for_statement_with_local_control(Parser *p,
         for_stmt->declaration_is_const = for_init_decl_is_const;
         for_stmt->declaration_names = for_init_decl_names;
         for_stmt->declaration_name_count = for_init_decl_name_count;
+        for_stmt->declaration_value_kinds = for_init_decl_value_kinds;
+        for_stmt->declaration_type_names = for_init_decl_type_names;
         for_stmt->declaration_array_ranks = for_init_decl_array_ranks;
         for_stmt->declaration_array_extent_exprs = for_init_decl_array_extent_exprs;
+        if (for_init_decl_value_kinds &&
+            for_init_decl_name_count > 0u &&
+            for_init_decl_value_kinds[0] == AST_DECLARATION_VALUE_PAIR) {
+            for_stmt->extension_origin = AST_EXTENSION_ORIGIN_PAIR;
+        } else if (for_init_decl_value_kinds &&
+            for_init_decl_name_count > 0u &&
+            for_init_decl_value_kinds[0] == AST_DECLARATION_VALUE_STRUCT) {
+            for_stmt->extension_origin = AST_EXTENSION_ORIGIN_STRUCT;
+        }
         for_stmt->children[0] = body_stmt;
         for_stmt->child_count = 1;
         *out_statement = for_stmt;
@@ -839,6 +912,8 @@ static int parse_for_statement_with_local_control(Parser *p,
             for_init_decl_array_extent_exprs,
             for_init_decl_array_ranks,
             for_init_decl_name_count);
+        free(for_init_decl_value_kinds);
+        free_name_array(for_init_decl_type_names, for_init_decl_name_count);
         free(for_init_decl_array_ranks);
         free_ast_expression_array(for_init_decl_exprs, for_init_decl_expr_count);
     }
@@ -1014,6 +1089,211 @@ static int parse_defer_statement(Parser *p,
      * Registering a defer does not itself change local control flow. The
      * deferred payload will run later when lowering rewrites scope exits.
      */
+    return 1;
+}
+
+static int parse_capdefer_statement(Parser *p,
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
+    const Token *capdefer_tok = previous(p);
+    AstStatement *payload_stmt = NULL;
+    AstStatement *capdefer_stmt = NULL;
+    ParserLocalControl payload_control;
+
+    parser_local_control_set(out_local_control, 1, 0);
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
+    if (out_statement) {
+        capdefer_stmt = alloc_ast_statement(p, AST_STMT_CAPDEFER, capdefer_tok);
+        if (!capdefer_stmt) {
+            return 0;
+        }
+    }
+
+    if (!parse_capture_list(p,
+            out_statement ? &capdefer_stmt->capture_names : NULL,
+            out_statement ? &capdefer_stmt->capture_name_count : NULL,
+            out_statement ? &capdefer_stmt->capture_expressions : NULL,
+            out_statement ? &capdefer_stmt->capture_expression_count : NULL)) {
+        ast_statement_free(capdefer_stmt);
+        return 0;
+    }
+    if (!parse_statement_with_local_control(p, &payload_control, out_statement ? &payload_stmt : NULL)) {
+        ast_statement_free(capdefer_stmt);
+        return 0;
+    }
+
+    if (out_statement) {
+        capdefer_stmt->children = (AstStatement **)calloc(1u, sizeof(AstStatement *));
+        if (!capdefer_stmt->children) {
+            ast_statement_free(capdefer_stmt);
+            ast_statement_free(payload_stmt);
+            set_error(p, capdefer_tok, "out of memory allocating capture defer statement");
+            return 0;
+        }
+        capdefer_stmt->children[0] = payload_stmt;
+        capdefer_stmt->child_count = 1u;
+        capdefer_stmt->extension_origin = AST_EXTENSION_ORIGIN_CAPDEFER;
+        *out_statement = capdefer_stmt;
+    }
+
+    return 1;
+}
+
+static int parse_capture_list(Parser *p,
+    char ***out_capture_names,
+    size_t *out_capture_name_count,
+    AstExpression ***out_capture_expressions,
+    size_t *out_capture_expression_count) {
+    char **capture_names = NULL;
+    AstExpression **capture_exprs = NULL;
+    size_t capture_count = 0u;
+    size_t capture_capacity = 0u;
+
+    if (out_capture_names) {
+        *out_capture_names = NULL;
+    }
+    if (out_capture_name_count) {
+        *out_capture_name_count = 0u;
+    }
+    if (out_capture_expressions) {
+        *out_capture_expressions = NULL;
+    }
+    if (out_capture_expression_count) {
+        *out_capture_expression_count = 0u;
+    }
+
+    if (!consume(p, TOKEN_LPAREN, "'('")) {
+        return 0;
+    }
+    if (check(p, TOKEN_RPAREN)) {
+        advance(p);
+        return 1;
+    }
+
+    for (;;) {
+        const Token *name_tok;
+        AstExpression *expr = NULL;
+        char *name_copy = NULL;
+        size_t name_length;
+        char **new_names;
+        AstExpression **new_exprs;
+        size_t next_capacity;
+
+        if (!consume_token(p, TOKEN_IDENTIFIER, "capture name", &name_tok)) {
+            goto fail;
+        }
+        if (!consume(p, TOKEN_ASSIGN, "'='")) {
+            goto fail;
+        }
+        if (!parse_initializer_expression(p, &expr, name_tok)) {
+            goto fail;
+        }
+
+        if (capture_count == capture_capacity) {
+            if (!parser_next_growth_capacity(capture_capacity, 4u, sizeof(char *), &next_capacity)) {
+                set_error(p, name_tok, "out of memory growing capture list");
+                goto fail;
+            }
+            new_names = (char **)realloc(capture_names, next_capacity * sizeof(char *));
+            if (!new_names) {
+                set_error(p, name_tok, "out of memory growing capture list");
+                goto fail;
+            }
+            new_exprs = (AstExpression **)realloc(capture_exprs, next_capacity * sizeof(AstExpression *));
+            if (!new_exprs) {
+                set_error(p, name_tok, "out of memory growing capture list");
+                goto fail;
+            }
+            capture_names = new_names;
+            capture_exprs = new_exprs;
+            capture_capacity = next_capacity;
+        }
+
+        name_length = name_tok->length;
+        name_copy = (char *)malloc(name_length + 1u);
+        if (!name_copy) {
+            set_error(p, name_tok, "out of memory copying capture name");
+            goto fail;
+        }
+        memcpy(name_copy, name_tok->lexeme, name_length);
+        name_copy[name_length] = '\0';
+        capture_names[capture_count] = name_copy;
+        capture_exprs[capture_count] = expr;
+        capture_count++;
+
+        if (match(p, TOKEN_COMMA)) {
+            continue;
+        }
+        break;
+    }
+
+    if (!consume(p, TOKEN_RPAREN, "')'")) {
+        goto fail;
+    }
+
+    if (out_capture_names) {
+        *out_capture_names = capture_names;
+    } else {
+        free_name_array(capture_names, capture_count);
+    }
+    if (out_capture_name_count) {
+        *out_capture_name_count = capture_count;
+    }
+    if (out_capture_expressions) {
+        *out_capture_expressions = capture_exprs;
+    } else {
+        free_ast_expression_array(capture_exprs, capture_count);
+    }
+    if (out_capture_expression_count) {
+        *out_capture_expression_count = capture_count;
+    }
+    return 1;
+
+fail:
+    free_name_array(capture_names, capture_count);
+    free_ast_expression_array(capture_exprs, capture_count);
+    return 0;
+}
+
+static int parse_fndefer_statement(Parser *p,
+    ParserLocalControl *out_local_control,
+    AstStatement **out_statement) {
+    const Token *defer_tok = previous(p);
+    AstStatement *payload_stmt = NULL;
+    AstStatement *defer_stmt = NULL;
+    ParserLocalControl payload_control;
+
+    parser_local_control_set(out_local_control, 1, 0);
+    if (out_statement) {
+        *out_statement = NULL;
+    }
+
+    if (!parse_statement_with_local_control(p, &payload_control, out_statement ? &payload_stmt : NULL)) {
+        return 0;
+    }
+
+    if (out_statement) {
+        defer_stmt = alloc_ast_statement(p, AST_STMT_FNDEFER, defer_tok);
+        if (!defer_stmt) {
+            ast_statement_free(payload_stmt);
+            return 0;
+        }
+        defer_stmt->children = (AstStatement **)calloc(1u, sizeof(AstStatement *));
+        if (!defer_stmt->children) {
+            ast_statement_free(defer_stmt);
+            ast_statement_free(payload_stmt);
+            set_error(p, defer_tok, "out of memory allocating function-exit defer statement");
+            return 0;
+        }
+        defer_stmt->children[0] = payload_stmt;
+        defer_stmt->child_count = 1u;
+        defer_stmt->extension_origin = AST_EXTENSION_ORIGIN_FNDEFER;
+        *out_statement = defer_stmt;
+    }
+
     return 1;
 }
 
@@ -1194,6 +1474,36 @@ static int parse_statement_with_local_control(Parser *p,
         }
         return ok;
     }
+    if (match(p, TOKEN_KW_FNDEFER)) {
+        AstStatement *stmt = NULL;
+
+        ok = parse_fndefer_statement(p,
+            &local_control,
+            out_statement ? &stmt : NULL);
+        leave_statement_recursion(p);
+        if (ok) {
+            parser_local_control_set(out_local_control, 1, 0);
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
+        return ok;
+    }
+    if (match(p, TOKEN_KW_CAPDEFER)) {
+        AstStatement *stmt = NULL;
+
+        ok = parse_capdefer_statement(p,
+            &local_control,
+            out_statement ? &stmt : NULL);
+        leave_statement_recursion(p);
+        if (ok) {
+            parser_local_control_set(out_local_control, 1, 0);
+        }
+        if (ok && out_statement) {
+            *out_statement = stmt;
+        }
+        return ok;
+    }
     if (match(p, TOKEN_KW_UNLESS)) {
         AstStatement *stmt = NULL;
 
@@ -1313,11 +1623,14 @@ static int parse_declaration(Parser *p,
     int *out_declaration_is_const,
     char ***out_decl_names,
     size_t *out_decl_name_count,
+    int **out_decl_value_kinds,
+    char ***out_decl_type_names,
     size_t **out_decl_array_ranks,
     AstExpression ****out_decl_array_extent_exprs,
     AstExpression ***out_decl_initializer_exprs,
     size_t *out_decl_initializer_expr_count) {
     const Token *ident = NULL;
+    const Token *struct_type_tok = NULL;
     AstExpression **array_extent_exprs = NULL;
     size_t array_rank = 0u;
     int declaration_is_const = 0;
@@ -1326,6 +1639,10 @@ static int parse_declaration(Parser *p,
     char **decl_names = NULL;
     size_t decl_name_count = 0;
     size_t decl_name_capacity = 0;
+    int *decl_value_kinds = NULL;
+    size_t decl_value_kind_capacity = 0;
+    char **decl_type_names = NULL;
+    size_t decl_type_name_capacity = 0;
     size_t *decl_array_ranks = NULL;
     size_t decl_array_rank_capacity = 0;
     AstExpression ***decl_array_extent_exprs = NULL;
@@ -1333,12 +1650,20 @@ static int parse_declaration(Parser *p,
     AstExpression **decl_initializer_exprs = NULL;
     size_t decl_initializer_expr_count = 0;
     size_t decl_initializer_expr_capacity = 0;
+    int declaration_value_kind = AST_DECLARATION_VALUE_INT;
+    char *declaration_type_name = NULL;
 
     if (out_decl_names) {
         *out_decl_names = NULL;
     }
     if (out_decl_name_count) {
         *out_decl_name_count = 0;
+    }
+    if (out_decl_value_kinds) {
+        *out_decl_value_kinds = NULL;
+    }
+    if (out_decl_type_names) {
+        *out_decl_type_names = NULL;
     }
     if (out_decl_array_ranks) {
         *out_decl_array_ranks = NULL;
@@ -1359,7 +1684,39 @@ static int parse_declaration(Parser *p,
     if (match(p, TOKEN_KW_CONST)) {
         declaration_is_const = 1;
     }
-    if (!consume(p, TOKEN_KW_INT, "'int'")) {
+    if (match(p, TOKEN_KW_INT)) {
+        declaration_value_kind = AST_DECLARATION_VALUE_INT;
+    } else if (match(p, TOKEN_KW_FLOAT)) {
+        declaration_value_kind = AST_DECLARATION_VALUE_FLOAT;
+    } else if (match(p, TOKEN_KW_PAIR)) {
+        declaration_value_kind = AST_DECLARATION_VALUE_PAIR;
+    } else if (match(p, TOKEN_KW_STRUCT)) {
+        declaration_value_kind = AST_DECLARATION_VALUE_STRUCT;
+        if (!consume_token(p, TOKEN_IDENTIFIER, "struct type name", &struct_type_tok)) {
+            return 0;
+        }
+        declaration_type_name = copy_token_identifier_lexeme(struct_type_tok);
+        if (!declaration_type_name) {
+            set_error(p,
+                struct_type_tok ? struct_type_tok : peek(p),
+                "Out of memory while building AST identifier metadata");
+            return 0;
+        }
+    } else {
+        if (!consume(p, TOKEN_KW_INT, "'int', 'float', 'pair', or 'struct <name>'")) {
+            return 0;
+        }
+        declaration_value_kind = AST_DECLARATION_VALUE_INT;
+    }
+    if (top_level_program &&
+        (declaration_value_kind == AST_DECLARATION_VALUE_PAIR ||
+            declaration_value_kind == AST_DECLARATION_VALUE_STRUCT)) {
+        set_error(p,
+            ident ? ident : previous(p),
+            declaration_value_kind == AST_DECLARATION_VALUE_PAIR
+                ? "'pair' top-level declarations are not supported in this extension slice"
+                : "'struct' object top-level declarations are not supported in this extension slice");
+        free(declaration_type_name);
         return 0;
     }
     if (!parse_init_declarator(p,
@@ -1382,6 +1739,7 @@ static int parse_declaration(Parser *p,
             external_initializer_expr,
             ident)) {
             free_name_array(decl_names, decl_name_count);
+            free(declaration_type_name);
             free_ast_expression_array(array_extent_exprs, array_rank);
             free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
             free(decl_array_ranks);
@@ -1405,6 +1763,35 @@ static int parse_declaration(Parser *p,
             free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
             return 0;
         }
+        if (!append_int_array_item(p,
+                &decl_value_kinds,
+                decl_name_count - 1u,
+                &decl_value_kind_capacity,
+                declaration_value_kind,
+                ident)) {
+            free_name_array(decl_names, decl_name_count);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free(decl_value_kinds);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        if (!append_nullable_name_array_item(p,
+                &decl_type_names,
+                decl_name_count - 1u,
+                &decl_type_name_capacity,
+                declaration_type_name,
+                struct_type_tok ? struct_type_tok : ident)) {
+            free_name_array(decl_names, decl_name_count);
+            free(decl_value_kinds);
+            free_ast_expression_array(array_extent_exprs, array_rank);
+            free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+            free(decl_array_ranks);
+            free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+            return 0;
+        }
+        declaration_type_name = NULL;
         if (!append_size_t_array_item(p,
                 &decl_array_ranks,
                 decl_name_count - 1u,
@@ -1412,6 +1799,7 @@ static int parse_declaration(Parser *p,
                 array_rank,
                 ident)) {
             free_name_array(decl_names, decl_name_count);
+            free(declaration_type_name);
             free_ast_expression_array(array_extent_exprs, array_rank);
             free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
             free(decl_array_ranks);
@@ -1446,6 +1834,11 @@ static int parse_declaration(Parser *p,
         top_level_program->externals[top_level_program->count - 1].declaration_array_rank = array_rank;
         top_level_program->externals[top_level_program->count - 1].declaration_array_extent_exprs =
             array_extent_exprs;
+        top_level_program->externals[top_level_program->count - 1].declaration_value_kind =
+            declaration_value_kind;
+        top_level_program->externals[top_level_program->count - 1].declaration_type_name =
+            declaration_type_name;
+        declaration_type_name = NULL;
         top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
         top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
         top_level_program->externals[top_level_program->count - 1].declaration_initializer =
@@ -1485,11 +1878,11 @@ static int parse_declaration(Parser *p,
         }
         if (out_decl_names) {
             char *name_copy = copy_token_identifier_lexeme(ident);
-            if (!name_copy || !append_name_array_item(p,
-                &decl_names,
-                &decl_name_count,
-                &decl_name_capacity,
-                name_copy,
+        if (!name_copy || !append_name_array_item(p,
+            &decl_names,
+            &decl_name_count,
+            &decl_name_capacity,
+            name_copy,
                 ident)) {
                 free_name_array(decl_names, decl_name_count);
                 free_ast_expression_array(array_extent_exprs, array_rank);
@@ -1498,6 +1891,39 @@ static int parse_declaration(Parser *p,
                 free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
                 return 0;
             }
+            if (!append_int_array_item(p,
+                    &decl_value_kinds,
+                    decl_name_count - 1u,
+                    &decl_value_kind_capacity,
+                    declaration_value_kind,
+                    ident)) {
+                free_name_array(decl_names, decl_name_count);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free(decl_value_kinds);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
+                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+                return 0;
+            }
+            if (!append_nullable_name_array_item(p,
+                    &decl_type_names,
+                    decl_name_count - 1u,
+                    &decl_type_name_capacity,
+                    declaration_type_name
+                        ? declaration_type_name
+                        : (declaration_value_kind == AST_DECLARATION_VALUE_STRUCT && struct_type_tok
+                                ? copy_token_identifier_lexeme(struct_type_tok)
+                                : NULL),
+                    struct_type_tok ? struct_type_tok : ident)) {
+                free_name_array(decl_names, decl_name_count);
+                free(decl_value_kinds);
+                free_ast_expression_array(array_extent_exprs, array_rank);
+                free_ast_expression_matrix(decl_array_extent_exprs, decl_array_ranks, decl_name_count);
+                free(decl_array_ranks);
+                free_ast_expression_array(decl_initializer_exprs, decl_initializer_expr_count);
+                return 0;
+            }
+            declaration_type_name = NULL;
             if (!append_size_t_array_item(p,
                     &decl_array_ranks,
                     decl_name_count - 1u,
@@ -1540,6 +1966,11 @@ static int parse_declaration(Parser *p,
             top_level_program->externals[top_level_program->count - 1].declaration_array_rank = array_rank;
             top_level_program->externals[top_level_program->count - 1].declaration_array_extent_exprs =
                 array_extent_exprs;
+            top_level_program->externals[top_level_program->count - 1].declaration_value_kind =
+                declaration_value_kind;
+            top_level_program->externals[top_level_program->count - 1].declaration_type_name =
+                declaration_type_name;
+            declaration_type_name = NULL;
             top_level_program->externals[top_level_program->count - 1].is_const_qualified = declaration_is_const;
             top_level_program->externals[top_level_program->count - 1].has_initializer = has_initializer;
             top_level_program->externals[top_level_program->count - 1].declaration_initializer =
@@ -1565,6 +1996,16 @@ static int parse_declaration(Parser *p,
         }
     } else {
         free_name_array(decl_names, decl_name_count);
+    }
+    if (out_decl_value_kinds) {
+        *out_decl_value_kinds = decl_value_kinds;
+    } else {
+        free(decl_value_kinds);
+    }
+    if (out_decl_type_names) {
+        *out_decl_type_names = decl_type_names;
+    } else {
+        free_name_array(decl_type_names, decl_name_count);
     }
     if (out_decl_array_extent_exprs) {
         *out_decl_array_extent_exprs = decl_array_extent_exprs;
@@ -1596,8 +2037,11 @@ static int parse_parameter_list(Parser *p,
     size_t *out_param_count,
     int *out_has_unnamed_parameter,
     char ***out_parameter_names,
+    int **out_parameter_value_kinds,
     size_t **out_parameter_array_ranks,
     AstExpression ****out_parameter_array_extent_exprs,
+    AstFunctionReturnType **out_parameter_function_return_types,
+    size_t **out_parameter_function_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns) {
@@ -1607,10 +2051,16 @@ static int parse_parameter_list(Parser *p,
     size_t *parameter_array_ranks = NULL;
     AstExpression ***parameter_array_extent_exprs = NULL;
     size_t parameter_array_extent_capacity = 0;
+    int *parameter_value_kinds = NULL;
+    AstFunctionReturnType *parameter_function_return_types = NULL;
+    size_t *parameter_function_parameter_counts = NULL;
     int *parameter_is_const = NULL;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_value_kinds != NULL) ||
         (out_parameter_array_ranks != NULL) ||
+        (out_parameter_function_return_types != NULL) ||
+        (out_parameter_function_parameter_counts != NULL) ||
         (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
@@ -1627,11 +2077,20 @@ static int parse_parameter_list(Parser *p,
     if (out_parameter_names) {
         *out_parameter_names = NULL;
     }
+    if (out_parameter_value_kinds) {
+        *out_parameter_value_kinds = NULL;
+    }
     if (out_parameter_array_ranks) {
         *out_parameter_array_ranks = NULL;
     }
     if (out_parameter_array_extent_exprs) {
         *out_parameter_array_extent_exprs = NULL;
+    }
+    if (out_parameter_function_return_types) {
+        *out_parameter_function_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_counts) {
+        *out_parameter_function_parameter_counts = NULL;
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
@@ -1647,11 +2106,20 @@ static int parse_parameter_list(Parser *p,
         if (out_parameter_names) {
             *out_parameter_names = parameter_names;
         }
+        if (out_parameter_value_kinds) {
+            *out_parameter_value_kinds = parameter_value_kinds;
+        }
         if (out_parameter_array_ranks) {
             *out_parameter_array_ranks = parameter_array_ranks;
         }
         if (out_parameter_array_extent_exprs) {
             *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
+        }
+        if (out_parameter_function_return_types) {
+            *out_parameter_function_return_types = parameter_function_return_types;
+        }
+        if (out_parameter_function_parameter_counts) {
+            *out_parameter_function_parameter_counts = parameter_function_parameter_counts;
         }
         if (out_parameter_is_const) {
             *out_parameter_is_const = parameter_is_const;
@@ -1673,15 +2141,29 @@ static int parse_parameter_list(Parser *p,
         AstExpression **parameter_extent_exprs = NULL;
         size_t parameter_extent_capacity = 0u;
         size_t parameter_array_rank = 0u;
+        AstFunctionReturnType parameter_decl_type = AST_FUNCTION_RETURN_INT;
+        int parameter_value_kind = AST_PARAMETER_VALUE_INT;
+        AstFunctionReturnType parameter_function_return_type = AST_FUNCTION_RETURN_INT;
+        size_t parameter_function_parameter_count = 0u;
 
         if (match(p, TOKEN_KW_CONST)) {
             parameter_is_const_flag = 1;
         }
-        if (!consume(p, TOKEN_KW_INT, "'int'")) {
+        if (match(p, TOKEN_KW_INT)) {
+            parameter_decl_type = AST_FUNCTION_RETURN_INT;
+        } else if (match(p, TOKEN_KW_FLOAT)) {
+            parameter_decl_type = AST_FUNCTION_RETURN_FLOAT;
+        } else if (match(p, TOKEN_KW_VOID)) {
+            parameter_decl_type = AST_FUNCTION_RETURN_VOID;
+        } else {
+            consume(p, TOKEN_KW_INT, "'int', 'float', or 'void'");
             free_name_array(parameter_names, count);
+            free(parameter_value_kinds);
             free(parameter_is_const);
             free(parameter_name_lines);
             free(parameter_name_columns);
+            free(parameter_function_return_types);
+            free(parameter_function_parameter_counts);
             return 0;
         }
         /* C-style prototypes may omit parameter names: int f(int); */
@@ -1689,7 +2171,80 @@ static int parse_parameter_list(Parser *p,
             consume_token(p, TOKEN_IDENTIFIER, "identifier", &parameter_name_tok);
             parameter_line = parameter_name_tok->line;
             parameter_column = parameter_name_tok->column;
+            if (check(p, TOKEN_LPAREN)) {
+                size_t nested_param_count = 0u;
+
+                advance(p);
+                if (!parse_parameter_list(p,
+                        &nested_param_count,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL)) {
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    return 0;
+                }
+                if (!consume(p, TOKEN_RPAREN, "')'")) {
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    return 0;
+                }
+                parameter_value_kind = AST_PARAMETER_VALUE_FUNCTION;
+                parameter_function_return_type = parameter_decl_type;
+                parameter_function_parameter_count = nested_param_count;
+            } else if (parameter_decl_type == AST_FUNCTION_RETURN_FLOAT) {
+                parameter_value_kind = AST_PARAMETER_VALUE_FLOAT;
+            } else if (parameter_decl_type == AST_FUNCTION_RETURN_VOID) {
+                set_error(p,
+                    parameter_name_tok,
+                    "Expected function declarator '(...)' after void-typed parameter name");
+                free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
+                free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                free(parameter_array_ranks);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
+                return 0;
+            }
         } else {
+            if (parameter_decl_type == AST_FUNCTION_RETURN_VOID) {
+                set_error(p, peek(p), "Expected identifier after 'void' in parameter list");
+                free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
+                free(parameter_is_const);
+                free(parameter_name_lines);
+                free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
+                return 0;
+            }
+            if (parameter_decl_type == AST_FUNCTION_RETURN_FLOAT) {
+                parameter_value_kind = AST_PARAMETER_VALUE_FLOAT;
+            }
             if (out_has_unnamed_parameter) {
                 *out_has_unnamed_parameter = 1;
             }
@@ -1701,12 +2256,15 @@ static int parse_parameter_list(Parser *p,
             if (!check(p, TOKEN_RBRACKET)) {
                 if (!parse_expression(p)) {
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                     free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
                 if (!build_expression_ast_from_slice(p,
@@ -1715,24 +2273,30 @@ static int parse_parameter_list(Parser *p,
                         &extent_expr,
                         parameter_name_tok ? parameter_name_tok : peek(p))) {
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                     free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
             }
             if (!consume(p, TOKEN_RBRACKET, "']'")) {
                 free_name_array(parameter_names, count);
                 parser_ast_expression_free(extent_expr);
+                free(parameter_value_kinds);
                 free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                 free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                 free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
                 return 0;
             }
             if (!append_ast_expression_slot(p,
@@ -1742,12 +2306,15 @@ static int parse_parameter_list(Parser *p,
                     extent_expr,
                     parameter_name_tok ? parameter_name_tok : peek(p))) {
                 free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
                 free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                 free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                 free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
                 return 0;
             }
         }
@@ -1761,11 +2328,14 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok,
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
             }
@@ -1776,13 +2346,43 @@ static int parse_parameter_list(Parser *p,
                 parameter_name_copy,
                 parameter_name_tok)) {
                 free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
                 free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                 free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                 free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
                 return 0;
+            }
+            if (out_parameter_value_kinds) {
+                int *new_parameter_value_kinds;
+
+                if (!parameter_value_kinds) {
+                    new_parameter_value_kinds = (int *)malloc(name_capacity * sizeof(int));
+                } else {
+                    new_parameter_value_kinds = (int *)realloc(parameter_value_kinds, name_capacity * sizeof(int));
+                }
+                if (!new_parameter_value_kinds) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    return 0;
+                }
+                parameter_value_kinds = new_parameter_value_kinds;
+                parameter_value_kinds[count - 1] = parameter_value_kind;
             }
             if (!append_size_t_array_item(p,
                     &parameter_array_ranks,
@@ -1791,12 +2391,15 @@ static int parse_parameter_list(Parser *p,
                     parameter_array_rank,
                     parameter_name_tok)) {
                 free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
                 free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                 free_ast_expression_array(parameter_extent_exprs, parameter_array_rank);
                 free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
                 return 0;
             }
             if (!append_ast_expression_list_slot(p,
@@ -1806,14 +2409,73 @@ static int parse_parameter_list(Parser *p,
                     parameter_extent_exprs,
                     parameter_name_tok ? parameter_name_tok : peek(p))) {
                 free_name_array(parameter_names, count);
+                free(parameter_value_kinds);
                 free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                 free(parameter_array_ranks);
                 free(parameter_is_const);
                 free(parameter_name_lines);
                 free(parameter_name_columns);
+                free(parameter_function_return_types);
+                free(parameter_function_parameter_counts);
                 return 0;
             }
             parameter_extent_exprs = NULL;
+            if (out_parameter_function_return_types) {
+                AstFunctionReturnType *new_parameter_function_return_types;
+
+                if (!parameter_function_return_types) {
+                    new_parameter_function_return_types =
+                        (AstFunctionReturnType *)malloc(name_capacity * sizeof(AstFunctionReturnType));
+                } else {
+                    new_parameter_function_return_types =
+                        (AstFunctionReturnType *)realloc(parameter_function_return_types,
+                            name_capacity * sizeof(AstFunctionReturnType));
+                }
+                if (!new_parameter_function_return_types) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    return 0;
+                }
+                parameter_function_return_types = new_parameter_function_return_types;
+                parameter_function_return_types[count - 1] = parameter_function_return_type;
+            }
+            if (out_parameter_function_parameter_counts) {
+                size_t *new_parameter_function_parameter_counts;
+
+                if (!parameter_function_parameter_counts) {
+                    new_parameter_function_parameter_counts = (size_t *)malloc(name_capacity * sizeof(size_t));
+                } else {
+                    new_parameter_function_parameter_counts =
+                        (size_t *)realloc(parameter_function_parameter_counts, name_capacity * sizeof(size_t));
+                }
+                if (!new_parameter_function_parameter_counts) {
+                    set_error(p,
+                        parameter_name_tok ? parameter_name_tok : peek(p),
+                        "Out of memory while building function parameter metadata");
+                    free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
+                    free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+                    free(parameter_array_ranks);
+                    free(parameter_is_const);
+                    free(parameter_name_lines);
+                    free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
+                    return 0;
+                }
+                parameter_function_parameter_counts = new_parameter_function_parameter_counts;
+                parameter_function_parameter_counts[count - 1] = parameter_function_parameter_count;
+            }
             if (out_parameter_is_const) {
                 int *new_parameter_is_const;
 
@@ -1827,11 +2489,14 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
                 parameter_is_const = new_parameter_is_const;
@@ -1850,11 +2515,14 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
                 parameter_name_lines = new_lines;
@@ -1874,11 +2542,14 @@ static int parse_parameter_list(Parser *p,
                         parameter_name_tok ? parameter_name_tok : peek(p),
                         "Out of memory while building function parameter metadata");
                     free_name_array(parameter_names, count);
+                    free(parameter_value_kinds);
                     free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
                     free(parameter_array_ranks);
                     free(parameter_is_const);
                     free(parameter_name_lines);
                     free(parameter_name_columns);
+                    free(parameter_function_return_types);
+                    free(parameter_function_parameter_counts);
                     return 0;
                 }
                 parameter_name_columns = new_columns;
@@ -1905,6 +2576,11 @@ static int parse_parameter_list(Parser *p,
     } else {
         free_name_array(parameter_names, count);
     }
+    if (out_parameter_value_kinds) {
+        *out_parameter_value_kinds = parameter_value_kinds;
+    } else {
+        free(parameter_value_kinds);
+    }
     if (out_parameter_array_ranks) {
         *out_parameter_array_ranks = parameter_array_ranks;
     } else {
@@ -1914,6 +2590,16 @@ static int parse_parameter_list(Parser *p,
         *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
     } else {
         free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, count);
+    }
+    if (out_parameter_function_return_types) {
+        *out_parameter_function_return_types = parameter_function_return_types;
+    } else {
+        free(parameter_function_return_types);
+    }
+    if (out_parameter_function_parameter_counts) {
+        *out_parameter_function_parameter_counts = parameter_function_parameter_counts;
+    } else {
+        free(parameter_function_parameter_counts);
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
@@ -1943,8 +2629,11 @@ static void parsed_function_signature_init(ParsedFunctionSignature *signature) {
     signature->name_tok = NULL;
     signature->parameter_count = 0;
     signature->parameter_names = NULL;
+    signature->parameter_value_kinds = NULL;
     signature->parameter_array_ranks = NULL;
     signature->parameter_array_extent_exprs = NULL;
+    signature->parameter_function_return_types = NULL;
+    signature->parameter_function_parameter_counts = NULL;
     signature->parameter_is_const = NULL;
     signature->parameter_name_lines = NULL;
     signature->parameter_name_columns = NULL;
@@ -1957,10 +2646,13 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
     }
 
     free_name_array(signature->parameter_names, signature->parameter_count);
+    free(signature->parameter_value_kinds);
     free_ast_expression_matrix(signature->parameter_array_extent_exprs,
         signature->parameter_array_ranks,
         signature->parameter_count);
     free(signature->parameter_array_ranks);
+    free(signature->parameter_function_return_types);
+    free(signature->parameter_function_parameter_counts);
     free(signature->parameter_is_const);
     free(signature->parameter_name_lines);
     free(signature->parameter_name_columns);
@@ -1968,14 +2660,20 @@ static void parsed_function_signature_release(ParsedFunctionSignature *signature
 }
 
 static void parser_commit_parameter_names(char ***out_parameter_names,
+    int **out_parameter_value_kinds,
     size_t **out_parameter_array_ranks,
     AstExpression ****out_parameter_array_extent_exprs,
+    AstFunctionReturnType **out_parameter_function_return_types,
+    size_t **out_parameter_function_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
     char **parameter_names,
+    int *parameter_value_kinds,
     size_t *parameter_array_ranks,
     AstExpression ***parameter_array_extent_exprs,
+    AstFunctionReturnType *parameter_function_return_types,
+    size_t *parameter_function_parameter_counts,
     int *parameter_is_const,
     int *parameter_name_lines,
     int *parameter_name_columns,
@@ -1984,6 +2682,11 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
         *out_parameter_names = parameter_names;
     } else {
         free_name_array(parameter_names, parameter_count);
+    }
+    if (out_parameter_value_kinds) {
+        *out_parameter_value_kinds = parameter_value_kinds;
+    } else {
+        free(parameter_value_kinds);
     }
     if (out_parameter_array_ranks) {
         *out_parameter_array_ranks = parameter_array_ranks;
@@ -1994,6 +2697,16 @@ static void parser_commit_parameter_names(char ***out_parameter_names,
         *out_parameter_array_extent_exprs = parameter_array_extent_exprs;
     } else {
         free_ast_expression_matrix(parameter_array_extent_exprs, parameter_array_ranks, parameter_count);
+    }
+    if (out_parameter_function_return_types) {
+        *out_parameter_function_return_types = parameter_function_return_types;
+    } else {
+        free(parameter_function_return_types);
+    }
+    if (out_parameter_function_parameter_counts) {
+        *out_parameter_function_parameter_counts = parameter_function_parameter_counts;
+    } else {
+        free(parameter_function_parameter_counts);
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = parameter_is_const;
@@ -2020,10 +2733,12 @@ static int parse_function_external_signature(Parser *p,
     parser_consume_optional_const_qualifier(p);
     if (match(p, TOKEN_KW_INT)) {
         out_signature->return_type = AST_FUNCTION_RETURN_INT;
+    } else if (match(p, TOKEN_KW_FLOAT)) {
+        out_signature->return_type = AST_FUNCTION_RETURN_FLOAT;
     } else if (match(p, TOKEN_KW_VOID)) {
         out_signature->return_type = AST_FUNCTION_RETURN_VOID;
     } else {
-        consume(p, TOKEN_KW_INT, "'int' or 'void'");
+        consume(p, TOKEN_KW_INT, "'int', 'float', or 'void'");
         return 0;
     }
     if (!consume_token(p, TOKEN_IDENTIFIER, "identifier", &out_signature->name_tok)) {
@@ -2036,8 +2751,11 @@ static int parse_function_external_signature(Parser *p,
         &out_signature->parameter_count,
         &out_signature->has_unnamed_parameter,
         capture_parameter_names ? &out_signature->parameter_names : NULL,
+        capture_parameter_names ? &out_signature->parameter_value_kinds : NULL,
         capture_parameter_names ? &out_signature->parameter_array_ranks : NULL,
         capture_parameter_names ? &out_signature->parameter_array_extent_exprs : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_return_types : NULL,
+        capture_parameter_names ? &out_signature->parameter_function_parameter_counts : NULL,
         capture_parameter_names ? &out_signature->parameter_is_const : NULL,
         capture_parameter_names ? &out_signature->parameter_name_lines : NULL,
         capture_parameter_names ? &out_signature->parameter_name_columns : NULL)) {
@@ -2091,8 +2809,11 @@ static int parse_function_external(Parser *p,
     AstFunctionReturnType *out_return_type,
     size_t *out_parameter_count,
     char ***out_parameter_names,
+    int **out_parameter_value_kinds,
     size_t **out_parameter_array_ranks,
     AstExpression ****out_parameter_array_extent_exprs,
+    AstFunctionReturnType **out_parameter_function_return_types,
+    size_t **out_parameter_function_parameter_counts,
     int **out_parameter_is_const,
     int **out_parameter_name_lines,
     int **out_parameter_name_columns,
@@ -2102,7 +2823,10 @@ static int parse_function_external(Parser *p,
     ParsedFunctionSignature signature;
     int capture_parameter_metadata =
         (out_parameter_names != NULL) ||
+        (out_parameter_value_kinds != NULL) ||
         (out_parameter_array_ranks != NULL) ||
+        (out_parameter_function_return_types != NULL) ||
+        (out_parameter_function_parameter_counts != NULL) ||
         (out_parameter_is_const != NULL) ||
         (out_parameter_name_lines != NULL) ||
         (out_parameter_name_columns != NULL);
@@ -2120,11 +2844,20 @@ static int parse_function_external(Parser *p,
     if (out_parameter_names) {
         *out_parameter_names = NULL;
     }
+    if (out_parameter_value_kinds) {
+        *out_parameter_value_kinds = NULL;
+    }
     if (out_parameter_array_ranks) {
         *out_parameter_array_ranks = NULL;
     }
     if (out_parameter_array_extent_exprs) {
         *out_parameter_array_extent_exprs = NULL;
+    }
+    if (out_parameter_function_return_types) {
+        *out_parameter_function_return_types = NULL;
+    }
+    if (out_parameter_function_parameter_counts) {
+        *out_parameter_function_parameter_counts = NULL;
     }
     if (out_parameter_is_const) {
         *out_parameter_is_const = NULL;
@@ -2163,21 +2896,30 @@ static int parse_function_external(Parser *p,
 
     if (match(p, TOKEN_SEMICOLON)) {
         parser_commit_parameter_names(out_parameter_names,
+            out_parameter_value_kinds,
             out_parameter_array_ranks,
             out_parameter_array_extent_exprs,
+            out_parameter_function_return_types,
+            out_parameter_function_parameter_counts,
             out_parameter_is_const,
             out_parameter_name_lines,
             out_parameter_name_columns,
             signature.parameter_names,
+            signature.parameter_value_kinds,
             signature.parameter_array_ranks,
             signature.parameter_array_extent_exprs,
+            signature.parameter_function_return_types,
+            signature.parameter_function_parameter_counts,
             signature.parameter_is_const,
             signature.parameter_name_lines,
             signature.parameter_name_columns,
             signature.parameter_count);
         signature.parameter_names = NULL;
+        signature.parameter_value_kinds = NULL;
         signature.parameter_array_ranks = NULL;
         signature.parameter_array_extent_exprs = NULL;
+        signature.parameter_function_return_types = NULL;
+        signature.parameter_function_parameter_counts = NULL;
         signature.parameter_is_const = NULL;
         signature.parameter_name_lines = NULL;
         signature.parameter_name_columns = NULL;
@@ -2197,21 +2939,30 @@ static int parse_function_external(Parser *p,
             out_return_statement_count);
         if (body_ok) {
             parser_commit_parameter_names(out_parameter_names,
+                out_parameter_value_kinds,
                 out_parameter_array_ranks,
                 out_parameter_array_extent_exprs,
+                out_parameter_function_return_types,
+                out_parameter_function_parameter_counts,
                 out_parameter_is_const,
                 out_parameter_name_lines,
                 out_parameter_name_columns,
                 signature.parameter_names,
+                signature.parameter_value_kinds,
                 signature.parameter_array_ranks,
                 signature.parameter_array_extent_exprs,
+                signature.parameter_function_return_types,
+                signature.parameter_function_parameter_counts,
                 signature.parameter_is_const,
                 signature.parameter_name_lines,
                 signature.parameter_name_columns,
                 signature.parameter_count);
             signature.parameter_names = NULL;
+            signature.parameter_value_kinds = NULL;
             signature.parameter_array_ranks = NULL;
             signature.parameter_array_extent_exprs = NULL;
+            signature.parameter_function_return_types = NULL;
+            signature.parameter_function_parameter_counts = NULL;
             signature.parameter_is_const = NULL;
             signature.parameter_name_lines = NULL;
             signature.parameter_name_columns = NULL;
@@ -2228,6 +2979,111 @@ static int parse_function_external(Parser *p,
         lexer_token_type_name(peek(p)->type));
     parsed_function_signature_release(&signature);
     return 0;
+}
+
+static int parser_ast_program_add_struct_type(Parser *p,
+    AstProgram *program,
+    const Token *name_tok,
+    char **field_names,
+    size_t field_count) {
+    AstStructType *new_types;
+    AstStructType *entry;
+    size_t next_capacity;
+
+    if (!program || !name_tok) {
+        free_name_array(field_names, field_count);
+        return 0;
+    }
+
+    if (program->struct_type_count == program->struct_type_capacity) {
+        if (!parser_next_growth_capacity(program->struct_type_capacity,
+                8,
+                sizeof(AstStructType),
+                &next_capacity)) {
+            set_error(p, name_tok, "Out of memory while building AST");
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+        new_types = (AstStructType *)realloc(program->struct_types, next_capacity * sizeof(AstStructType));
+        if (!new_types) {
+            set_error(p, name_tok, "Out of memory while building AST");
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+        program->struct_types = new_types;
+        program->struct_type_capacity = next_capacity;
+    }
+
+    entry = &program->struct_types[program->struct_type_count++];
+    entry->name = copy_token_identifier_lexeme(name_tok);
+    if (!entry->name) {
+        set_error(p, name_tok, "Out of memory while building AST");
+        --program->struct_type_count;
+        free_name_array(field_names, field_count);
+        return 0;
+    }
+    entry->name_length = name_tok->length;
+    entry->field_names = field_names;
+    entry->field_count = field_count;
+    return 1;
+}
+
+static int parse_struct_type_definition(Parser *p, AstProgram *out_program) {
+    const Token *struct_name_tok = NULL;
+    char **field_names = NULL;
+    size_t field_count = 0u;
+    size_t field_capacity = 0u;
+
+    if (!consume(p, TOKEN_KW_STRUCT, "'struct'")) {
+        return 0;
+    }
+    if (!consume_token(p, TOKEN_IDENTIFIER, "struct type name", &struct_name_tok)) {
+        return 0;
+    }
+    if (!consume(p, TOKEN_LBRACE, "'{'")) {
+        return 0;
+    }
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        const Token *field_name_tok = NULL;
+        char *field_name_copy = NULL;
+
+        if (!consume(p, TOKEN_KW_INT, "'int'")) {
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+        if (!consume_token(p, TOKEN_IDENTIFIER, "field name", &field_name_tok)) {
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+        field_name_copy = copy_token_identifier_lexeme(field_name_tok);
+        if (!field_name_copy || !append_name_array_item(
+                p,
+                &field_names,
+                &field_count,
+                &field_capacity,
+                field_name_copy,
+                field_name_tok)) {
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+        if (!consume(p, TOKEN_SEMICOLON, "';'")) {
+            free_name_array(field_names, field_count);
+            return 0;
+        }
+    }
+
+    if (!consume(p, TOKEN_RBRACE, "'}'") || !consume(p, TOKEN_SEMICOLON, "';'")) {
+        free_name_array(field_names, field_count);
+        return 0;
+    }
+
+    if (out_program) {
+        return parser_ast_program_add_struct_type(p, out_program, struct_name_tok, field_names, field_count);
+    }
+
+    free_name_array(field_names, field_count);
+    return 1;
 }
 
 static int parser_prepare(Parser *p, const TokenArray *tokens, ParserError *error) {
@@ -2276,8 +3132,11 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     AstFunctionReturnType external_return_type = AST_FUNCTION_RETURN_INT;
     size_t external_parameter_count = 0;
     char **external_parameter_names = NULL;
+    int *external_parameter_value_kinds = NULL;
     size_t *external_parameter_array_ranks = NULL;
     AstExpression ***external_parameter_array_extent_exprs = NULL;
+    AstFunctionReturnType *external_parameter_function_return_types = NULL;
+    size_t *external_parameter_function_parameter_counts = NULL;
     int *external_parameter_is_const = NULL;
     int *external_parameter_name_lines = NULL;
     int *external_parameter_name_columns = NULL;
@@ -2285,21 +3144,46 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     AstStatement *external_function_body = NULL;
     size_t external_return_statement_count = 0;
 
+    if (check(p, TOKEN_KW_STRUCT) &&
+        p->current + 2u < p->tokens->size &&
+        p->tokens->data[p->current + 1u].type == TOKEN_IDENTIFIER &&
+        p->tokens->data[p->current + 2u].type == TOKEN_LBRACE) {
+        return parse_struct_type_definition(p, out_program);
+    }
+
     if (!parse_function_external(p,
         out_program ? &external_name : NULL,
         out_program ? &external_return_type : NULL,
         out_program ? &external_parameter_count : NULL,
         out_program ? &external_parameter_names : NULL,
+        out_program ? &external_parameter_value_kinds : NULL,
         out_program ? &external_parameter_array_ranks : NULL,
         out_program ? &external_parameter_array_extent_exprs : NULL,
+        out_program ? &external_parameter_function_return_types : NULL,
+        out_program ? &external_parameter_function_parameter_counts : NULL,
         out_program ? &external_parameter_is_const : NULL,
         out_program ? &external_parameter_name_lines : NULL,
         out_program ? &external_parameter_name_columns : NULL,
         out_program ? &external_is_definition : NULL,
         out_program ? &external_function_body : NULL,
         out_program ? &external_return_statement_count : NULL)) {
+        if (check(p, TOKEN_KW_FLOAT)) {
+            set_error(p, peek(p), "'float' declarations are not supported in this extension slice");
+            return 0;
+        }
+        if (check(p, TOKEN_KW_PAIR)) {
+            set_error(p, peek(p), "'pair' parameters/returns are not supported in this extension slice");
+            return 0;
+        }
+        if (check(p, TOKEN_KW_STRUCT) &&
+            !(p->current + 2u < p->tokens->size &&
+              p->tokens->data[p->current + 1u].type == TOKEN_IDENTIFIER &&
+              p->tokens->data[p->current + 2u].type == TOKEN_LBRACE)) {
+            set_error(p, peek(p), "'struct' parameters/returns are not supported in this extension slice");
+            return 0;
+        }
         p->current = start;
-        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        return parse_declaration(p, out_program, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     }
 
     if (!out_program) {
@@ -2308,8 +3192,11 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
 
     if (!parser_ast_program_add_external(out_program, AST_EXTERNAL_FUNCTION, external_name)) {
         free_name_array(external_parameter_names, external_parameter_count);
+        free(external_parameter_value_kinds);
         free(external_parameter_array_ranks);
         free(external_parameter_array_extent_exprs);
+        free(external_parameter_function_return_types);
+        free(external_parameter_function_parameter_counts);
         free(external_parameter_is_const);
         free(external_parameter_name_lines);
         free(external_parameter_name_columns);
@@ -2321,9 +3208,14 @@ static int parse_translation_unit_external_or_declaration(Parser *p, AstProgram 
     out_program->externals[out_program->count - 1].parameter_count = external_parameter_count;
     out_program->externals[out_program->count - 1].function_return_type = external_return_type;
     out_program->externals[out_program->count - 1].parameter_names = external_parameter_names;
+    out_program->externals[out_program->count - 1].parameter_value_kinds = external_parameter_value_kinds;
     out_program->externals[out_program->count - 1].parameter_array_ranks = external_parameter_array_ranks;
     out_program->externals[out_program->count - 1].parameter_array_extent_exprs =
         external_parameter_array_extent_exprs;
+    out_program->externals[out_program->count - 1].parameter_function_return_types =
+        external_parameter_function_return_types;
+    out_program->externals[out_program->count - 1].parameter_function_parameter_counts =
+        external_parameter_function_parameter_counts;
     out_program->externals[out_program->count - 1].parameter_is_const = external_parameter_is_const;
     out_program->externals[out_program->count - 1].parameter_name_lines =
         external_parameter_name_lines;

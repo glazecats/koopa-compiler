@@ -20,12 +20,19 @@ static int value_ssa_reg_filter_match(const char *case_id) {
     return case_id && strstr(case_id, filter) != NULL;
 }
 
-static int value_ssa_reg_and(int ok, const char *case_id, int case_ok) {
+static int __attribute__((unused)) value_ssa_reg_and(int ok, const char *case_id, int case_ok) {
     if (!value_ssa_reg_filter_match(case_id)) {
         return ok;
     }
     return ok & case_ok;
 }
+
+static int build_value_ssa_perf_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error);
+static int build_value_ssa_default_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error);
 
 static int build_sample_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaGlobal *global = NULL;
@@ -310,6 +317,901 @@ static int build_lower_ir_diamond_store_indirect_phi_program(LowerIrProgram *pro
     }
 
     return 1;
+}
+
+static int build_float_transport_program(ValueSsaProgram *program, ValueSsaError *error) {
+    ValueSsaGlobal *global = NULL;
+    ValueSsaFunction *function = NULL;
+    ValueSsaBasicBlock *block = NULL;
+    ValueSsaInstruction instruction;
+    size_t param_local_id = 0u;
+    size_t value0 = 0u;
+
+    value_ssa_program_init(program);
+
+    if (!value_ssa_program_append_global(program, "g", &global, error) ||
+        !global ||
+        !value_ssa_program_append_function(program, "id", 1, &function, error) ||
+        !function ||
+        !value_ssa_function_append_local(function, "x", 1, &param_local_id, error) ||
+        !value_ssa_function_append_block(function, NULL, &block, error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    global->value_type = AST_FUNCTION_RETURN_FLOAT;
+    function->locals[param_local_id].value_type = AST_FUNCTION_RETURN_FLOAT;
+    value0 = value_ssa_function_allocate_value(function);
+    if (value0 == (size_t)-1) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = VALUE_SSA_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = value_ssa_value_id(value0);
+    instruction.as.load_slot = value_ssa_slot_local(param_local_id);
+    if (!value_ssa_block_append_instruction(block, &instruction, error) ||
+        !value_ssa_block_set_return(block, value_ssa_value_id(value0), error)) {
+        value_ssa_program_free(program);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int build_extension_float_transport_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ float x = 1.25; id(1.25); return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-SOURCE-TRANSPORT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_global_literal_runtime_init_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_global_identifier_runtime_init_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_global_call_runtime_init_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-GLOBAL-CALL-INIT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_return_global_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float get(){ return g; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-RETURN-GLOBAL setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_return_global_call_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float get(){ return id(g); }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-RETURN-GLOBAL-CALL setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_global_call_chain_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float getg(){ return wrap(g); }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_local_call_chain_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float bounce(float x){ float y; y = x; return wrap(y); }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-LOCAL-CALL-CHAIN setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_assignment_transport_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ float y; y = id(g); return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-ASSIGN-TRANSPORT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_if_condition_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-IF-COND setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_while_condition_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ while(g) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-WHILE-COND setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_float_for_condition_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ for(;g;) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-FOR-COND setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
 }
 
 static int build_lower_ir_scrambled_diamond_program(LowerIrProgram *program, LowerIrError *error) {
@@ -1555,7 +2457,7 @@ static int build_lower_ir_unique_pred_repeated_indirect_load_across_non_alias_lo
     return 1;
 }
 
-static int build_lower_ir_unique_pred_repeated_binary_chain_program(LowerIrProgram *program,
+static int __attribute__((unused)) build_lower_ir_unique_pred_repeated_binary_chain_program(LowerIrProgram *program,
     LowerIrError *error) {
     LowerIrGlobal *head = NULL;
     LowerIrFunction *function = NULL;
@@ -8166,7 +9068,7 @@ static int build_perf_phi_header_loop_invariant_indirect_load_store_barrier_prog
     return 1;
 }
 
-static int build_licm_header_invariant_indirect_load_program(ValueSsaProgram *program, ValueSsaError *error) {
+static int __attribute__((unused)) build_licm_header_invariant_indirect_load_program(ValueSsaProgram *program, ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *entry = NULL;
     ValueSsaBasicBlock *header = NULL;
@@ -8308,7 +9210,7 @@ static int build_licm_header_invariant_indirect_load_program(ValueSsaProgram *pr
     return 1;
 }
 
-static int build_licm_header_invariant_indirect_load_store_barrier_program(ValueSsaProgram *program,
+static int __attribute__((unused)) build_licm_header_invariant_indirect_load_store_barrier_program(ValueSsaProgram *program,
     ValueSsaError *error) {
     ValueSsaFunction *function = NULL;
     ValueSsaBasicBlock *entry = NULL;
@@ -13541,6 +14443,3718 @@ static int expect_dump(const char *case_id,
     return ok;
 }
 
+static int test_value_ssa_preserves_float_transport_metadata(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    if (!build_float_transport_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float") ||
+        !strstr(actual_text, "func id(x.0:float)")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT dump mismatch\nactual:\n%s\n",
+            actual_text);
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_float_transport_analysis_surface(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    ValueSsaCfgAnalysis cfg;
+    ValueSsaDefUseAnalysis def_use;
+    int ok = 1;
+
+    if (!build_float_transport_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT-ANALYSIS setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    value_ssa_cfg_analysis_init(&cfg);
+    value_ssa_def_use_analysis_init(&def_use);
+    if (!value_ssa_compute_cfg_analysis(&program.functions[0], &cfg, &error) ||
+        !value_ssa_compute_def_use_analysis(&program.functions[0], &def_use, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT-ANALYSIS query failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (cfg.block_count != 1u ||
+        !cfg.reachable[0] ||
+        def_use.value_count == 0u ||
+        def_use.use_counts[0] == 0u) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TRANSPORT-ANALYSIS mismatch\n");
+        ok = 0;
+    }
+
+cleanup:
+    value_ssa_def_use_analysis_free(&def_use);
+    value_ssa_cfg_analysis_free(&cfg);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_float_global_literal_analysis_surface(void) {
+    ValueSsaProgram program;
+    ValueSsaError error;
+    ValueSsaCfgAnalysis cfg;
+    ValueSsaDefUseAnalysis def_use;
+    const ValueSsaFunction *global_init = NULL;
+    const ValueSsaFunction *main_function = NULL;
+    size_t function_index;
+    int ok = 1;
+
+    if (!build_extension_float_global_literal_runtime_init_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+
+    if (program.global_count < 1u ||
+        program.globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !program.globals[0].has_runtime_initializer) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS global metadata mismatch\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    for (function_index = 0; function_index < program.function_count; ++function_index) {
+        if (program.functions[function_index].name &&
+            strcmp(program.functions[function_index].name, "__global.init") == 0) {
+            global_init = &program.functions[function_index];
+        } else if (program.functions[function_index].name &&
+            strcmp(program.functions[function_index].name, "main") == 0) {
+            main_function = &program.functions[function_index];
+        }
+    }
+
+    if (!global_init || !main_function) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS function lookup mismatch\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_cfg_analysis_init(&cfg);
+    value_ssa_def_use_analysis_init(&def_use);
+    if (!value_ssa_compute_cfg_analysis(global_init, &cfg, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS cfg query failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    if (cfg.block_count != 1u || !cfg.reachable[0]) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS cfg mismatch\n");
+        ok = 0;
+        goto cleanup;
+    }
+
+    value_ssa_cfg_analysis_free(&cfg);
+    value_ssa_cfg_analysis_init(&cfg);
+    if (!value_ssa_compute_cfg_analysis(main_function, &cfg, &error) ||
+        !value_ssa_compute_def_use_analysis(main_function, &def_use, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS main query failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    if (cfg.block_count != 1u ||
+        !cfg.reachable[0] ||
+        def_use.value_count != 1u ||
+        !def_use.has_def[0] ||
+        def_use.def_block_ids[0] != 0u) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS main mismatch\n");
+        ok = 0;
+    }
+
+cleanup:
+    value_ssa_def_use_analysis_free(&def_use);
+    value_ssa_cfg_analysis_free(&cfg);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_transport(void) {
+    return expect_dump("VALUE-SSA-FLOAT-SOURCE-TRANSPORT",
+        build_extension_float_transport_program,
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    store_local x.0, 1067450368\n"
+        "    ssa.0 = call id(1067450368)\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_global_literal_runtime_init(void) {
+    return expect_dump("VALUE-SSA-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT",
+        build_extension_float_global_literal_runtime_init_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_global_identifier_runtime_init(void) {
+    return expect_dump("VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT",
+        build_extension_float_global_identifier_runtime_init_program,
+        "global g.0:float\n"
+        "global h.1:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ssa.0 = load_global g.0\n"
+        "    store_global h.1, ssa.0\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_global_call_runtime_init(void) {
+    return expect_dump("VALUE-SSA-FLOAT-GLOBAL-CALL-INIT",
+        build_extension_float_global_call_runtime_init_program,
+        "global g.0:float\n"
+        "global h.1:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ssa.1 = call id(ssa.0)\n"
+        "    store_global h.1, ssa.1\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_return_global(void) {
+    return expect_dump("VALUE-SSA-FLOAT-RETURN-GLOBAL",
+        build_extension_float_return_global_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func get() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_return_global_call(void) {
+    return expect_dump("VALUE-SSA-FLOAT-RETURN-GLOBAL-CALL",
+        build_extension_float_return_global_call_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func get() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ssa.1 = call id(ssa.0)\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_global_call_chain(void) {
+    return expect_dump("VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN",
+        build_extension_float_global_call_chain_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func wrap(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = call id(ssa.0)\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func getg() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_global g.0\n"
+        "    ssa.1 = call wrap(ssa.0)\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_local_call_chain(void) {
+    return expect_dump("VALUE-SSA-FLOAT-LOCAL-CALL-CHAIN",
+        build_extension_float_local_call_chain_program,
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func wrap(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ssa.1 = call id(ssa.0)\n"
+        "    ret ssa.1\n"
+        "}\n"
+        "\n"
+        "func bounce(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    store_local y.1, ssa.0\n"
+        "    ssa.1 = load_local y.1\n"
+        "    ssa.2 = call wrap(ssa.1)\n"
+        "    ret ssa.2\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_lowers_extension_float_assignment_transport(void) {
+    return expect_dump("VALUE-SSA-FLOAT-ASSIGN-TRANSPORT",
+        build_extension_float_assignment_transport_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func id(x.0:float) {\n"
+        "  bb.0:\n"
+        "    ssa.0 = load_local x.0\n"
+        "    ret ssa.0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = call id(ssa.1)\n"
+        "    store_local y.0, ssa.2\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_default_pipeline_preserves_live_extension_float_assignment_transport(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float mainf(){ float y; y = id(g); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ASSIGN-LIVE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ASSIGN-LIVE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ASSIGN-LIVE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float\n") ||
+        !strstr(actual_text, "func mainf() {\n") ||
+        !strstr(actual_text, "ssa.0 = load_global g.0\n") ||
+        !strstr(actual_text, "ret ssa.0\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ASSIGN-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_parameter_forward_transport(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float forward(float x){ return id(x); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-FORWARD-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-FORWARD-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-FORWARD-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func forward(x.0:float) {\n") ||
+        !strstr(actual_text, "ssa.0 = load_local x.0\n") ||
+        !strstr(actual_text, "ret ssa.0\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-FORWARD-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_parameter_local_forward_transport(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float bounce(float x){ float y; y = x; return id(y); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-LOCAL-FORWARD-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-LOCAL-FORWARD-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-LOCAL-FORWARD-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func bounce(x.0:float) {\n") ||
+        !strstr(actual_text, "ssa.0 = load_local x.0\n") ||
+        !strstr(actual_text, "ret ssa.0\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-PARAM-LOCAL-FORWARD-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_global_identifier_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float\n") ||
+        !strstr(actual_text, "global h.1:float\n") ||
+        !strstr(actual_text, "store_global g.0, 1067450368\n") ||
+        !strstr(actual_text, "store_global h.1, 1067450368\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_global_call_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float\n") ||
+        !strstr(actual_text, "global h.1:float\n") ||
+        !strstr(actual_text, "func id(x.0:float) {\n") ||
+        !strstr(actual_text, "store_global g.0, 1067450368\n") ||
+        !strstr(actual_text, "store_global h.1, 1067450368\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_global_call_chain_transport(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float getg(){ return wrap(g); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float\n") ||
+        !strstr(actual_text, "func id(x.0:float) {\n") ||
+        !strstr(actual_text, "func wrap(x.0:float) {\n") ||
+        !strstr(actual_text, "func getg() {\n") ||
+        !strstr(actual_text, "ssa.0 = load_global g.0\n") ||
+        !strstr(actual_text, "ret ssa.0\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_logical_condition_composition(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(!g || (g && 1.25)) return g ? 1 : 0; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LOGICAL-COND-COMPOSE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LOGICAL-COND-COMPOSE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LOGICAL-COND-COMPOSE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float\n") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "and 1067450368, 2147483647\n") ||
+        !strstr(actual_text, "phi [bb.1: 1], [bb.2: 0]\n") ||
+        !strstr(actual_text, "ret ssa.") ) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LOGICAL-COND-COMPOSE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_equality_compare(void) {
+    static const char *source =
+        "int eq(float x, float y){ return x == y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-EQ-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-EQ-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-EQ-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func eq(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "load_local x.0\n") ||
+        !strstr(actual_text, "load_local y.1\n") ||
+        !strstr(actual_text, "mul ssa.") ||
+        !strstr(actual_text, "eq ssa.") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-EQ-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_relational_compare(void) {
+    static const char *source =
+        "int lt(float x, float y){ return x < y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LT-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LT-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LT-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func lt(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "load_local x.0\n") ||
+        !strstr(actual_text, "load_local y.1\n") ||
+        !strstr(actual_text, "shr ssa.") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "lt ssa.") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LT-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_addition(void) {
+    static const char *source =
+        "float add(float x, float y){ return x + y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ADD-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ADD-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ADD-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ADD-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_subtraction(void) {
+    static const char *source =
+        "float sub(float x, float y){ return x - y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SUB-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SUB-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SUB-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func sub(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SUB-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_negative_float_addition_combo(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float add(float y){ return -g + y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-ADD-COMBO-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-ADD-COMBO-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-ADD-COMBO-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add(y.0:float) {\n") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-ADD-COMBO-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_negative_float_subtraction_combo(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float sub(float y){ return y - -g; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-SUB-COMBO-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-SUB-COMBO-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-SUB-COMBO-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func sub(y.0:float) {\n") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-SUB-COMBO-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_multiplication(void) {
+    static const char *source =
+        "float mul(float x, float y){ return x * y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-MUL-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-MUL-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-MUL-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mul(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-MUL-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_float_division(void) {
+    static const char *source =
+        "float divv(float x, float y){ return x / y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-DIV-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-DIV-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-DIV-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func divv(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-DIV-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_negative_float_multiplication_combo(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float mul(float y){ return -g * y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-MUL-COMBO-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-MUL-COMBO-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-MUL-COMBO-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mul(y.0:float) {\n") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-MUL-COMBO-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_negative_float_division_combo(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float divv(float y){ return y / -g; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-DIV-COMBO-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-DIV-COMBO-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-DIV-COMBO-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func divv(y.0:float) {\n") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-DIV-COMBO-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_chained_float_addition(void) {
+    static const char *source =
+        "float add3(float x, float y, float z){ return (x + y) + z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add3(x.0:float, y.1:float, z.2:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_conversion(void) {
+    static const char *source =
+        "int conv(float x, float y){ return int(x + y); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-CONVERT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-CONVERT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-CONVERT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func conv(x.0:float, y.1:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-CONVERT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_float_from_int_conversion(void) {
+    static const char *source =
+        "float conv(int x, int y){ return float(x + y); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-CONVERT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-CONVERT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-CONVERT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func conv(x.0, y.1) {\n") ||
+        !strstr(actual_text, "add ssa.") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-CONVERT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_initializer_bridge(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float z = float(add3(1, 2, 3));\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global z.0:float") ||
+        !strstr(actual_text, "func __global.init()") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, "store_global z.0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_assignment_bridge(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ float y; y = float(add3(1, 2, 3)); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mainf()") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_float_from_int_compare_bridge(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ return float(add3(1, 2, 3)) == float(6); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-COMPARE-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-COMPARE-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-COMPARE-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-COMPARE-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_arithmetic_bridge(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ return float(add3(1, 2, 3)) + 1.25; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_return(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 1.25;\n"
+        "float mainf(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mainf()") ||
+        !strstr(actual_text, "br ssa.") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_assignment(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float mainf(){ float y; y = (g ? h : h); return y; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func mainf()") ||
+        !strstr(actual_text, "br ssa.") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_initializer(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float y = (g ? h : h);\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global y.2:float") ||
+        !strstr(actual_text, "func __global.init()") ||
+        !strstr(actual_text, "store_global y.2, 1075838976") ||
+        !strstr(actual_text, "ret 0")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "global g.0:float") ||
+        !strstr(actual_text, "global h.1:float") ||
+        !strstr(actual_text, "func main() {\n") ||
+        !strstr(actual_text, "call __builtin_f2i32(1075838976)") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_call_argument_bridge(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return sink(int(add3(1.0, 2.0, 3.0))); }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add3(") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "func sink(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_assignment_bridge(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ int x=0; x = int(add3(1.0, 2.0, 3.0)); return x; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add3(") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_compare_bridge(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h) == 2; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-COMPARE-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-COMPARE-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-COMPARE-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-COMPARE-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_arithmetic_bridge(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return int(add3(1.0, 2.0, 3.0)) + 1; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func add3(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, " add ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_float_mul_div(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return -a * (b / c); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func f(a.0:float, b.1:float, c.2:float) {\n") ||
+        !strstr(actual_text, "xor ssa.") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int __attribute__((unused)) test_value_ssa_default_pipeline_preserves_signed_zero_float_equality(void) {
+    static const char *source =
+        "int z(){ return 0.0 == -0.0; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_default_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SIGNED-ZERO-EQ-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SIGNED-ZERO-EQ-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SIGNED-ZERO-EQ-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func z() {\n") ||
+        !strstr(actual_text, "ret 1\n")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SIGNED-ZERO-EQ-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_rejects_global_float_operator_expression_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ return g + 1; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-OP-SEMANTIC-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_mixed_float_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float add(float x){ return x + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ARITH-INT-TYPE-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_call_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return id(x) + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CALL-ARITH-INT-TYPE-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_literal_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float add(){ return 1.25 + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return -id(x) * 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_float_tree_plus_int_under_extension(void) {
+    static const char *source =
+        "float add(float x, float y){ return (x + y) + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-TREE-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_float_muldiv_plus_int_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return (-a * (b / c)) + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_plus_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return (g ? h : h) + 1; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_plus_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float add(float x){ return (-id(x) ? x : x) + 1; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ int x=0; x = (g ? h : h); return x; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT expected SEMA-TYPE-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ int y=0; y = (-id(1.0) ? 1.0 : 2.0); return y; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT expected SEMA-TYPE-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_global_float_operator_expression_in_initializer_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int h = g + 1;\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-OP-INIT-SEMANTIC-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_global_float_call_result_in_initializer_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "int h = id(g);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_assignment_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ int x = 0; x = g; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-006") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-ASSIGN-TYPE-REJECT expected SEMA-TYPE-006, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_return_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int bad(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-005") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT expected SEMA-TYPE-005, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_return_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int bad(){ return -id(1.0) ? 1.0 : 2.0; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-005") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT expected SEMA-TYPE-005, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_recursive_float_call_result_in_initializer_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int x = add3(1.0, 2.0, 3.0);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_recursive_float_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return sink(add3(1.0, 2.0, 3.0)); }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT expected SEMA-TYPE-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return sink((g ? h : h)); }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT expected SEMA-TYPE-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_call_argument_to_int_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float id(float x){ return x; }\n"
+        "int main(){ return sink((-id(1.0) ? 1.0 : 2.0)); }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-003") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT expected SEMA-TYPE-003, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int x = (g ? h : h);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-INT-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_initializer_to_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int y = (-id(1.0) ? 1.0 : 2.0);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-004") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT expected SEMA-TYPE-004, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float y = (g ? h : h);\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error);
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT expected semantic success, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_ternary_value_compare_against_int_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return (g ? h : h) == 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-007") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT expected SEMA-TYPE-007, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_unary_call_ternary_value_compare_against_int_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ return (-id(1.0) ? 1.0 : 2.0) == 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-007") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT expected SEMA-TYPE-007, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_accepts_float_if_condition_under_extension(void) {
+    return expect_dump("VALUE-SSA-FLOAT-IF-COND-ACCEPT",
+        build_extension_float_if_condition_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = and ssa.1, 2147483647\n"
+        "    ssa.3 = ne ssa.2, 0\n"
+        "    br ssa.3, bb.1, bb.2\n"
+        "  bb.1:\n"
+        "    ret 1\n"
+        "  bb.2:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_accepts_float_while_condition_under_extension(void) {
+    return expect_dump("VALUE-SSA-FLOAT-WHILE-COND-ACCEPT",
+        build_extension_float_while_condition_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = and ssa.1, 2147483647\n"
+        "    ssa.3 = ne ssa.2, 0\n"
+        "    br ssa.3, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ret 1\n"
+        "  bb.3:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_accepts_float_for_condition_under_extension(void) {
+    return expect_dump("VALUE-SSA-FLOAT-FOR-COND-ACCEPT",
+        build_extension_float_for_condition_program,
+        "global g.0:float\n"
+        "\n"
+        "func __global.init() {\n"
+        "  bb.0:\n"
+        "    store_global g.0, 1067450368\n"
+        "    ret 0\n"
+        "}\n"
+        "\n"
+        "func main() {\n"
+        "  bb.0:\n"
+        "    ssa.0 = call __global.init()\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    ssa.1 = load_global g.0\n"
+        "    ssa.2 = and ssa.1, 2147483647\n"
+        "    ssa.3 = ne ssa.2, 0\n"
+        "    br ssa.3, bb.2, bb.3\n"
+        "  bb.2:\n"
+        "    ret 1\n"
+        "  bb.3:\n"
+        "    ret 0\n"
+        "}\n");
+}
+
+static int test_value_ssa_translation_only_preserves_signed_zero_float_equality(void) {
+    static const char *source =
+        "int z(){ return 0.0 == -0.0; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    char *actual_text = NULL;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast_program, NULL, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) &&
+        value_ssa_build_translation_only_from_lower_ir(&lower_program, &program, &value_error) &&
+        value_ssa_dump_program(&program, &actual_text);
+
+    ok = ok &&
+        strstr(actual_text, "func z() {\n") != NULL &&
+        strstr(actual_text, "2147483647") != NULL &&
+        strstr(actual_text, "eq ssa.") != NULL &&
+        strstr(actual_text, "ret ssa.") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-SIGNED-ZERO-EQ mismatch: parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\nactual:\n%s\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message,
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_translation_only_preserves_negative_float_relational_compare(void) {
+    static const char *source =
+        "int lt(){ return -1.25 < 0.0; }\n"
+        "int main(){ return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    char *actual_text = NULL;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        ir_lower_program(&ast_program, NULL, &ir_program, &ir_error) &&
+        lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) &&
+        value_ssa_build_translation_only_from_lower_ir(&lower_program, &program, &value_error) &&
+        value_ssa_dump_program(&program, &actual_text);
+
+    ok = ok &&
+        strstr(actual_text, "func lt() {\n") != NULL &&
+        strstr(actual_text, "shr ssa.") != NULL &&
+        strstr(actual_text, "xor ssa.") != NULL &&
+        strstr(actual_text, "lt ssa.") != NULL &&
+        strstr(actual_text, "ret ssa.") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-LT mismatch: parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\nactual:\n%s\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message,
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int expect_verifier_rejects(const char *case_id,
     int (*builder)(ValueSsaProgram *program, ValueSsaError *error),
     void (*mutator)(ValueSsaProgram *program),
@@ -14805,7 +19419,7 @@ static int expect_default_converted_dump(const char *case_id,
     return ok;
 }
 
-static int expect_default_matches_mode_dump(const char *case_id,
+static int __attribute__((unused)) expect_default_matches_mode_dump(const char *case_id,
     int (*builder)(LowerIrProgram *program, LowerIrError *error),
     ValueSsaLowerIrCanonicalizeMode mode) {
     LowerIrProgram lower_program;
@@ -14868,7 +19482,7 @@ cleanup:
     return ok;
 }
 
-static int expect_default_matches_direct_dump(const char *case_id,
+static int __attribute__((unused)) expect_default_matches_direct_dump(const char *case_id,
     int (*builder)(LowerIrProgram *program, LowerIrError *error)) {
     LowerIrProgram lower_program;
     LowerIrError lower_error;
@@ -14996,7 +19610,159 @@ cleanup:
     return ok;
 }
 
-static int expect_source_perf_hotspot_dump(const char *case_id,
+static int build_value_ssa_perf_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (out_error) {
+            out_error->line = 0;
+            out_error->column = 0;
+            snprintf(out_error->message, sizeof(out_error->message), "invalid extension source perf build contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+    value_ssa_program_init(out_program);
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_local_slots(out_program, out_error) ||
+        !memory_ssa_pass_scalar_replace_global_slots(out_program, out_error) ||
+        !value_ssa_optimize_perf_hotspots(out_program, out_error)) {
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(out_program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_value_ssa_default_from_extension_source_text(const char *source,
+    ValueSsaProgram *out_program,
+    ValueSsaError *out_error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    int ok = 0;
+
+    if (!source || !out_program) {
+        if (out_error) {
+            out_error->line = 0;
+            out_error->column = 0;
+            snprintf(out_error->message, sizeof(out_error->message), "invalid extension source default build contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+    value_ssa_program_init(out_program);
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, out_program, out_error)) {
+        if (out_error && out_error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                out_error->line = lower_error.line;
+                out_error->column = lower_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                out_error->line = ir_error.line;
+                out_error->column = ir_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                out_error->line = semantic_error.line;
+                out_error->column = semantic_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                out_error->line = parse_error.line;
+                out_error->column = parse_error.column;
+                snprintf(out_error->message, sizeof(out_error->message), "%s", parse_error.message);
+            } else {
+                snprintf(out_error->message, sizeof(out_error->message), "VALUE-SSA-DEFAULT-EXT setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        value_ssa_program_free(out_program);
+    }
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int __attribute__((unused)) expect_source_perf_hotspot_dump(const char *case_id,
     const char *source,
     const char *expected_text) {
     ValueSsaProgram program;
@@ -16812,8 +21578,8 @@ static int test_value_ssa_optimize_perf_hotspots_rebalances_integer_dispatch_cha
         "func main(x.0) {\n"
         "  bb.0:\n"
         "    ssa.0 = load_local x.0\n"
-        "    ssa.1 = lt ssa.0, 2\n"
-        "    br ssa.1, bb.5, bb.6\n"
+        "    ssa.1 = eq ssa.0, 1\n"
+        "    br ssa.1, bb.1, bb.5\n"
         "  bb.1:\n"
         "    ret 10\n"
         "  bb.2:\n"
@@ -16823,17 +21589,14 @@ static int test_value_ssa_optimize_perf_hotspots_rebalances_integer_dispatch_cha
         "  bb.4:\n"
         "    ret 40\n"
         "  bb.5:\n"
-        "    ssa.2 = eq ssa.0, 1\n"
-        "    br ssa.2, bb.1, bb.4\n"
+        "    ssa.2 = lt ssa.0, 3\n"
+        "    br ssa.2, bb.6, bb.7\n"
         "  bb.6:\n"
-        "    ssa.3 = lt ssa.0, 3\n"
-        "    br ssa.3, bb.7, bb.8\n"
+        "    ssa.3 = eq ssa.0, 2\n"
+        "    br ssa.3, bb.2, bb.4\n"
         "  bb.7:\n"
-        "    ssa.4 = eq ssa.0, 2\n"
-        "    br ssa.4, bb.2, bb.4\n"
-        "  bb.8:\n"
-        "    ssa.5 = eq ssa.0, 3\n"
-        "    br ssa.5, bb.3, bb.4\n"
+        "    ssa.4 = eq ssa.0, 3\n"
+        "    br ssa.4, bb.3, bb.4\n"
         "}\n");
 }
 
@@ -20637,6 +25400,231 @@ int main(void) {
     const char *filter = getenv("VALUE_SSA_REG_FILTER");
 
     if (filter && filter[0] != '\0') {
+        if (strstr("VALUE-SSA-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_global_identifier_runtime_init() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-CALL-INIT", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_global_call_runtime_init() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-RETURN-GLOBAL", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_return_global() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-RETURN-GLOBAL-CALL", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_return_global_call() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_global_call_chain() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-LOCAL-CALL-CHAIN", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_local_call_chain() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TRANSPORT", filter) != NULL) {
+            return test_value_ssa_preserves_float_transport_metadata() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TRANSPORT-ANALYSIS", filter) != NULL) {
+            return test_value_ssa_float_transport_analysis_surface() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-LITERAL-ANALYSIS", filter) != NULL) {
+            return test_value_ssa_float_global_literal_analysis_surface() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-OP-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_global_float_operator_expression_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-OP-INIT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_global_float_operator_expression_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_global_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-ASSIGN-TRANSPORT", filter) != NULL) {
+            return test_value_ssa_translation_only_lowers_extension_float_assignment_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-ASSIGN-LIVE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_live_extension_float_assignment_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-PARAM-FORWARD-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_parameter_forward_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-PARAM-LOCAL-FORWARD-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_parameter_local_forward_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-IDENT-INIT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_global_identifier_runtime_init() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-CALL-INIT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_global_call_runtime_init() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-CALL-CHAIN-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_global_call_chain_transport() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-LOGICAL-COND-COMPOSE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_logical_condition_composition() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-EQ-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_equality_compare() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-LT-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_relational_compare() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-ADD-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_addition() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-SUB-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_subtraction() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-ADD-COMBO-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_negative_float_addition_combo() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-SUB-COMBO-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_negative_float_subtraction_combo() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-MUL-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_multiplication() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-DIV-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_float_division() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-MUL-COMBO-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_negative_float_multiplication_combo() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-DIV-COMBO-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_negative_float_division_combo() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_chained_float_addition() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-CONVERT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_float_conversion() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-INT-TO-FLOAT-CONVERT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_float_from_int_conversion() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_initializer_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_assignment_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-INT-TO-FLOAT-COMPARE-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_float_from_int_compare_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_arithmetic_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_return() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_assignment() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_initializer() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_call_argument_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_assignment_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-COMPARE-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_float_compare_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_arithmetic_bridge() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-MUL-DIV-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_float_mul_div() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_recursive_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_recursive_float_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-SIGNED-ZERO-EQ-TRANSLATION", filter) != NULL) {
+            return test_value_ssa_translation_only_preserves_signed_zero_float_equality() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-LT-TRANSLATION", filter) != NULL) {
+            return test_value_ssa_translation_only_preserves_negative_float_relational_compare() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-PERF-HOTSPOT-INDUCTION-ADDRESS", filter) != NULL) {
             return test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_addresses() ? 0 : 1;
         }
@@ -20655,6 +25643,64 @@ int main(void) {
     }
 
     ok &= test_value_ssa_dump_straight_line_program();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_transport();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_global_literal_runtime_init();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_global_identifier_runtime_init();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_global_call_runtime_init();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_return_global();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_return_global_call();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_global_call_chain();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_local_call_chain();
+    ok &= test_value_ssa_preserves_float_transport_metadata();
+    ok &= test_value_ssa_float_transport_analysis_surface();
+    ok &= test_value_ssa_float_global_literal_analysis_surface();
+    ok &= test_value_ssa_default_pipeline_preserves_float_parameter_forward_transport();
+    ok &= test_value_ssa_default_pipeline_preserves_float_parameter_local_forward_transport();
+    ok &= test_value_ssa_default_pipeline_preserves_float_global_identifier_runtime_init();
+    ok &= test_value_ssa_default_pipeline_preserves_float_global_call_runtime_init();
+    ok &= test_value_ssa_default_pipeline_preserves_float_global_call_chain_transport();
+    ok &= test_value_ssa_default_pipeline_preserves_float_logical_condition_composition();
+    ok &= test_value_ssa_default_pipeline_preserves_float_equality_compare();
+    ok &= test_value_ssa_default_pipeline_preserves_float_relational_compare();
+    ok &= test_value_ssa_default_pipeline_preserves_float_addition();
+    ok &= test_value_ssa_default_pipeline_preserves_float_subtraction();
+    ok &= test_value_ssa_default_pipeline_preserves_negative_float_addition_combo();
+    ok &= test_value_ssa_default_pipeline_preserves_negative_float_subtraction_combo();
+    ok &= test_value_ssa_default_pipeline_preserves_float_multiplication();
+    ok &= test_value_ssa_default_pipeline_preserves_float_division();
+    ok &= test_value_ssa_default_pipeline_preserves_negative_float_multiplication_combo();
+    ok &= test_value_ssa_default_pipeline_preserves_negative_float_division_combo();
+    ok &= test_value_ssa_default_pipeline_preserves_chained_float_addition();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_float_conversion();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_float_from_int_conversion();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_initializer_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_assignment_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_float_from_int_compare_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_float_from_recursive_int_arithmetic_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_return();
+    ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_assignment();
+    ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_initializer();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_call_argument_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_assignment_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_float_compare_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_arithmetic_bridge();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_float_mul_div();
+    ok &= test_value_ssa_rejects_global_float_operator_expression_under_extension();
+    ok &= test_value_ssa_rejects_global_float_operator_expression_in_initializer_under_extension();
+    ok &= test_value_ssa_rejects_global_float_call_result_in_initializer_under_extension();
+    ok &= test_value_ssa_translation_only_lowers_extension_float_assignment_transport();
+    ok &= test_value_ssa_default_pipeline_preserves_live_extension_float_assignment_transport();
+    ok &= test_value_ssa_rejects_mixed_float_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_float_call_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_float_literal_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_float_assignment_to_int_under_extension();
+    ok &= test_value_ssa_accepts_float_if_condition_under_extension();
+    ok &= test_value_ssa_accepts_float_while_condition_under_extension();
+    ok &= test_value_ssa_accepts_float_for_condition_under_extension();
+    ok &= test_value_ssa_translation_only_preserves_signed_zero_float_equality();
+    ok &= test_value_ssa_translation_only_preserves_negative_float_relational_compare();
     ok &= test_value_ssa_dump_diamond_phi_program();
     ok &= test_value_ssa_cfg_analysis_diamond_program();
     ok &= test_value_ssa_def_use_analysis_diamond_program();

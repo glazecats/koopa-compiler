@@ -45,8 +45,29 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_STATEMENT_FREE_FN(AstStatement *stmt) {
         }
     }
     free(stmt->declaration_names);
+    free(stmt->declaration_value_kinds);
+    if (stmt->declaration_type_names) {
+        for (i = 0; i < stmt->declaration_name_count; ++i) {
+            free(stmt->declaration_type_names[i]);
+        }
+    }
+    free(stmt->declaration_type_names);
     free(stmt->declaration_array_ranks);
     free(stmt->declaration_array_extent_exprs);
+    free(stmt->declaration_function_return_types);
+    free(stmt->declaration_function_parameter_counts);
+    if (stmt->capture_names) {
+        for (i = 0; i < stmt->capture_name_count; ++i) {
+            free(stmt->capture_names[i]);
+        }
+    }
+    free(stmt->capture_names);
+    if (stmt->capture_expressions) {
+        for (i = 0; i < stmt->capture_expression_count; ++i) {
+            AST_LIFECYCLE_EXPRESSION_FREE_FN(stmt->capture_expressions[i]);
+        }
+    }
+    free(stmt->capture_expressions);
     free(stmt->expressions);
     free(stmt->children);
     free(stmt);
@@ -59,9 +80,26 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
         return;
     }
 
+    for (i = 0; i < program->struct_type_count; ++i) {
+        size_t j;
+
+        free(program->struct_types[i].name);
+        if (program->struct_types[i].field_names) {
+            for (j = 0; j < program->struct_types[i].field_count; ++j) {
+                free(program->struct_types[i].field_names[j]);
+            }
+        }
+        free(program->struct_types[i].field_names);
+    }
+    free(program->struct_types);
+    program->struct_types = NULL;
+    program->struct_type_count = 0;
+    program->struct_type_capacity = 0;
+
     for (i = 0; i < program->count; ++i) {
         size_t j;
         free(program->externals[i].name);
+        free(program->externals[i].declaration_type_name);
         if (program->externals[i].declaration_array_extent_exprs) {
             for (j = 0; j < program->externals[i].declaration_array_rank; ++j) {
                 AST_LIFECYCLE_EXPRESSION_FREE_FN(program->externals[i].declaration_array_extent_exprs[j]);
@@ -74,6 +112,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
             }
         }
         free(program->externals[i].parameter_names);
+        free(program->externals[i].parameter_value_kinds);
         if (program->externals[i].parameter_array_extent_exprs) {
             for (j = 0; j < program->externals[i].parameter_count; ++j) {
                 size_t k;
@@ -93,6 +132,8 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_PROGRAM_CLEAR_FN(AstProgram *program) {
             free(program->externals[i].parameter_array_extent_exprs);
         }
         free(program->externals[i].parameter_array_ranks);
+        free(program->externals[i].parameter_function_return_types);
+        free(program->externals[i].parameter_function_parameter_counts);
         free(program->externals[i].parameter_is_const);
         free(program->externals[i].parameter_name_lines);
         free(program->externals[i].parameter_name_columns);
@@ -117,6 +158,11 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
         return 0;
     }
 
+    if (!program->struct_types) {
+        program->struct_type_count = 0;
+        program->struct_type_capacity = 0;
+    }
+
     if (program->count == program->capacity) {
         if (program->capacity == 0) {
             next_capacity = 16;
@@ -139,6 +185,8 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
 
     external.kind = kind;
     external.function_return_type = AST_FUNCTION_RETURN_INT;
+    external.declaration_value_kind = AST_DECLARATION_VALUE_INT;
+    external.declaration_type_name = NULL;
     external.name = NULL;
     external.name_length = 0;
     external.declaration_array_rank = 0;
@@ -148,8 +196,11 @@ AST_LIFECYCLE_STATIC int AST_LIFECYCLE_PROGRAM_ADD_EXTERNAL_FN(AstProgram *progr
     external.declaration_initializer = NULL;
     external.parameter_count = 0;
     external.parameter_names = NULL;
+    external.parameter_value_kinds = NULL;
     external.parameter_array_ranks = NULL;
     external.parameter_array_extent_exprs = NULL;
+    external.parameter_function_return_types = NULL;
+    external.parameter_function_parameter_counts = NULL;
     external.parameter_is_const = NULL;
     external.parameter_name_lines = NULL;
     external.parameter_name_columns = NULL;
@@ -192,6 +243,9 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
         free(expr->as.init_list.items);
         break;
     }
+    case AST_EXPR_CONVERSION:
+        AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.conversion.operand);
+        break;
     case AST_EXPR_PAREN:
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.inner);
         break;
@@ -204,6 +258,10 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
     case AST_EXPR_SUBSCRIPT:
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.subscript.base);
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.subscript.index);
+        break;
+    case AST_EXPR_MEMBER:
+        AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.member.base);
+        free(expr->as.member.field_name);
         break;
     case AST_EXPR_CALL: {
         size_t i;
@@ -224,6 +282,7 @@ AST_LIFECYCLE_STATIC void AST_LIFECYCLE_EXPRESSION_FREE_FN(AstExpression *expr) 
         AST_LIFECYCLE_EXPRESSION_FREE_FN(expr->as.ternary.else_expr);
         break;
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         break;
     }

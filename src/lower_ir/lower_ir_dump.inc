@@ -43,6 +43,17 @@ static const char *lower_ir_binary_op_name(LowerIrBinaryOp op) {
     }
 }
 
+static int lower_ir_append_scalar_type_suffix(LowerIrStringBuilder *builder,
+    AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+    if (value_type == AST_FUNCTION_RETURN_FLOAT) {
+        return lower_ir_append_string(builder, ":float");
+    }
+    return 1;
+}
+
 int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
     LowerIrStringBuilder builder;
     size_t i;
@@ -63,6 +74,10 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
                 "global %s.%zu",
                 (global->name && global->name[0] != '\0') ? global->name : "global",
                 global->id)) {
+            free(builder.data);
+            return 0;
+        }
+        if (!lower_ir_append_scalar_type_suffix(&builder, global->value_type)) {
             free(builder.data);
             return 0;
         }
@@ -101,6 +116,11 @@ int lower_ir_dump_program(const LowerIrProgram *program, char **out_text) {
                     program,
                     function,
                     lower_ir_slot_local(j))) {
+                free(builder.data);
+                return 0;
+            }
+            if (function->locals && j < function->local_count &&
+                !lower_ir_append_scalar_type_suffix(&builder, function->locals[j].value_type)) {
                 free(builder.data);
                 return 0;
             }

@@ -262,6 +262,49 @@ int machine_select_build_program_from_machine_ir_report(const MachineIrAllocateR
     return machine_select_lower_program_from_machine_ir(program, out_program, error);
 }
 
+int machine_select_build_program_from_machine_ir_report_conservative(const MachineIrAllocateRewriteReport *report,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error) {
+    const MachineIrProgram *program = NULL;
+
+    if (!report || !out_program) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-421: invalid conservative report lowering contract");
+        return 0;
+    }
+    if (!machine_ir_allocate_rewrite_report_get_program(report, &program) || !program) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-422: machine-ir report does not expose program");
+        return 0;
+    }
+    if (machine_select_program_has_phi_nodes(program)) {
+        return machine_select_lower_canonicalized_program_from_machine_ir_conservative(program, out_program, error);
+    }
+    return machine_select_lower_program_from_machine_ir_conservative(program, out_program, error);
+}
+
+int machine_select_build_program_from_machine_ir_report_conservative_no_phi(
+    const MachineIrAllocateRewriteReport *report,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error) {
+    const MachineIrProgram *program = NULL;
+
+    if (!report || !out_program) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-423: invalid conservative no-phi report lowering contract");
+        return 0;
+    }
+    if (!machine_ir_allocate_rewrite_report_get_program(report, &program) || !program) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-424: machine-ir report does not expose program");
+        return 0;
+    }
+    if (machine_select_program_has_phi_nodes(program)) {
+        machine_select_set_error(error,
+            0,
+            0,
+            "MACHINE-SELECT-425: conservative no-phi report lowering requires phi-free machine-ir input");
+        return 0;
+    }
+    return machine_select_lower_program_from_machine_ir_conservative(program, out_program, error);
+}
+
 int machine_select_build_report_from_machine_ir_program(const MachineIrProgram *source,
     MachineSelectLowerReport *out_report,
     MachineSelectError *error) {

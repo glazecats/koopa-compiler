@@ -212,6 +212,18 @@ Recommended lowering model:
 This means the implementation can stay explicit and verifier-friendly without
 building a runtime callback stack.
 
+### Current implementation note
+
+- The first landed slice now uses hidden per-site counters plus exit-time
+  replay loops, so a dynamically re-executed `fndefer` site inside `if` /
+  `while` / `for` now enqueues one function-exit action per execution.
+- The current conservative boundary is still narrower than a full closure
+  system:
+  - `capdefer` dynamic registration remains rejected
+  - multi-site loop-nested `fndefer` growth stays conservative for now
+- The "Recommended first answer: yes" note in `Nested registration` is now
+  realized for the single-site `fndefer` loop case that the live tree supports.
+
 ## Testing Plan
 
 ### Parser

@@ -82,6 +82,8 @@ static int ir_lower_scope_add_binding_with_metadata(IrLowerScopeStack *stack,
     IrLowerBindingKind kind,
     size_t array_rank,
     const size_t *array_extents,
+    size_t pair_second_local_id,
+    const char *type_name,
     int is_const,
     int has_const_value,
     long long const_value) {
@@ -127,6 +129,8 @@ static int ir_lower_scope_add_binding_with_metadata(IrLowerScopeStack *stack,
     frame->bindings[frame->count].kind = kind;
     frame->bindings[frame->count].array_rank = array_rank;
     frame->bindings[frame->count].array_extents = extent_copy;
+    frame->bindings[frame->count].pair_second_local_id = pair_second_local_id;
+    frame->bindings[frame->count].type_name = type_name;
     frame->bindings[frame->count].is_const = is_const;
     frame->bindings[frame->count].has_const_value = has_const_value;
     frame->bindings[frame->count].const_value = const_value;
@@ -181,6 +185,8 @@ static int ir_lower_scope_lookup_binding(const IrLowerScopeStack *stack,
                     out_info->kind = binding->kind;
                     out_info->array_rank = binding->array_rank;
                     out_info->array_extents = binding->array_extents;
+                    out_info->pair_second_local_id = binding->pair_second_local_id;
+                    out_info->type_name = binding->type_name;
                     out_info->is_const = binding->is_const;
                     out_info->has_const_value = binding->has_const_value;
                     out_info->const_value = binding->const_value;
@@ -321,6 +327,10 @@ static int ir_lower_scope_stack_merge_const_facts(IrLowerScopeStack *dest,
                 lhs_binding->name != rhs_binding->name ||
                 dest_binding->local_id != lhs_binding->local_id ||
                 lhs_binding->local_id != rhs_binding->local_id ||
+                dest_binding->pair_second_local_id != lhs_binding->pair_second_local_id ||
+                lhs_binding->pair_second_local_id != rhs_binding->pair_second_local_id ||
+                dest_binding->type_name != lhs_binding->type_name ||
+                lhs_binding->type_name != rhs_binding->type_name ||
                 dest_binding->kind != lhs_binding->kind ||
                 lhs_binding->kind != rhs_binding->kind) {
                 return 0;

@@ -186,6 +186,7 @@ static int ir_program_append_global(IrProgram *program,
     global = &program->globals[program->global_count];
     global->id = program->global_count;
     global->name = NULL;
+    global->value_type = AST_FUNCTION_RETURN_INT;
     global->array_rank = 0;
     global->array_extents = NULL;
     global->byte_size = 4u;
@@ -324,6 +325,7 @@ static int ir_function_append_local(IrFunction *function,
     local->id = local_id;
     local->source_name = NULL;
     local->is_parameter = is_parameter;
+    local->value_type = AST_FUNCTION_RETURN_INT;
     local->array_rank = 0;
 
     name_length = strlen(source_name);

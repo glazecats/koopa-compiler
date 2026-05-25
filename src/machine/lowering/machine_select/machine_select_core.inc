@@ -105,6 +105,7 @@ int machine_select_clone_program(const MachineSelectProgram *source,
             machine_select_program_free(out_program);
             return 0;
         }
+        dest->value_type = src->value_type;
     }
 
     out_program->function_count = source->function_count;
@@ -167,6 +168,7 @@ int machine_select_clone_program(const MachineSelectProgram *source,
                 machine_select_program_free(out_program);
                 return 0;
             }
+            dest_local->value_type = src_local->value_type;
         }
 
         for (block_index = 0; block_index < src_function->block_count; ++block_index) {

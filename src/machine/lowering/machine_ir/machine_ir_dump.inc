@@ -43,6 +43,17 @@ static const char *machine_ir_binary_op_name(MachineIrBinaryOp op) {
     }
 }
 
+static int machine_ir_append_scalar_type_suffix(MachineIrStringBuilder *builder,
+    AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+    if (value_type == AST_FUNCTION_RETURN_FLOAT) {
+        return machine_ir_append_format(builder, "%s", ":float");
+    }
+    return 1;
+}
+
 static int machine_ir_append_operand(MachineIrStringBuilder *builder,
     const MachineIrProgram *program,
     MachineIrOperand operand) {
@@ -134,6 +145,9 @@ int machine_ir_dump_program(const MachineIrProgram *program,
                 global->has_runtime_initializer)) {
             goto oom;
         }
+        if (!machine_ir_append_scalar_type_suffix(&builder, global->value_type)) {
+            goto oom;
+        }
         if (global->has_initializer && !machine_ir_append_format(&builder, " value=%lld", global->initializer_value)) {
             goto oom;
         }
@@ -153,6 +167,20 @@ int machine_ir_dump_program(const MachineIrProgram *program,
                 function->local_count,
                 function->spill_slot_count)) {
             goto oom;
+        }
+        for (size_t param_index = 0; param_index < function->parameter_count; ++param_index) {
+            if (function->locals[param_index].value_type == AST_FUNCTION_RETURN_INT) {
+                continue;
+            }
+            if (!machine_ir_append_format(&builder, "  param local.%zu", function->locals[param_index].id) ||
+                !machine_ir_append_scalar_type_suffix(&builder, function->locals[param_index].value_type) ||
+                !machine_ir_append_format(&builder,
+                    " name=%s\n",
+                    function->locals[param_index].source_name
+                        ? function->locals[param_index].source_name
+                        : "<unnamed>")) {
+                goto oom;
+            }
         }
         for (block_index = 0; block_index < function->block_count; ++block_index) {
             const MachineIrBasicBlock *block = &function->blocks[block_index];

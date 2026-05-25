@@ -71,6 +71,133 @@ static int test_expression_ast_parses_number_primary(void) {
     return 1;
 }
 
+static int test_expression_ast_parses_float_literal_primary(void) {
+    const char *source = "1.25\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_FLOAT_LITERAL) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected float literal expression 1.25\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_zero_float_literal_primary(void) {
+    const char *source = "0.0\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_FLOAT_LITERAL) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected float literal expression 0.0\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_int_conversion_primary(void) {
+    const char *source = "int(x)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CONVERSION ||
+        expr->as.conversion.target_type_kind != AST_DECLARATION_VALUE_INT ||
+        !expr->as.conversion.operand ||
+        expr->as.conversion.operand->kind != AST_EXPR_IDENTIFIER ||
+        !expr->as.conversion.operand->as.identifier.name ||
+        strcmp(expr->as.conversion.operand->as.identifier.name, "x") != 0) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected int conversion expression int(x)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_float_conversion_primary(void) {
+    const char *source = "float(1)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CONVERSION ||
+        expr->as.conversion.target_type_kind != AST_DECLARATION_VALUE_FLOAT ||
+        !expr->as.conversion.operand ||
+        expr->as.conversion.operand->kind != AST_EXPR_NUMBER ||
+        expr->as.conversion.operand->as.number_value != 1) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected float conversion expression float(1)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
+static int test_expression_ast_parses_int_conversion_with_ternary_operand(void) {
+    const char *source = "int(a?b:c)\n";
+    TokenArray tokens;
+    AstExpression *expr = NULL;
+    ParserError err;
+
+    if (!parse_expression_source_to_ast(source, &tokens, &expr, &err)) {
+        return 0;
+    }
+
+    if (!expr || expr->kind != AST_EXPR_CONVERSION ||
+        expr->as.conversion.target_type_kind != AST_DECLARATION_VALUE_INT ||
+        !expr->as.conversion.operand ||
+        expr->as.conversion.operand->kind != AST_EXPR_TERNARY) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: expected int conversion with ternary operand int(a?b:c)\n");
+        lexer_free_tokens(&tokens);
+        ast_expression_free(expr);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_expression_free(expr);
+    return 1;
+}
+
 static int test_expression_ast_parses_nested_parentheses(void) {
     const char *source = "((a))\n";
     TokenArray tokens;

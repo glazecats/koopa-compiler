@@ -202,6 +202,7 @@ int machine_ir_program_append_global(MachineIrProgram *program,
     global = &program->globals[program->global_count];
     memset(global, 0, sizeof(*global));
     global->id = program->global_count;
+    global->value_type = AST_FUNCTION_RETURN_INT;
     global->byte_size = 4u;
     global->name = machine_ir_strdup(name);
     if (!global->name) {
@@ -305,6 +306,7 @@ int machine_ir_function_append_local(MachineIrFunction *function,
         return 0;
     }
     local->is_parameter = is_parameter ? 1 : 0;
+    local->value_type = AST_FUNCTION_RETURN_INT;
     if (is_parameter) {
         if (function->local_count != function->parameter_count) {
             machine_ir_set_error(error, 0, 0, "MACHINE-IR-022: parameter locals must form a contiguous prefix");

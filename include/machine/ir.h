@@ -134,11 +134,13 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    AstFunctionReturnType value_type;
 } MachineIrLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    AstFunctionReturnType value_type;
     size_t byte_size;
     int has_initializer;
     long long initializer_value;
@@ -485,6 +487,24 @@ int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_repor
     MachineIrAllocateRewriteReport *out_report,
     MachineIrError *error);
 int machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+    const ValueSsaProgram *program,
+    size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
+int machine_ir_build_translation_only_report(
+    const ValueSsaProgram *program,
+    size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
+int machine_ir_build_conservative_flat_program_only_report(
+    const ValueSsaProgram *program,
+    size_t color_budget,
+    size_t machine_register_count,
+    MachineIrAllocateRewriteReport *out_report,
+    MachineIrError *error);
+int machine_ir_build_conservative_phi_eliminated_flat_program_only_report(
     const ValueSsaProgram *program,
     size_t color_budget,
     size_t machine_register_count,

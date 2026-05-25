@@ -143,11 +143,13 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    AstFunctionReturnType value_type;
 } MachineSelectLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    AstFunctionReturnType value_type;
     size_t byte_size;
     int has_initializer;
     long long initializer_value;
@@ -311,7 +313,13 @@ MachineSelectSlotRef machine_select_slot_global(size_t global_id);
 int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
     MachineSelectProgram *out_program,
     MachineSelectError *error);
+int machine_select_lower_program_from_machine_ir_conservative(const MachineIrProgram *source,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error);
 int machine_select_lower_canonicalized_program_from_machine_ir(const MachineIrProgram *source,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error);
+int machine_select_lower_canonicalized_program_from_machine_ir_conservative(const MachineIrProgram *source,
     MachineSelectProgram *out_program,
     MachineSelectError *error);
 int machine_select_verify_program(const MachineSelectProgram *program, MachineSelectError *error);
@@ -609,6 +617,13 @@ int machine_select_build_report_from_program_dump(const MachineSelectProgram *so
     char **out_text,
     MachineSelectError *error);
 int machine_select_build_program_from_machine_ir_report(const MachineIrAllocateRewriteReport *report,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error);
+int machine_select_build_program_from_machine_ir_report_conservative(const MachineIrAllocateRewriteReport *report,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error);
+int machine_select_build_program_from_machine_ir_report_conservative_no_phi(
+    const MachineIrAllocateRewriteReport *report,
     MachineSelectProgram *out_program,
     MachineSelectError *error);
 int machine_select_build_report_from_machine_ir_program(const MachineIrProgram *source,

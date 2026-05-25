@@ -28,6 +28,16 @@
   step to produce a compiler artifact only. Keep the full internal suite on
   explicit `make test`, and `make check` may remain an alias for that same
   full suite.
+- Repository build-workflow note: avoid launching multiple concurrent
+  `make -B` test-target builds that all rebuild the shared
+  `build/lib/libcompiler_common.a` archive. Parallel forced rebuilds of
+  `build/value_ssa/value_ssa_regression_test`,
+  `build/machine_ir/machine_ir_test`,
+  `build/machine_select/machine_select_test`, and similar siblings can race on
+  the common archive and produce transient linker/archive failures such as
+  `file truncated` or `no more archived files`. When several of those targets
+  need a forced refresh, prefer one serial `make -B target1 target2 ...`
+  invocation or rebuild them one at a time.
 - Value-SSA source layout should now treat optimization/cleanup transforms as a sibling module, not just a subdirectory: keep core representation, verifier, analysis, rename, and strict conversion under `src/value_ssa/`, and keep SSA-native pass code under `src/value_ssa_pass/` with its own public pass header `include/value_ssa_pass.h`.
 - Value-SSA pass code is now also split into its own top-level compilation unit, [value_ssa_pass.c](/workspaces/compiler_lab/src/value_ssa_pass/value_ssa_pass.c), rather than being aggregated into the same module as core representation/conversion code. Keep future pass aggregation there unless a stronger sub-split becomes necessary.
 - Value-SSA now also has a first execution-oriented sibling module: keep direct SSA interpretation under `src/value_ssa_interp/` with its own public header `include/value_ssa_interp.h`, rather than folding execution support into `src/value_ssa_pass/` or bloating core representation code inside `src/value_ssa/`.
@@ -38,6 +48,17 @@
   - `src/machine/observe/` and `tests/machine/observe/` for downstream observation/reporting layers such as `machine_observe`, `machine_delta`, `machine_trace`, `machine_event`, `machine_outcome`, `machine_history`, `machine_timeline`, `machine_log`, and `machine_journal`
 - Machine-facing planning now also has a first independent IR consumer layer: keep explicit machine-placed CFG/value materialization under `src/machine/lowering/machine_ir/` with its own public header `include/machine/ir.h`, rather than stretching `value_ssa_machine` into a pseudo-IR/report hybrid forever. The current contract is intentionally conservative: machine IR still keeps CFG shape, phi nodes, and local/global slot ops, but Value-SSA value refs are now projected into explicit `register` / `spill-slot` / `immediate` operands.
 - That machine-ir consumer line now also has a first real selected-op sibling layer above itself: keep selected machine-facing lowering under `src/machine/lowering/machine_select/` with public surface `include/machine/select.h`, rather than stretching `machine_ir` into an instruction-selection layer. The current `machine_select` contract should now be treated as checkpoint-ready / maintenance-first by default: explicit selected op families, selected cleanup, call/result/return shaping, canonicalized/report bridges, report-side function/block navigation, raw whole-program block navigation by `function_name + block_id`, whole-program raw block summary/terminator convenience, raw/report function-artifact convenience, raw/report block-artifact convenience, report-filter-to-function-summary convenience, report-filter-by-name convenience, report-side per-function block-filter convenience, report-side filtered block-artifact convenience, selected-program report refresh/rebuild lifecycle, and structured selected-terminator query surfaces are already real enough that new expansion should be need-driven rather than the default backend mainline.
+- `MachineIrAllocateRewriteReport` builders that populate `report->program`
+  directly must call `machine_ir_allocate_rewrite_report_refresh_shape(...)`
+  before any dump/report consumer runs. Otherwise the textual report header and
+  shape summaries can silently claim zero blocks/calls/spills even though the
+  embedded machine-IR program is already non-empty.
+- Conservative float-expression rejection must resolve top-level object
+  identifiers through the same shared visible-external/type-descriptor path as
+  local float identifiers. Otherwise shapes like
+  `float g = 1.25; int main(){ return g + 1; }` can silently bypass
+  `SEMA-EXT-035` just because the float came from a top-level declaration
+  instead of a local slot.
 - Repository target-memory note: **RISC-V is the intended final target language / ISA direction for this backend**. Current backend layers may still stay generic or preview-oriented while that line is being built out, but design choices should prefer eventual RISC-V lowering compatibility over drifting toward a permanently target-agnostic or i386-first backend.
 - `machine_bytes` now has an explicit target-profile-aware bridge surface in addition to the historical generic one. The default/generic path still emits the repository's tag/payload byte format, while profile-aware builders may select a preview lane deliberately.
 - That same bytes layer now also has a first explicit target-policy summary
@@ -97,6 +118,206 @@
 - Final RISC-V text peepholes must treat labels as control-flow boundaries for liveness-style safety checks: a register feeding `li 0 ; add ...` cannot be assumed dead just because it is unused later in the same linear scan if a later labeled block still consumes that register value.
 - Final RISC-V text peepholes must also treat `call`-like rows (`call`, `jal ra, ...`, `jalr ra, ...`, and conservatively `ecall`) as caller-clobber barriers for `ra`, `a*`, and `t*` registers. Reusing an earlier array-address formation sequence across one of those rows is not sound just because the surrounding plain-text scan sees no explicit redefinition of `a0`/`t6` in between.
 - `ValueSSA` non-address-taken global load forwarding must treat declaration-only callees (known by name but without a body) as unknown-call clobber barriers, not as "safe because we can resolve the symbol". Otherwise canonicalize/default cleanup can wrongly forward `load_global` across `call touch()`-style external barriers and turn `store_global ; call ; load_global` into a stale constant return.
+- Conservative float transport now has one more explicit scalar-type boundary:
+  direct assignment is allowed only for same-type transport (`float = float`
+  and existing `int = int`), while `int = float` now rejects as
+  `SEMA-TYPE-006` instead of falling through to the generic
+  `SEMA-EXT-035` derived-float-expression error.
+- The newly added float-assignment witness
+  `float g = 1.25; float id(float x){ return x; } int main(){ float y; y = id(g); return 0; }`
+  is now regression-locked through semantic / compiler / IR / lower-IR /
+  translation-only ValueSSA. If the same witness disappears on the default
+  optimized `ValueSSA` / machine-report path, treat that as a separate
+  default-pipeline investigation rather than undoing the semantic assignment
+  fix.
+- The live default-pipeline float-assignment witness
+  `float g = 1.25; float id(float x){ return x; } float mainf(){ float y; y = id(g); return y; } int main(){ return 0; }`
+  has now been checked end-to-end: default `ValueSSA`, `machine_ir` report,
+  and `machine_select` report may legally fold it to a direct `load_global g`
+  return while still preserving float metadata. Do not treat that fold as a
+  regression by itself; the regression surface should check for preserved
+  float/global transport facts, not for the pre-optimization call/store shape.
+- The same “legal fold is not a regression” rule now also applies to the new
+  top-level runtime-init witnesses `float h = g;` and `float h = id(g);`.
+  Translation-only IR/lower-IR/ValueSSA keep the explicit load/call/store
+  transport path visible inside `__global.init`, while default `ValueSSA`
+  plus downstream default machine-report layers may legally collapse both
+  shapes to `store_globali ..., 1067450368` when the value flow is
+  constant-proven.
+- That same rule now also extends to direct float-return global-flow witnesses:
+  `float get(){ return g; }` and `float get(){ return id(g); }` are now
+  locked through translation-only IR/lower-IR/ValueSSA, while downstream
+  default machine-report layers are now locked too and may legally fold the
+  call-return transport witness to the same direct `load_global g` return
+  shape.
+- The same “legal fold is not a regression” rule also now shows up on float
+  parameter forwarding. On the default optimized `ValueSSA` path,
+  `float forward(float x){ return id(x); }` and even the one-hop local bounce
+  form `float bounce(float x){ float y; y = x; return id(y); }` may collapse
+  to the same direct `load_local x` return shape.
+- There is now also one first explicitly locked float call-chain family before
+  default folding: `float getg(){ return wrap(g); }` and
+  `float bounce(float x){ float y; y = x; return wrap(y); }` currently keep
+  the expected explicit call-chain transport shape through semantic / IR /
+  lower-IR / translation-only ValueSSA. Treat later default-pipeline folding
+  of that family, if/when added, by the same “legal fold is not a regression”
+  standard as the earlier assignment/return/runtime-init families.
+- That same call-chain family now also has one first default-ValueSSA closure
+  on the global-fed shape: `float getg(){ return wrap(g); }` may legally fold
+  to the same direct `load_global g` return shape as the simpler
+  global-return family.
+- Manual downstream probes now also agree with that same global-fed call-chain
+  fold on default `machine_ir` / `machine_select` report surfaces. Treat that
+  as the current expected optimized shape if/when broader regression coverage
+  is added later.
+- The first deliberate post-transport float feature is now also landed:
+  direct float values may be used as control conditions in `if`, `while`, and
+  `for`, but only for direct transport shapes (identifier / direct call /
+  float literal). Current lowering rewrites that to integer truthiness via
+  `(bits & 0x7fffffff) != 0`, so both `+0.0` and `-0.0` are false. Derived
+  float conditions such as `if(g + 1)` remain outside the feature and still
+  reject through the older transport-only boundary.
+- That direct-float-condition slice is now also explicitly closed on the
+  deeper regression surfaces: `ValueSSA` translation-only dumps keep the
+  visible `and 2147483647` / `ne 0` truthiness bridge, while the default
+  optimized `machine_ir` / `machine_select` report paths may legally fold the
+  simple witnesses to `ret 1` / `reti 1`. Treat those optimized folds as the
+  expected current checkpoint, not as evidence that float-condition lowering
+  disappeared.
+- The next small post-transport float broadening is now also landed on the
+  front-end through lower-IR surfaces: logical condition composition may now
+  contain direct float conditions under `!`, `&&`, `||`, and ternary
+  condition positions. Keep the boundary explicit: this does *not* mean
+  general float-valued derived expressions are open. `g + 1` and float-valued
+  ternary branches such as `g ? h : 0` still reject through `SEMA-EXT-035`.
+- That same condition-composition slice is now also checked one stage deeper
+  on the default optimized path: the current `ValueSSA` witness may legally
+  fold to a compact `phi`-based return, and downstream default `machine_ir` /
+  `machine_select` report surfaces may legally fold the same witness to
+  `ret 1` / `reti 1`. Treat those folds as the expected checkpoint shape.
+- The next conservative float broadening is now also landed: same-type float
+  comparisons are accepted under `-extension` across both equality and
+  relational operators. Current lowering normalizes signed zero before
+  compare, so `+0.0 == -0.0` is deliberately true on this slice, and the
+  relational family uses a normalized integer order-key mapping instead of
+  claiming a full native float-comparison pipeline. Mixed scalar comparisons
+  such as `float == int` still reject explicitly.
+- Negative float literals now also count as a first-class part of the same
+  conservative direct-transport slice. Treat that as a support surface for
+  better comparison witnesses and signed-zero behavior, not as proof that
+  arbitrary unary float arithmetic is already open.
+- Direct unary sign transport on float roots is now also part of that same
+  conservative story. Treat `-g` / `+g` / `-id(g)` as supported transport
+  shapes, but keep distinguishing them from a true generic float arithmetic
+  model.
+- The first arithmetic checkpoint is now also real: same-type `float + float`
+  and `float - float` are accepted on direct roots, but the current lowering
+  is helper-based (`__builtin_fadd32` / `__builtin_fsub32`). Treat that as a
+  deliberate honesty boundary, not as evidence that all later layers suddenly
+  have native float ALU semantics.
+- That helper-lowered arithmetic slice now also reaches the downstream
+  machine-report layers: focused `machine_ir` / `machine_select` witnesses can
+  already observe the helper-call path. Keep using that explicit helper-call
+  shape as the current checkpoint expectation when extending float arithmetic.
+- The same arithmetic slice now also has a focused default `ValueSSA`
+  checkpoint, not only front-half and machine-report coverage. Treat the
+  helper-call shape as the cross-layer contract for this first arithmetic
+  version.
+- The first arithmetic slice now also has one composition-style proof point on
+  the front half of the pipeline: unary-sign transport and helper-lowered
+  add/sub can already combine in focused witnesses such as `-g + y` and
+  `y - -g`. Keep using those combo witnesses when broadening the arithmetic
+  surface so we do not silently regress from “operators work in isolation”
+  back to “operators only work on the easiest positive-parameter shapes”.
+- The first helper-backed arithmetic slice now also has one explicit reject
+  boundary split: local/parameter mixed scalar arithmetic such as `float + int`
+  rejects as `SEMA-TYPE-008`, while unsupported broader derived-float
+  expression families such as `(x + y) + z` and the already-kept top-level
+  `g + 1` family still reject through `SEMA-EXT-035`.
+- That same mixed-arithmetic split is now also wider than the original
+  parameter-local witness: float literal roots and direct call roots now
+  follow the same `SEMA-TYPE-008` arithmetic mismatch rule in direct
+  semantic/compiler probes, unary-sign call-root shapes such as `-id(x) * 1`
+  now match that same boundary too, and the deliberately kept top-level
+  global-root family still remains on the older `SEMA-EXT-035` boundary.
+- That same mixed-root arithmetic split is now also regression-locked through
+  the focused compiler / default-`ValueSSA` / `machine_ir` /
+  `machine_select` surfaces for the local-id, float-literal, direct-call, and
+  unary-sign-call witness families, so the current gap is runner cleanliness
+  on some older IR/lower-IR aggregators rather than uncertainty about the
+  front-half or default-machine path behavior.
+- That same conservative helper-backed arithmetic family is now also widened
+  one operator pair further under the same honesty boundary: same-type
+  `float * float` and `float / float` on direct roots lower through
+  `__builtin_fmul32` / `__builtin_fdiv32`, not through a pretended native
+  float ALU path.
+- The helper-backed `*` / `/` slice now also has one first composition proof
+  point on the same unary-sign path as `+/-`: focused witnesses such as
+  `-g * y` and `y / -g` now survive through semantic / compiler / IR /
+  lower-IR, the focused default `ValueSSA` path, plus the downstream
+  `machine_ir` / `machine_select` report path.
+- That same helper-backed arithmetic family is now also known to compose
+  recursively on pure-float trees in direct probes, not only on one operator
+  applied to direct roots. Representative shapes such as `(x + y) + z` and
+  `-a * (b / c)` now pass focused semantic checks plus direct compiler / IR /
+  lower-IR / default-`ValueSSA` probes, and the downstream default
+  `machine_ir` / `machine_select` report surfaces now also lock the same
+  recursive helper-call shape. The remaining runner noise is concentrated in
+  some older compiler/IR/lower-IR aggregate-style paths rather than in the
+  implementation path itself.
+- Current authority for that recursive pure-float arithmetic surface is now
+  “implemented and directly observed”, not “still speculative”. The open item
+  is regression-lock breadth, especially on noisier aggregate runners, rather
+  than whether helper-backed recursive lowering itself works.
+- The conservative float arithmetic gate must distinguish “opened recursive
+  pure-float tree” from “any expression whose final type is float”. In
+  practice that means `float` arithmetic usage may recurse through same-type
+  float subtrees such as `(x + y) + z`, but mixed/global-root shapes like
+  `float g = 1.25; int main(){ return g + 1; }` still belong on the older
+  `SEMA-EXT-035` boundary unless they hit one of the explicitly opened
+  non-global mixed-root `SEMA-TYPE-008` families.
+- Current conservative float boundary table:
+  - `SEMA-EXT-035`: unsupported derived float values in value contexts such as
+    top-level/global-root arithmetic (`g + 1`), recursive-call results flowing
+    into disallowed value contexts, ternary float values used as plain values,
+    and same-type assignment/initializer of unsupported ternary-derived float
+    values such as `y = (g ? h : h)` or `float y = (g ? h : h)`.
+  - `SEMA-TYPE-008`: explicitly opened non-global mixed arithmetic families
+    such as `x + 1`, `id(x) + 1`, `1.25 + 1`, and `-id(x) * 1`.
+  - `SEMA-TYPE-007`: comparison-side scalar mismatch families such as
+    `g == 1` and `(g ? h : h) == 0`.
+  - `SEMA-TYPE-006`: direct assignment scalar mismatch families such as
+    `int x; x = g;`.
+  - `SEMA-TYPE-004`: top-level initializer scalar mismatch families that stay
+    on the initializer path, such as `int h = id(g);` and
+    `int x = add3(1.0, 2.0, 3.0);`.
+  - `SEMA-TYPE-003`: call-argument scalar mismatch families that stay on the
+    call-argument path, such as `sink(g)`, `sink((g ? h : h))`, and
+    `sink(add3(1.0, 2.0, 3.0))`.
+- Regression-runner hygiene note: the most frequently used focused-source
+  runners (`semantic_regression_test` and `compiler_driver_test`) now treat an
+  unknown `*_FILTER` value as an explicit failure instead of silently falling
+  back to the full suite. Use that behavior to distinguish “case truly
+  passed/failed” from “filter typo accidentally ran everything”.
+- Signed-zero coverage is now broader than the earlier checkpoint: after
+  teaching the front-end to treat `0.0` as a real float literal, focused
+  source-driven semantic / compiler / IR / lower-IR witnesses pass, the
+  translation-only `ValueSSA` witness is now locked too, and the downstream
+  default `machine_ir` / `machine_select` report surfaces remain green on the
+  same corner case.
+- The current relational float-compare slice is now also checked on negative
+  witnesses rather than only on positive literals/parameters. Keep relying on
+  those negative/signed-zero witnesses when touching the comparison lowering,
+  because they exercise the order-key mapping in a way that plain positive
+  examples do not. Translation-only `ValueSSA` and the downstream default
+  machine-report layers now both have focused negative-order witnesses too.
+- The first explicit post-transport cleanup after that checkpoint is now also
+  landed: arrays of `float` are rejected for local declarations, top-level
+  declarations, and function parameters via `SEMA-EXT-037`. Current
+  authority is that float arrays are *not* part of the conservative float
+  slice yet, even though earlier builds accidentally let some shapes lower all
+  the way to backend artifacts. The semantic and real compiler entrypoints now
+  both enforce that boundary.
 - `ValueSSA` loop-hoist safety proofs may not treat only `header + backedge`
   as "the loop" when deciding whether a local/global/indirect load is
   invariant. The `lv9/21_sort7` merge-sort witness showed that this can hoist
@@ -857,3 +1078,61 @@
   `stack_addr_reuse`, or a base register that `indexed_local_base_offsets`
   wants to erase, must stay in place if a later label can still observe that
   register before it is redefined.
+- Explicit float conversion checkpoint is now bidirectional rather than
+  one-sided. `int(float_expr)` lowers through `__builtin_f2i32` and
+  `float(int_expr)` lowers through `__builtin_i2f32`, with focused semantic /
+  compiler / IR / lower-IR / default-ValueSSA / machine-report regression
+  locks on both directions. Redundant same-type conversions still reject
+  through `SEMA-EXT-038`.
+- Explicit-conversion IR-lowering memory: helper-backed conversion builtins
+  must be part of the same predeclaration sweep as other builtin calls before
+  function-body lowering begins. Otherwise nested shapes such as
+  `sink(int(add3(...)))` can append `__builtin_f2i32` / `__builtin_i2f32`
+  mid-lowering, invalidate the current `IrFunction *`, and reuse a temp id in
+  the same block, surfacing as `IR-VERIFY-031`.
+- Default-pipeline explicit-conversion memory: bridge witnesses may optimize
+  much more aggressively than their source shape suggests. In particular,
+  `int(g ? h : h)` can legally collapse on default `ValueSSA` /
+  `machine_ir` / `machine_select` to a direct constant helper call such as
+  `__builtin_f2i32(1075838976)`. Treat preserved helper-conversion semantics,
+  not preserved branch/phi text, as the checkpoint contract on that path.
+- User-facing binary hygiene note: after `.inc`-only parser/lowering edits,
+  the focused regression binaries may be rebuilt while `build/compiler` itself
+  is still stale. If a manual CLI probe unexpectedly reports
+  `Expected expression, got KW_INT` on a conversion witness that the focused
+  regression surface accepts, rebuild `build/compiler` before treating it as a
+  real parser regression.
+- Explicit-conversion front-half matrix memory: `int(float_expr)` is now
+  checkpointed not only on plain return/callarg bridges, but also on top-
+  level initializer, local assignment, integer comparison, and integer
+  arithmetic-after-conversion witnesses. Treat those as live intended
+  behavior when broadening the symmetric `float(int_expr)` side.
+- Explicit-conversion default-downstream matrix memory: those same
+  `int(float_expr)` families now mostly survive focused default
+  `ValueSSA` / `machine_ir` / `machine_select` regression locks too, but keep
+  expecting legal optimization folds. Assignment bridges may fold away the
+  temporary local store/reload entirely, and compare bridges may lower to
+  more compact integer-compare instruction families instead of preserving the
+  source-level shape literally.
+- Symmetric explicit-conversion memory: `float(int_expr)` no longer lives only
+  on the seed witness `float(x + y)`. The front-half regression surface now
+  also covers top-level initializer, local assignment, float comparison, and
+  float arithmetic-neighbor families. The earlier local-assignment reject was
+  a semantic-assignment gate inconsistency, not a parser/lowering limitation.
+- Symmetric explicit-conversion default-downstream memory: those same
+  `float(int_expr)` richer families now also survive focused default
+  `ValueSSA` / `machine_ir` / `machine_select` locks. As with the
+  `int(float_expr)` side, expect legal constant folds and compact integer-side
+  compare/arithmetic materializations instead of insisting on source-shaped
+  helper trees at every later stage.
+- Same-type float ternary-value memory: the current live tree now accepts
+  `g ? h : h`-style float values on the focused front-half path for return,
+  assignment, and initializer contexts. Treat that as a new conservative
+  value-producing slice distinct from the older “float ternary condition”
+  slice. Mixed ternary branches (`g ? h : 0`) and ternary-float values flowing
+  directly into later float arithmetic still remain closed for now.
+- Same-type float ternary default-downstream memory: the return / assignment /
+  initializer witnesses for that slice now also survive focused default
+  `ValueSSA` locks. As with the explicit-conversion families, expect legal
+  constant folds on initializer-style cases rather than preserving the full
+  source-level branch structure in optimized dumps.

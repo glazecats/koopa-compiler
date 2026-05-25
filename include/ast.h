@@ -12,17 +12,34 @@ typedef enum {
 
 typedef enum {
     AST_FUNCTION_RETURN_INT = 0,
+    AST_FUNCTION_RETURN_FLOAT,
     AST_FUNCTION_RETURN_VOID,
 } AstFunctionReturnType;
 
 typedef enum {
+    AST_PARAMETER_VALUE_INT = 0,
+    AST_PARAMETER_VALUE_FLOAT,
+    AST_PARAMETER_VALUE_FUNCTION,
+} AstParameterValueKind;
+
+typedef enum {
+    AST_DECLARATION_VALUE_INT = 0,
+    AST_DECLARATION_VALUE_FLOAT,
+    AST_DECLARATION_VALUE_PAIR,
+    AST_DECLARATION_VALUE_STRUCT,
+} AstDeclarationValueKind;
+
+typedef enum {
     AST_EXPR_IDENTIFIER = 0,
     AST_EXPR_NUMBER,
+    AST_EXPR_FLOAT_LITERAL,
+    AST_EXPR_CONVERSION,
     AST_EXPR_INIT_LIST,
     AST_EXPR_PAREN,
     AST_EXPR_UNARY,
     AST_EXPR_POSTFIX,
     AST_EXPR_SUBSCRIPT,
+    AST_EXPR_MEMBER,
     AST_EXPR_CALL,
     AST_EXPR_BINARY,
     AST_EXPR_TERNARY,
@@ -39,13 +56,26 @@ typedef enum {
     AST_STMT_BREAK,
     AST_STMT_CONTINUE,
     AST_STMT_DEFER,
+    AST_STMT_FNDEFER,
+    AST_STMT_CAPDEFER,
 } AstStatementKind;
 
 typedef enum {
     AST_EXTENSION_ORIGIN_NONE = 0,
     AST_EXTENSION_ORIGIN_DEFER,
+    AST_EXTENSION_ORIGIN_FNDEFER,
+    AST_EXTENSION_ORIGIN_CAPDEFER,
     AST_EXTENSION_ORIGIN_UNLESS,
+    AST_EXTENSION_ORIGIN_PAIR,
+    AST_EXTENSION_ORIGIN_STRUCT,
 } AstExtensionOrigin;
+
+typedef struct {
+    char *name;
+    size_t name_length;
+    char **field_names;
+    size_t field_count;
+} AstStructType;
 
 typedef enum {
     AST_CALL_CALLEE_DIRECT_IDENTIFIER = 0,
@@ -66,6 +96,11 @@ struct AstExpression {
             size_t name_length;
         } identifier;
         long long number_value;
+        double float_number_value;
+        struct {
+            AstDeclarationValueKind target_type_kind;
+            AstExpression *operand;
+        } conversion;
         struct {
             AstExpression **items;
             size_t item_count;
@@ -83,6 +118,11 @@ struct AstExpression {
             AstExpression *base;
             AstExpression *index;
         } subscript;
+        struct {
+            AstExpression *base;
+            char *field_name;
+            size_t field_name_length;
+        } member;
         struct {
             AstExpression *callee;
             AstExpression **args;
@@ -109,8 +149,12 @@ struct AstStatement {
     int declaration_is_const;
     char **declaration_names;
     size_t declaration_name_count;
+    int *declaration_value_kinds;
     size_t *declaration_array_ranks;
     AstExpression ***declaration_array_extent_exprs;
+    AstFunctionReturnType *declaration_function_return_types;
+    size_t *declaration_function_parameter_counts;
+    char **declaration_type_names;
     AstExpression **expressions;
     size_t expression_count;
     int has_primary_expression;
@@ -121,6 +165,10 @@ struct AstStatement {
     size_t for_init_expression_index;
     int has_for_step_expression;
     size_t for_step_expression_index;
+    char **capture_names;
+    size_t capture_name_count;
+    AstExpression **capture_expressions;
+    size_t capture_expression_count;
     AstStatement **children;
     size_t child_count;
 };
@@ -128,6 +176,8 @@ struct AstStatement {
 typedef struct {
     AstExternalKind kind;
     AstFunctionReturnType function_return_type;
+    int declaration_value_kind;
+    char *declaration_type_name;
     char *name;
     size_t name_length;
     size_t declaration_array_rank;
@@ -137,8 +187,11 @@ typedef struct {
     AstExpression *declaration_initializer;
     size_t parameter_count;
     char **parameter_names;
+    int *parameter_value_kinds;
     size_t *parameter_array_ranks;
     AstExpression ***parameter_array_extent_exprs;
+    AstFunctionReturnType *parameter_function_return_types;
+    size_t *parameter_function_parameter_counts;
     int *parameter_is_const;
     int *parameter_name_lines;
     int *parameter_name_columns;
@@ -151,10 +204,13 @@ typedef struct {
 
 static inline int ast_external_function_returns_value(const AstExternal *external) {
     return external && external->kind == AST_EXTERNAL_FUNCTION &&
-        external->function_return_type == AST_FUNCTION_RETURN_INT;
+        external->function_return_type != AST_FUNCTION_RETURN_VOID;
 }
 
 typedef struct {
+    AstStructType *struct_types;
+    size_t struct_type_count;
+    size_t struct_type_capacity;
     AstExternal *externals;
     size_t count;
     size_t capacity;

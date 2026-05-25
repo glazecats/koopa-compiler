@@ -782,6 +782,7 @@ static int value_ssa_copy_globals_from_lower_ir(const LowerIrProgram *input_prog
                 error)) {
             return 0;
         }
+        output_global->value_type = input_global->value_type;
         output_global->byte_size = input_global->byte_size;
         output_global->has_initializer = input_global->has_initializer;
         output_global->initializer_value = input_global->initializer_value;
@@ -824,6 +825,7 @@ static int value_ssa_convert_function_from_lower_ir(const LowerIrProgram *input_
                 error)) {
             return 0;
         }
+        output_function->locals[i].value_type = input_function->locals[i].value_type;
         output_function->locals[i].array_rank = input_function->locals[i].array_rank;
     }
 
@@ -1081,6 +1083,12 @@ int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
     }
 
     return 1;
+}
+
+int value_ssa_build_translation_only_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error) {
+    return value_ssa_build_from_lower_ir(program, out_program, error);
 }
 
 #endif

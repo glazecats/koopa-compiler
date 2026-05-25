@@ -11,18 +11,39 @@
 
 typedef struct {
     const char *name;
+    AstFunctionReturnType return_type;
     size_t parameter_count;
+    const AstFunctionReturnType *parameter_types;
 } IrBuiltinFunctionInfo;
 
+static const AstFunctionReturnType k_ir_builtin_float_binary_param_types[2] = {
+    AST_FUNCTION_RETURN_FLOAT,
+    AST_FUNCTION_RETURN_FLOAT,
+};
+
+static const AstFunctionReturnType k_ir_builtin_float_unary_param_types[1] = {
+    AST_FUNCTION_RETURN_FLOAT,
+};
+
+static const AstFunctionReturnType k_ir_builtin_int_unary_param_types[1] = {
+    AST_FUNCTION_RETURN_INT,
+};
+
 static const IrBuiltinFunctionInfo k_ir_builtin_functions[] = {
-    {"getint", 0u},
-    {"getch", 0u},
-    {"getarray", 1u},
-    {"putint", 1u},
-    {"putch", 1u},
-    {"putarray", 2u},
-    {"starttime", 0u},
-    {"stoptime", 0u},
+    {"getint", AST_FUNCTION_RETURN_INT, 0u, NULL},
+    {"getch", AST_FUNCTION_RETURN_INT, 0u, NULL},
+    {"getarray", AST_FUNCTION_RETURN_INT, 1u, NULL},
+    {"putint", AST_FUNCTION_RETURN_VOID, 1u, NULL},
+    {"putch", AST_FUNCTION_RETURN_VOID, 1u, NULL},
+    {"putarray", AST_FUNCTION_RETURN_VOID, 2u, NULL},
+    {"starttime", AST_FUNCTION_RETURN_VOID, 0u, NULL},
+    {"stoptime", AST_FUNCTION_RETURN_VOID, 0u, NULL},
+    {"__builtin_fadd32", AST_FUNCTION_RETURN_FLOAT, 2u, k_ir_builtin_float_binary_param_types},
+    {"__builtin_fsub32", AST_FUNCTION_RETURN_FLOAT, 2u, k_ir_builtin_float_binary_param_types},
+    {"__builtin_fmul32", AST_FUNCTION_RETURN_FLOAT, 2u, k_ir_builtin_float_binary_param_types},
+    {"__builtin_fdiv32", AST_FUNCTION_RETURN_FLOAT, 2u, k_ir_builtin_float_binary_param_types},
+    {"__builtin_f2i32", AST_FUNCTION_RETURN_INT, 1u, k_ir_builtin_float_unary_param_types},
+    {"__builtin_i2f32", AST_FUNCTION_RETURN_FLOAT, 1u, k_ir_builtin_int_unary_param_types},
 };
 
 static int ir_function_find_last_unterminated_block(const IrFunction *function,
@@ -45,19 +66,40 @@ static const IrBuiltinFunctionInfo *ir_find_builtin_function_info(const char *na
 }
 
 static int ir_builtin_function_returns_value(const char *name) {
+    const IrBuiltinFunctionInfo *builtin = ir_find_builtin_function_info(name);
+
     if (!name || name[0] == '\0') {
         return 0;
     }
-    return strcmp(name, "putint") != 0 &&
-        strcmp(name, "putch") != 0 &&
-        strcmp(name, "putarray") != 0 &&
-        strcmp(name, "starttime") != 0 &&
-        strcmp(name, "stoptime") != 0;
+    return builtin && builtin->return_type != AST_FUNCTION_RETURN_VOID;
+}
+
+static int ir_builtin_function_matches_signature(const char *name,
+    AstFunctionReturnType expected_return_type,
+    size_t expected_parameter_count) {
+    const IrBuiltinFunctionInfo *builtin = ir_find_builtin_function_info(name);
+    if (!builtin) {
+        return 0;
+    }
+    return builtin->parameter_count == expected_parameter_count &&
+        builtin->return_type == expected_return_type;
 }
 
 static int ir_function_parameter_count_matches_external(const IrFunction *function,
     const AstExternal *external) {
     return function && external && function->parameter_count == external->parameter_count;
+}
+
+static AstFunctionReturnType ir_scalar_declaration_value_kind_to_return_type(int declaration_value_kind) {
+    return declaration_value_kind == AST_DECLARATION_VALUE_FLOAT
+        ? AST_FUNCTION_RETURN_FLOAT
+        : AST_FUNCTION_RETURN_INT;
+}
+
+static AstFunctionReturnType ir_scalar_parameter_value_kind_to_return_type(int parameter_value_kind) {
+    return parameter_value_kind == AST_PARAMETER_VALUE_FLOAT
+        ? AST_FUNCTION_RETURN_FLOAT
+        : AST_FUNCTION_RETURN_INT;
 }
 
 static int ir_apply_array_rank_to_local(IrFunction *function,
@@ -136,9 +178,7 @@ static int ir_ensure_builtin_function_signature(IrProgram *program,
             return 0;
         }
     }
-    function->return_type = ir_builtin_function_returns_value(builtin->name)
-        ? AST_FUNCTION_RETURN_INT
-        : AST_FUNCTION_RETURN_VOID;
+    function->return_type = builtin->return_type;
 
     if (function->local_count == 0u && function->parameter_count == 0u &&
         builtin->parameter_count > 0u) {
@@ -149,6 +189,10 @@ static int ir_ensure_builtin_function_signature(IrProgram *program,
             if (!ir_function_append_local(function, fallback_name, 1, NULL, error)) {
                 return 0;
             }
+            function->locals[param_index].value_type =
+                (builtin->parameter_types && param_index < builtin->parameter_count)
+                    ? builtin->parameter_types[param_index]
+                    : AST_FUNCTION_RETURN_INT;
         }
     }
 
@@ -187,6 +231,17 @@ static int ir_predeclare_builtin_calls_in_expression(IrProgram *program,
         return 1;
     case AST_EXPR_PAREN:
         return ir_predeclare_builtin_calls_in_expression(program, expr->as.inner, error);
+    case AST_EXPR_CONVERSION:
+        if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT) {
+            if (!ir_ensure_builtin_function_signature(program, "__builtin_f2i32", NULL, error)) {
+                return 0;
+            }
+        } else if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
+            if (!ir_ensure_builtin_function_signature(program, "__builtin_i2f32", NULL, error)) {
+                return 0;
+            }
+        }
+        return ir_predeclare_builtin_calls_in_expression(program, expr->as.conversion.operand, error);
     case AST_EXPR_UNARY:
         return ir_predeclare_builtin_calls_in_expression(program, expr->as.unary.operand, error);
     case AST_EXPR_POSTFIX:
@@ -323,6 +378,10 @@ static int ir_predeclare_program_globals(IrProgram *program,
         global = ir_program_find_global_mut(program, external->name);
         if (!global && !ir_program_append_global(program, external->name, &global, error)) {
             return 0;
+        }
+        if (global) {
+            global->value_type =
+                ir_scalar_declaration_value_kind_to_return_type(external->declaration_value_kind);
         }
         if (global &&
             !ir_apply_array_rank_to_global(global, external->declaration_array_rank, error)) {
@@ -478,6 +537,11 @@ static int ir_eval_global_initializer_expr(const IrProgram *program,
         }
         *out_value = ir_normalize_sysy_int_value(expr->as.number_value);
         return 1;
+    case AST_EXPR_FLOAT_LITERAL:
+        if (out_invalid_constant) {
+            *out_invalid_constant = 1;
+        }
+        return 0;
     case AST_EXPR_INIT_LIST:
         if (out_invalid_constant) {
             *out_invalid_constant = 1;
@@ -700,6 +764,10 @@ static int ir_ensure_function_signature(IrProgram *program,
             if (!ir_function_append_local(function, parameter_name, 1, NULL, error)) {
                 return 0;
             }
+            function->locals[i].value_type = ir_scalar_parameter_value_kind_to_return_type(
+                external->parameter_value_kinds
+                    ? external->parameter_value_kinds[i]
+                    : AST_PARAMETER_VALUE_INT);
         }
     }
 
@@ -718,6 +786,12 @@ static int ir_ensure_function_signature(IrProgram *program,
 
         if (!ir_function_set_parameter_name(function, i, parameter_name, error)) {
             return 0;
+        }
+        if (function->locals && i < function->local_count) {
+            function->locals[i].value_type = ir_scalar_parameter_value_kind_to_return_type(
+                external->parameter_value_kinds
+                    ? external->parameter_value_kinds[i]
+                    : AST_PARAMETER_VALUE_INT);
         }
         if (external->parameter_array_ranks &&
             !ir_apply_array_rank_to_local(function, i, external->parameter_array_ranks[i], error)) {
@@ -1269,15 +1343,565 @@ static int ir_lower_global_declaration(IrProgram *program,
     return 1;
 }
 
-static int ir_lower_function(IrProgram *program,
+static int ir_lower_function(const AstProgram *ast_program,
+    IrProgram *program,
     const IrLowerOptions *options,
     const AstExternal *external,
+    IrError *error) {
+    if (ir_external_body_needs_function_value_specialization(ast_program, external, external->function_body)) {
+        ir_set_error(error,
+            external->line,
+            external->column,
+            "IR-LOWER-027: function '%s' needs function-value callee specialization before direct IR lowering",
+            external->name);
+        return 0;
+    }
+    return ir_lower_function_core(ast_program, program, NULL, options, external, NULL, error);
+}
+
+static int ir_external_body_has_function_parameter_callee_calls(const AstExternal *external,
+    const AstStatement *stmt) {
+    size_t child_index;
+    size_t expr_index;
+    const char *called_name = NULL;
+
+    if (!external || !stmt) {
+        return 0;
+    }
+
+    for (expr_index = 0u; expr_index < stmt->expression_count; ++expr_index) {
+        const AstExpression *expr = stmt->expressions ? stmt->expressions[expr_index] : NULL;
+
+        if (!expr || expr->kind != AST_EXPR_CALL) {
+            continue;
+        }
+        called_name = ir_extract_direct_call_callee_name(expr->as.call.callee);
+        if ((!called_name || called_name[0] == '\0') &&
+            !ir_classify_direct_identifier_expr(expr->as.call.callee, &called_name)) {
+            continue;
+        }
+        if (called_name &&
+            external->parameter_value_kinds &&
+            external->parameter_names) {
+            size_t param_index;
+            for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+                if (external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+                    external->parameter_names[param_index] &&
+                    strcmp(external->parameter_names[param_index], called_name) == 0) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        if (ir_external_body_has_function_parameter_callee_calls(
+                external,
+                stmt->children ? stmt->children[child_index] : NULL)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int ir_function_parameter_name_is_compatible_function_value(const AstExternal *current_external,
+    const char *name,
+    AstFunctionReturnType expected_return_type,
+    size_t expected_parameter_count) {
+    size_t param_index;
+
+    if (!current_external || !name || name[0] == '\0' ||
+        !current_external->parameter_names ||
+        !current_external->parameter_value_kinds) {
+        return 0;
+    }
+
+    for (param_index = 0u; param_index < current_external->parameter_count; ++param_index) {
+        if (current_external->parameter_value_kinds[param_index] != AST_PARAMETER_VALUE_FUNCTION ||
+            !current_external->parameter_names[param_index] ||
+            strcmp(current_external->parameter_names[param_index], name) != 0) {
+            continue;
+        }
+
+        return (!current_external->parameter_function_return_types ||
+                   current_external->parameter_function_return_types[param_index] == expected_return_type) &&
+            (!current_external->parameter_function_parameter_counts ||
+                current_external->parameter_function_parameter_counts[param_index] == expected_parameter_count);
+    }
+
+    return 0;
+}
+
+static int ir_external_body_needs_function_value_specialization(const AstProgram *program,
+    const AstExternal *current_external,
+    const AstStatement *stmt) {
+    size_t expr_index;
+    size_t child_index;
+
+    if (!current_external || !stmt) {
+        return 0;
+    }
+
+    if (ir_external_body_has_function_parameter_callee_calls(current_external, stmt)) {
+        return 1;
+    }
+
+    for (expr_index = 0u; expr_index < stmt->expression_count; ++expr_index) {
+        const AstExpression *expr = stmt->expressions ? stmt->expressions[expr_index] : NULL;
+        const char *callee_name = NULL;
+        const AstExternal *callee_external = NULL;
+        size_t external_index;
+        size_t arg_index;
+
+        if (!expr || expr->kind != AST_EXPR_CALL) {
+            continue;
+        }
+
+        callee_name = ir_extract_direct_call_callee_name(expr->as.call.callee);
+        if ((!callee_name || callee_name[0] == '\0') &&
+            !ir_classify_direct_identifier_expr(expr->as.call.callee, &callee_name)) {
+            continue;
+        }
+
+        if (callee_name && current_external->parameter_value_kinds && current_external->parameter_names) {
+            size_t param_index;
+
+            for (param_index = 0u; param_index < current_external->parameter_count; ++param_index) {
+                if (current_external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+                    current_external->parameter_names[param_index] &&
+                    strcmp(current_external->parameter_names[param_index], callee_name) == 0) {
+                    return 1;
+                }
+            }
+        }
+
+        if (!program || !callee_name || callee_name[0] == '\0') {
+            continue;
+        }
+
+        for (external_index = 0u; external_index < program->count; ++external_index) {
+            const AstExternal *candidate = &program->externals[external_index];
+
+            if (candidate->kind == AST_EXTERNAL_FUNCTION &&
+                candidate->name &&
+                strcmp(candidate->name, callee_name) == 0) {
+                callee_external = candidate;
+                break;
+            }
+        }
+        if (!callee_external || !callee_external->parameter_value_kinds) {
+            continue;
+        }
+
+        for (arg_index = 0u; arg_index < expr->as.call.arg_count && arg_index < callee_external->parameter_count;
+             ++arg_index) {
+            const AstExpression *arg_expr = expr->as.call.args ? expr->as.call.args[arg_index] : NULL;
+            const char *arg_name = NULL;
+            size_t expected_nested_count = 0u;
+            AstFunctionReturnType expected_return_type = AST_FUNCTION_RETURN_INT;
+
+            if (!arg_expr ||
+                callee_external->parameter_value_kinds[arg_index] != AST_PARAMETER_VALUE_FUNCTION ||
+                !ir_classify_direct_identifier_expr(arg_expr, &arg_name) ||
+                !arg_name || arg_name[0] == '\0') {
+                continue;
+            }
+
+            expected_nested_count = callee_external->parameter_function_parameter_counts
+                ? callee_external->parameter_function_parameter_counts[arg_index]
+                : 0u;
+            expected_return_type = callee_external->parameter_function_return_types
+                ? callee_external->parameter_function_return_types[arg_index]
+                : AST_FUNCTION_RETURN_INT;
+
+            if (ir_function_parameter_name_is_compatible_function_value(
+                    current_external,
+                    arg_name,
+                    expected_return_type,
+                    expected_nested_count)) {
+                return 1;
+            }
+        }
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        if (ir_external_body_needs_function_value_specialization(
+                program,
+                current_external,
+                stmt->children ? stmt->children[child_index] : NULL)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+#if 0
+static int ir_external_body_has_function_parameter_forwarding_calls_unused(const AstExternal *external,
+    const AstStatement *stmt) {
+    size_t child_index;
+    size_t expr_index;
+
+    if (!external || !stmt || !external->parameter_value_kinds || !external->parameter_names) {
+        return 0;
+    }
+
+    for (expr_index = 0u; expr_index < stmt->expression_count; ++expr_index) {
+        const AstExpression *expr = stmt->expressions ? stmt->expressions[expr_index] : NULL;
+        const char *callee_name = NULL;
+        const AstExternal *callee_external = NULL;
+        size_t external_index;
+        size_t arg_index;
+
+        if (!expr || expr->kind != AST_EXPR_CALL ||
+            !ir_classify_direct_identifier_expr(expr->as.call.callee, &callee_name) ||
+            !callee_name || callee_name[0] == '\0') {
+            continue;
+        }
+
+        for (external_index = 0u; external_index < stmt->line; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        callee_external = NULL;
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < external->parameter_count; ++external_index) {
+            (void)external_index;
+        }
+
+        for (external_index = 0u; external_index < 0u; ++external_index) {
+            (void)external_index;
+        }
+
+        (void)callee_external;
+        (void)arg_index;
+    }
+
+    for (child_index = 0u; child_index < stmt->child_count; ++child_index) {
+        if (ir_external_body_has_function_parameter_forwarding_calls(
+                external,
+                stmt->children ? stmt->children[child_index] : NULL)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+#endif
+
+static int ir_lower_function_core(const AstProgram *ast_program,
+    IrProgram *program,
+    IrFunction *existing_function,
+    const IrLowerOptions *options,
+    const AstExternal *external,
+    const char *const *bound_function_targets,
     IrError *error) {
     IrFunction *function;
     IrLowerContext ctx;
     size_t i;
     int scope_pushed = 0;
     int ok = 0;
+    const char *current_function_name = NULL;
 
     if (!program || !external || external->kind != AST_EXTERNAL_FUNCTION ||
         !external->name || external->name[0] == '\0') {
@@ -1285,8 +1909,11 @@ static int ir_lower_function(IrProgram *program,
         return 0;
     }
 
-    if (!ir_ensure_function_signature(program, external, &function, error)) {
-        return 0;
+    function = existing_function;
+    if (!function) {
+        if (!ir_ensure_function_signature(program, external, &function, error)) {
+            return 0;
+        }
     }
 
     if (!external->is_function_definition) {
@@ -1311,12 +1938,15 @@ static int ir_lower_function(IrProgram *program,
         return 0;
     }
 
+    current_function_name = function->name;
+
     if (!ir_function_append_block(function, &ctx.block_id, NULL, error)) {
         return 0;
     }
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.program = program;
+    ctx.ast_program = ast_program;
     ctx.function = function;
     ctx.function_return_type = external->function_return_type;
     ctx.allow_implicit_fallthrough_return =
@@ -1324,6 +1954,11 @@ static int ir_lower_function(IrProgram *program,
     ctx.block_id = 0;
     ctx.has_block = 1;
     ctx.error = error;
+    ctx.function_value_parameter_names = external->parameter_names
+        ? (const char **)external->parameter_names
+        : NULL;
+    ctx.function_value_parameter_targets = bound_function_targets;
+    ctx.function_value_parameter_count = external->parameter_count;
 
     if (!ir_lower_scope_stack_push(&ctx.scopes)) {
         ir_set_error(error,
@@ -1375,6 +2010,8 @@ static int ir_lower_function(IrProgram *program,
                     : IR_LOWER_BINDING_SCALAR_LOCAL,
                 parameter_array_rank,
                 parameter_array_extents,
+                0u,
+                NULL,
                 parameter_is_const,
                 0,
                 0)) {
@@ -1389,12 +2026,68 @@ static int ir_lower_function(IrProgram *program,
         free(parameter_array_extents);
     }
 
+    if (external->function_body) {
+        size_t fndefer_site_capacity = 0u;
+
+        if (!ir_collect_fndefer_sites(external->function_body,
+                &ctx.fndefer_sites,
+                &ctx.fndefer_site_count,
+                &fndefer_site_capacity,
+                error)) {
+            goto cleanup;
+        }
+        if (ctx.fndefer_site_count > 0u) {
+            ctx.fndefer_counter_local_ids = (size_t *)calloc(ctx.fndefer_site_count, sizeof(size_t));
+            if (!ctx.fndefer_counter_local_ids) {
+                ir_set_error(error,
+                    external->line,
+                    external->column,
+                    "IR-INT-086: out of memory while preparing function-exit defer counters");
+                goto cleanup;
+            }
+            for (i = 0u; i < ctx.fndefer_site_count; ++i) {
+                char hidden_name[64];
+                size_t counter_local_id = (size_t)-1;
+
+                snprintf(hidden_name, sizeof(hidden_name), "__fndefer_count_%zu", i);
+                if (!ir_function_append_local(function, hidden_name, 0, &counter_local_id, error) ||
+                    !ir_emit_mov(&ctx, ir_value_local(counter_local_id), ir_value_immediate(0)) ||
+                    !ir_lower_function_defer_entry_stack_push_with_runtime_repeat_count(
+                        &ctx.function_defer_entries,
+                        ctx.fndefer_sites[i]->children[0],
+                        counter_local_id)) {
+                    goto cleanup;
+                }
+                ctx.fndefer_counter_local_ids[i] = counter_local_id;
+            }
+        }
+    }
+
     if (!ir_lower_statement(&ctx, external->function_body)) {
         goto cleanup;
     }
 
+    if (current_function_name && current_function_name[0] != '\0') {
+        function = ir_program_find_function_mut(program, current_function_name);
+        if (!function) {
+            ir_set_error(error,
+                external->line,
+                external->column,
+                "IR-INT-084: current function '%s' disappeared during lowering",
+                current_function_name);
+            goto cleanup;
+        }
+        ctx.function = function;
+    }
+
     if (ctx.has_block && !ir_lower_current_block(&ctx)) {
         goto cleanup;
+    }
+
+    if (ctx.has_block && !ir_lower_current_block(&ctx)->has_terminator) {
+        if (!ir_lower_emit_function_defer_entries(&ctx)) {
+            goto cleanup;
+        }
     }
 
     if (ctx.has_block && !ir_lower_current_block(&ctx)->has_terminator) {
@@ -1427,7 +2120,130 @@ cleanup:
     ir_loop_target_stack_free(&ctx.loop_targets);
     ir_lower_defer_scope_stack_free(&ctx.defer_scopes);
     ir_lower_defer_entry_stack_free(&ctx.defer_entries);
+    ir_lower_function_defer_entry_stack_free(&ctx.function_defer_entries);
+    free((void *)ctx.fndefer_sites);
+    free(ctx.fndefer_counter_local_ids);
     return ok;
+}
+
+static int ir_build_function_value_specialized_name(const AstExternal *external,
+    const char *const *bound_function_targets,
+    char **out_name,
+    IrError *error) {
+    size_t param_index;
+    size_t needed = 0u;
+    char *name = NULL;
+    size_t offset = 0u;
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (!external || !external->name || !out_name) {
+        ir_set_error(error, 0, 0, "IR-INT-080: invalid specialized-name build contract");
+        return 0;
+    }
+
+    needed = strlen(external->name) + strlen("__fv") + 1u;
+    for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+        if (external->parameter_value_kinds &&
+            external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+            bound_function_targets &&
+            bound_function_targets[param_index]) {
+            needed += strlen(bound_function_targets[param_index]) + 3u;
+        }
+    }
+
+    name = (char *)malloc(needed);
+    if (!name) {
+        ir_set_error(error, external->line, external->column,
+            "IR-INT-081: out of memory while naming function-value specialization");
+        return 0;
+    }
+
+    offset += (size_t)snprintf(name + offset, needed - offset, "%s__fv", external->name);
+    for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+        if (external->parameter_value_kinds &&
+            external->parameter_value_kinds[param_index] == AST_PARAMETER_VALUE_FUNCTION &&
+            bound_function_targets &&
+            bound_function_targets[param_index]) {
+            offset += (size_t)snprintf(name + offset,
+                needed - offset,
+                "_%zu_%s",
+                param_index,
+                bound_function_targets[param_index]);
+        }
+    }
+
+    *out_name = name;
+    return 1;
+}
+
+static int ir_lower_specialized_function_for_function_value_call(
+    const AstProgram *ast_program,
+    IrProgram *program,
+    const IrLowerOptions *options,
+    const AstExternal *external,
+    const char *const *bound_function_targets,
+    const char **out_specialized_name,
+    IrError *error) {
+    char *specialized_name = NULL;
+    IrFunction *function = NULL;
+    int ok = 0;
+
+    if (out_specialized_name) {
+        *out_specialized_name = NULL;
+    }
+    if (!ast_program || !program || !external || !bound_function_targets) {
+        ir_set_error(error, 0, 0, "IR-INT-082: invalid specialized function lowering contract");
+        return 0;
+    }
+
+    if (!ir_build_function_value_specialized_name(external, bound_function_targets, &specialized_name, error)) {
+        return 0;
+    }
+
+    function = ir_program_find_function_mut(program, specialized_name);
+    if (function) {
+        if (out_specialized_name) {
+            *out_specialized_name = function->name;
+        }
+        free(specialized_name);
+        return 1;
+    }
+
+    if (!ir_program_append_function(program, specialized_name, &function, error)) {
+        free(specialized_name);
+        return 0;
+    }
+    function->return_type = external->function_return_type;
+
+    {
+        size_t param_index;
+        for (param_index = 0u; param_index < external->parameter_count; ++param_index) {
+            if (!ir_function_append_local(function,
+                    external->parameter_names && external->parameter_names[param_index]
+                        ? external->parameter_names[param_index]
+                        : "param",
+                    1,
+                    NULL,
+                    error)) {
+                free(specialized_name);
+                return 0;
+            }
+        }
+    }
+
+    ok = ir_lower_function_core(ast_program, program, function, options, external, bound_function_targets, error);
+    if (!ok) {
+        free(specialized_name);
+        return 0;
+    }
+
+    if (out_specialized_name) {
+        *out_specialized_name = function->name;
+    }
+    free(specialized_name);
+    return 1;
 }
 
 int ir_lower_program(const AstProgram *ast_program,
@@ -1491,7 +2307,11 @@ int ir_lower_program(const AstProgram *ast_program,
         if (!ir_ensure_function_signature(out_program, external, NULL, error)) {
             return 0;
         }
-        if (external->is_function_definition && !ir_lower_function(out_program, options, external, error)) {
+        if (external->is_function_definition &&
+            ir_external_body_needs_function_value_specialization(ast_program, external, external->function_body)) {
+            continue;
+        }
+        if (external->is_function_definition && !ir_lower_function(ast_program, out_program, options, external, error)) {
             return 0;
         }
     }

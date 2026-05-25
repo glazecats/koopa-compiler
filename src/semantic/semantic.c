@@ -16,6 +16,7 @@ typedef struct {
     const AstProgram *program;
     size_t func_index;
     int include_current_external;
+    const AstExternal *current_func;
     SemanticError *error;
 } CallableRuleVisitCtx;
 
@@ -34,6 +35,44 @@ typedef struct {
     AstFunctionReturnType return_type;
     size_t parameter_count;
 } SemanticBuiltinFunctionInfo;
+
+typedef enum {
+    SEMANTIC_TYPE_KIND_INVALID = 0,
+    SEMANTIC_TYPE_KIND_INT,
+    SEMANTIC_TYPE_KIND_FLOAT,
+    SEMANTIC_TYPE_KIND_VOID,
+    SEMANTIC_TYPE_KIND_FUNCTION,
+    SEMANTIC_TYPE_KIND_AGGREGATE,
+} SemanticTypeKind;
+
+typedef enum {
+    SEMANTIC_AGGREGATE_KIND_NONE = 0,
+    SEMANTIC_AGGREGATE_KIND_PAIR,
+    SEMANTIC_AGGREGATE_KIND_STRUCT,
+} SemanticAggregateKind;
+
+typedef struct SemanticTypeDescriptor SemanticTypeDescriptor;
+
+struct SemanticTypeDescriptor {
+    SemanticTypeKind kind;
+    SemanticAggregateKind aggregate_kind;
+    const char *named_type_name;
+    size_t array_rank;
+    AstExpression **array_extent_exprs;
+    AstFunctionReturnType function_return_type;
+    size_t parameter_count;
+    const int *parameter_value_kinds;
+    const AstFunctionReturnType *parameter_function_return_types;
+    const size_t *parameter_function_parameter_counts;
+};
+
+typedef enum {
+    SEMANTIC_FUNCTION_SIGNATURE_MATCH = 0,
+    SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_RETURN_TYPE,
+    SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_PARAMETER_COUNT,
+    SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_PARAMETER_KIND,
+    SEMANTIC_FUNCTION_SIGNATURE_MISMATCH_NESTED_SIGNATURE,
+} SemanticFunctionSignatureMatchKind;
 
 static void format_callee_preview(const char *name, char *out, size_t out_size);
 static void semantic_set_error(SemanticError *error,
@@ -89,6 +128,7 @@ static int semantic_analyze_statement_flow(const AstStatement *stmt,
 static int semantic_check_single_callable_rule(const AstProgram *program,
     size_t func_index,
     int include_current_external,
+    const AstExternal *current_func,
     const char *called_name,
     int call_line,
     int call_column,
@@ -104,6 +144,7 @@ static int semantic_check_top_level_initializer_callable_rules(const AstProgram 
     size_t external_index,
     const AstExpression *expr,
     SemanticError *error);
+static int semantic_function_parameter_name_is_function_valued(const AstExternal *func, const char *name);
 static int semantic_check_function_callable_scope_shadow_rules(const AstExternal *func,
     SemanticError *error);
 static int semantic_scope_check_top_level_initializer_expression(const AstExpression *expr,
@@ -115,11 +156,41 @@ static int semantic_check_function_scope_rules(const AstProgram *program,
     const AstExternal *func,
     const SemanticAnalyzeConfig *config,
     SemanticError *error);
+static int semantic_build_function_return_type_descriptor(const AstExternal *external,
+    SemanticTypeDescriptor *out_type);
+static int semantic_build_top_level_declaration_type_descriptor(const AstExternal *external,
+    SemanticTypeDescriptor *out_type);
+static int semantic_build_function_parameter_type_descriptor(const AstExternal *external,
+    size_t param_index,
+    SemanticTypeDescriptor *out_type);
+static int semantic_find_named_function_parameter_type_descriptor(const AstExternal *func,
+    const char *name,
+    size_t *out_index,
+    SemanticTypeDescriptor *out_type);
+static int semantic_type_descriptors_are_compatible(const SemanticTypeDescriptor *lhs,
+    const SemanticTypeDescriptor *rhs);
+static int semantic_top_level_declarations_have_compatible_types(const AstExternal *lhs,
+    const AstExternal *rhs);
+static SemanticFunctionSignatureMatchKind semantic_function_declaration_signature_match_kind(
+    const AstExternal *lhs,
+    const AstExternal *rhs);
 static int semantic_check_function_return_shape_rules(const AstExternal *func,
     SemanticError *error);
 static int semantic_compute_function_returns_all_paths(const AstExternal *func,
     int *out_returns_all_paths,
     SemanticError *error);
+static SemanticAggregateKind semantic_aggregate_kind_from_declaration_value_kind(int declaration_value_kind) {
+    switch (declaration_value_kind) {
+    case AST_DECLARATION_VALUE_FLOAT:
+        return SEMANTIC_AGGREGATE_KIND_NONE;
+    case AST_DECLARATION_VALUE_PAIR:
+        return SEMANTIC_AGGREGATE_KIND_PAIR;
+    case AST_DECLARATION_VALUE_STRUCT:
+        return SEMANTIC_AGGREGATE_KIND_STRUCT;
+    default:
+        return SEMANTIC_AGGREGATE_KIND_NONE;
+    }
+}
 
 static long long semantic_normalize_sysy_int_value(long long value) {
     uint32_t bits = (uint32_t)value;

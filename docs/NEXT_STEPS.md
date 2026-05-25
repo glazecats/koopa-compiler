@@ -49,6 +49,669 @@
   [docs/language/UNLESS_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/UNLESS_FEATURE_PLAN.md)
 - Another follow-up feature candidate now also has a first design plan:
   [docs/language/FUNCTION_EXIT_DEFER_PLAN.md](/workspaces/compiler_lab/docs/language/FUNCTION_EXIT_DEFER_PLAN.md)
+- The next likely post-`fndefer` feature candidate now also has a first design
+  plan:
+  [docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md](/workspaces/compiler_lab/docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md)
+  - current checkpoint:
+    parser now accepts first function-valued-parameter shapes such as
+    `int apply(int f(int), int x);`
+  - current landed slice:
+    the conservative extension path now supports passing a top-level function
+    name into a function-valued parameter, including direct callee use like
+    `return f(x);` through specialization helpers such as `apply__fv_0_add1`
+  - current further landed step:
+    chained forwarding through another compatible function-valued parameter is
+    now also supported, for example `wrapper(f, x) { return apply(f, x); }`,
+    still via static helper specialization rather than generic function values
+  - current broader landed shape:
+    multiple simultaneously bound function-valued parameters are now also
+    supported under the same specialization model, for example
+    `compose(f, g, x) { return f(g(x)); }`
+  - current further landed type broadening:
+    `void`-return function-valued parameters are now supported too, including
+    builtin bindings such as `apply(putint, 7)`
+  - current further landed arity broadening:
+    zero-argument function-valued parameters are now supported too, for
+    example `apply0(next)`
+  - current further landed zero-arg/void broadening:
+    zero-argument `void`-return function-valued parameters are now supported
+    too, for example `apply0(ping)`
+  - current non-goals that still reject:
+    plain function values in ordinary value position, non-function actual
+    arguments, local/global storage of function values, returning function
+    values, and CFG-merged dynamic function-value flow
+  - current implementation authority for the landed `f(x)` slice and its
+    remaining boundary:
+    [docs/language/FUNCTION_VALUE_CALLEE_LOWERING_PLAN.md](/workspaces/compiler_lab/docs/language/FUNCTION_VALUE_CALLEE_LOWERING_PLAN.md)
+- New composite-type feature candidate now also has a first concrete plan:
+  [docs/language/PAIR_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/PAIR_FEATURE_PLAN.md)
+  - current checkpoint:
+    `pair` is an `-extension`-only builtin composite type slice
+  - current landed slice:
+    local `pair` declarations, `{1, 2}`-style initialization,
+    local pair-copy initialization/assignment, and `.first` / `.second`
+    field access all lower through hidden scalar slots
+  - current non-goals:
+    global `pair`, parameters, returns, arrays of `pair`, arbitrary fields,
+    and a generic struct ABI
+- Another composite-type follow-up is now also landed in a first conservative
+  named form:
+  [docs/language/STRUCT_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/STRUCT_FEATURE_PLAN.md)
+  - current checkpoint:
+    `struct` is an `-extension`-only top-level type-definition slice
+  - current landed slice:
+    `struct Name { int x; int y; };` plus local declarations, `{...}`
+    initialization, local copy init/assignment, and field access
+  - current non-goals:
+    globals, parameters, returns, arrays, more than two `int` fields, and a
+    general struct ABI
+- The next composite/type-system follow-up now also has a first concrete plan:
+  [docs/language/TYPE_SYSTEM_PLAN.md](/workspaces/compiler_lab/docs/language/TYPE_SYSTEM_PLAN.md)
+  - current target:
+    unify the existing `pair` / `struct` slices under one conservative
+    type/compatibility layer, then use that shared layer as the bridge toward
+    `float` and richer type checking
+  - current non-goals:
+    full C type equivalence, pointers, closures, and a new aggregate ABI
+  - current landed slice:
+    parser and semantic now share the aggregate-kind/type-name metadata path
+    for `pair` / `struct` declarations, member access, initializer bounds, and
+    assignment compatibility checks
+  - current boundary tightening:
+    aggregate parameters/returns still stay out of scope, but parser/driver
+    diagnostics now reject them honestly as unsupported parameter/return forms
+    rather than as fake top-level object declarations
+  - current cleanup follow-up:
+    the shared semantic helper surface is now also being renamed away from
+    pair-specific wording toward aggregate-oriented wording
+  - current shared-field boundary:
+    invalid field names are now covered consistently for both builtin and
+    named aggregates in the parser/semantic/driver regression surface
+  - current shared-member lookup step:
+    pair and struct member access now flow through one shared aggregate
+    member-lookup helper path rather than separate validators
+  - current regression lock:
+    both positive and negative member-lookup cases are now covered for builtin
+    and named aggregates on the parser/semantic/driver surfaces
+  - current shared value-lookup step:
+    aggregate value-position checks now also draw from the same shared
+    declaration-kind/type-name facts as the member lookup path
+  - current cleanup note:
+    remaining aggregate diagnostics and tests are being normalized onto the
+    shared aggregate vocabulary
+  - current status:
+    kept and extending
+  - latest shared declaration-compatibility follow-up:
+    top-level repeated object declarations no longer accept mismatched shared
+    object shapes such as scalar-vs-array silently; semantic now rejects them
+    through one shared type-mismatch path instead of only checking duplicate
+    initialized definitions
+  - latest further refinement:
+    shared top-level object compatibility now also treats constant-folded array
+    extents as part of the same object type check, so `[1+1]` and `[2]`
+    remain compatible while `[2]` and `[3]` now reject through the same
+    shared mismatch path
+  - latest function-signature cleanup:
+    top-level function declaration compatibility now also routes through one
+    shared signature-compatibility helper for return type, parameter kinds,
+    and nested function-parameter signature shape, rather than keeping all of
+    those comparisons open-coded only at the duplicate-declaration site
+  - latest shared type-descriptor step:
+    semantic now routes float detection plus top-level object/function
+    compatibility through a small shared type descriptor layer, and the
+    function-signature path now returns a structured match kind before the
+    existing diagnostics are emitted
+  - latest regression lock:
+    extension-mode regressions now cover parameter-kind and nested-signature
+    mismatches on function-valued parameters through the same shared type
+    descriptor path
+  - latest local-aggregate follow-up:
+    local `pair` / `struct` member lookup and whole-value assignment checks
+    now also share one scope-side aggregate type-descriptor path, rather than
+    re-deriving pair/struct compatibility through separate ad hoc branches
+  - latest local-declaration follow-up:
+    local declaration validation now also routes through the shared type
+    descriptor path for `float`, `pair`, and `struct` declarations, including
+    the existing array restrictions for aggregate locals
+  - latest return-shape follow-up:
+    function return-statement shape checking now also derives the declared
+    return kind through a shared descriptor helper instead of open-coding
+    `AST_FUNCTION_RETURN_*` checks at that semantic entrypoint
+  - latest non-void return follow-up:
+    the function-definition all-path return gate now also keys off the shared
+    return descriptor helper, so that check no longer depends on direct
+    `AST_FUNCTION_RETURN_INT` comparisons
+  - latest local-shadow follow-up:
+    local declaration shadow-pass float rejection now also routes through the
+    same shared declaration-value-kind to type-kind mapping as the other
+    declaration-side type checks
+  - latest function-value helper follow-up:
+    function-valued-parameter and function-argument compatibility checks now
+    also route through shared function-parameter type descriptors before the
+    existing specialization and call diagnostics run
+  - latest callable helper follow-up:
+    function-valued parameter lookup for callable diagnostics and
+    function-return void checks now also route through shared descriptor
+    helpers instead of re-reading raw parameter/return enum fields directly
+  - latest aggregate-init follow-up:
+    aggregate declaration initialization now also rejects scalar-to-aggregate
+    init and mismatched struct copy-init shapes through the same conservative
+    compatibility story used for aggregate assignment, and pair initializer
+    lists now also enforce the declared two-field bound
+  - latest function-exit-defer follow-up:
+    dynamically re-executed `fndefer` / `capdefer` sites inside `if` / `while`
+    / `for` are now rejected at the semantic boundary for the first extension
+    version, so the live tree stays honest until a true runtime-registration
+    model lands
+  - Current type-system checkpoint:
+  - `float` keyword and AST metadata are now wired through lexer/parser
+  - the current next slice now accepts conservative float transport shapes:
+    declarations, parameters, returns, direct identifier/call transport, and
+    same-type scalar call/return flow no longer silently collapse to `int`
+  - the current conservative float boundary remains explicit:
+    float operators and derived float expressions are still rejected with
+    `SEMA-EXT-035`, and this slice should still be treated as semantic/type
+    broadening rather than real floating-point arithmetic support
+  - latest lowering follow-up:
+    canonical IR and lower IR now also preserve visible `float` slot/signature
+    metadata on this transport-only slice, so the front-end type boundary no
+    longer disappears immediately at the first IR/lower-IR dump boundary
+  - latest machine-lowering follow-up:
+    `ValueSSA`, `machine_ir`, and conservative `machine_select` lowering now
+    also preserve visible float metadata for globals/parameter locals on this
+    transport-only slice, and focused machine regressions now lock that
+    metadata path without perturbing existing int-only dump surfaces
+  - latest regression-lock follow-up:
+    the extension-mode path is now also covered one stage earlier at the
+    `lower_ir -> translation-only ValueSSA` boundary by a real source-driven
+    `float` transport regression, and the conservative `machine_ir`
+    translation-only path plus the downstream conservative `machine_select`
+    path now also have matching source-driven regressions; while landing that
+    selected-layer lock, `machine_ir_clone_program(...)` was also fixed to
+    preserve local `value_type` metadata instead of silently collapsing cloned
+    float parameters back to `int`
+  - latest float-literal transport slice:
+    `1.25`-style literals are now tokenized, parsed, and transported as a
+    dedicated float-literal path through semantic / IR / lower-IR / ValueSSA
+    / machine-ir / machine-select transport checks, still without opening true
+    float arithmetic or general conversions; the current conservative payload
+    contract is to carry float literals through immediate-bearing stages as
+    their `float32` bit pattern rather than as a real float-arithmetic value
+  - latest top-level follow-up on that same slice:
+    top-level `float g = 1.25;` now also stays on the same conservative
+    transport story by flowing through the existing `__global.init`
+    runtime-initializer path, with focused regression coverage now present at
+    IR, lower-IR, ValueSSA, compiler-driver, machine-ir, and machine-select
+    boundaries
+  - latest assignment follow-up on that same slice:
+    plain scalar assignment now also participates in the conservative float
+    transport story, so `float y; y = id(g);` is accepted through semantic /
+    compiler / IR / lower-IR / translation-only ValueSSA, while `int x; x = g;`
+    now rejects explicitly as `SEMA-TYPE-006` instead of being misreported as
+    the broader derived-float-expression restriction
+  - latest default-pipeline follow-up on that same slice:
+    the default optimized `ValueSSA` / `machine_ir` / `machine_select` path
+    has now also been sanity-checked on a live float-assignment witness
+    (`float mainf(){ float y; y = id(g); return y; }`), and the observed
+    collapse to a direct `load_global g` return was confirmed as a legal
+    optimization rather than a missing float transport path; focused
+    regressions now lock that optimized shape at the default ValueSSA dump,
+    machine-ir report, and machine-select report surfaces
+  - latest top-level runtime-init follow-up on that same slice:
+    top-level same-type float initializers sourced from another float
+    identifier (`float h = g;`) and from a float call result
+    (`float h = id(g);`) are now both regression-locked through semantic /
+    compiler / IR / lower-IR / translation-only ValueSSA; downstream default
+    `ValueSSA` / `machine_ir` / `machine_select` report surfaces are now
+    regression-locked too and legally fold both shapes to immediate
+    runtime-init stores rather than preserving the higher-level source
+    transport literally
+  - latest return/global-flow follow-up on that same slice:
+    float return transport sourced from a global (`float get(){ return g; }`)
+    and from a same-type float call on that global
+    (`float get(){ return id(g); }`) is now regression-locked through
+    semantic / compiler / IR / lower-IR / translation-only ValueSSA; the
+    downstream default machine-report surfaces are now regression-locked too
+    and may legally fold the call-return witness to the same direct
+    `load_global g` return shape
+  - latest parameter-forward follow-up on that same slice:
+    same-type float parameter forwarding has now also been checked on the
+    default optimized `ValueSSA` path: both direct forwarding
+    (`float forward(float x){ return id(x); }`) and local bounce forwarding
+    (`float bounce(float x){ float y; y = x; return id(y); }`) remain valid
+    conservative transport and may legally collapse to a direct `load_local x`
+    return shape; this slice is now also covered at the compiler-driver
+    surface
+  - latest call-chain follow-up on that same slice:
+    one more transport-only family is now regression-locked through
+    semantic / IR / lower-IR / translation-only ValueSSA: a global-fed chain
+    (`float getg(){ return wrap(g); }`) and a local-fed one-hop chain
+    (`float bounce(float x){ float y; y = x; return wrap(y); }`) both keep
+    the expected explicit call-chain transport shape before any later default
+    optimization fold; the global-fed chain also now has a first default
+    `ValueSSA` lock where that fold simplifies it to a direct
+    `load_global g` return, downstream machine-report probes agree with that
+    same optimized shape, and the family is now also covered at the compiler-
+    driver surface
+  - latest post-transport boundary cleanup:
+    arrays of `float` are now explicitly rejected in the current extension
+    slice for local declarations, top-level declarations, and function
+    parameters via `SEMA-EXT-037`, closing the earlier accidental float-array
+    surface before it hardens into an undesigned ABI/semantic commitment; this
+    boundary is now locked on the semantic and compiler-driver surfaces
+  - first post-transport feature now checkpoint-complete:
+    direct float values may now drive `if` / `while` / `for` conditions for
+    the narrow direct transport shapes (identifier / direct call / float
+    literal). Semantic, compiler, IR, lower-IR, ValueSSA, machine-ir, and
+    machine-select regression surfaces are now aligned to that behavior, while
+    derived float conditions such as `if(g + 1)` remain rejected; the
+    remaining cleanup from the earlier partial landing has now been closed on
+    the ValueSSA / machine-ir / machine-select test surfaces too
+  - latest post-transport control-flow follow-up:
+    that same condition story now also extends one step further through
+    logical condition composition under `-extension`: `!g`, `g && h`,
+    `g || h`, and ternary-condition positions such as `g ? 1 : 0` now pass
+    through semantic / compiler / IR / lower-IR regression surfaces, while
+    float-valued ternary branches and arithmetic-style derived float values
+    remain intentionally rejected; focused default-path regression locks now
+    also exist for `ValueSSA`, `machine_ir`, and `machine_select` on a shared
+    source witness for that same condition-composition family
+  - latest explicit-comparison follow-up:
+    same-type float comparisons now pass under the extension slice across the
+    equality and relational families, with focused regression coverage from
+    semantic through lower-IR and matching focused default-path locks on
+    `ValueSSA`, `machine_ir`, and `machine_select`; the current boundary
+    remains conservative, so mixed `float == int` comparisons still reject
+    and this should not be mistaken for full float arithmetic support
+  - latest signed-literal follow-up:
+    negative float literals now also participate in the same conservative
+    direct-transport boundary, which gives the float-comparison slice honest
+    source-level access to `-0.0` and negative witnesses without pretending
+    general unary float arithmetic is already open
+  - latest unary-sign follow-up:
+    direct float unary sign transport now also works on identifier/call roots
+    such as `-g`, `+g`, and `-id(g)` across semantic / compiler / IR /
+    lower-IR focused regression surfaces, giving the float line a cleaner
+    bridge into any later arithmetic slice
+  - latest arithmetic follow-up:
+    same-type `float + float` and `float - float` now pass under the
+    extension slice across semantic / compiler / IR / lower-IR focused
+    regressions, and the current implementation is explicitly helper-lowered
+    through `__builtin_fadd32` / `__builtin_fsub32` rather than claiming a
+    native float ALU model in the existing middle/backend layers
+  - latest deeper arithmetic follow-up:
+    downstream focused `machine_ir` / `machine_select` report witnesses now
+    also accept that helper-lowered arithmetic slice, and the focused default
+    `ValueSSA` side is now explicitly covered on the plain helper-call shape
+    plus the unary-sign composition witnesses too
+  - latest arithmetic-composition follow-up:
+    the first arithmetic slice now also composes with the earlier unary-sign
+    transport path on focused semantic / compiler / IR / lower-IR witnesses
+    such as `-g + y` and `y - -g`, and the same combo family is now locked on
+    the downstream focused machine-report path too, so the new helper-lowered
+    operators are no longer only checked on the simplest parameter-only
+    positive forms
+  - latest arithmetic-boundary follow-up:
+    the first helper-backed float arithmetic slice now also has explicit
+    reject coverage for the intended split between mixed scalar arithmetic and
+    still-unsupported derived float expressions: local/parameter
+    `float + int` witnesses now reject as `SEMA-TYPE-008`, while the broader
+    unsupported-expression family such as `(x + y) + z` and the already-kept
+    top-level `g + 1` witness remain on `SEMA-EXT-035`
+  - latest mixed-root boundary follow-up:
+    that same arithmetic-mismatch split is now also observed beyond the
+    original local-identifier witness: float literal roots and direct call
+    roots are now confirmed on direct semantic/compiler probes to land on the
+    same `SEMA-TYPE-008` boundary, while the intentionally kept top-level
+    global-root family still remains on `SEMA-EXT-035`
+  - latest focused-runner hygiene follow-up:
+    the earlier confusing `call-root mixed arithmetic` signal has now been
+    narrowed to runner/build hygiene rather than a live language bug. Direct
+    semantic and direct `compiler_compile_source_text(...)` probes already
+    return `SEMA-TYPE-008` for `id(x) + 1`, and after refreshing the focused
+    test binaries the dedicated compiler / default-`ValueSSA` / `machine_ir` /
+    `machine_select` filter entrypoints all run that same case cleanly. So the
+    remaining work on this line is language-surface choice, not continued
+    uncertainty about whether the current implementation path actually reaches
+    the intended mismatch diagnostic.
+  - latest literal/unary-call mixed-root follow-up:
+    that same direct-probe closure now also covers the neighboring root
+    variants `1.25 + 1` and `-id(x) * 1`: both currently resolve to
+    `SEMA-TYPE-008` on direct compiler probes, so the live implementation's
+    intended mixed-root arithmetic split is now broader than only the first
+    local-id and plain-call witnesses.
+  - latest mixed-root reject-matrix follow-up:
+    that broader split is now also locked on the focused compiler /
+    default-`ValueSSA` / `machine_ir` / `machine_select` surfaces for the
+    local-id, float-literal, direct-call, and unary-sign-call witnesses. The
+    remaining noisy signal is now concentrated in some older IR/lower-IR
+    aggregator runs rather than in the implementation path itself.
+  - latest global-root boundary repair:
+    the conservative usage gate no longer treats “result type is float” as
+    automatic permission for all arithmetic trees. Recursive pure-float trees
+    such as `(x + y) + z` remain accepted, while the deliberately kept
+    top-level global-root family such as `g + 1` is now back on
+    `SEMA-EXT-035` across the focused semantic / compiler / IR /
+    `machine_ir` / `machine_select` regression surfaces.
+  - latest reject-matrix extension follow-up:
+    nested/value-context mixed families such as `(x + y) + 1`,
+    `(-a * (b / c)) + 1`, and float-valued ternary branches feeding
+    arithmetic value context are now also explicitly probed and currently stay
+    on `SEMA-EXT-035`. Focused semantic, compiler, `ValueSSA`, `machine_ir`,
+    and `machine_select` regressions now lock that boundary directly from
+    source-driven reject probes; IR/lower-IR source-side cases are added too,
+    but those two older aggregate runners still carry unrelated noise and
+    should not be used as the only evidence until their baseline cleanliness
+    improves.
+  - latest assignment-context repair:
+    assignment now also rejects unsupported float-derived rhs families instead
+    of accidentally letting same-type assignment slip through. In particular,
+    ternary float values such as `y = (g ? h : h)` and
+    `y = (-id(x) ? x : x)` are now back on `SEMA-EXT-035`, while the older
+    direct transport mismatch surface such as `int x; x = g;` remains on
+    `SEMA-TYPE-006`.
+  - latest initializer/compare cross-check:
+    the same ternary float-value family is now also explicitly locked on the
+    neighboring value contexts: same-type initialization such as
+    `float y = (g ? h : h)` stays on `SEMA-EXT-035`, while comparison against
+    `int` such as `(g ? h : h) == 0` resolves to the comparison-side
+    `SEMA-TYPE-007` boundary rather than silently opening a broader derived
+    float comparison slice.
+  - latest call-argument cross-check:
+    that same derived float-value family no longer slips through integer
+    call-argument positions. Calls such as `sink((g ? h : h))` and
+    `sink((-id(1.0) ? 1.0 : 2.0))` are now locked too, and they settle on the
+    call-argument mismatch boundary `SEMA-TYPE-003` rather than opening a new
+    direct-float argument family.
+  - latest recursive-call reject follow-up:
+    the recursive pure-float call family is now also locked across the
+    source-driven reject surfaces below the front-end. In particular,
+    `int x = add3(1.0, 2.0, 3.0);` settles on initializer mismatch
+    `SEMA-TYPE-004`, while `sink(add3(1.0, 2.0, 3.0))` settles on call-arg
+    mismatch `SEMA-TYPE-003`, and focused `ValueSSA` / `machine_ir` /
+    `machine_select` regressions now record that split directly.
+  - current closure state on reject-matrix cleanup:
+    the float reject matrix is now close to a stage-closed checkpoint.
+    Semantic/compiler plus the downstream source-driven `ValueSSA` /
+    `machine_ir` / `machine_select` surfaces now all agree on the main split
+    table for derived float values across arithmetic, assignment,
+    initialization, comparison, and call-argument contexts. Remaining work on
+    this line should be opportunistic cleanup or documentation tightening
+    unless a new feature step reopens the boundary.
+  - latest downstream closure follow-up:
+    the remaining high-value downstream gaps for same-type ternary-derived
+    float value contexts are now filled too. `ValueSSA` / `machine_ir` /
+    `machine_select` all have focused source-driven rejects for
+    `float y = (g ? h : h)` and `(g ? h : h) == 0`, so this float reject
+    matrix line should now be treated as maintenance-first rather than as an
+    open implementation frontier.
+  - latest runner-hygiene cleanup:
+    the two most frequently used focused-source runners now fail explicitly on
+    unknown filter strings instead of silently falling back to their full
+    suites. Treat that as a quality-of-life checkpoint for future language
+    work: filter typos should now read as immediate harness failures rather
+    than as misleading unrelated regression noise.
+  - next recommended float step:
+    with the conservative float boundary now effectively checkpoint-closed,
+    the preferred follow-up is explicit scalar conversion design rather than
+    more ad hoc boundary pokes. Current design authority:
+    [docs/language/FLOAT_EXPLICIT_CONVERSION_PLAN.md](/workspaces/compiler_lab/docs/language/FLOAT_EXPLICIT_CONVERSION_PLAN.md)
+  - latest explicit-conversion bootstrap:
+    parser/AST now have the first structural conversion-expression slice for
+    `int(expr)` / `float(expr)` under the new plan, with parser regressions
+    locking the AST shape
+  - latest explicit-conversion semantic gate:
+    the frontend now also recognizes that syntax explicitly and routes failures
+    through a dedicated conversion-family diagnostic `SEMA-EXT-038` instead of
+    letting it fall back into the older generic float-derived-expression story
+  - latest explicit-conversion first landing:
+    the first half-step is now real: `int(float_expr)` is accepted and lowers
+    through explicit helper `__builtin_f2i32`, with focused semantic /
+    compiler / IR / lower-IR coverage in place
+  - latest explicit-conversion downstream lock:
+    that same `int(float_expr)` half-step is now also covered on the default
+    `ValueSSA`, `machine_ir`, and `machine_select` report surfaces through a
+    shared source witness such as
+    `int conv(float x, float y){ return int(x + y); }`
+  - latest explicit-conversion second landing:
+    the opposite direction `float(int_expr)` is now also accepted and lowers
+    through explicit helper `__builtin_i2f32`, with focused semantic /
+    compiler / IR / lower-IR / default-`ValueSSA` / `machine_ir` /
+    `machine_select` coverage in place on witnesses such as
+    `float conv(int x, int y){ return float(x + y); }`
+  - current explicit-conversion kept boundary:
+    redundant same-type conversions such as `int(3)` and `float(g)` still
+    intentionally reject through `SEMA-EXT-038`, so the next float task is no
+    longer “make explicit conversion exist” but rather deciding which broader
+    post-conversion value contexts or reject-matrix edges deserve to open next
+  - latest explicit-conversion bridge lock:
+    focused parser / semantic / compiler / IR / lower-IR regressions now also
+    lock two first real bridge families rather than only direct-root/same-
+    family cases:
+    `int(g ? h : h)` and `sink(int(add3(1.0, 2.0, 3.0)))`
+  - latest explicit-conversion downstream bridge lock:
+    those same two bridge families are now also covered on the default
+    `ValueSSA`, `machine_ir`, and `machine_select` path
+  - latest explicit-conversion downstream matrix lock:
+    the default downstream path for `int(float_expr)` now also covers the
+    newer assignment / compare / arithmetic bridge families, not only the
+    original ternary-return and recursive-callarg witnesses
+  - current explicit-conversion optimized-shape note:
+    on the default optimized downstream path, the ternary bridge witness
+    `int(g ? h : h)` may legally constant-fold all the way to a direct helper
+    call such as `__builtin_f2i32(1075838976)` after runtime-init constants
+    propagate; do not treat disappearance of the source-level branch/phi shape
+    there as a regression by itself
+  - latest explicit-conversion top-level-init bridge lock:
+    the recursive-float top-level initializer family is now also
+    regression-locked through semantic / compiler / IR / lower-IR on a source
+    witness such as `int x = int(add3(1.0, 2.0, 3.0));`
+  - latest explicit-conversion front-half matrix lock:
+    the focused front-half regression surface for `int(float_expr)` now also
+    covers the main post-conversion int-context families beyond plain
+    return/callarg:
+    top-level initialization, local assignment, integer comparison, and
+    integer arithmetic after conversion
+  - current explicit-conversion next matrix slice:
+    the symmetric `float(int_expr)` bridge matrix is now also underway on the
+    focused front-half surface: richer usage families such as top-level
+    initializer, local assignment, float comparison, and float arithmetic-
+    neighbor witnesses are now live and regression-locked through
+    semantic / compiler / IR / lower-IR
+  - latest symmetric explicit-conversion downstream lock:
+    that newer `float(int_expr)` richer matrix is now also covered on focused
+    default `ValueSSA`, `machine_ir`, and `machine_select` witnesses
+  - current explicit-conversion next step:
+    the most useful next follow-up is no longer “make explicit conversion
+    usable in one more obvious place”, but rather deciding whether to broaden
+    the matrix further or to treat explicit conversion as checkpoint-closed
+    and return to the wider float/type-system plan
+  - latest float-ternary-value slice:
+    same-type float ternary values are now also accepted on the focused
+    front-half path for return / assignment / initializer families such as
+    `return g ? h : h;`, `y = (g ? h : h);`, and `float y = (g ? h : h);`
+  - latest float-ternary-value downstream lock:
+    those same return / assignment / initializer witnesses now also have
+    focused default `ValueSSA`, `machine_ir`, and `machine_select`
+    regression locks; the current downstream expectation is intentionally
+    optimizer-honest, so `machine_ir` may collapse some initializer-only
+    cases to compact global-store shapes while `machine_select` may still
+    keep the ternary branch structure on the return/assignment families
+  - latest float-ternary-value reject-matrix follow-up:
+    the neighboring `int` call-argument boundary is now also locked one stage
+    deeper for both the plain and unary-call ternary families:
+    `sink(g ? h : h)` and `sink(-id(1.0) ? 1.0 : 2.0)` both stay on
+    `SEMA-TYPE-003` across focused `ValueSSA`, `machine_ir`, and
+    `machine_select` source-driven reject probes
+  - latest ternary-assignment boundary refinement:
+    both the plain and unary-call ternary siblings now confirm that
+    `int = float` keeps the more specific assignment mismatch classification
+    even when the rhs is a value-producing float ternary:
+    `x = (g ? h : h)` and `y = (-id(1.0) ? 1.0 : 2.0)` now have focused
+    semantic / compiler / `ValueSSA` / `machine_ir` / `machine_select`
+    regression locks on `SEMA-TYPE-006` rather than the broader
+    `SEMA-EXT-035` family
+  - latest ternary-int-context matrix follow-up:
+    the neighboring initializer family is now also locked for both the plain
+    and unary-call ternary siblings: `int x = (g ? h : h);` and
+    `int y = (-id(1.0) ? 1.0 : 2.0);` both stay on `SEMA-TYPE-004` across
+    focused semantic / compiler / `ValueSSA` / `machine_ir` /
+    `machine_select` probes, so the current ternary-to-`int` matrix is now
+    explicit across initializer (`TYPE-004`), call-argument (`TYPE-003`),
+    assignment (`TYPE-006`), and compare (`TYPE-007`) contexts
+  - current ternary-int-context status:
+    for the current conservative float slice, that plain/unary-call
+    ternary-to-`int` matrix should now be treated as a regression-locked
+    checkpoint rather than a still-fuzzy diagnostic area
+  - latest ternary-return boundary follow-up:
+    the return-side sibling is now locked too: `int bad(){ return g ? h : h; }`
+    and `int bad(){ return -id(1.0) ? 1.0 : 2.0; }` both stay on
+    `SEMA-TYPE-005` across focused semantic / compiler / `ValueSSA` /
+    `machine_ir` / `machine_select` probes, so the current plain/unary
+    ternary-to-`int` matrix is now explicit across return (`TYPE-005`),
+    initializer (`TYPE-004`), call-argument (`TYPE-003`), assignment
+    (`TYPE-006`), and compare (`TYPE-007`) contexts
+  - latest front-half closure:
+    that same return-side ternary boundary is now also locked one stage
+    earlier on source-driven `IR` and `lower-IR` semantic-reject probes, so
+    the current ternary-to-`int` matrix is no longer only a semantic/driver
+    plus downstream-machine fact; the whole front half now agrees on the same
+    `TYPE-003/004/005/006/007` split for the currently covered plain/unary
+    ternary families
+  - current ternary-int-context checkpoint:
+    after the latest residual scan, this plain/unary-call ternary-to-`int`
+    matrix should now be treated as checkpoint-closed. The nearby ternary
+    cases that still report `SEMA-EXT-035` are the intended still-closed
+    value-producing families such as `(g ? h : h) + 1`, not stale coarse
+    typing leftovers that still need reclassification.
+  - current float-ternary-value kept boundary:
+    mixed float ternary branches such as `g ? h : 0`, and same-type float
+    ternary values immediately feeding later float arithmetic/value-comparison
+    families such as `(g ? h : h) + h`, still remain outside the current
+    slice
+  - latest explicit-conversion lowering fix:
+    helper-backed conversion builtins are now also predeclared before IR
+    function-body lowering, so nested call/conversion shapes such as
+    `sink(int(add3(...)))` no longer risk invalidating the current function
+    pointer and reusing the same canonical IR temp id in one block
+  - latest recursive arithmetic-tree follow-up:
+    the same helper-backed same-type float arithmetic path is now also
+    confirmed in direct probes on recursive pure-float trees such as
+    `(x + y) + z` and `-a * (b / c)`. Focused semantic regressions plus
+    direct compiler / IR / lower-IR / default-`ValueSSA` probes now agree on
+    those shapes, and the downstream default `machine_ir` /
+    `machine_select` report surfaces are now locked on the same recursive
+    helper-call form too. The current question is now mostly regression-lock
+    breadth and runner cleanliness in some older aggregate runners rather
+    than whether the implementation can lower that shape at all.
+  - current closure state on that same line:
+    treat the recursive helper-backed pure-float tree slice as
+    implementation-closed but regression-noisy. The next useful work is to
+    either add more direct focused locks around the same shape or clean the
+    older aggregate runners enough that those direct checks can be promoted
+    into ordinary regression cases without ambiguity.
+  - latest arithmetic broadening follow-up:
+    the next helper-backed operator pair is now also landed under the same
+    conservative contract: same-type `float * float` and `float / float` on
+    direct roots now compile under `-extension`, and lowering keeps the same
+    explicit helper-call honesty boundary through `__builtin_fmul32` /
+    `__builtin_fdiv32`
+  - latest multiplication/division composition follow-up:
+    that new `*` / `/` slice is already checked on unary-sign compositions
+    such as `-g * y` and `y / -g`, so these operators are not locked only on
+    the easiest positive-parameter forms
+  - latest deeper multiplication/division follow-up:
+    focused compiler / IR / lower-IR regressions plus downstream
+    focused default-`ValueSSA` regressions plus downstream `machine_ir` /
+    `machine_select` report witnesses now all accept the same helper-backed
+    `*` / `/` slice, so this checkpoint is no longer waiting on a deeper-path
+    closure task
+  - latest signed-zero follow-up:
+    `0.0` / `-0.0` source witnesses now also parse honestly as float-literal
+    shapes, and the signed-zero comparison witness is now locked through the
+    semantic / compiler / IR / lower-IR / translation-only `ValueSSA` path
+    plus the downstream `machine_ir` / `machine_select` report surfaces
+  - latest negative-compare follow-up:
+    the compare slice is now also exercised on negative-value and signed-zero
+    order witnesses such as `-1.25 < 0.0` and `-0.0 <= 0.0` across semantic,
+    compiler, IR, and lower-IR focused regressions, so the current
+    conservative ordering model is no longer only checked on positive inputs;
+    focused translation-only `ValueSSA` and downstream default
+    `machine_ir` / `machine_select` witnesses now cover that negative-order
+    path too
+  - latest report-surface follow-up:
+    translation-only / program-only `machine_ir` reports now also refresh and
+    dump real shape summaries after populating the machine program, and the
+    matching conservative float transport path remains locked through the
+    downstream `machine_select` report surface too, including the
+    `machine_ir report -> machine_select report` bridge
+  - latest focused validation follow-up:
+    the focused `VALUE_SSA_REG_FILTER` float subset remains green on the
+    source-transport, global-literal-runtime-init, and metadata-preservation
+    cases, and the float transport analysis surface is now also covered by a
+    focused CFG/def-use query regression, so the conservative float path is
+    no longer blocked on the slow full `value_ssa` regression wall just to
+    verify this slice; that same analysis line now also covers the top-level
+    `float g = 1.25` runtime-init/global shape in focused `value_ssa`
+    validation
+  - latest nearby open question:
+    the conservative float transport matrix, its immediate boundary cleanup,
+    and the first minimal post-transport control-flow slice are now in place,
+    so the next useful step should choose the second deliberate
+    post-transport float feature
+    real post-transport target deliberately
+  - latest query-surface follow-up:
+    the machine-select side now also has a focused float report query
+    regression on the `machine_ir report -> machine_select report` bridge, so
+    report program/function/summary lookups no longer rely only on dump text
+    for this conservative float slice; the same line now also covers the
+    top-level `float g = 1.25` runtime-init/global metadata query surface, and
+    the upstream `machine_ir` report query surface now has a matching focused
+    regression for that same global-literal/runtime-init shape. The focused
+    `MACHINE_IR_REG_FILTER` / `MACHINE_SELECT_REG_FILTER` float query cases are
+    now also wired up explicitly and have been revalidated in isolation; the
+    lower-IR regression surface now also has matching focused float filters for
+    the global-literal runtime-init and global-float operator reject shapes.
+    The compiler-driver regression surface now also has matching focused float
+    filters for transport, global-op reject, and global-init startup-shape
+    coverage, and the semantic / IR regression surfaces now also expose
+    matching focused float filters. So the full extension entry-to-machine
+    slice can be spot-checked cheaply without rerunning the full suite at each
+    layer every time.
+    The machine-select test helpers now also propagate upstream semantic /
+    lowering failures into the local `MachineIrError` surface more reliably, so
+    focused negative filters such as `MACHINE-SELECT-FLOAT-GLOBAL-OP-REJECT`
+    can assert `SEMA-EXT-035` directly instead of depending on empty/garbled
+    error messages. The same helper-hardening line now also applies on the
+    machine-ir test side, so the corresponding focused negative filters keep
+    stable source-layer diagnostics instead of relying on partially populated
+    error state.
+  - latest diagnostic-boundary fix:
+    global float identifiers now also participate in the same conservative
+    `SEMA-EXT-035` rejection path as local float identifiers, so derived
+    expressions such as `float g = 1.25; int main(){ return g + 1; }` no
+    longer slip past the transport-only boundary just because the float source
+    is top-level instead of local; focused semantic / IR / compiler-driver
+    regressions now lock that exact global-literal/operator shape too, and the
+    same negative shape is now also covered by focused `value_ssa` and
+    `lower_ir` regressions. The same top-level derived-expression boundary is
+    now also locked in the top-level-initializer form
+    `float g = 1.25; int h = g + 1;`, with matching focused
+    `IR_REG_FILTER` / `LOWER_IR_REG_FILTER` / `VALUE_SSA_REG_FILTER` /
+    `MACHINE_IR_REG_FILTER` / `MACHINE_SELECT_REG_FILTER` /
+    `COMPILER_DRIVER_REG_FILTER` / `SEMANTIC_REG_FILTER` cases now wired up
+    for that initializer-side reject path too. Adjacent top-level initializer
+    scalar type-mismatch shapes such as `int h = g;` and `int h = id(g);`
+    are now also regression-locked at the semantic / compiler-driver entry
+    surfaces under `SEMA-TYPE-004`, and the `int h = id(g)` shape now also has
+    a focused `VALUE_SSA_REG_FILTER` / `IR_REG_FILTER` / `LOWER_IR_REG_FILTER`
+    / `MACHINE_IR_REG_FILTER` / `MACHINE_SELECT_REG_FILTER` chain that asserts
+    the same initializer mismatch consistently across the extension pipeline;
+    that focused chain now also includes the semantic / compiler-driver
+    surfaces explicitly wired for the same `SEMA-TYPE-004` case.
+  - next step is to keep tightening this transport boundary through the
+    remaining diagnostic / report / query surfaces before opening true float
+    arithmetic
 - Current defer checkpoint:
   - `defer` is extension-only
   - first-version semantic restrictions are active
@@ -68,6 +731,18 @@
   - nested early `return` now also has explicit unwind coverage: every active
     defer scope on the path out runs from inner to outer before the final
     return completes
+  - follow-up capture-style defer planning now also lives in
+    [docs/language/DEFER_CAPTURE_PLAN.md](/workspaces/compiler_lab/docs/language/DEFER_CAPTURE_PLAN.md)
+  - clarified follow-up need:
+    per-iteration snapshots like `fndefer putint(a[i])` require a separate
+    capture-style defer feature, not the current exit-time `fndefer`
+  - current capture-style follow-up slice:
+    `capdefer(name = expr, ...) stmt` is now landed under `-extension` as a
+    first explicit snapshot-by-value defer form
+  - current capture-style boundary:
+    capture expressions may reference only globals, parameters, and
+    function-top-level locals, and the payload stays limited to
+    expression/if/compound statements without nested defer/control-transfer
   - `return expr` under active defer now also freezes the return result before
     deferred side effects run; deferred code may still mutate/read locals
     afterward, but it does not retroactively change the chosen return value
@@ -87,12 +762,53 @@
   - extension-origin metadata keeps non-extension rejection available after
     desugar
   - semantic / IR / compiler-driver regressions are green on the first slice
+- Current `-extension` conservative-path checkpoint:
+  - lower frontend / lower-IR / ValueSSA / MachineIR already used conservative
+    translation entrypoints
+  - machine-select now also has an explicit conservative lowering/report path,
+    and `compiler_driver` routes `-extension` through it instead of relying
+    only on ambient cleanup/environment defaults
 - Current function-exit-defer checkpoint:
-  - design-only
-  - no implementation landed yet
-  - current recommended first-version safety boundary is:
+  - first `fndefer` slice is now landed under `-extension`
+  - parser / semantic / IR lowering / compiler-driver / extension-runtime
+    coverage are green on the first slice
+  - current first-version behavior:
+    ordinary scope `defer`s unwind first, then function-level `fndefer`s run
+    in LIFO order, then the final return completes
+  - current first-version safety boundary remains:
     globals + parameters + function-top-level locals declared before the
     registration point
+  - current enforced first-version restrictions:
+    reject nested-block locals, loop locals, nested `defer` / `fndefer`,
+    nested `return` / `break` / `continue`, and direct `while` / `for` /
+    declaration payload shapes
+  - latest runtime-registration follow-up:
+    dynamically re-executed `fndefer` sites now lower through hidden
+    per-site registration counters plus exit-time replay loops, so shapes such
+    as `for (...) { fndefer putint(a[2]); }` now enqueue one function-exit
+    action per execution as intended
+  - current conservative boundary:
+    `capdefer` dynamic registration is still rejected, and loop-nested
+    `fndefer` support is currently kept to one repeating site per function
+    until a fuller multi-site runtime stack story lands
+- Current `-extension` conservative-pipeline checkpoint:
+  - driver routing is now explicit instead of ambient:
+    frontend lowering, translation-only ValueSSA construction, and
+    conservative machine/backend lowering are chosen directly by mode
+  - the machine-ir bridge is now also more honest about that policy:
+    `-extension` no longer relies on a translation-only entrypoint that may
+    still hide allocate+rewrite behavior on some shapes; it now goes through an
+    explicit conservative machine-ir report path that either does plain
+    allocation-without-rewrite or falls back to explicit all-spill lowering
+  - that same conservative machine-ir report path now also eliminates phi
+    nodes before machine-select, so the later conservative bridge does not need
+    to opportunistically canonicalize report-side phi shape on the fly
+  - machine-select now also exposes a matching conservative no-phi report
+    entrypoint, and the compiler driver uses that explicit contract for
+    `-extension` instead of depending on report-side shape inspection
+  - extension runtime coverage is also now more robust against concurrent
+    local rebuilds because the script snapshots the compiler binary before
+    running per-case compile/link/execute checks
 - Current checkpoint status:
   - stable recovery checkpoint: **kept**
   - `03_sort1` / `03_sort3`: reclosed

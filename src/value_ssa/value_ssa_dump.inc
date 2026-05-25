@@ -43,6 +43,17 @@ static const char *value_ssa_binary_op_name(ValueSsaBinaryOp op) {
     }
 }
 
+static int value_ssa_append_scalar_type_suffix(ValueSsaStringBuilder *builder,
+    AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+    if (value_type == AST_FUNCTION_RETURN_FLOAT) {
+        return value_ssa_append_string(builder, ":float");
+    }
+    return 1;
+}
+
 int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
     ValueSsaStringBuilder builder;
     size_t i;
@@ -63,6 +74,10 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
                 "global %s.%zu",
                 (global->name && global->name[0] != '\0') ? global->name : "global",
                 global->id)) {
+            free(builder.data);
+            return 0;
+        }
+        if (!value_ssa_append_scalar_type_suffix(&builder, global->value_type)) {
             free(builder.data);
             return 0;
         }
@@ -101,6 +116,11 @@ int value_ssa_dump_program(const ValueSsaProgram *program, char **out_text) {
                     program,
                     function,
                     value_ssa_slot_local(j))) {
+                free(builder.data);
+                return 0;
+            }
+            if (function->locals && j < function->local_count &&
+                !value_ssa_append_scalar_type_suffix(&builder, function->locals[j].value_type)) {
                 free(builder.data);
                 return 0;
             }

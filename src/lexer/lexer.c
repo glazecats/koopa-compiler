@@ -169,6 +169,20 @@ static bool add_token(Lexer *lx, TokenType type, const char *lexeme, size_t leng
     t.lexeme = lexeme;
     t.length = length;
     t.number_value = number_value;
+    t.float_number_value = 0.0;
+    t.line = line;
+    t.column = column;
+    return token_array_push(lx->tokens, t);
+}
+
+static bool add_float_token(Lexer *lx, const char *lexeme, size_t length,
+    double float_number_value, int line, int column) {
+    Token t;
+    t.type = TOKEN_FLOAT_NUMBER;
+    t.lexeme = lexeme;
+    t.length = length;
+    t.number_value = 0;
+    t.float_number_value = float_number_value;
     t.line = line;
     t.column = column;
     return token_array_push(lx->tokens, t);
@@ -183,6 +197,9 @@ static TokenType keyword_or_identifier(const char *start, size_t len) {
     }
     if (len == 3 && strncmp(start, "int", 3) == 0) {
         return TOKEN_KW_INT;
+    }
+    if (len == 5 && strncmp(start, "float", 5) == 0) {
+        return TOKEN_KW_FLOAT;
     }
     if (len == 4 && strncmp(start, "void", 4) == 0) {
         return TOKEN_KW_VOID;
@@ -208,8 +225,20 @@ static TokenType keyword_or_identifier(const char *start, size_t len) {
     if (len == 5 && strncmp(start, "defer", 5) == 0) {
         return TOKEN_KW_DEFER;
     }
+    if (len == 7 && strncmp(start, "fndefer", 7) == 0) {
+        return TOKEN_KW_FNDEFER;
+    }
+    if (len == 8 && strncmp(start, "capdefer", 8) == 0) {
+        return TOKEN_KW_CAPDEFER;
+    }
     if (len == 6 && strncmp(start, "unless", 6) == 0) {
         return TOKEN_KW_UNLESS;
+    }
+    if (len == 4 && strncmp(start, "pair", 4) == 0) {
+        return TOKEN_KW_PAIR;
+    }
+    if (len == 6 && strncmp(start, "struct", 6) == 0) {
+        return TOKEN_KW_STRUCT;
     }
     return TOKEN_IDENTIFIER;
 }
@@ -223,6 +252,9 @@ enum {
 static int scan_number(Lexer *lx, const char *start, int line, int column) {
     long long value = 0;
     int base = 10;
+    int is_float_literal = 0;
+    double float_value = 0.0;
+    char *endptr = NULL;
 
     if (*start == '0') {
         if (peek(lx) == 'x' || peek(lx) == 'X') {
@@ -232,6 +264,8 @@ static int scan_number(Lexer *lx, const char *start, int line, int column) {
                 fprintf(stderr, "Invalid hexadecimal literal at %d:%d\n", line, column);
                 return SCAN_ERROR;
             }
+        } else if (peek(lx) == '.' && isdigit((unsigned char)peek_next(lx))) {
+            base = 10;
         } else {
             base = 8;
         }
@@ -257,7 +291,36 @@ static int scan_number(Lexer *lx, const char *start, int line, int column) {
         return SCAN_ERROR;
     }
 
+    if (base == 10 && peek(lx) == '.' && isdigit((unsigned char)peek_next(lx))) {
+        is_float_literal = 1;
+        advance(lx);
+        while (isdigit((unsigned char)peek(lx))) {
+            advance(lx);
+        }
+    }
+
     size_t len = (size_t)(lx->current - start);
+    if (is_float_literal) {
+        char *literal_text = (char *)malloc(len + 1u);
+        int parse_ok = 0;
+
+        if (!literal_text) {
+            return SCAN_OOM;
+        }
+        memcpy(literal_text, start, len);
+        literal_text[len] = '\0';
+        float_value = strtod(literal_text, &endptr);
+        parse_ok = endptr && *endptr == '\0';
+        free(literal_text);
+        if (!parse_ok) {
+            fprintf(stderr, "Invalid float literal at %d:%d\n", line, column);
+            return SCAN_ERROR;
+        }
+        if (!add_float_token(lx, start, len, float_value, line, column)) {
+            return SCAN_OOM;
+        }
+        return SCAN_OK;
+    }
     if (!add_token(lx, TOKEN_NUMBER, start, len, value, line, column)) {
         return SCAN_OOM;
     }
@@ -438,6 +501,10 @@ int lexer_tokenize(const char *source, TokenArray *out_tokens) {
             if (!add_token(&lx, TOKEN_COMMA, tok_start, 1, 0, tok_line, tok_col))
                 goto oom;
             break;
+        case '.':
+            if (!add_token(&lx, TOKEN_DOT, tok_start, 1, 0, tok_line, tok_col))
+                goto oom;
+            break;
         case '?':
             if (!add_token(&lx, TOKEN_QUESTION, tok_start, 1, 0, tok_line, tok_col))
                 goto oom;
@@ -565,10 +632,14 @@ const char *lexer_token_type_name(TokenType type) {
         return "IDENTIFIER";
     case TOKEN_NUMBER:
         return "NUMBER";
+    case TOKEN_FLOAT_NUMBER:
+        return "FLOAT_NUMBER";
     case TOKEN_KW_CONST:
         return "KW_CONST";
     case TOKEN_KW_INT:
         return "KW_INT";
+    case TOKEN_KW_FLOAT:
+        return "KW_FLOAT";
     case TOKEN_KW_VOID:
         return "KW_VOID";
     case TOKEN_KW_RETURN:
@@ -587,8 +658,16 @@ const char *lexer_token_type_name(TokenType type) {
         return "KW_CONTINUE";
     case TOKEN_KW_DEFER:
         return "KW_DEFER";
+    case TOKEN_KW_FNDEFER:
+        return "KW_FNDEFER";
+    case TOKEN_KW_CAPDEFER:
+        return "KW_CAPDEFER";
     case TOKEN_KW_UNLESS:
         return "KW_UNLESS";
+    case TOKEN_KW_PAIR:
+        return "KW_PAIR";
+    case TOKEN_KW_STRUCT:
+        return "KW_STRUCT";
     case TOKEN_PLUS:
         return "PLUS";
     case TOKEN_MINUS:
@@ -671,6 +750,8 @@ const char *lexer_token_type_name(TokenType type) {
         return "SEMICOLON";
     case TOKEN_COMMA:
         return "COMMA";
+    case TOKEN_DOT:
+        return "DOT";
     case TOKEN_QUESTION:
         return "QUESTION";
     case TOKEN_COLON:

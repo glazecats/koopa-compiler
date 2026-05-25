@@ -172,6 +172,66 @@ static int test_break_continue_keywords(void) {
     return 1;
 }
 
+static int test_float_keyword(void) {
+    const char *source = "float x;";
+    TokenArray tokens;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on float keyword input\n");
+        return 0;
+    }
+
+    if (tokens.size < 2 || tokens.data[0].type != TOKEN_KW_FLOAT) {
+        fprintf(stderr, "[lexer-reg] FAIL: expected KW_FLOAT token\n");
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_float_literal_token(void) {
+    const char *source = "1.25";
+    TokenArray tokens;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on float literal input\n");
+        return 0;
+    }
+
+    if (tokens.size < 2 || tokens.data[0].type != TOKEN_FLOAT_NUMBER) {
+        fprintf(stderr, "[lexer-reg] FAIL: expected FLOAT_NUMBER token\n");
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
+static int test_zero_float_literal_token(void) {
+    const char *source = "0.0";
+    TokenArray tokens;
+
+    lexer_init_tokens(&tokens);
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[lexer-reg] FAIL: lexer failed on zero float literal input\n");
+        return 0;
+    }
+
+    if (tokens.size < 2 || tokens.data[0].type != TOKEN_FLOAT_NUMBER) {
+        fprintf(stderr, "[lexer-reg] FAIL: expected FLOAT_NUMBER token for 0.0\n");
+        lexer_free_tokens(&tokens);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    return 1;
+}
+
 static int test_bang_and_not_equal_tokens(void) {
     const char *source = "!a!=b;";
     TokenArray tokens;
@@ -664,6 +724,9 @@ int main(void) {
     ok &= test_invalid_token_array_state_rejected();
     ok &= test_garbage_token_array_state_rejected();
     ok &= test_break_continue_keywords();
+    ok &= test_float_keyword();
+    ok &= test_float_literal_token();
+    ok &= test_zero_float_literal_token();
     ok &= test_bang_and_not_equal_tokens();
     ok &= test_tilde_bang_and_not_equal_tokens();
     ok &= test_and_and_or_or_token_sequence();

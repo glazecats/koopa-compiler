@@ -1,6 +1,13 @@
 #include "machine/select.h"
 
 #include "machine/ir.h"
+#include "value_ssa.h"
+#include "value_ssa_pass.h"
+#include "lexer.h"
+#include "parser.h"
+#include "semantic.h"
+#include "ir.h"
+#include "lower_ir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +27,53 @@ static char *dup_text(const char *text) {
     }
     memcpy(copy, text, length + 1);
     return copy;
+}
+
+static void machine_select_test_set_build_error(MachineIrError *error,
+    const ParserError *parser_error,
+    const SemanticError *semantic_error,
+    const IrError *ir_error,
+    const LowerIrError *lower_error,
+    const ValueSsaError *value_error,
+    const char *fallback_message) {
+    if (!error || error->message[0] != '\0') {
+        return;
+    }
+
+    if (lower_error && lower_error->message[0] != '\0') {
+        error->line = lower_error->line;
+        error->column = lower_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", lower_error->message);
+        return;
+    }
+    if (ir_error && ir_error->message[0] != '\0') {
+        error->line = ir_error->line;
+        error->column = ir_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", ir_error->message);
+        return;
+    }
+    if (semantic_error && semantic_error->message[0] != '\0') {
+        error->line = semantic_error->line;
+        error->column = semantic_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", semantic_error->message);
+        return;
+    }
+    if (parser_error && parser_error->message[0] != '\0') {
+        error->line = parser_error->line;
+        error->column = parser_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", parser_error->message);
+        return;
+    }
+    if (value_error && value_error->message[0] != '\0') {
+        error->line = value_error->line;
+        error->column = value_error->column;
+        snprintf(error->message, sizeof(error->message), "%s", value_error->message);
+        return;
+    }
+    snprintf(error->message,
+        sizeof(error->message),
+        "%s",
+        fallback_message ? fallback_message : "machine-select source builder failed");
 }
 
 static int expect_dump(const MachineSelectProgram *program, const char *expected_text) {
@@ -148,6 +202,247 @@ static int build_machine_ir_smoke_program(MachineIrProgram *program, MachineIrEr
     }
 
     return 1;
+}
+
+static int build_machine_ir_program_from_extension_source_text(const char *source,
+    MachineIrProgram *program,
+    MachineIrError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    ValueSsaProgram value_program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    const MachineIrProgram *report_program = NULL;
+    int ok = 0;
+
+    if (!source || !program) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "invalid machine-ir extension source builder contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&value_program);
+    machine_ir_program_init(program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, &value_program, &value_error) ||
+        !machine_ir_build_translation_only_report(&value_program, 8, 8, &report, error) ||
+        !machine_ir_allocate_rewrite_report_get_program(&report, &report_program) ||
+        !report_program ||
+        !machine_ir_clone_program(report_program, program, error)) {
+        machine_select_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            &value_error,
+            "invalid machine-ir extension source builder contract");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        machine_ir_program_free(program);
+    }
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&value_program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_machine_ir_report_from_extension_source_text(const char *source,
+    MachineIrAllocateRewriteReport *report,
+    MachineIrError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    ValueSsaProgram value_program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    if (!source || !report) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "invalid machine-ir extension report builder contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&value_program);
+    machine_ir_allocate_rewrite_report_init(report);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, &value_program, &value_error) ||
+        !machine_ir_build_translation_only_report(&value_program, 8, 8, report, error)) {
+        machine_select_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            &value_error,
+            "invalid machine-ir extension report builder contract");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        machine_ir_allocate_rewrite_report_free(report);
+    }
+    value_ssa_program_free(&value_program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_machine_ir_report_from_default_extension_source_text(const char *source,
+    MachineIrAllocateRewriteReport *report,
+    MachineIrError *error) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    LowerIrOptions lower_options;
+    ValueSsaProgram value_program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    if (!source || !report) {
+        if (error) {
+            error->line = 0;
+            error->column = 0;
+            snprintf(error->message, sizeof(error->message), "invalid default machine-ir extension report builder contract");
+        }
+        return 0;
+    }
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&value_program);
+    machine_ir_allocate_rewrite_report_init(report);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&lower_options, 0, sizeof(lower_options));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+    lower_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, &lower_options, &lower_program, &lower_error) ||
+        !value_ssa_build_default_from_lower_ir(&lower_program, &value_program, &value_error) ||
+        !machine_ir_build_translation_only_report(&value_program, 8, 8, report, error)) {
+        machine_select_test_set_build_error(error,
+            &parser_error,
+            &semantic_error,
+            &ir_error,
+            &lower_error,
+            &value_error,
+            "invalid default machine-ir extension report builder contract");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (!ok) {
+        machine_ir_allocate_rewrite_report_free(report);
+    }
+    value_ssa_program_free(&value_program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
 }
 
 static int test_machine_select_lower_machine_ir_smoke(void) {
@@ -1167,6 +1462,126 @@ static int test_machine_select_folds_pure_producer_copy_pair_into_final_result(v
     return ok;
 }
 
+static int test_machine_select_keeps_parameter_pointer_copy_when_original_value_is_used_in_successor(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 3u;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(3u, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    for (size_t i = 0; i < 3u; ++i) {
+        machine_program.register_bank.registers[i].register_id = i;
+        machine_program.register_bank.registers[i].name = dup_text(i == 0 ? "r0" : (i == 1 ? "r1" : "r2"));
+        machine_program.register_bank.registers[i].allocatable = 1u;
+        if (!machine_program.register_bank.registers[i].name) {
+            machine_ir_program_free(&machine_program);
+            machine_select_program_free(&select_program);
+            return 0;
+        }
+    }
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_local(function, "arr", 1, NULL, &machine_error) ||
+        !machine_ir_function_append_local(function, "tmp", 0, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_LOCAL;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(2u);
+    instruction.as.load_slot = machine_ir_slot_local(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.mov_value = machine_ir_operand_register(2u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[0], &instruction, &machine_error) ||
+        !machine_ir_block_set_jump(&function->blocks[0], 1u, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_BINARY;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.binary.op = MACHINE_IR_BINARY_ADD;
+    instruction.as.binary.lhs = machine_ir_operand_register(2u);
+    instruction.as.binary.rhs = machine_ir_operand_immediate(4);
+    if (!machine_ir_block_append_instruction(&function->blocks[1], &instruction, &machine_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_LOAD_INDIRECT;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0u);
+    instruction.as.load_indirect_addr = machine_ir_operand_register(0u);
+    if (!machine_ir_block_append_instruction(&function->blocks[1], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_register(0u), &machine_error) ||
+        !machine_select_lower_program_from_machine_ir(&machine_program, &select_program, &select_error)) {
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=1 locals=2 spills=0\n"
+        "  bb.0:\n"
+        "    reg.2 = load_local local.0\n"
+        "    reg.0 = copy reg.2\n"
+        "    reg.0 = load_indirect reg.0\n"
+        "    jmp bb.1\n"
+        "  bb.1:\n"
+        "    reg.0 = alui.0 reg.2, 4\n"
+        "    reg.0 = load_indirect reg.0\n"
+        "    ret reg.0\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
 static int test_machine_select_forwards_compare_inputs_through_adjacent_copy(void) {
     MachineIrProgram machine_program;
     MachineIrFunction *function = NULL;
@@ -1254,8 +1669,8 @@ static int test_machine_select_forwards_compare_inputs_through_adjacent_copy(voi
         "machine_select\n"
         "function main params=1 locals=1 spills=0\n"
         "  bb.0:\n"
-        "    reg.1 = load_local local.0\n"
-        "    cmpbri.12 reg.1, 4, bb.1, bb.2\n"
+        "    reg.0 = load_local local.0\n"
+        "    cmpbri.12 reg.0, 4, bb.1, bb.2\n"
         "  bb.1:\n"
         "    reti 1\n"
         "  bb.2:\n"
@@ -1353,8 +1768,8 @@ static int test_machine_select_fuses_branch_with_adjacent_compare_after_copy_for
         "machine_select\n"
         "function main params=1 locals=1 spills=0\n"
         "  bb.0:\n"
-        "    reg.1 = load_local local.0\n"
-        "    cmpbri.12 reg.1, 4, bb.1, bb.2\n"
+        "    reg.0 = load_local local.0\n"
+        "    cmpbri.12 reg.0, 4, bb.1, bb.2\n"
         "  bb.1:\n"
         "    reti 1\n"
         "  bb.2:\n"
@@ -2040,6 +2455,3045 @@ static int test_machine_select_canonicalized_bridge(void) {
         "    reti 7\n");
 
     machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_canonicalized_conservative_bridge(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrInstruction instruction;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error) ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: conservative canonicalized bridge setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    memset(&instruction, 0, sizeof(instruction));
+    instruction.kind = MACHINE_IR_INSTR_MOV;
+    instruction.has_result = 1;
+    instruction.result = machine_ir_operand_register(0);
+    instruction.as.mov_value = machine_ir_operand_immediate(7);
+    if (!machine_ir_block_append_instruction(&function->blocks[1], &instruction, &machine_error) ||
+        !machine_ir_block_set_return(&function->blocks[1], machine_ir_operand_register(0), &machine_error) ||
+        !machine_ir_block_set_jump(&function->blocks[0], 1, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: conservative canonicalized bridge setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_lower_canonicalized_program_from_machine_ir_conservative(
+            &machine_program, &select_program, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: conservative canonicalized bridge lowering failed: %s\n",
+            select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    ok = expect_dump(
+        &select_program,
+        "machine_select\n"
+        "function main params=0 locals=0 spills=0\n"
+        "  bb.0:\n"
+        "    reti 7\n");
+
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_float_metadata_roundtrip(void) {
+    MachineIrProgram machine_program;
+    MachineSelectProgram select_program;
+    MachineIrError machine_error;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    if (!build_machine_ir_smoke_program(&machine_program, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: float metadata setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    machine_program.globals[0].value_type = AST_FUNCTION_RETURN_FLOAT;
+    machine_program.functions[0].locals[0].value_type = AST_FUNCTION_RETURN_FLOAT;
+
+    if (!machine_select_lower_program_from_machine_ir_conservative(
+            &machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: conservative lower failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    if (!machine_select_dump_program(&select_program, &actual_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: float metadata dump failed: %s\n", select_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (select_program.globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        select_program.functions[0].locals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !strstr(actual_text, "param local.0:float name=a")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: float metadata was not preserved\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_lowers_extension_float_transport(void) {
+    MachineIrProgram machine_program;
+    MachineSelectProgram select_program;
+    MachineIrError machine_error;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    MachineSelectLowerReport report;
+    char *report_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    machine_select_lower_report_init(&report);
+
+    if (!build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; } int main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_lower_program_from_machine_ir_conservative(
+            &machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float conservative lower failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    if (!machine_select_dump_program(&select_program, &actual_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float dump failed: %s\n", select_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+    if (!machine_select_build_report_from_machine_ir_program(&machine_program, &report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&report, &report_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float report dump failed: %s\n", select_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (select_program.function_count < 2u ||
+        select_program.functions[0].parameter_count < 1u ||
+        select_program.functions[0].locals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        strcmp(select_program.functions[0].name, "id") != 0 ||
+        !strstr(actual_text, "param local.0:float name=x") ||
+        !strstr(actual_text, "store_locali local.0, 1067450368") ||
+        !strstr(actual_text, "calli id(1067450368)") ||
+        !strstr(report_text, "functions=2") ||
+        !strstr(report_text, "target_policy preview_reg_cap=8") ||
+        !strstr(report_text, "function_summaries:")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float metadata was not preserved\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    free(report_text);
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    machine_select_lower_report_free(&report);
+    return ok;
+}
+
+static int test_machine_select_lowers_extension_float_global_literal_runtime_init(void) {
+    MachineIrProgram machine_program;
+    MachineSelectProgram select_program;
+    MachineIrError machine_error;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+
+    if (!build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float global literal setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    if (!machine_select_lower_program_from_machine_ir_conservative(
+            &machine_program, &select_program, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float global literal conservative lower failed: %s\n", select_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+    if (!machine_select_dump_program(&select_program, &actual_text, &select_error)) {
+        fprintf(stderr, "[machine-select] FAIL: extension float global literal dump failed: %s\n", select_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (select_program.global_count < 1u ||
+        select_program.globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !strstr(actual_text, "function __global.init params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float global literal runtime-init mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_program_free(&machine_program);
+    machine_select_program_free(&select_program);
+    return ok;
+}
+
+static int test_machine_select_builds_report_from_extension_float_machine_ir_report(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(
+            "float id(float x){ return x; } int main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &machine_report,
+            &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float report bridge setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "fn.0 id blocks=1") ||
+        !strstr(actual_text, "param local.0:float name=x") ||
+        !strstr(actual_text, "store_locali local.0, 1067450368") ||
+        !strstr(actual_text, "calli id(1067450368)")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float report bridge dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_builds_report_from_extension_float_global_literal_machine_ir_report(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &machine_report,
+            &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float global literal report bridge setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=3") ||
+        !strstr(actual_text, "function __global.init params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: extension float global literal report bridge dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_float_report_query_surface(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    const MachineSelectProgram *report_program = NULL;
+    const MachineSelectFunction *id_function = NULL;
+    const MachineSelectFunction *main_function = NULL;
+    const MachineSelectFunctionSummary *id_summary = NULL;
+    const MachineSelectFunctionSummary *main_summary = NULL;
+    char *actual_text = NULL;
+    size_t register_count = 0;
+    size_t global_count = 0;
+    size_t function_count = 0;
+    size_t function_index = 0;
+    size_t main_function_index = 0;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(
+            "float id(float x){ return x; } int main(){ float x = 1.25; id(1.25); return 0; }\n",
+            &machine_report,
+            &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: float report query setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_select_lower_report_get_summary(&select_report,
+            &register_count,
+            &global_count,
+            &function_count,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL) ||
+        register_count < 1u ||
+        global_count != 0u ||
+        function_count < 2u ||
+        !machine_select_lower_report_get_program(&select_report, &report_program) ||
+        !report_program ||
+        !machine_select_lower_report_get_function_by_name(&select_report, "id", &function_index, &id_function) ||
+        !id_function ||
+        !machine_select_lower_report_get_function_summary_artifact(&select_report, function_index, &id_summary) ||
+        !id_summary ||
+        !machine_select_lower_report_get_function_by_name(&select_report, "main", &main_function_index, &main_function) ||
+        !main_function ||
+        !machine_select_lower_report_get_function_summary_artifact(&select_report, main_function_index, &main_summary) ||
+        !main_summary ||
+        id_summary->load_local_count == 0u ||
+        id_summary->block_count != 1u ||
+        main_summary->call_imm_count == 0u ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error) ||
+        !strstr(actual_text, "param local.0:float name=x") ||
+        !strstr(actual_text, "calli id(1067450368)")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: float report query mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_float_global_literal_report_query_surface(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    const MachineSelectProgram *report_program = NULL;
+    const MachineSelectFunction *global_init_function = NULL;
+    const MachineSelectFunctionSummary *global_init_summary = NULL;
+    char *actual_text = NULL;
+    size_t register_count = 0;
+    size_t global_count = 0;
+    size_t function_count = 0;
+    size_t function_index = 0;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint main(){ return 0; }\n",
+            &machine_report,
+            &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: float global literal report query setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!machine_select_lower_report_get_summary(&select_report,
+            &register_count,
+            &global_count,
+            &function_count,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL) ||
+        global_count != 1u ||
+        function_count < 3u ||
+        !machine_select_lower_report_get_program(&select_report, &report_program) ||
+        !report_program ||
+        report_program->global_count < 1u ||
+        report_program->globals[0].value_type != AST_FUNCTION_RETURN_FLOAT ||
+        !machine_select_lower_report_get_function_by_name(
+            &select_report, "__global.init", &function_index, &global_init_function) ||
+        !global_init_function ||
+        !machine_select_lower_report_get_function_summary_artifact(
+            &select_report, function_index, &global_init_summary) ||
+        !global_init_summary ||
+        global_init_summary->store_global_imm_count == 0u ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error) ||
+        !strstr(actual_text, "function __global.init params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: float global literal report query mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_default_pipeline_preserves_live_extension_float_assignment_transport(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float mainf(){ float y; y = id(g); return y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ASSIGN-LIVE-DEFAULT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=4") ||
+        !strstr(actual_text, "fn.2 mainf blocks=1") ||
+        !strstr(actual_text, "load_global=1") ||
+        !strstr(actual_text, "function mainf params=0 locals=1 spills=0") ||
+        !strstr(actual_text, "reg.0 = load_global global.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ASSIGN-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_default_pipeline_preserves_float_return_transport_from_global(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float get(){ return g; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=3") ||
+        !strstr(actual_text, "fn.1 get blocks=1") ||
+        !strstr(actual_text, "load_global=1") ||
+        !strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0 = load_global global.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_default_pipeline_preserves_float_return_transport_from_global_call(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float get(){ return id(g); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=4") ||
+        !strstr(actual_text, "fn.1 id blocks=1") ||
+        !strstr(actual_text, "fn.2 get blocks=1") ||
+        !strstr(actual_text, "load_global=1") ||
+        !strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0 = load_global global.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_default_pipeline_preserves_float_global_identifier_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = g;\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-IDENT-INIT-DEFAULT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368") ||
+        !strstr(actual_text, "store_globali global.1, 1067450368")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-IDENT-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_default_pipeline_preserves_float_global_call_runtime_init(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float id(float x){ return x; }\n"
+        "float h = id(g);\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-DEFAULT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=3") ||
+        !strstr(actual_text, "fn.1 id blocks=1") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368") ||
+        !strstr(actual_text, "store_globali global.1, 1067450368")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_rejects_global_float_operator_expression_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\nint main(){ return g + 1; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-OP-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-OP-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_global_float_operator_expression_in_initializer_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\nint h = g + 1;\nint main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-OP-INIT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-OP-INIT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_global_float_call_result_in_initializer_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\nfloat id(float x){ return x; }\nint h = id(g);\nint main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_assignment_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\nint main(){ int x = 0; x = g; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ASSIGN-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ASSIGN-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_return_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int bad(){ return g ? h : h; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_return_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int bad(){ return -id(1.0) ? 1.0 : 2.0; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-005") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_accepts_float_if_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-IF-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reti 1")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-IF-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_while_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ while(g) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-WHILE-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reti 1")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-WHILE-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_for_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ for(;g;) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-FOR-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reti 1")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-FOR-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_logical_condition_composition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(!g || (g && 1.25)) return g ? 1 : 0; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=2") ||
+        !strstr(actual_text, "function main params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0 = load_global global.0") ||
+        !strstr(actual_text, "cmpbri.11 reg.0, 0, bb.2, bb.3") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y){ return x == y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "alui.5") ||
+        !strstr(actual_text, "cmpi.11") ||
+        !strstr(actual_text, "alu.2") ||
+        !strstr(actual_text, "cmp.10") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y){ return x < y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LT-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "alui.5") ||
+        !strstr(actual_text, "cmpi.11") ||
+        !strstr(actual_text, "alui.9") ||
+        !strstr(actual_text, "alui.7") ||
+        !strstr(actual_text, "alu.6") ||
+        !strstr(actual_text, "cmp.12") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_signed_zero_float_equality_under_extension(void) {
+    static const char *source =
+        "int z(){ return 0.0 == -0.0; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-SIGNED-ZERO-EQ-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function z params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reti 1")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-SIGNED-ZERO-EQ-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_negative_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(){ return -1.25 < 0.0; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-LT-ZERO-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reti 0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-LT-ZERO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_addition_under_extension(void) {
+    static const char *source =
+        "float add(float x, float y){ return x + y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ADD-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ADD-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_subtraction_under_extension(void) {
+    static const char *source =
+        "float sub(float x, float y){ return x - y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-SUB-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sub params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "load_local local.1") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-SUB-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_negative_float_addition_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float add(float y){ return -g + y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-ADD-COMBO-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function __builtin_fadd32 params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "load_global global.0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "alui.6") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-ADD-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_negative_float_subtraction_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float sub(float y){ return y - -g; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-SUB-COMBO-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function sub params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function __builtin_fsub32 params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "load_global global.0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "alui.6") ||
+        !strstr(actual_text, "call __builtin_fsub32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-SUB-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_multiplication_under_extension(void) {
+    static const char *source =
+        "float mul(float x, float y){ return x * y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-MUL-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mul params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-MUL-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_division_under_extension(void) {
+    static const char *source =
+        "float divv(float x, float y){ return x / y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-DIV-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function divv params=2 locals=2 spills=0") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-DIV-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_negative_float_multiplication_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float mul(float y){ return -g * y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-MUL-COMBO-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mul params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "load_global global.0") ||
+        !strstr(actual_text, "alui.6 reg.") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-MUL-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_negative_float_division_combo_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float divv(float y){ return y / -g; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-DIV-COMBO-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function divv params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "load_global global.0") ||
+        !strstr(actual_text, "alui.6 reg.") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-DIV-COMBO-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_chained_float_addition_under_extension(void) {
+    static const char *source =
+        "float add3(float x, float y, float z){ return (x + y) + z; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    const char *first_add = NULL;
+    const char *second_add = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    first_add = actual_text ? strstr(actual_text, "call __builtin_fadd32(") : NULL;
+    second_add = first_add ? strstr(first_add + 1, "call __builtin_fadd32(") : NULL;
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !first_add ||
+        !second_add ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_float_conversion_under_extension(void) {
+    static const char *source =
+        "int conv(float x, float y){ return int(x + y); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-CONVERT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function conv params=2") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-CONVERT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_from_int_conversion_under_extension(void) {
+    static const char *source =
+        "float conv(int x, int y){ return float(x + y); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-CONVERT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function conv params=2") ||
+        !strstr(actual_text, "alu.0") ||
+        !strstr(actual_text, "call __builtin_i2f32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-CONVERT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float z = float(add3(1, 2, 3));\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function __global.init params=0") ||
+        (!strstr(actual_text, "calli __builtin_i2f32(6)") &&
+            !strstr(actual_text, "call __builtin_i2f32(6)")) ||
+        !strstr(actual_text, "store_global")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ float y; y = float(add3(1, 2, 3)); return y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function mainf params=0") ||
+        (!strstr(actual_text, "call __builtin_i2f32(6)") &&
+            !strstr(actual_text, "calli __builtin_i2f32(6)")) ||
+        !strstr(actual_text, "store_local local.0") ||
+        !strstr(actual_text, "load_local local.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_from_int_compare_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ return float(add3(1, 2, 3)) == float(6); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if ((!strstr(actual_text, "call __builtin_i2f32(6)") &&
+            !strstr(actual_text, "calli __builtin_i2f32(6)")) ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "float mainf(){ return float(add3(1, 2, 3)) + 1.25; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if ((!strstr(actual_text, "call __builtin_i2f32(") &&
+            !strstr(actual_text, "calli __builtin_i2f32(")) ||
+        !strstr(actual_text, "alui") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_float_ternary_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function main params=0") ||
+        !strstr(actual_text, "store_globali global.0, 1067450368") ||
+        !strstr(actual_text, "store_globali global.1, 1075838976") ||
+        !strstr(actual_text, "calli __builtin_f2i32(1075838976)") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension(void) {
+    static const char *source =
+        "int sink(int x){ return x; }\n"
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return sink(int(add3(1.0, 2.0, 3.0))); }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "function sink params=1") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ int x=0; x = int(add3(1.0, 2.0, 3.0)); return x; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "store_local local.0") ||
+        !strstr(actual_text, "load_local local.0") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_float_compare_bridge_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "int main(){ return int(g ? h : h) == 2; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "calli __builtin_f2i32(") &&
+        !strstr(actual_text, "call __builtin_f2i32(")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT missing conversion helper\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+    if ((!strstr(actual_text, "cmpbri") &&
+            !strstr(actual_text, " sltiu ") &&
+            !strstr(actual_text, " xori ")) ||
+        !strstr(actual_text, "ret")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension(void) {
+    static const char *source =
+        "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+        "int main(){ return int(add3(1.0, 2.0, 3.0)) + 1; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3") ||
+        !strstr(actual_text, "call __builtin_f2i32(") ||
+        !strstr(actual_text, "alui") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_float_mul_div_under_extension(void) {
+    static const char *source =
+        "float f(float a, float b, float c){ return -a * (b / c); }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function f params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_rejects_mixed_float_int_arithmetic_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float add(float x){ return x + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ARITH-INT-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_call_int_arithmetic_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return id(x) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CALL-ARITH-INT-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CALL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_literal_int_arithmetic_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float add(){ return 1.25 + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return -id(x) * 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_float_tree_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float add(float x, float y){ return (x + y) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-TREE-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-TREE-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_float_muldiv_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float f(float a, float b, float c){ return (-a * (b / c)) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return (g ? h : h) + 1; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_plus_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "float add(float x){ return (-id(x) ? x : x) + 1; }\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_assignment_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ int x=0; x = (g ? h : h); return x; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_assignment_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ int y=0; y = (-id(1.0) ? 1.0 : 2.0); return y; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-006") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_recursive_float_call_result_in_initializer_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int x = add3(1.0, 2.0, 3.0);\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_recursive_float_call_argument_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float add3(float a, float b, float c){ return (a + b) + c; }\n"
+            "int main(){ return sink(add3(1.0, 2.0, 3.0)); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_call_argument_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return sink((g ? h : h)); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_call_argument_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int sink(int x){ return x; }\n"
+            "float id(float x){ return x; }\n"
+            "int main(){ return sink((-id(1.0) ? 1.0 : 2.0)); }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-003") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int x = (g ? h : h);\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_initializer_to_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int y = (-id(1.0) ? 1.0 : 2.0);\n"
+            "int main(){ return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-004") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_accepts_float_ternary_value_return_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 1.25;\n"
+        "float mainf(){ return g ? h : h; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=3") ||
+        !strstr(actual_text, "fn.1 mainf blocks=4") ||
+        !strstr(actual_text, "load_global=3") ||
+        !strstr(actual_text, "function mainf params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "cmpbri.11 reg.0, 0, bb.1, bb.2") ||
+        !strstr(actual_text, "bb.1:\n    reg.0 = load_global global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "bb.2:\n    reg.0 = load_global global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_ternary_value_assignment_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float mainf(){ float y; y = (g ? h : h); return y; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "functions=3") ||
+        !strstr(actual_text, "fn.1 mainf blocks=4") ||
+        !strstr(actual_text, "load_global=3") ||
+        !strstr(actual_text, "function mainf params=0 locals=1 spills=0") ||
+        !strstr(actual_text, "cmpbri.11 reg.0, 0, bb.1, bb.2") ||
+        !strstr(actual_text, "bb.1:\n    reg.0 = load_global global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "bb.2:\n    reg.0 = load_global global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "store_local local.0, reg.0") ||
+        !strstr(actual_text, "reg.0 = load_local local.0") ||
+        !strstr(actual_text, "ret reg.0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_float_ternary_value_initializer_to_float_under_extension(void) {
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float y = (g ? h : h);\n"
+            "int main(){ return 0; }\n",
+            &machine_report,
+            &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function __global.init params=0") ||
+        !strstr(actual_text, "store_global")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_rejects_float_ternary_value_compare_against_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "int main(){ return (g ? h : h) == 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_unary_call_ternary_value_compare_against_int_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ return (-id(1.0) ? 1.0 : 2.0) == 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-007") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_conservative_no_phi_report_bridge_rejects_phi_input(void) {
+    MachineIrProgram machine_program;
+    MachineIrFunction *function = NULL;
+    MachineIrPhi *phis = NULL;
+    MachineIrPhiInput *phi_inputs = NULL;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+    MachineSelectError select_error;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_program_init(&machine_program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    machine_select_program_init(&select_program);
+
+    machine_program.register_bank.register_count = 1;
+    machine_program.register_bank.registers = (MachineIrRegisterDesc *)calloc(1, sizeof(MachineIrRegisterDesc));
+    if (!machine_program.register_bank.registers) {
+        return 0;
+    }
+    machine_program.register_bank.registers[0].register_id = 0;
+    machine_program.register_bank.registers[0].name = dup_text("r0");
+    machine_program.register_bank.registers[0].allocatable = 1u;
+
+    if (!machine_ir_program_append_function(&machine_program, "main", 1, &function, &machine_error) ||
+        !function ||
+        !machine_ir_function_append_block(function, NULL, NULL, &machine_error)) {
+        fprintf(stderr, "[machine-select] FAIL: conservative no-phi report setup failed: %s\n", machine_error.message);
+        machine_ir_program_free(&machine_program);
+        machine_ir_allocate_rewrite_report_free(&report);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    phis = (MachineIrPhi *)calloc(1u, sizeof(MachineIrPhi));
+    phi_inputs = (MachineIrPhiInput *)calloc(1u, sizeof(MachineIrPhiInput));
+    if (!phis || !phi_inputs) {
+        fprintf(stderr, "[machine-select] FAIL: conservative no-phi report setup ran out of memory\n");
+        free(phis);
+        free(phi_inputs);
+        machine_ir_program_free(&machine_program);
+        machine_ir_allocate_rewrite_report_free(&report);
+        machine_select_program_free(&select_program);
+        return 0;
+    }
+
+    phis[0].result = machine_ir_operand_register(0);
+    phis[0].inputs = phi_inputs;
+    phis[0].input_count = 1u;
+    phis[0].input_capacity = 1u;
+    phi_inputs[0].predecessor_block_id = 0u;
+    phi_inputs[0].value = machine_ir_operand_immediate(7);
+    function->blocks[0].phis = phis;
+    function->blocks[0].phi_count = 1u;
+    function->blocks[0].phi_capacity = 1u;
+
+    report.program = machine_program;
+
+    if (machine_select_build_program_from_machine_ir_report_conservative_no_phi(
+            &report, &select_program, &select_error) ||
+        strstr(select_error.message, "MACHINE-SELECT-425") == NULL) {
+        fprintf(stderr, "[machine-select] FAIL: conservative no-phi report bridge should reject phi input\n");
+        ok = 0;
+    }
+
+    report.program.functions = NULL;
+    report.program.function_count = 0u;
+    report.program.function_capacity = 0u;
+    report.program.register_bank.registers = NULL;
+    report.program.register_bank.register_count = 0u;
+    machine_ir_program_free(&machine_program);
+    machine_ir_allocate_rewrite_report_free(&report);
     machine_select_program_free(&select_program);
     return ok;
 }
@@ -2846,10 +6300,10 @@ static int test_machine_select_cleanup_propagates_cross_block_spill_alias_into_u
         "machine_select\n"
         "function main params=1 locals=1 spills=1\n"
         "  bb.0:\n"
-        "    spill.0 = load_local local.0\n"
+        "    reg.0 = load_local local.0\n"
         "    jmp bb.1\n"
         "  bb.1:\n"
-        "    retspill spill.0\n");
+        "    ret reg.0\n");
 
     machine_ir_program_free(&machine_program);
     machine_select_program_free(&select_program);
@@ -4748,8 +8202,8 @@ static int test_machine_select_cleanup_fuses_branch_with_adjacent_compare_after_
         "machine_select\n"
         "function main params=1 locals=1 spills=0\n"
         "  bb.0:\n"
-        "    reg.1 = load_local local.0\n"
-        "    cmpbri.12 reg.1, 4, bb.1, bb.2\n"
+        "    reg.0 = load_local local.0\n"
+        "    cmpbri.12 reg.0, 4, bb.1, bb.2\n"
         "  bb.1:\n"
         "    reti 1\n"
         "  bb.2:\n"
@@ -10390,6 +13844,206 @@ static int test_machine_select_does_not_forward_same_block_local_load_across_sto
 }
 
 int main(void) {
+    const char *filter = getenv("MACHINE_SELECT_REG_FILTER");
+
+    if (filter && filter[0] != '\0') {
+        if (strstr("MACHINE-SELECT-FLOAT-SOURCE-TRANSPORT", filter) != NULL) {
+            return test_machine_select_lowers_extension_float_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
+            return test_machine_select_lowers_extension_float_global_literal_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-REPORT-QUERY", filter) != NULL) {
+            return test_machine_select_float_report_query_surface() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-LITERAL-REPORT-QUERY", filter) != NULL) {
+            return test_machine_select_float_global_literal_report_query_surface() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-ASSIGN-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_select_default_pipeline_preserves_live_extension_float_assignment_transport() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-RETURN-GLOBAL-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_select_default_pipeline_preserves_float_return_transport_from_global() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-RETURN-GLOBAL-CALL-LIVE-DEFAULT", filter) != NULL) {
+            return test_machine_select_default_pipeline_preserves_float_return_transport_from_global_call() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-IDENT-INIT-DEFAULT", filter) != NULL) {
+            return test_machine_select_default_pipeline_preserves_float_global_identifier_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-DEFAULT", filter) != NULL) {
+            return test_machine_select_default_pipeline_preserves_float_global_call_runtime_init() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-OP-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_global_float_operator_expression_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-OP-INIT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_global_float_operator_expression_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-CALL-INIT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_global_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-LOGICAL-COND-COMPOSE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-SIGNED-ZERO-EQ-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_signed_zero_float_equality_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_negative_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-ADD-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-SUB-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_subtraction_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-ADD-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_negative_float_addition_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-SUB-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_negative_float_subtraction_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-MUL-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_multiplication_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-DIV-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_division_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-MUL-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_negative_float_multiplication_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-DIV-COMBO-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_negative_float_division_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_chained_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-CONVERT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-INT-TO-FLOAT-CONVERT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_from_int_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_from_int_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-INT-TO-FLOAT-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-TERNARY-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_float_ternary_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-CALLARG-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_float_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TO-INT-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-RECURSIVE-CALL-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_recursive_float_call_result_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-RECURSIVE-CALL-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_recursive_float_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-RETURN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_ternary_value_return_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+    }
+
     if (!test_machine_select_lower_machine_ir_smoke()) {
         return 1;
     }
@@ -10429,6 +14083,9 @@ int main(void) {
     if (!test_machine_select_folds_pure_producer_copy_pair_into_final_result()) {
         return 1;
     }
+    if (!test_machine_select_keeps_parameter_pointer_copy_when_original_value_is_used_in_successor()) {
+        return 1;
+    }
     if (!test_machine_select_forwards_compare_inputs_through_adjacent_copy()) {
         return 1;
     }
@@ -10460,6 +14117,159 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_canonicalized_bridge()) {
+        return 1;
+    }
+    if (!test_machine_select_canonicalized_conservative_bridge()) {
+        return 1;
+    }
+    if (!test_machine_select_float_metadata_roundtrip()) {
+        return 1;
+    }
+    if (!test_machine_select_lowers_extension_float_transport()) {
+        return 1;
+    }
+    if (!test_machine_select_lowers_extension_float_global_literal_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_select_builds_report_from_extension_float_machine_ir_report()) {
+        return 1;
+    }
+    if (!test_machine_select_builds_report_from_extension_float_global_literal_machine_ir_report()) {
+        return 1;
+    }
+    if (!test_machine_select_float_report_query_surface()) {
+        return 1;
+    }
+    if (!test_machine_select_float_global_literal_report_query_surface()) {
+        return 1;
+    }
+    if (!test_machine_select_default_pipeline_preserves_live_extension_float_assignment_transport()) {
+        return 1;
+    }
+    if (!test_machine_select_default_pipeline_preserves_float_return_transport_from_global()) {
+        return 1;
+    }
+    if (!test_machine_select_default_pipeline_preserves_float_return_transport_from_global_call()) {
+        return 1;
+    }
+    if (!test_machine_select_default_pipeline_preserves_float_global_identifier_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_select_default_pipeline_preserves_float_global_call_runtime_init()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_global_float_operator_expression_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_global_float_operator_expression_in_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_global_float_call_result_in_initializer_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_assignment_to_int_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_if_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_while_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_for_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_logical_condition_composition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_signed_zero_float_equality_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_negative_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_addition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_subtraction_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_negative_float_addition_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_negative_float_subtraction_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_multiplication_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_float_division_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_negative_float_multiplication_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_negative_float_division_combo_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_chained_float_addition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_float_conversion_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_from_int_conversion_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_from_int_compare_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_float_ternary_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_float_compare_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_float_mul_div_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_mixed_float_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_call_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_literal_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_conservative_no_phi_report_bridge_rejects_phi_input()) {
         return 1;
     }
     if (!test_machine_select_materializes_immediates()) {

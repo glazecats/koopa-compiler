@@ -73,12 +73,14 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    AstFunctionReturnType value_type;
     size_t array_rank;
 } LowerIrLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    AstFunctionReturnType value_type;
     size_t byte_size;
     int has_initializer;
     long long initializer_value;

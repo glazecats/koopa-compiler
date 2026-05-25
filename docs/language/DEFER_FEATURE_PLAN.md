@@ -49,6 +49,13 @@
   set than `-riscv` / `-perf`.
 - Keep this same policy in mind for later feature-round work too, especially
   closures or any feature that introduces richer control/data capture.
+- Current follow-up authority on this same conservative extension line now
+  also includes:
+  - [docs/language/FUNCTION_EXIT_DEFER_PLAN.md](/workspaces/compiler_lab/docs/language/FUNCTION_EXIT_DEFER_PLAN.md)
+  - [docs/language/DEFER_CAPTURE_PLAN.md](/workspaces/compiler_lab/docs/language/DEFER_CAPTURE_PLAN.md)
+  - [docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md](/workspaces/compiler_lab/docs/language/NONCAPTURING_FUNCTION_VALUES_PLAN.md)
+  - [docs/language/PAIR_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/PAIR_FEATURE_PLAN.md)
+  - [docs/language/STRUCT_FEATURE_PLAN.md](/workspaces/compiler_lab/docs/language/STRUCT_FEATURE_PLAN.md)
 
 ## User-Facing Semantics
 
@@ -317,9 +324,11 @@ Small source-based output probes that print observable order.
   - optional optimization stages
   - backend text export
 - Current `-extension` policy is the first conservative version:
-  it builds ValueSSA from lower IR through the lower-level translation entry
-  (`value_ssa_build_from_lower_ir(...)`) and skips the extra mainline
-  optimization passes for now.
+  it builds ValueSSA through the translation-only entry
+  (`value_ssa_build_translation_only_from_lower_ir(...)`), skips the extra
+  mainline optimization passes, and now also prefers the explicit all-spill
+  / conservative-allocation machine-ir report path instead of the mainline
+  allocate+rewrite report flow.
 - This is only the first decoupling checkpoint, not the final one:
   even some currently retained translation-core stages should continue to be
   audited and separated into smaller “required for lowering” vs “optional

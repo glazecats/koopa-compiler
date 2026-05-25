@@ -69,12 +69,14 @@ typedef struct {
     size_t id;
     char *source_name;
     int is_parameter;
+    AstFunctionReturnType value_type;
     size_t array_rank;
 } ValueSsaLocal;
 
 typedef struct {
     size_t id;
     char *name;
+    AstFunctionReturnType value_type;
     size_t byte_size;
     int has_initializer;
     long long initializer_value;
@@ -501,6 +503,9 @@ int value_ssa_rename_function_values(ValueSsaFunction *function,
     const ValueSsaCfgAnalysis *analysis,
     ValueSsaError *error);
 int value_ssa_build_from_lower_ir(const LowerIrProgram *program,
+    ValueSsaProgram *out_program,
+    ValueSsaError *error);
+int value_ssa_build_translation_only_from_lower_ir(const LowerIrProgram *program,
     ValueSsaProgram *out_program,
     ValueSsaError *error);
 

@@ -606,6 +606,7 @@ static int ir_trace_global_dependency_from_expr(IrGlobalDepTrace *trace,
         trace->found_via_callee = trace->call_path.count > 0;
         return 1;
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
         return 1;
     case AST_EXPR_PAREN:
         return ir_trace_global_dependency_from_expr(trace,
@@ -1471,6 +1472,7 @@ static int ir_collect_global_dependencies_from_expr(IrGlobalDepCollector *collec
             global->id,
             error);
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
         return 1;
     case AST_EXPR_PAREN:
         return ir_collect_global_dependencies_from_expr(collector,

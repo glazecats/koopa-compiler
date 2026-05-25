@@ -168,6 +168,270 @@ static int test_ast_records_function_parameter_count(void) {
     return 1;
 }
 
+static int test_ast_rejects_float_top_level_declaration_for_now(void) {
+    const char *source = "float x;\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for float declaration AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr, "[parser-reg] FAIL: AST parse failed for float declaration input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1u ||
+        program.externals[0].kind != AST_EXTERNAL_DECLARATION ||
+        program.externals[0].declaration_value_kind != AST_DECLARATION_VALUE_FLOAT) {
+        fprintf(stderr, "[parser-reg] FAIL: float declaration AST metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_float_function_signature_metadata(void) {
+    const char *source = "float mix(float a, int b);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for float function signature AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for float function signature input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 ||
+        program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].name ||
+        strcmp(program.externals[0].name, "mix") != 0 ||
+        program.externals[0].function_return_type != AST_FUNCTION_RETURN_FLOAT ||
+        !program.externals[0].parameter_value_kinds ||
+        program.externals[0].parameter_value_kinds[0] != AST_PARAMETER_VALUE_FLOAT ||
+        program.externals[0].parameter_value_kinds[1] != AST_PARAMETER_VALUE_INT) {
+        fprintf(stderr, "[parser-reg] FAIL: float function signature metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_function_valued_parameter_metadata(void) {
+    const char *source = "int apply(int f(int), int x);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for function-valued parameter AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for function-valued parameter input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 ||
+        program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].name ||
+        strcmp(program.externals[0].name, "apply") != 0 ||
+        program.externals[0].parameter_count != 2 ||
+        !program.externals[0].parameter_value_kinds ||
+        program.externals[0].parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        program.externals[0].parameter_value_kinds[1] != AST_PARAMETER_VALUE_INT ||
+        !program.externals[0].parameter_function_parameter_counts ||
+        program.externals[0].parameter_function_parameter_counts[0] != 1u) {
+        fprintf(stderr, "[parser-reg] FAIL: function-valued parameter metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_void_function_valued_parameter_metadata(void) {
+    const char *source = "int apply(void f(int), int x);\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for void function-valued parameter AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for void function-valued parameter input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 ||
+        program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].parameter_value_kinds ||
+        program.externals[0].parameter_count != 2 ||
+        program.externals[0].parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        !program.externals[0].parameter_function_return_types ||
+        program.externals[0].parameter_function_return_types[0] != AST_FUNCTION_RETURN_VOID ||
+        !program.externals[0].parameter_function_parameter_counts ||
+        program.externals[0].parameter_function_parameter_counts[0] != 1u) {
+        fprintf(stderr, "[parser-reg] FAIL: void function-valued parameter metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_zero_arg_function_valued_parameter_metadata(void) {
+    const char *source = "int apply0(int f());\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for zero-arg function-valued parameter AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for zero-arg function-valued parameter input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 ||
+        program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        !program.externals[0].parameter_value_kinds ||
+        program.externals[0].parameter_count != 1 ||
+        program.externals[0].parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        !program.externals[0].parameter_function_parameter_counts ||
+        program.externals[0].parameter_function_parameter_counts[0] != 0u ||
+        !program.externals[0].parameter_function_return_types ||
+        program.externals[0].parameter_function_return_types[0] != AST_FUNCTION_RETURN_INT) {
+        fprintf(stderr, "[parser-reg] FAIL: zero-arg function-valued parameter metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_records_zero_arg_void_function_valued_parameter_metadata(void) {
+    const char *source = "void apply0(void f());\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for zero-arg void function-valued parameter AST input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for zero-arg void function-valued parameter input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.count != 1 ||
+        program.externals[0].kind != AST_EXTERNAL_FUNCTION ||
+        program.externals[0].function_return_type != AST_FUNCTION_RETURN_VOID ||
+        !program.externals[0].parameter_value_kinds ||
+        program.externals[0].parameter_count != 1 ||
+        program.externals[0].parameter_value_kinds[0] != AST_PARAMETER_VALUE_FUNCTION ||
+        !program.externals[0].parameter_function_parameter_counts ||
+        program.externals[0].parameter_function_parameter_counts[0] != 0u ||
+        !program.externals[0].parameter_function_return_types ||
+        program.externals[0].parameter_function_return_types[0] != AST_FUNCTION_RETURN_VOID) {
+        fprintf(stderr, "[parser-reg] FAIL: zero-arg void function-valued parameter metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
 static int test_ast_parses_function_declaration_external(void) {
     const char *source = "int add(int a,int b);\n";
     TokenArray tokens;
@@ -390,6 +654,274 @@ static int test_ast_unless_desugars_to_if_with_negated_condition(void) {
         strcmp(cond_expr->as.unary.operand->as.identifier.name, "x") != 0) {
         fprintf(stderr,
             "[parser-reg] FAIL: unless should desugar to if(!x) in AST\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_fndefer_records_payload_metadata(void) {
+    const char *source = "int main(){ fndefer return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *fndefer_stmt;
+    AstStatement *ret_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for fndefer AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for fndefer input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.count == 1 ? program.externals[0].function_body : NULL;
+    fndefer_stmt = body && body->child_count >= 1 ? body->children[0] : NULL;
+    ret_stmt = body && body->child_count >= 2 ? body->children[1] : NULL;
+
+    if (!fndefer_stmt || fndefer_stmt->kind != AST_STMT_FNDEFER ||
+        fndefer_stmt->extension_origin != AST_EXTENSION_ORIGIN_FNDEFER ||
+        fndefer_stmt->child_count != 1 || !fndefer_stmt->children || !fndefer_stmt->children[0] ||
+        fndefer_stmt->children[0]->kind != AST_STMT_RETURN ||
+        !fndefer_stmt->children[0]->has_primary_expression ||
+        fndefer_stmt->children[0]->primary_expression_index != 0 ||
+        fndefer_stmt->children[0]->expression_count != 1) {
+        fprintf(stderr, "[parser-reg] FAIL: fndefer statement payload metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!ret_stmt || ret_stmt->kind != AST_STMT_RETURN || !ret_stmt->has_primary_expression ||
+        ret_stmt->primary_expression_index != 0 || ret_stmt->expression_count != 1) {
+        fprintf(stderr, "[parser-reg] FAIL: trailing return metadata mismatch for fndefer AST test\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_capdefer_records_capture_metadata(void) {
+    const char *source = "int main(){ capdefer(x=1, y=2) return x+y; return 0; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *capdefer_stmt;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for capdefer AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for capdefer input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.count == 1 ? program.externals[0].function_body : NULL;
+    capdefer_stmt = body && body->child_count >= 1 ? body->children[0] : NULL;
+
+    if (!capdefer_stmt || capdefer_stmt->kind != AST_STMT_CAPDEFER ||
+        capdefer_stmt->extension_origin != AST_EXTENSION_ORIGIN_CAPDEFER ||
+        capdefer_stmt->capture_name_count != 2u ||
+        capdefer_stmt->capture_expression_count != 2u ||
+        !capdefer_stmt->capture_names ||
+        !capdefer_stmt->capture_expressions ||
+        strcmp(capdefer_stmt->capture_names[0], "x") != 0 ||
+        strcmp(capdefer_stmt->capture_names[1], "y") != 0 ||
+        !capdefer_stmt->children || capdefer_stmt->child_count != 1u ||
+        !capdefer_stmt->children[0] ||
+        capdefer_stmt->children[0]->kind != AST_STMT_RETURN) {
+        fprintf(stderr, "[parser-reg] FAIL: capdefer statement capture metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_pair_declaration_and_member_metadata(void) {
+    const char *source = "int main(){ pair a={1,2}; pair b=a; return b.first; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *pair_decl_a;
+    AstStatement *pair_decl_b;
+    AstStatement *ret_stmt;
+    AstExpression *ret_expr;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for pair AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for pair input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.count == 1 ? program.externals[0].function_body : NULL;
+    pair_decl_a = body && body->child_count >= 1 ? body->children[0] : NULL;
+    pair_decl_b = body && body->child_count >= 2 ? body->children[1] : NULL;
+    ret_stmt = body && body->child_count >= 3 ? body->children[2] : NULL;
+    ret_expr = ret_stmt && ret_stmt->has_primary_expression &&
+            ret_stmt->primary_expression_index < ret_stmt->expression_count
+        ? ret_stmt->expressions[ret_stmt->primary_expression_index]
+        : NULL;
+
+    if (!pair_decl_a || pair_decl_a->kind != AST_STMT_DECLARATION ||
+        pair_decl_a->extension_origin != AST_EXTENSION_ORIGIN_PAIR ||
+        !pair_decl_a->declaration_value_kinds ||
+        pair_decl_a->declaration_value_kinds[0] != AST_DECLARATION_VALUE_PAIR) {
+        fprintf(stderr, "[parser-reg] FAIL: first pair declaration metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!pair_decl_b || pair_decl_b->kind != AST_STMT_DECLARATION ||
+        !pair_decl_b->declaration_value_kinds ||
+        pair_decl_b->declaration_value_kinds[0] != AST_DECLARATION_VALUE_PAIR ||
+        !pair_decl_b->expressions || !pair_decl_b->expressions[0] ||
+        pair_decl_b->expressions[0]->kind != AST_EXPR_IDENTIFIER ||
+        strcmp(pair_decl_b->expressions[0]->as.identifier.name, "a") != 0) {
+        fprintf(stderr, "[parser-reg] FAIL: pair copy declaration metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!ret_expr || ret_expr->kind != AST_EXPR_MEMBER ||
+        !ret_expr->as.member.field_name ||
+        strcmp(ret_expr->as.member.field_name, "first") != 0) {
+        fprintf(stderr, "[parser-reg] FAIL: pair member return expression metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_ast_struct_definition_and_local_metadata(void) {
+    const char *source =
+        "struct Point { int x; int y; int z; };\n"
+        "int main(){ struct Point p={1,2,3}; struct Point q=p; return q.z; }\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError err;
+    AstStatement *body;
+    AstStatement *decl_p;
+    AstStatement *decl_q;
+    AstStatement *ret_stmt;
+    AstExpression *ret_expr;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&program);
+
+    if (!lexer_tokenize(source, &tokens)) {
+        fprintf(stderr, "[parser-reg] FAIL: lexer failed for struct AST test input\n");
+        return 0;
+    }
+
+    if (!parser_parse_translation_unit_ast(&tokens, &program, &err)) {
+        fprintf(stderr,
+            "[parser-reg] FAIL: AST parse failed for struct input at %d:%d: %s\n",
+            err.line,
+            err.column,
+            err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (program.struct_type_count != 1u ||
+        !program.struct_types ||
+        !program.struct_types[0].name ||
+        strcmp(program.struct_types[0].name, "Point") != 0 ||
+        program.struct_types[0].field_count != 3u ||
+        !program.struct_types[0].field_names ||
+        strcmp(program.struct_types[0].field_names[0], "x") != 0 ||
+        strcmp(program.struct_types[0].field_names[1], "y") != 0 ||
+        strcmp(program.struct_types[0].field_names[2], "z") != 0) {
+        fprintf(stderr, "[parser-reg] FAIL: struct type metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    body = program.count == 1 ? program.externals[0].function_body : NULL;
+    decl_p = body && body->child_count >= 1 ? body->children[0] : NULL;
+    decl_q = body && body->child_count >= 2 ? body->children[1] : NULL;
+    ret_stmt = body && body->child_count >= 3 ? body->children[2] : NULL;
+    ret_expr = ret_stmt && ret_stmt->has_primary_expression &&
+            ret_stmt->primary_expression_index < ret_stmt->expression_count
+        ? ret_stmt->expressions[ret_stmt->primary_expression_index]
+        : NULL;
+
+    if (!decl_p || !decl_q ||
+        !decl_p->declaration_value_kinds || decl_p->declaration_value_kinds[0] != AST_DECLARATION_VALUE_STRUCT ||
+        !decl_q->declaration_value_kinds || decl_q->declaration_value_kinds[0] != AST_DECLARATION_VALUE_STRUCT ||
+        !decl_p->declaration_type_names || !decl_p->declaration_type_names[0] ||
+        !decl_q->declaration_type_names || !decl_q->declaration_type_names[0] ||
+        strcmp(decl_p->declaration_type_names[0], "Point") != 0 ||
+        strcmp(decl_q->declaration_type_names[0], "Point") != 0) {
+        fprintf(stderr, "[parser-reg] FAIL: struct declaration metadata mismatch\n");
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    if (!ret_expr || ret_expr->kind != AST_EXPR_MEMBER ||
+        !ret_expr->as.member.field_name ||
+        strcmp(ret_expr->as.member.field_name, "z") != 0) {
+        fprintf(stderr, "[parser-reg] FAIL: struct member return expression metadata mismatch\n");
         lexer_free_tokens(&tokens);
         ast_program_free(&program);
         return 0;

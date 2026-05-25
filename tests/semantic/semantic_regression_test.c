@@ -151,11 +151,256 @@ static int run_callable_pass_case(const CallablePassCase *c) {
     return 1;
 }
 
+static int run_extension_semantic_expect_accepts(const char *case_id, const char *source);
+static int run_extension_semantic_expect_rejects(const char *case_id,
+    const char *source,
+    const char *expected_code);
+
 /* Split for maintainability: keep regression execution order in main, move case bodies to fragments. */
 #include "semantic_regression_callable_flow.inc"
 #include "semantic_regression_scope_cf.inc"
 int main(void) {
+    const char *filter = getenv("SEMANTIC_REG_FILTER");
     int ok = 1;
+
+    if (filter && filter[0] != '\0') {
+        if (strstr("SEMANTIC-FLOAT-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_float_function_signature_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-RETURN-GLOBAL", filter) != NULL) {
+            return test_semantic_accepts_float_return_transport_from_global_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-RETURN-GLOBAL-CALL", filter) != NULL) {
+            return test_semantic_accepts_float_return_transport_from_global_call_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-PARAM-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_float_parameter_forward_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-PARAM-LOCAL-FORWARD", filter) != NULL) {
+            return test_semantic_accepts_float_parameter_local_forward_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-GLOBAL-CALL-CHAIN", filter) != NULL) {
+            return test_semantic_accepts_float_global_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-LOCAL-CALL-CHAIN", filter) != NULL) {
+            return test_semantic_accepts_float_local_call_chain_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-IF-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_rejects_float_if_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_rejects_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_rejects_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NOT-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_not_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-AND-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_and_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-OR-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_or_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_ternary_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_same_type_float_ternary_value_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-GLOBAL-OP-REJECT", filter) != NULL) {
+            return test_semantic_rejects_global_float_operator_expression_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-GLOBAL-OP-INIT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_global_float_operator_expression_in_initializer_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-ASSIGN-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_float_assignment_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-ASSIGN-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-RETURN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-RETURN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_return_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-LITERAL-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_literal_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-IDENT-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_unary_minus_float_identifier_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-CALL-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_unary_minus_float_call_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-POS-IDENT-TRANSPORT", filter) != NULL) {
+            return test_semantic_accepts_unary_plus_float_identifier_transport_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-ZERO-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_zero_float_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_relational_compare_against_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-LT-NEGATIVE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_relational_compare_against_negative_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-ZERO-LT-ZERO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_zero_lt_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-ZERO-LE-ZERO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_zero_le_zero_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-ADD-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-SUB-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_subtraction_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-ADD-COMBO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_addition_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-SUB-COMBO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_subtraction_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-MUL-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_multiplication_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-DIV-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_float_division_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-MUL-COMBO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_multiplication_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-DIV-COMBO-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_negative_float_division_combo_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_addition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-LITERAL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_literal_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MULDIV-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_nested_float_muldiv_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_plus_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-ASSIGN-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_assignment_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_same_type_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-ASSIGN-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_unary_call_same_type_float_ternary_value_assignment_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_same_type_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-COMPARE-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_compare_against_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-UNARY-CALL-TERNARY-INIT-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_unary_call_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-FLOAT-DIRECT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-FLOAT-FROM-INT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_from_int_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-SAME-TYPE-REJECT", filter) != NULL) {
+            return test_semantic_rejects_redundant_explicit_same_type_conversion_for_now() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-FLOAT-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-FLOAT-TERNARY-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_float_ternary_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-CALLARG-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-FLOAT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_float_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-INT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-INIT-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ASSIGN-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-FLOAT-FROM-INT-COMPARE-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_from_int_compare_bridge_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-EXPLICIT-FLOAT-FROM-RECURSIVE-ARITH-BRIDGE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension() ? 0 : 1;
+        }
+        fprintf(stderr, "[semantic-reg] FAIL: unknown filter '%s'\n", filter);
+        return 1;
+    }
 
     ok &= test_semantic_accepts_valid_program();
     ok &= test_semantic_rejects_duplicate_function();
@@ -163,9 +408,15 @@ int main(void) {
     ok &= test_semantic_allows_duplicate_function_declarations();
     ok &= test_semantic_rejects_function_declaration_count_mismatch();
     ok &= test_semantic_rejects_declaration_definition_count_mismatch();
+    ok &= test_semantic_rejects_function_declaration_parameter_kind_mismatch();
+    ok &= test_semantic_rejects_function_declaration_nested_signature_mismatch();
     ok &= test_semantic_rejects_function_variable_conflict();
     ok &= test_semantic_rejects_variable_function_conflict();
     ok &= test_semantic_allows_repeated_declaration();
+    ok &= test_semantic_rejects_repeated_top_level_declaration_type_mismatch();
+    ok &= test_semantic_rejects_repeated_top_level_array_rank_mismatch();
+    ok &= test_semantic_rejects_repeated_top_level_array_extent_mismatch();
+    ok &= test_semantic_accepts_repeated_top_level_array_extent_constant_equivalence();
     ok &= test_semantic_rejects_duplicate_initialized_top_level_definition();
     ok &= test_semantic_allows_initialized_definition_with_redeclaration();
     ok &= test_semantic_allows_unnamed_external_contract();
@@ -282,6 +533,124 @@ int main(void) {
     ok &= test_semantic_accepts_defer_body_internal_continue_under_extension();
     ok &= test_semantic_accepts_unless_under_extension();
     ok &= test_semantic_rejects_unless_outside_extension_mode();
+    ok &= test_semantic_accepts_fndefer_with_stable_names_under_extension();
+    ok &= test_semantic_rejects_fndefer_outside_extension_mode();
+    ok &= test_semantic_rejects_fndefer_nested_block_local_under_extension();
+    ok &= test_semantic_rejects_fndefer_loop_local_under_extension();
+    ok &= test_semantic_rejects_fndefer_nested_defer_under_extension();
+    ok &= test_semantic_rejects_fndefer_loop_body_under_extension();
+    ok &= test_semantic_rejects_fndefer_later_local_declaration_under_extension();
+    ok &= test_semantic_accepts_fndefer_conditional_registration_under_extension();
+    ok &= test_semantic_accepts_capdefer_with_stable_names_under_extension();
+    ok &= test_semantic_accepts_float_declaration_under_extension();
+    ok &= test_semantic_accepts_float_function_signature_transport_under_extension();
+    ok &= test_semantic_accepts_float_literal_transport_under_extension();
+    ok &= test_semantic_accepts_float_return_transport_from_global_under_extension();
+    ok &= test_semantic_accepts_float_return_transport_from_global_call_under_extension();
+    ok &= test_semantic_accepts_float_parameter_forward_transport_under_extension();
+    ok &= test_semantic_accepts_float_parameter_local_forward_transport_under_extension();
+    ok &= test_semantic_accepts_float_global_call_chain_transport_under_extension();
+    ok &= test_semantic_accepts_float_local_call_chain_transport_under_extension();
+    ok &= test_semantic_rejects_float_if_condition_under_extension();
+    ok &= test_semantic_rejects_float_while_condition_under_extension();
+    ok &= test_semantic_rejects_float_for_condition_under_extension();
+    ok &= test_semantic_accepts_float_not_condition_under_extension();
+    ok &= test_semantic_accepts_float_and_condition_under_extension();
+    ok &= test_semantic_accepts_float_or_condition_under_extension();
+    ok &= test_semantic_accepts_float_ternary_condition_under_extension();
+    ok &= test_semantic_accepts_same_type_float_ternary_value_under_extension();
+    ok &= test_semantic_rejects_global_float_operator_expression_under_extension();
+    ok &= test_semantic_rejects_global_float_operator_expression_in_initializer_under_extension();
+    ok &= test_semantic_accepts_float_assignment_transport_under_extension();
+    ok &= test_semantic_rejects_float_assignment_to_int_under_extension();
+    ok &= test_semantic_accepts_float_equality_compare_under_extension();
+    ok &= test_semantic_accepts_float_inequality_compare_under_extension();
+    ok &= test_semantic_accepts_float_relational_compare_under_extension();
+    ok &= test_semantic_accepts_negative_float_literal_transport_under_extension();
+    ok &= test_semantic_accepts_unary_minus_float_identifier_transport_under_extension();
+    ok &= test_semantic_accepts_unary_minus_float_call_transport_under_extension();
+    ok &= test_semantic_accepts_unary_plus_float_identifier_transport_under_extension();
+    ok &= test_semantic_accepts_negative_zero_float_condition_under_extension();
+    ok &= test_semantic_accepts_negative_float_relational_compare_against_zero_under_extension();
+    ok &= test_semantic_accepts_negative_float_relational_compare_against_negative_under_extension();
+    ok &= test_semantic_accepts_negative_zero_lt_zero_under_extension();
+    ok &= test_semantic_accepts_negative_zero_le_zero_under_extension();
+    ok &= test_semantic_accepts_float_addition_under_extension();
+    ok &= test_semantic_accepts_float_subtraction_under_extension();
+    ok &= test_semantic_accepts_negative_float_addition_combo_under_extension();
+    ok &= test_semantic_accepts_negative_float_subtraction_combo_under_extension();
+    ok &= test_semantic_accepts_float_multiplication_under_extension();
+    ok &= test_semantic_accepts_float_division_under_extension();
+    ok &= test_semantic_accepts_negative_float_multiplication_combo_under_extension();
+    ok &= test_semantic_accepts_negative_float_division_combo_under_extension();
+    ok &= test_semantic_accepts_chained_float_addition_under_extension();
+    ok &= test_semantic_accepts_nested_float_mul_div_under_extension();
+    ok &= test_semantic_rejects_mixed_float_int_arithmetic_under_extension();
+    ok &= test_semantic_rejects_float_literal_int_arithmetic_under_extension();
+    ok &= test_semantic_rejects_float_call_int_arithmetic_under_extension();
+    ok &= test_semantic_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_semantic_rejects_float_compare_against_int_under_extension();
+    ok &= test_semantic_rejects_nested_float_tree_plus_int_under_extension();
+    ok &= test_semantic_rejects_nested_float_muldiv_plus_int_under_extension();
+    ok &= test_semantic_rejects_float_ternary_value_plus_int_under_extension();
+    ok &= test_semantic_rejects_unary_call_ternary_value_plus_int_under_extension();
+    ok &= test_semantic_rejects_float_ternary_value_assignment_to_int_under_extension();
+    ok &= test_semantic_accepts_same_type_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_semantic_accepts_unary_call_same_type_float_ternary_value_assignment_to_float_under_extension();
+    ok &= test_semantic_accepts_same_type_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_semantic_rejects_float_ternary_value_compare_against_int_under_extension();
+    ok &= test_semantic_rejects_float_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_semantic_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension();
+    ok &= test_semantic_accepts_explicit_float_from_int_conversion_under_extension();
+    ok &= test_semantic_rejects_redundant_explicit_same_type_conversion_for_now();
+    ok &= test_semantic_accepts_explicit_int_from_float_conversion_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_float_ternary_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_recursive_float_call_argument_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_recursive_float_initializer_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_recursive_float_assignment_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_float_compare_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_float_from_recursive_int_initializer_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_float_from_recursive_int_assignment_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_float_from_int_compare_bridge_under_extension();
+    ok &= test_semantic_accepts_explicit_float_from_recursive_int_arithmetic_bridge_under_extension();
+    ok &= test_semantic_rejects_capdefer_outside_extension_mode();
+    ok &= test_semantic_rejects_capdefer_nested_block_local_under_extension();
+    ok &= test_semantic_rejects_capdefer_loop_registration_under_extension();
+    ok &= test_semantic_rejects_function_valued_parameter_extension_slice_for_now();
+    ok &= test_semantic_rejects_function_valued_parameter_outside_extension_mode();
+    ok &= test_semantic_accepts_function_valued_parameter_declaration_under_extension_when_unused();
+    ok &= test_semantic_rejects_calling_function_with_function_valued_parameter_under_extension_for_now();
+    ok &= test_semantic_rejects_non_function_arg_to_function_valued_parameter_call_under_extension_for_now();
+    ok &= test_semantic_rejects_top_level_function_value_in_plain_value_position_under_extension_for_now();
+    ok &= test_semantic_accepts_direct_call_of_function_valued_parameter_under_extension_for_now();
+    ok &= test_semantic_accepts_pair_copy_under_extension();
+    ok &= test_semantic_rejects_plain_pair_value_in_int_context_under_extension();
+    ok &= test_semantic_rejects_pair_assignment_from_scalar_under_extension();
+    ok &= test_semantic_rejects_pair_init_from_scalar_under_extension();
+    ok &= test_semantic_rejects_pair_init_list_too_many_items_under_extension();
+    ok &= test_semantic_accepts_struct_copy_under_extension();
+    ok &= test_semantic_rejects_unknown_struct_type_under_extension();
+    ok &= test_semantic_rejects_mismatched_struct_assignment_under_extension();
+    ok &= test_semantic_rejects_struct_init_from_scalar_under_extension();
+    ok &= test_semantic_rejects_mismatched_struct_copy_init_under_extension();
+    ok &= test_semantic_rejects_pair_struct_assignment_mismatch_under_extension();
+    ok &= test_semantic_rejects_plain_struct_value_in_int_context_under_extension();
+    ok &= test_semantic_rejects_unknown_struct_field_under_extension();
+    ok &= test_semantic_accepts_pair_and_struct_member_lookup_under_extension();
+    ok &= test_semantic_accepts_float_local_declaration_under_extension();
+    ok &= test_semantic_rejects_float_array_local_declaration_under_extension();
+    ok &= test_semantic_rejects_float_array_global_declaration_under_extension();
+    ok &= test_semantic_rejects_float_array_parameter_under_extension();
+    ok &= test_semantic_rejects_pair_array_local_declaration_under_extension();
+    ok &= test_semantic_rejects_struct_array_local_declaration_under_extension();
+    ok &= test_semantic_accepts_forwarding_function_valued_parameter_under_extension_for_now();
+    ok &= test_semantic_accepts_multiple_function_valued_parameters_under_extension_for_now();
+    ok &= test_semantic_accepts_void_function_valued_parameter_with_builtin_binding_under_extension();
+    ok &= test_semantic_accepts_zero_arg_function_valued_parameter_under_extension();
+    ok &= test_semantic_accepts_zero_arg_void_function_valued_parameter_under_extension();
+    ok &= test_semantic_rejects_nonvoid_function_for_void_function_valued_parameter_under_extension();
     ok &= test_semantic_ast_primary_return_flow_ignores_tampered_metadata();
     ok &= test_semantic_ast_primary_callable_ignores_tampered_metadata();
     ok &= test_semantic_ast_primary_chained_call_ignores_tampered_metadata();

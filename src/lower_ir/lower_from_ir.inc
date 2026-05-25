@@ -370,6 +370,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
             return 0;
         }
 
+        target_global->value_type = source_global->value_type;
         target_global->byte_size = source_global->byte_size;
         target_global->has_initializer = source_global->has_initializer;
         target_global->initializer_value = source_global->initializer_value;
@@ -423,6 +424,7 @@ int lower_ir_lower_from_ir(const IrProgram *program,
                 lower_ir_program_free(out_program);
                 return 0;
             }
+            target_function->locals[local_index].value_type = source_local->value_type;
             target_function->locals[local_index].array_rank = source_local->array_rank;
         }
 

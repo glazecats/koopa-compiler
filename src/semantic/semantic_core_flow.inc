@@ -98,6 +98,33 @@ static const AstExternal *semantic_find_visible_function_external(const AstProgr
     return NULL;
 }
 
+static const AstExternal *semantic_find_visible_external(const AstProgram *program,
+    size_t func_index,
+    int include_current_external,
+    const char *name) {
+    size_t visible_external_count;
+    size_t i;
+
+    if (!program || !name || name[0] == '\0') {
+        return NULL;
+    }
+
+    visible_external_count = include_current_external ? (func_index + 1u) : func_index;
+    if (visible_external_count > program->count) {
+        visible_external_count = program->count;
+    }
+
+    for (i = 0; i < visible_external_count; ++i) {
+        const AstExternal *candidate = &program->externals[i];
+
+        if (candidate->name && strcmp(candidate->name, name) == 0) {
+            return candidate;
+        }
+    }
+
+    return NULL;
+}
+
 static int names_equal(const AstExternal *a, const AstExternal *b) {
     if (!a->name || !b->name) {
         return 0;
@@ -267,6 +294,7 @@ static int walk_expression_postorder_with_depth(const AstExpression *expr,
         break;
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         break;
     }
@@ -888,6 +916,7 @@ static int flow_update_guard_constant_state_from_expression(const AstExpression 
 
     switch (base->kind) {
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     case AST_EXPR_IDENTIFIER:
         return 1;
     case AST_EXPR_INIT_LIST:
@@ -1031,6 +1060,7 @@ static void flow_collect_expression_identifiers(const AstExpression *expr,
         flow_collect_expression_identifiers(expr->as.ternary.else_expr, set, scopes);
         return;
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         return;
     }
@@ -1805,6 +1835,7 @@ static int flow_expression_contains_call(const AstExpression *expr) {
     }
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         return 0;
     }
@@ -1940,6 +1971,7 @@ static int flow_expression_may_change_guard_state_with_state(const AstExpression
             flow_expression_may_change_guard_state_with_state(expr->as.ternary.else_expr, set, scopes, effective_state);
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
     default:
         return 0;
     }
@@ -2512,6 +2544,8 @@ static int flow_try_eval_constant_int_with_depth(const AstExpression *expr,
     case AST_EXPR_NUMBER:
         *out_value = expr->as.number_value;
         return 1;
+    case AST_EXPR_FLOAT_LITERAL:
+        return 0;
     case AST_EXPR_INIT_LIST:
         return 0;
     case AST_EXPR_PAREN:

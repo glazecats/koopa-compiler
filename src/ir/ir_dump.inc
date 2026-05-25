@@ -110,6 +110,16 @@ static int ir_append_value_name(IrStringBuilder *builder,
     }
 }
 
+static int ir_append_scalar_type_suffix(IrStringBuilder *builder, AstFunctionReturnType value_type) {
+    if (!builder) {
+        return 0;
+    }
+    if (value_type == AST_FUNCTION_RETURN_FLOAT) {
+        return ir_append_string(builder, ":float");
+    }
+    return 1;
+}
+
 int ir_dump_program(const IrProgram *program, char **out_text) {
     IrStringBuilder builder;
     size_t i;
@@ -130,6 +140,10 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
                 "global %s.%zu",
                 (global->name && global->name[0] != '\0') ? global->name : "global",
                 global->id)) {
+            free(builder.data);
+            return 0;
+        }
+        if (!ir_append_scalar_type_suffix(&builder, global->value_type)) {
             free(builder.data);
             return 0;
         }
@@ -170,6 +184,11 @@ int ir_dump_program(const IrProgram *program, char **out_text) {
                 return 0;
             }
             if (!ir_append_value_name(&builder, program, function, ir_value_local(j))) {
+                free(builder.data);
+                return 0;
+            }
+            if (function->locals && j < function->local_count &&
+                !ir_append_scalar_type_suffix(&builder, function->locals[j].value_type)) {
                 free(builder.data);
                 return 0;
             }

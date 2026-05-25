@@ -363,6 +363,8 @@ static int ir_lower_flow_state_eval_expr(const IrLowerContext *ctx,
     case AST_EXPR_NUMBER:
         *out_value = ir_normalize_sysy_int_value(base->as.number_value);
         return 1;
+    case AST_EXPR_FLOAT_LITERAL:
+        return 0;
     case AST_EXPR_IDENTIFIER:
         index = ir_lower_flow_state_resolve_binding(state,
             base->as.identifier.name,
@@ -1330,8 +1332,231 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
         const char *name = stmt->declaration_names ? stmt->declaration_names[i] : NULL;
         size_t local_id = (size_t)-1;
         IrValueRef init_value;
+        int declaration_value_kind = stmt->declaration_value_kinds
+            ? stmt->declaration_value_kinds[i]
+            : AST_DECLARATION_VALUE_INT;
 
         if (!name || name[0] == '\0') {
+            continue;
+        }
+        if (declaration_value_kind == AST_DECLARATION_VALUE_STRUCT) {
+            size_t field_index;
+            size_t field_count = 0u;
+            const AstExpression *initializer_expr =
+                (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
+            const AstExpression *initializer_base = ir_unwrap_paren_expression(initializer_expr);
+            const char *type_name = stmt->declaration_type_names ? stmt->declaration_type_names[i] : NULL;
+            const AstStructType *struct_type = ir_find_struct_type(ctx->ast_program, type_name);
+            size_t source_first_local_id = (size_t)-1;
+            size_t source_second_local_id = (size_t)-1;
+            const char *source_type_name = NULL;
+            IrValueRef field_value;
+            size_t name_len = strlen(name);
+
+            if (!struct_type || !struct_type->field_names || struct_type->field_count == 0u) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-LOWER-049: unsupported struct declaration lowering shape");
+                return 0;
+            }
+            field_count = struct_type->field_count;
+            for (field_index = 0u; field_index < field_count; ++field_index) {
+                char *field_local_name;
+                size_t current_local_id = (size_t)-1;
+                size_t field_name_len;
+
+                if (!struct_type->field_names[field_index] || struct_type->field_names[field_index][0] == '\0') {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-LOWER-049: unsupported struct declaration lowering shape");
+                    return 0;
+                }
+
+                field_name_len = strlen(struct_type->field_names[field_index]);
+                field_local_name = (char *)malloc(name_len + field_name_len + 2u);
+                if (!field_local_name) {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-INT-017: failed to allocate struct local metadata for '%s'",
+                        name);
+                    return 0;
+                }
+                sprintf(field_local_name, "%s$%s", name, struct_type->field_names[field_index]);
+                if (!ir_function_append_local(ctx->function, field_local_name, 0, &current_local_id, ctx->error)) {
+                    free(field_local_name);
+                    return 0;
+                }
+                free(field_local_name);
+                if (field_index == 0u) {
+                    local_id = current_local_id;
+                }
+            }
+
+            if (!ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+                    name,
+                    local_id,
+                    IR_LOWER_BINDING_STRUCT_LOCAL,
+                    0u,
+                    NULL,
+                    field_count > 1u ? (local_id + 1u) : local_id,
+                    type_name,
+                    stmt->declaration_is_const,
+                    0,
+                    0)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-017: failed to record struct local '%s' during IR lowering",
+                    name);
+                return 0;
+            }
+
+            if (initializer_base) {
+                if (ir_lookup_struct_local_binding(
+                        ctx,
+                        initializer_base,
+                        &source_first_local_id,
+                        &source_second_local_id,
+                        &source_type_name)) {
+                    if (!source_type_name || strcmp(source_type_name, type_name) != 0) {
+                        ir_set_error(ctx->error,
+                            stmt->line,
+                            stmt->column,
+                            "IR-LOWER-050: struct copy initialization requires matching struct types");
+                        return 0;
+                    }
+                    for (field_index = 0u; field_index < field_count; ++field_index) {
+                        if (!ir_emit_mov(ctx,
+                                ir_value_local(local_id + field_index),
+                                ir_value_local(source_first_local_id + field_index))) {
+                            return 0;
+                        }
+                    }
+                    continue;
+                }
+                if (initializer_base->kind != AST_EXPR_INIT_LIST) {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-LOWER-051: struct initializers currently require an initializer list");
+                    return 0;
+                }
+                for (field_index = 0u;
+                     field_index < initializer_base->as.init_list.item_count && field_index < field_count;
+                     ++field_index) {
+                    if (initializer_base->as.init_list.items &&
+                        initializer_base->as.init_list.items[field_index] &&
+                        (!ir_lower_expression(ctx, initializer_base->as.init_list.items[field_index], &field_value) ||
+                            !ir_emit_mov(ctx, ir_value_local(local_id + field_index), field_value))) {
+                        return 0;
+                    }
+                }
+                for (; field_index < field_count; ++field_index) {
+                    if (!ir_emit_mov(ctx, ir_value_local(local_id + field_index), ir_value_immediate(0))) {
+                        return 0;
+                    }
+                }
+            }
+            continue;
+        }
+        if (declaration_value_kind == AST_DECLARATION_VALUE_PAIR) {
+            size_t second_local_id = (size_t)-1;
+            const AstExpression *initializer_expr =
+                (stmt->expressions && i < init_expr_limit) ? stmt->expressions[i] : NULL;
+            const AstExpression *initializer_base = ir_unwrap_paren_expression(initializer_expr);
+            char *first_name = NULL;
+            char *second_name = NULL;
+            size_t name_len = strlen(name);
+
+            first_name = (char *)malloc(name_len + 7u);
+            second_name = (char *)malloc(name_len + 8u);
+            if (!first_name || !second_name) {
+                free(first_name);
+                free(second_name);
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-017: failed to allocate pair local metadata for '%s'",
+                    name);
+                return 0;
+            }
+            memcpy(first_name, name, name_len);
+            memcpy(first_name + name_len, "$first", 7u);
+            memcpy(second_name, name, name_len);
+            memcpy(second_name + name_len, "$second", 8u);
+
+            if (!ir_function_append_local(ctx->function, first_name, 0, &local_id, ctx->error) ||
+                !ir_function_append_local(ctx->function, second_name, 0, &second_local_id, ctx->error) ||
+                !ir_lower_scope_add_binding_with_metadata(&ctx->scopes,
+                    name,
+                    local_id,
+                    IR_LOWER_BINDING_PAIR_LOCAL,
+                    0u,
+                    NULL,
+                    second_local_id,
+                    NULL,
+                    stmt->declaration_is_const,
+                    0,
+                    0)) {
+                free(first_name);
+                free(second_name);
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-017: failed to record pair local '%s' during IR lowering",
+                    name);
+                return 0;
+            }
+            free(first_name);
+            free(second_name);
+
+            if (initializer_base) {
+                size_t item_count = 0u;
+                AstExpression **items = NULL;
+                size_t source_first_local_id = (size_t)-1;
+                size_t source_second_local_id = (size_t)-1;
+
+                if (ir_lookup_pair_local_binding(
+                        ctx,
+                        initializer_base,
+                        &source_first_local_id,
+                        &source_second_local_id)) {
+                    if (!ir_emit_mov(ctx,
+                            ir_value_local(local_id),
+                            ir_value_local(source_first_local_id)) ||
+                        !ir_emit_mov(ctx,
+                            ir_value_local(second_local_id),
+                            ir_value_local(source_second_local_id))) {
+                        return 0;
+                    }
+                    continue;
+                }
+
+                if (initializer_base->kind != AST_EXPR_INIT_LIST) {
+                    ir_set_error(ctx->error,
+                        stmt->line,
+                        stmt->column,
+                        "IR-LOWER-045: pair initializers currently require an initializer list");
+                    return 0;
+                }
+                item_count = initializer_base->as.init_list.item_count;
+                items = initializer_base->as.init_list.items;
+                if (item_count > 0u && items && items[0]) {
+                    if (!ir_lower_expression(ctx, items[0], &init_value) ||
+                        !ir_emit_mov(ctx, ir_value_local(local_id), init_value)) {
+                        return 0;
+                    }
+                }
+                if (item_count > 1u && items && items[1]) {
+                    if (!ir_lower_expression(ctx, items[1], &init_value) ||
+                        !ir_emit_mov(ctx, ir_value_local(second_local_id), init_value)) {
+                        return 0;
+                    }
+                }
+            }
             continue;
         }
         if (stmt->declaration_array_ranks && stmt->declaration_array_ranks[i] > 0u) {
@@ -1356,6 +1581,8 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                     IR_LOWER_BINDING_ARRAY_LOCAL,
                     stmt->declaration_array_ranks[i],
                     array_extents,
+                    0u,
+                    NULL,
                     stmt->declaration_is_const,
                     0,
                     0)) {
@@ -1428,6 +1655,12 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                 name);
             return 0;
         }
+        if (ctx->function->locals && local_id < ctx->function->local_count) {
+            ctx->function->locals[local_id].value_type =
+                declaration_value_kind == AST_DECLARATION_VALUE_FLOAT
+                    ? AST_FUNCTION_RETURN_FLOAT
+                    : AST_FUNCTION_RETURN_INT;
+        }
         if (stmt->expressions && i < init_expr_limit && stmt->expressions[i]) {
             long long const_value = 0;
             int has_const_value = ir_eval_constant_int_expression(ctx, stmt->expressions[i], &const_value);
@@ -1436,6 +1669,8 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                     ctx->function->locals[local_id].source_name,
                     local_id,
                     IR_LOWER_BINDING_SCALAR_LOCAL,
+                    0u,
+                    NULL,
                     0u,
                     NULL,
                     stmt->declaration_is_const,
@@ -1456,6 +1691,8 @@ static int ir_lower_declaration_names(IrLowerContext *ctx,
                 ctx->function->locals[local_id].source_name,
                 local_id,
                 IR_LOWER_BINDING_SCALAR_LOCAL,
+                0u,
+                NULL,
                 0u,
                 NULL,
                 stmt->declaration_is_const,
@@ -1507,6 +1744,7 @@ static int ir_expression_has_side_effects(const AstExpression *expr) {
     switch (expr->kind) {
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
         return 0;
     case AST_EXPR_INIT_LIST:
         for (i = 0; i < expr->as.init_list.item_count; ++i) {
@@ -1531,6 +1769,8 @@ static int ir_expression_has_side_effects(const AstExpression *expr) {
     case AST_EXPR_SUBSCRIPT:
         return ir_expression_has_side_effects(expr->as.subscript.base) ||
             ir_expression_has_side_effects(expr->as.subscript.index);
+    case AST_EXPR_MEMBER:
+        return ir_expression_has_side_effects(expr->as.member.base);
     case AST_EXPR_CALL:
         return 1;
     case AST_EXPR_BINARY: {
@@ -1623,6 +1863,7 @@ static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack 
     switch (expr->kind) {
     case AST_EXPR_IDENTIFIER:
     case AST_EXPR_NUMBER:
+    case AST_EXPR_FLOAT_LITERAL:
         return 1;
     case AST_EXPR_INIT_LIST:
         for (i = 0; i < expr->as.init_list.item_count; ++i) {
@@ -1650,6 +1891,8 @@ static int ir_lower_scope_clear_mutated_scalar_locals_in_expr(IrLowerScopeStack 
     case AST_EXPR_SUBSCRIPT:
         return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.subscript.base) &&
             ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.subscript.index);
+    case AST_EXPR_MEMBER:
+        return ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.member.base);
     case AST_EXPR_CALL:
         if (!ir_lower_scope_clear_mutated_scalar_locals_in_expr(stack, expr->as.call.callee)) {
             return 0;
@@ -1850,6 +2093,8 @@ static int ir_eval_constant_int_expression(IrLowerContext *ctx,
     case AST_EXPR_NUMBER:
         *out_value = ir_normalize_sysy_int_value(expr->as.number_value);
         return 1;
+    case AST_EXPR_FLOAT_LITERAL:
+        return 0;
     case AST_EXPR_IDENTIFIER:
         if (expr->as.identifier.name &&
             ir_lower_scope_lookup_binding(&ctx->scopes, expr->as.identifier.name, &binding_info) &&
@@ -2255,6 +2500,8 @@ static int ir_try_emit_compact_large_local_array_initializer(IrLowerContext *ctx
             ctx->function->locals[loop_index_local_id].source_name,
             loop_index_local_id,
             IR_LOWER_BINDING_SCALAR_LOCAL,
+            0u,
+            NULL,
             0u,
             NULL,
             0,
@@ -3095,6 +3342,104 @@ static int ir_lower_statement(IrLowerContext *ctx, const AstStatement *stmt) {
             return 0;
         }
         return 1;
+    case AST_STMT_FNDEFER:
+        if (stmt->child_count != 1u || !stmt->children || !stmt->children[0]) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-026: malformed fndefer statement payload during IR lowering");
+            return 0;
+        }
+        {
+            size_t repeat_count_local_id = (size_t)-1;
+
+            if (!ir_lower_emit_fndefer_site_registration(ctx, stmt, &repeat_count_local_id)) {
+                ir_set_error(ctx->error,
+                    stmt->line,
+                    stmt->column,
+                    "IR-INT-080: failed to register function-exit defer payload during IR lowering");
+                return 0;
+            }
+            (void)repeat_count_local_id;
+        }
+        return 1;
+    case AST_STMT_CAPDEFER: {
+        const AstStatement *payload_stmt;
+        const char **capture_names = NULL;
+        size_t *capture_local_ids = NULL;
+        size_t capture_index;
+
+        if (stmt->child_count != 1u || !stmt->children || !stmt->children[0]) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-049: malformed capdefer statement payload during IR lowering");
+            return 0;
+        }
+        if (stmt->capture_name_count == 0u || !stmt->capture_names ||
+            stmt->capture_expression_count != stmt->capture_name_count ||
+            !stmt->capture_expressions) {
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-LOWER-050: malformed capdefer capture list during IR lowering");
+            return 0;
+        }
+
+        payload_stmt = stmt->children[0];
+        capture_names = (const char **)malloc(stmt->capture_name_count * sizeof(const char *));
+        capture_local_ids = (size_t *)malloc(stmt->capture_name_count * sizeof(size_t));
+        if (!capture_names || !capture_local_ids) {
+            free(capture_names);
+            free(capture_local_ids);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-081: failed to allocate capdefer capture metadata during IR lowering");
+            return 0;
+        }
+
+        for (capture_index = 0u; capture_index < stmt->capture_name_count; ++capture_index) {
+            IrValueRef captured_value;
+            size_t local_id;
+            char hidden_name[128];
+
+            snprintf(hidden_name,
+                sizeof(hidden_name),
+                "__capdefer_%zu_%s",
+                capture_index,
+                stmt->capture_names[capture_index] ? stmt->capture_names[capture_index] : "capture");
+            if (!ir_function_append_local(ctx->function, hidden_name, 0, &local_id, ctx->error)) {
+                free(capture_names);
+                free(capture_local_ids);
+                return 0;
+            }
+            if (!ir_lower_expression(ctx, stmt->capture_expressions[capture_index], &captured_value) ||
+                !ir_emit_mov(ctx, ir_value_local(local_id), captured_value)) {
+                free(capture_names);
+                free(capture_local_ids);
+                return 0;
+            }
+            capture_names[capture_index] = stmt->capture_names[capture_index];
+            capture_local_ids[capture_index] = local_id;
+        }
+
+        if (!ir_lower_function_defer_entry_stack_push_with_captures(
+                &ctx->function_defer_entries,
+                payload_stmt,
+                capture_names,
+                capture_local_ids,
+                stmt->capture_name_count)) {
+            free(capture_names);
+            free(capture_local_ids);
+            ir_set_error(ctx->error,
+                stmt->line,
+                stmt->column,
+                "IR-INT-082: failed to register capdefer payload during IR lowering");
+            return 0;
+        }
+        return 1;
+    }
     case AST_STMT_DECLARATION:
         return ir_lower_declaration_names(ctx, stmt, stmt->expression_count);
     case AST_STMT_EXPRESSION:

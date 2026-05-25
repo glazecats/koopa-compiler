@@ -359,9 +359,11 @@ static int machine_select_lower_instruction(const MachineIrInstruction *src_op,
     return 0;
 }
 
-int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
+static int machine_select_lower_program_from_machine_ir_with_cleanup_mode(
+    const MachineIrProgram *source,
     MachineSelectProgram *out_program,
-    MachineSelectError *error) {
+    MachineSelectError *error,
+    int conservative_cleanup_only) {
     size_t register_index;
     size_t global_index;
     size_t function_index;
@@ -433,6 +435,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
             machine_select_program_free(out_program);
             return 0;
         }
+        dest->value_type = src->value_type;
         dest->byte_size = src->byte_size;
         dest->has_initializer = src->has_initializer;
         dest->initializer_value = src->initializer_value;
@@ -499,6 +502,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
                 return 0;
             }
             dest_function->locals[local_index].is_parameter = src_function->locals[local_index].is_parameter;
+            dest_function->locals[local_index].value_type = src_function->locals[local_index].value_type;
         }
 
         for (block_index = 0; block_index < src_function->block_count; ++block_index) {
@@ -570,7 +574,7 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
         machine_select_trace_timing("verify-initial", machine_select_now_s() - stage_start);
         stage_start = machine_select_now_s();
     }
-    if (!machine_select_aggressive_opt_mode_enabled()) {
+    if (conservative_cleanup_only || !machine_select_aggressive_opt_mode_enabled()) {
         if (trace_timing) {
             machine_select_trace_timing("cleanup-conservative-skipped", machine_select_now_s() - stage_start);
             machine_select_trace_timing("total", machine_select_now_s() - total_start);
@@ -805,6 +809,26 @@ int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
     return 1;
 }
 
+int machine_select_lower_program_from_machine_ir(const MachineIrProgram *source,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error) {
+    return machine_select_lower_program_from_machine_ir_with_cleanup_mode(
+        source,
+        out_program,
+        error,
+        0);
+}
+
+int machine_select_lower_program_from_machine_ir_conservative(const MachineIrProgram *source,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error) {
+    return machine_select_lower_program_from_machine_ir_with_cleanup_mode(
+        source,
+        out_program,
+        error,
+        1);
+}
+
 int machine_select_lower_canonicalized_program_from_machine_ir(const MachineIrProgram *source,
     MachineSelectProgram *out_program,
     MachineSelectError *error) {
@@ -826,6 +850,31 @@ int machine_select_lower_canonicalized_program_from_machine_ir(const MachineIrPr
         return 0;
     }
     ok = machine_select_lower_program_from_machine_ir(&copy, out_program, error);
+    machine_ir_program_free(&copy);
+    return ok;
+}
+
+int machine_select_lower_canonicalized_program_from_machine_ir_conservative(const MachineIrProgram *source,
+    MachineSelectProgram *out_program,
+    MachineSelectError *error) {
+    MachineIrProgram copy;
+    MachineIrError machine_error;
+    int ok;
+
+    if (!source || !out_program) {
+        machine_select_set_error(error, 0, 0, "MACHINE-SELECT-423: invalid conservative canonicalized lowering contract");
+        return 0;
+    }
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    machine_ir_program_init(&copy);
+    ok = machine_ir_build_canonicalized_program(source, &copy, &machine_error);
+    if (!ok) {
+        machine_select_set_error(error, machine_error.line, machine_error.column, "%s", machine_error.message);
+        machine_ir_program_free(&copy);
+        return 0;
+    }
+    ok = machine_select_lower_program_from_machine_ir_conservative(&copy, out_program, error);
     machine_ir_program_free(&copy);
     return ok;
 }

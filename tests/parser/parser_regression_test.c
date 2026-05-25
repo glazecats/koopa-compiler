@@ -59,6 +59,11 @@ int main(void) {
     /* Expression AST positive-shape coverage. */
     ok &= test_expression_ast_parses_identifier_primary();
     ok &= test_expression_ast_parses_number_primary();
+    ok &= test_expression_ast_parses_float_literal_primary();
+    ok &= test_expression_ast_parses_zero_float_literal_primary();
+    ok &= test_expression_ast_parses_int_conversion_primary();
+    ok &= test_expression_ast_parses_float_conversion_primary();
+    ok &= test_expression_ast_parses_int_conversion_with_ternary_operand();
     ok &= test_expression_ast_parses_nested_parentheses();
     ok &= test_expression_ast_rejects_trailing_tokens();
     ok &= test_expression_ast_rejects_deep_parentheses_with_recursion_limit();
@@ -170,6 +175,12 @@ int main(void) {
     ok &= test_expression_ast_rejects_conditional_else_trailing_comma();
     ok &= test_ast_collects_top_level_externals();
     ok &= test_ast_records_function_parameter_count();
+    ok &= test_ast_rejects_float_top_level_declaration_for_now();
+    ok &= test_ast_records_float_function_signature_metadata();
+    ok &= test_ast_records_function_valued_parameter_metadata();
+    ok &= test_ast_records_void_function_valued_parameter_metadata();
+    ok &= test_ast_records_zero_arg_function_valued_parameter_metadata();
+    ok &= test_ast_records_zero_arg_void_function_valued_parameter_metadata();
     ok &= test_ast_parses_function_declaration_external();
     ok &= test_ast_statement_expression_slots_for_control_flow();
     ok &= test_ast_records_scope_declaration_and_parameter_names();
@@ -182,6 +193,10 @@ int main(void) {
     ok &= test_ast_rejects_break_outside_loop();
     ok &= test_ast_rejects_continue_outside_loop();
     ok &= test_ast_unless_desugars_to_if_with_negated_condition();
+    ok &= test_ast_fndefer_records_payload_metadata();
+    ok &= test_ast_capdefer_records_capture_metadata();
+    ok &= test_ast_pair_declaration_and_member_metadata();
+    ok &= test_ast_struct_definition_and_local_metadata();
     ok &= test_ast_records_declaration_initializer_metadata();
     ok &= test_ast_aligns_initializer_slots_with_declarator_order();
     ok &= test_ast_collects_all_top_level_declarators();

@@ -342,6 +342,20 @@ static int test_semantic_rejects_declaration_definition_count_mismatch(void) {
     return run_callable_diag_case(&c);
 }
 
+static int test_semantic_rejects_function_declaration_parameter_kind_mismatch(void) {
+    return run_extension_semantic_expect_rejects(
+        "TOP-006 declaration parameter kind mismatch",
+        "int apply(int f(int), int x);\nint apply(int f, int x);\n",
+        "SEMA-TOP-006");
+}
+
+static int test_semantic_rejects_function_declaration_nested_signature_mismatch(void) {
+    return run_extension_semantic_expect_rejects(
+        "TOP-007 declaration nested signature mismatch",
+        "int apply(int f(int), int x);\nint apply(int f(), int x);\n",
+        "SEMA-TOP-007");
+}
+
 static int test_semantic_rejects_function_variable_conflict(void) {
     static const CallableDiagCase c = {
         "TOP-004 function variable conflict",
@@ -382,6 +396,70 @@ static int test_semantic_allows_repeated_declaration(void) {
     if (!semantic_analyze_program(&program, &sema_err)) {
         fprintf(stderr,
             "[semantic-reg] FAIL: repeated declarations should currently pass, got: %s\n",
+            sema_err.message);
+        lexer_free_tokens(&tokens);
+        ast_program_free(&program);
+        return 0;
+    }
+
+    lexer_free_tokens(&tokens);
+    ast_program_free(&program);
+    return 1;
+}
+
+static int test_semantic_rejects_repeated_top_level_declaration_type_mismatch(void) {
+    static const CallableDiagCase c = {
+        "TOP-008 top-level declaration type mismatch",
+        "int x;\nint x[2];\nint main(){return 0;}\n",
+        "SEMA-TOP-008",
+        "identifier=x; conflicting top-level declarations: type mismatch",
+        2,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_repeated_top_level_array_rank_mismatch(void) {
+    static const CallableDiagCase c = {
+        "TOP-008 top-level array rank mismatch",
+        "int v[2];\nint v;\nint main(){return 0;}\n",
+        "SEMA-TOP-008",
+        "identifier=v; conflicting top-level declarations: type mismatch",
+        2,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_rejects_repeated_top_level_array_extent_mismatch(void) {
+    static const CallableDiagCase c = {
+        "TOP-008 top-level array extent mismatch",
+        "int v[2];\nint v[3];\nint main(){return 0;}\n",
+        "SEMA-TOP-008",
+        "identifier=v; conflicting top-level declarations: type mismatch",
+        2,
+        5,
+    };
+
+    return run_callable_diag_case(&c);
+}
+
+static int test_semantic_accepts_repeated_top_level_array_extent_constant_equivalence(void) {
+    const char *source = "int v[1+1];\nint v[2];\nint main(){return 0;}\n";
+    TokenArray tokens;
+    AstProgram program;
+    ParserError parse_err;
+    SemanticError sema_err;
+
+    if (!parse_source_to_ast(source, &tokens, &program, &parse_err)) {
+        return 0;
+    }
+
+    if (!semantic_analyze_program(&program, &sema_err)) {
+        fprintf(stderr,
+            "[semantic-reg] FAIL: constant-equivalent repeated array declarations should pass, got: %s\n",
             sema_err.message);
         lexer_free_tokens(&tokens);
         ast_program_free(&program);

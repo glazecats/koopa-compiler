@@ -5465,7 +5465,7 @@ static int compiler_build_value_ssa_translation_core(const LowerIrProgram *lower
     }
 
     if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
-        ok = value_ssa_build_from_lower_ir(lower_program, value_program, value_error);
+        ok = value_ssa_build_translation_only_from_lower_ir(lower_program, value_program, value_error);
     } else if (mode == COMPILER_MODE_PERF && extreme_straight_line_hotspot) {
         ok = value_ssa_build_from_lower_ir_with_canonicalization(
             lower_program, VALUE_SSA_LOWER_IR_CANONICALIZE_CLASSIC, value_program, value_error);
@@ -5518,7 +5518,7 @@ static int compiler_build_machine_report_translation_core(const ValueSsaProgram 
     MachineIrAllocateRewriteReport *machine_report,
     MachineIrError *machine_error) {
     if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
-        return machine_ir_build_allocate_and_rewrite_program_single_block_spills_flat_program_only_report(
+        return machine_ir_build_translation_only_report(
             value_program,
             COMPILER_DEFAULT_COLOR_BUDGET,
             COMPILER_DEFAULT_MACHINE_REGISTER_COUNT,
@@ -5562,7 +5562,12 @@ static int compiler_build_riscv_preview_bytes_report_from_machine_ir_report(
     machine_emit_program_init(&emit_program);
     machine_bytes_report_init(bytes_report);
 
-    ok = machine_select_build_program_from_machine_ir_report(report, &select_program, &select_error);
+    if (compiler_mode_uses_conservative_translation_pipeline(mode)) {
+        ok = machine_select_build_program_from_machine_ir_report_conservative_no_phi(
+            report, &select_program, &select_error);
+    } else {
+        ok = machine_select_build_program_from_machine_ir_report(report, &select_program, &select_error);
+    }
     if (!ok) {
         compiler_copy_stage_error(error, select_error.line, select_error.column, select_error.message);
         goto cleanup;
