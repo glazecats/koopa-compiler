@@ -197,6 +197,13 @@
     `float t; t = -a * (b / c);`, and `float t = -a * (b / c);` are now
     locked through semantic / compiler / IR / lower-IR plus default
     `ValueSSA`, `machine_ir`, and `machine_select`
+  - latest recursive-float compare closure:
+    the same recursive pure-float tree family is now also checkpointed in
+    compare contexts. Equality and relational witnesses such as
+    `((x + y) + z) == z`, `((x + y) + z) < z`,
+    `(-a * (b / c)) == c`, and `(-a * (b / c)) < c` are now locked through
+    semantic / compiler / IR / lower-IR plus default `ValueSSA`,
+    `machine_ir`, and `machine_select`
   - latest implementation note after that follow-up:
     landing that slice also closed a real canonical-IR lowering bug in the
     helper-backed float path. Nested helper-backed arithmetic such as

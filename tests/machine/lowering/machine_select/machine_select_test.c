@@ -3633,6 +3633,180 @@ cleanup:
     return ok;
 }
 
+static int test_machine_select_accepts_chained_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y, float z){ return ((x + y) + z) == z; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "cmp.10") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_chained_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y, float z){ return ((x + y) + z) < z; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, "cmp.12") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_muldiv_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float a, float b, float c){ return (-a * (b / c)) == c; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "cmp.10") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_nested_muldiv_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float a, float b, float c){ return (-a * (b / c)) < c; }\n"
+        "int main(){ return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_default_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, "cmp.12") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 static int test_machine_select_accepts_signed_zero_float_equality_under_extension(void) {
     static const char *source =
         "int z(){ return 0.0 == -0.0; }\n"
@@ -14595,6 +14769,18 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_float_relational_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_chained_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_chained_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_muldiv_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_nested_muldiv_float_relational_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-SIGNED-ZERO-EQ-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_signed_zero_float_equality_under_extension() ? 0 : 1;
         }
@@ -14919,6 +15105,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_accepts_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_chained_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_chained_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_muldiv_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_nested_muldiv_float_relational_compare_under_extension()) {
         return 1;
     }
     if (!test_machine_select_accepts_signed_zero_float_equality_under_extension()) {

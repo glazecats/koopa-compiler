@@ -1065,6 +1065,96 @@ static int test_compiler_accepts_nested_float_mul_div_under_extension(void) {
     return 1;
 }
 
+static int test_compiler_accepts_chained_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y, float z){ return ((x + y) + z) == z; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float equality compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_chained_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y, float z){ return ((x + y) + z) < z; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: chained float relational compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_muldiv_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float a, float b, float c){ return (-a * (b / c)) == c; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested mul/div float equality compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_nested_muldiv_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float a, float b, float c){ return (-a * (b / c)) < c; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fdiv32") == NULL ||
+        strstr(output, "__builtin_fmul32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested mul/div float relational compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_mixed_float_int_arithmetic_under_extension(void) {
     static const char *source =
         "float add(float x){ return x + 1; }\n"
@@ -6442,6 +6532,18 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_nested_float_mul_div_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_chained_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_muldiv_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_nested_muldiv_float_relational_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_compiler_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
         }
@@ -6678,6 +6780,10 @@ int main(void) {
     ok &= test_compiler_accepts_negative_float_division_combo_under_extension();
     ok &= test_compiler_accepts_chained_float_addition_under_extension();
     ok &= test_compiler_accepts_nested_float_mul_div_under_extension();
+    ok &= test_compiler_accepts_chained_float_equality_compare_under_extension();
+    ok &= test_compiler_accepts_chained_float_relational_compare_under_extension();
+    ok &= test_compiler_accepts_nested_muldiv_float_equality_compare_under_extension();
+    ok &= test_compiler_accepts_nested_muldiv_float_relational_compare_under_extension();
     ok &= test_compiler_rejects_mixed_float_int_arithmetic_under_extension();
     ok &= test_compiler_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_compiler_rejects_float_literal_int_arithmetic_under_extension();

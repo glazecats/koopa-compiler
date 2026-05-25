@@ -15945,6 +15945,200 @@ static int test_value_ssa_default_pipeline_preserves_unary_call_helper_wrapped_t
     return ok;
 }
 
+static int test_value_ssa_default_pipeline_preserves_chained_float_equality_compare(void) {
+    static const char *source =
+        "int eq(float x, float y, float z){ return ((x + y) + z) == z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-EQ-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-EQ-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-EQ-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func eq(x.0:float, y.1:float, z.2:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-EQ-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_chained_float_relational_compare(void) {
+    static const char *source =
+        "int lt(float x, float y, float z){ return ((x + y) + z) < z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-LT-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-LT-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-LT-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func lt(x.0:float, y.1:float, z.2:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, " lt ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CHAIN-ADD-LT-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_muldiv_float_equality_compare(void) {
+    static const char *source =
+        "int eq(float a, float b, float c){ return (-a * (b / c)) == c; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func eq(a.0:float, b.1:float, c.2:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_nested_muldiv_float_relational_compare(void) {
+    static const char *source =
+        "int lt(float a, float b, float c){ return (-a * (b / c)) < c; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-LT-COMPARE-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-LT-COMPARE-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-LT-COMPARE-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func lt(a.0:float, b.1:float, c.2:float) {\n") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, " lt ") ||
+        !strstr(actual_text, "ret ssa.")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MUL-DIV-LT-COMPARE-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_conversion(void) {
     static const char *source =
         "int conv(float x, float y){ return int(x + y); }\n"
@@ -27023,6 +27217,18 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-CHAIN-ADD-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_chained_float_addition() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-FLOAT-CHAIN-ADD-EQ-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_chained_float_equality_compare() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-CHAIN-ADD-LT-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_chained_float_relational_compare() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_muldiv_float_equality_compare() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-MUL-DIV-LT-COMPARE-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_nested_muldiv_float_relational_compare() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-HELPER-TERNARY-CALL-ARITH-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_float_helper_wrapped_ternary_call_arithmetic() ? 0 : 1;
         }
@@ -27279,6 +27485,10 @@ int main(void) {
     ok &= test_value_ssa_default_pipeline_preserves_negative_float_multiplication_combo();
     ok &= test_value_ssa_default_pipeline_preserves_negative_float_division_combo();
     ok &= test_value_ssa_default_pipeline_preserves_chained_float_addition();
+    ok &= test_value_ssa_default_pipeline_preserves_chained_float_equality_compare();
+    ok &= test_value_ssa_default_pipeline_preserves_chained_float_relational_compare();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_muldiv_float_equality_compare();
+    ok &= test_value_ssa_default_pipeline_preserves_nested_muldiv_float_relational_compare();
     ok &= test_value_ssa_default_pipeline_preserves_float_helper_wrapped_ternary_call_arithmetic();
     ok &= test_value_ssa_default_pipeline_preserves_unary_call_helper_wrapped_ternary_call_arithmetic();
     ok &= test_value_ssa_default_pipeline_preserves_float_helper_wrapped_ternary_call_compare();

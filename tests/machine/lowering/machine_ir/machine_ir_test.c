@@ -1943,6 +1943,180 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_accepts_chained_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float x, float y, float z){ return ((x + y) + z) == z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_chained_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float x, float y, float z){ return ((x + y) + z) < z; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=3") ||
+        !strstr(actual_text, "call __builtin_fadd32(") ||
+        !strstr(actual_text, " lt ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_muldiv_float_equality_compare_under_extension(void) {
+    static const char *source =
+        "int eq(float a, float b, float c){ return (-a * (b / c)) == c; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function eq params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, " eq ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_nested_muldiv_float_relational_compare_under_extension(void) {
+    static const char *source =
+        "int lt(float a, float b, float c){ return (-a * (b / c)) < c; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function lt params=3") ||
+        !strstr(actual_text, "call __builtin_fdiv32(") ||
+        !strstr(actual_text, "call __builtin_fmul32(") ||
+        !strstr(actual_text, " lt ") ||
+        !strstr(actual_text, "ret reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_accepts_signed_zero_float_equality_under_extension(void) {
     static const char *source =
         "int z(){ return 0.0 == -0.0; }\n"
@@ -14321,6 +14495,18 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_float_relational_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-CHAIN-ADD-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_chained_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_chained_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_muldiv_float_equality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_nested_muldiv_float_relational_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-SIGNED-ZERO-EQ-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_signed_zero_float_equality_under_extension() ? 0 : 1;
         }
@@ -14591,6 +14777,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_accepts_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_chained_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_chained_float_relational_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_muldiv_float_equality_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_nested_muldiv_float_relational_compare_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_accepts_signed_zero_float_equality_under_extension()) {
