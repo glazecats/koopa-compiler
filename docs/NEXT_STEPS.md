@@ -662,6 +662,11 @@
     `(-a * (b / c)) == c`, and `(-a * (b / c)) < c` are now locked through
     semantic / compiler / IR / lower-IR plus default `ValueSSA` /
     `machine_ir` / `machine_select`
+  - latest recursive-float compare coverage follow-up:
+    the same compare family now also has wider operator coverage on those
+    recursive shapes. Representative `!=`, `<=`, and `>=` witnesses such as
+    `((x + y) + z) != z`, `((x + y) + z) <= z`,
+    `(-a * (b / c)) != c`, and `(-a * (b / c)) >= c` are now locked too
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float

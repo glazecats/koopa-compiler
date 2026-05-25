@@ -3296,6 +3296,116 @@ static int test_ir_accepts_nested_muldiv_float_relational_compare_under_extensio
     return ok;
 }
 
+static int test_ir_accepts_chained_float_inequality_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int ne(float x, float y, float z){ return ((x + y) + z) != z; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func ne(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-NE-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_chained_float_le_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int le(float x, float y, float z){ return ((x + y) + z) <= z; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func le(x.0:float, y.1:float, z.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fadd32(") != NULL &&
+        strstr(actual_text, "le tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-CHAIN-ADD-LE-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_muldiv_float_inequality_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int ne(float a, float b, float c){ return (-a * (b / c)) != c; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func ne(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(") != NULL &&
+        strstr(actual_text, "ne tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-NE-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_nested_muldiv_float_ge_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "int ge(float a, float b, float c){ return (-a * (b / c)) >= c; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func ge(a.0:float, b.1:float, c.2:float) {\n") != NULL &&
+        strstr(actual_text, "call __builtin_fdiv32(") != NULL &&
+        strstr(actual_text, "call __builtin_fmul32(") != NULL &&
+        strstr(actual_text, "ge tmp.") != NULL &&
+        strstr(actual_text, "ret tmp.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-NESTED-MUL-DIV-GE-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_negative_float_literal_transport_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -4733,11 +4843,23 @@ int main(void) {
         if (strstr("IR-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_ir_accepts_chained_float_relational_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-CHAIN-ADD-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-CHAIN-ADD-LE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_chained_float_le_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT", filter) != NULL) {
             return test_ir_accepts_nested_muldiv_float_equality_compare_under_extension() ? 0 : 1;
         }
         if (strstr("IR-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_ir_accepts_nested_muldiv_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_muldiv_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MUL-DIV-GE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_nested_muldiv_float_ge_compare_under_extension() ? 0 : 1;
         }
         if (strstr("IR-FLOAT-NEG-LITERAL-TRANSPORT", filter) != NULL) {
             return test_ir_accepts_negative_float_literal_transport_under_extension() ? 0 : 1;
@@ -5056,8 +5178,12 @@ int main(void) {
     ok &= test_ir_accepts_float_relational_compare_under_extension();
     ok &= test_ir_accepts_chained_float_equality_compare_under_extension();
     ok &= test_ir_accepts_chained_float_relational_compare_under_extension();
+    ok &= test_ir_accepts_chained_float_inequality_compare_under_extension();
+    ok &= test_ir_accepts_chained_float_le_compare_under_extension();
     ok &= test_ir_accepts_nested_muldiv_float_equality_compare_under_extension();
     ok &= test_ir_accepts_nested_muldiv_float_relational_compare_under_extension();
+    ok &= test_ir_accepts_nested_muldiv_float_inequality_compare_under_extension();
+    ok &= test_ir_accepts_nested_muldiv_float_ge_compare_under_extension();
     ok &= test_ir_accepts_negative_float_literal_transport_under_extension();
     ok &= test_ir_accepts_unary_minus_float_identifier_transport_under_extension();
     ok &= test_ir_accepts_negative_zero_float_condition_under_extension();

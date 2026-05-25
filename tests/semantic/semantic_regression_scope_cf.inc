@@ -1809,6 +1809,34 @@ static int test_semantic_accepts_nested_muldiv_float_relational_compare_under_ex
         "int main(){ return 0; }\n");
 }
 
+static int test_semantic_accepts_chained_float_inequality_compare_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-chain-add-ne-compare-ext-pass",
+        "int ne(float x, float y, float z){ return ((x + y) + z) != z; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_chained_float_le_compare_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-chain-add-le-compare-ext-pass",
+        "int le(float x, float y, float z){ return ((x + y) + z) <= z; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_muldiv_float_inequality_compare_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-nested-mul-div-ne-compare-ext-pass",
+        "int ne(float a, float b, float c){ return (-a * (b / c)) != c; }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_nested_muldiv_float_ge_compare_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-nested-mul-div-ge-compare-ext-pass",
+        "int ge(float a, float b, float c){ return (-a * (b / c)) >= c; }\n"
+        "int main(){ return 0; }\n");
+}
+
 static int test_semantic_rejects_mixed_float_int_arithmetic_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-int-arith-mismatch-ext-reject",

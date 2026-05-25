@@ -302,11 +302,23 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_chained_float_relational_compare_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CHAIN-ADD-LE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_chained_float_le_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-EQ-COMPARE-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_nested_muldiv_float_equality_compare_under_extension() ? 0 : 1;
         }
         if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-LT-COMPARE-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_nested_muldiv_float_relational_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-NE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_muldiv_float_inequality_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MUL-DIV-GE-COMPARE-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_nested_muldiv_float_ge_compare_under_extension() ? 0 : 1;
         }
         if (strstr("SEMANTIC-FLOAT-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_semantic_rejects_mixed_float_int_arithmetic_under_extension() ? 0 : 1;
@@ -683,8 +695,12 @@ int main(void) {
     ok &= test_semantic_accepts_nested_float_mul_div_under_extension();
     ok &= test_semantic_accepts_chained_float_equality_compare_under_extension();
     ok &= test_semantic_accepts_chained_float_relational_compare_under_extension();
+    ok &= test_semantic_accepts_chained_float_inequality_compare_under_extension();
+    ok &= test_semantic_accepts_chained_float_le_compare_under_extension();
     ok &= test_semantic_accepts_nested_muldiv_float_equality_compare_under_extension();
     ok &= test_semantic_accepts_nested_muldiv_float_relational_compare_under_extension();
+    ok &= test_semantic_accepts_nested_muldiv_float_inequality_compare_under_extension();
+    ok &= test_semantic_accepts_nested_muldiv_float_ge_compare_under_extension();
     ok &= test_semantic_rejects_mixed_float_int_arithmetic_under_extension();
     ok &= test_semantic_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_semantic_rejects_float_call_int_arithmetic_under_extension();
