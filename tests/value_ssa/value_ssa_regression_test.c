@@ -16175,6 +16175,107 @@ static int test_value_ssa_default_pipeline_preserves_same_type_float_ternary_val
     return ok;
 }
 
+static int test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_float_call_argument(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((g ? h : h)); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func get() {\n") ||
+        !strstr(actual_text, "ssa.0 = load_global g.0") ||
+        !strstr(actual_text, "ssa.1 = load_global h.1") ||
+        !strstr(actual_text, "br ssa.3, bb.1, bb.2") ||
+        !strstr(actual_text, "ret ssa.1")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_default_pipeline_preserves_unary_call_float_ternary_value_float_call_argument(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((-id(1.0) ? 1.0 : 2.0)); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&error, 0, sizeof(error));
+    if (!build_value_ssa_perf_from_extension_source_text(source, &program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-DEFAULT setup failed at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        return 0;
+    }
+    if (!value_ssa_verify_program(&program, &error)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-DEFAULT verifier rejected setup at %d:%d: %s\n",
+            error.line,
+            error.column,
+            error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (!value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr, "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-DEFAULT dump failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    if (!strstr(actual_text, "func get() {\n") ||
+        !strstr(actual_text, "bb.0:\n    ret 1065353216")) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-DEFAULT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -25526,6 +25627,12 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-INIT-FLOAT-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_initializer() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_float_call_argument() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-DEFAULT", filter) != NULL) {
+            return test_value_ssa_default_pipeline_preserves_unary_call_float_ternary_value_float_call_argument() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-TO-INT-TERNARY-BRIDGE-DEFAULT", filter) != NULL) {
             return test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge() ? 0 : 1;
         }
@@ -25680,6 +25787,8 @@ int main(void) {
     ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_return();
     ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_assignment();
     ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_initializer();
+    ok &= test_value_ssa_default_pipeline_preserves_same_type_float_ternary_value_float_call_argument();
+    ok &= test_value_ssa_default_pipeline_preserves_unary_call_float_ternary_value_float_call_argument();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_float_ternary_bridge();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_call_argument_bridge();
     ok &= test_value_ssa_default_pipeline_preserves_explicit_int_from_recursive_float_assignment_bridge();

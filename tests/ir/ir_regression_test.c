@@ -2744,6 +2744,67 @@ static int test_ir_accepts_float_ternary_value_initializer_to_float_under_extens
     return ok;
 }
 
+static int test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float id(float x){ return x; }\n"
+            "float wrap(float x){ return id(x); }\n"
+            "float get(){ return wrap((g ? h : h)); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func get() {\n") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "tmp.3 = call wrap(tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.3\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_ir_text(
+            "float id(float x){ return x; }\n"
+            "float wrap(float x){ return id(x); }\n"
+            "float get(){ return wrap((-id(1.0) ? 1.0 : 2.0)); }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "tmp.1 = call id(1065353216)\n") != NULL &&
+        strstr(actual_text, "tmp.2 = xor tmp.1, 2147483648\n") != NULL &&
+        strstr(actual_text, "br tmp.") != NULL &&
+        strstr(actual_text, "tmp.5 = call wrap(tmp.0)\n") != NULL &&
+        strstr(actual_text, "ret tmp.5\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[ir-reg] FAIL: IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_ir_accepts_float_equality_compare_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -4371,6 +4432,12 @@ int main(void) {
         if (strstr("IR-FLOAT-TERNARY-VALUE-INIT-FLOAT-ACCEPT", filter) != NULL) {
             return test_ir_accepts_float_ternary_value_initializer_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
+        }
     }
 
     ok &= test_ir_lowers_return_literal();
@@ -4540,6 +4607,8 @@ int main(void) {
     ok &= test_ir_accepts_same_type_float_ternary_value_under_extension();
     ok &= test_ir_accepts_float_ternary_value_assignment_to_float_under_extension();
     ok &= test_ir_accepts_float_ternary_value_initializer_to_float_under_extension();
+    ok &= test_ir_accepts_float_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_ir_accepts_negative_float_addition_combo_under_extension();
     ok &= test_ir_accepts_negative_float_subtraction_combo_under_extension();
     ok &= test_ir_accepts_float_multiplication_under_extension();

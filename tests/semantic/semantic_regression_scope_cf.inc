@@ -1907,6 +1907,26 @@ static int test_semantic_rejects_unary_call_ternary_value_call_argument_to_int_u
         "SEMA-TYPE-003");
 }
 
+static int test_semantic_accepts_same_type_float_ternary_value_call_argument_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-ternary-value-callarg-float-ext-pass",
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((g ? h : h)); }\n"
+        "int main(){ return 0; }\n");
+}
+
+static int test_semantic_accepts_unary_call_same_type_float_ternary_value_call_argument_to_float_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-unary-call-ternary-callarg-float-ext-pass",
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((-id(1.0) ? 1.0 : 2.0)); }\n"
+        "int main(){ return 0; }\n");
+}
+
 static int test_semantic_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-ternary-value-init-int-ext-reject",

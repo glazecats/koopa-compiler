@@ -3566,6 +3566,99 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_accepts_float_ternary_value_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((g ? h : h)); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.0(r0) = load global.0") ||
+        !strstr(actual_text, "br reg.0(r0), bb.1, bb.2") ||
+        !strstr(actual_text, "bb.1:\n    reg.0(r0) = load global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "bb.2:\n    reg.0(r0) = load global.1\n    jmp bb.3") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float wrap(float x){ return id(x); }\n"
+        "float get(){ return wrap((-id(1.0) ? 1.0 : 2.0)); }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "bb.0:\n    jmp bb.1") ||
+        !strstr(actual_text, "bb.1:\n    ret 1065353216")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_rejects_float_ternary_value_compare_against_int_under_extension(void) {
     ValueSsaProgram program;
     ValueSsaError value_error;
@@ -13767,6 +13860,12 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_unary_call_ternary_value_call_argument_to_int_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
         }
@@ -13944,6 +14043,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_accepts_explicit_int_from_recursive_float_arithmetic_bridge_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_ternary_value_call_argument_to_float_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_accepts_nested_float_mul_div_under_extension()) {

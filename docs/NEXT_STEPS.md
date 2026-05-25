@@ -537,6 +537,20 @@
     optimizer-honest, so `machine_ir` may collapse some initializer-only
     cases to compact global-store shapes while `machine_select` may still
     keep the ternary branch structure on the return/assignment families
+  - latest float-ternary-callarg follow-up:
+    the next narrow value-producing opening is now also checkpointed:
+    same-type float ternary values may feed same-type float call arguments on
+    both the plain global-root family
+    (`float get(){ return wrap(g ? h : h); }`) and the unary-call-root
+    sibling (`float get(){ return wrap(-id(1.0) ? 1.0 : 2.0); }`)
+  - latest ternary-callarg downstream lock:
+    that new callarg family is now covered through semantic / compiler /
+    IR / lower-IR plus default `ValueSSA` / `machine_ir` /
+    `machine_select`. The default optimized path is intentionally locked to
+    the current legal folded shapes instead of a forced pre-optimization
+    transport form: the global-fed witness may drop the explicit `wrap`
+    transport while keeping ternary control structure, and the unary-call-root
+    witness may fold to a direct float literal return
   - latest float-ternary-value reject-matrix follow-up:
     the neighboring `int` call-argument boundary is now also locked one stage
     deeper for both the plain and unary-call ternary families:

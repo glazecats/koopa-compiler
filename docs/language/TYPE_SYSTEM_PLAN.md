@@ -161,6 +161,20 @@
   - latest value-producing follow-up now landed:
     same-type float ternary values are now also accepted on the focused
     front-half surface for return / assignment / initializer families
+  - latest float-callarg follow-up now landed:
+    that same same-type ternary-value slice now also extends one narrow value
+    context further: `float get(){ return wrap(g ? h : h); }` and the unary
+    call-root sibling `float get(){ return wrap(-id(1.0) ? 1.0 : 2.0); }`
+    are now regression-locked through semantic / compiler / IR / lower-IR
+    plus the downstream default `ValueSSA` / `machine_ir` /
+    `machine_select` surfaces
+  - current optimized-shape note after that follow-up:
+    the downstream default path does not promise to preserve an explicit
+    float call-argument transport shape forever. The global-fed witness may
+    still keep ternary structure while legally collapsing the `wrap(...)`
+    call itself away, and the unary-call-root witness may fold all the way to
+    a direct float-literal return. Those folds are now treated as the current
+    expected checkpoint, not as regressions
   - current kept boundary after that follow-up:
     mixed ternary branches such as `g ? h : 0`, and ternary-float values
     immediately feeding later float arithmetic families, still remain closed
