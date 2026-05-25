@@ -2428,6 +2428,197 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "float get(){ return pick() + h; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function pick params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "function get params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.1(r1) = call pick()") ||
+        !strstr(actual_text, "reg.0(r0) = load global.1") ||
+        !strstr(actual_text, "call __builtin_fadd32(reg.1(r1), reg.0(r0))") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "float f(float x){ return pick(x) + x; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function pick params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function f params=1 locals=1 spills=1") ||
+        !strstr(actual_text, "spill.0 = load local.0") ||
+        !strstr(actual_text, "reg.0(r0) = call pick(spill.0)") ||
+        !strstr(actual_text, "call __builtin_fadd32(reg.0(r0), spill.0)") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int eq(){ return pick() == h; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function pick params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "function eq params=0 locals=0 spills=0") ||
+        !strstr(actual_text, "reg.1(r1) = call pick()") ||
+        !strstr(actual_text, "reg.0(r0) = eq reg.2(r2), reg.0(r0)") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int eq(float x){ return pick(x) == x; }\n"
+        "int main(){ return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_default_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function pick params=1 locals=1 spills=0") ||
+        !strstr(actual_text, "function eq params=1 locals=1 spills=1") ||
+        !strstr(actual_text, "spill.0 = load local.0") ||
+        !strstr(actual_text, "reg.1(r1) = call pick(spill.0)") ||
+        !strstr(actual_text, "reg.1(r1) = mul reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "reg.0(r0) = mul spill.0, reg.0(r0)") ||
+        !strstr(actual_text, "reg.0(r0) = eq reg.1(r1), reg.0(r0)") ||
+        !strstr(actual_text, "ret reg.0(r0)")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension(void) {
     static const char *source =
         "int conv(float x, float y){ return int(x + y); }\n"
@@ -13906,6 +14097,18 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-CHAIN-ADD-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_chained_float_addition_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-TO-INT-CONVERT-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension() ? 0 : 1;
         }
@@ -14146,6 +14349,18 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_accepts_chained_float_addition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_accepts_explicit_int_from_float_conversion_under_extension()) {

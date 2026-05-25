@@ -3153,6 +3153,128 @@ static int test_lower_ir_accepts_unary_call_float_ternary_value_call_argument_to
     return ok;
 }
 
+static int test_lower_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "float get(){ return pick() + h; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick() {\n") != NULL &&
+        strstr(actual_text, "func get() {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call pick()\n") != NULL &&
+        strstr(actual_text, "tmp.2 = load_global h.1\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_fadd32(tmp.0, tmp.2)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "float f(float x){ return pick(x) + x; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call pick(tmp.2)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = call __builtin_fadd32(tmp.0, tmp.3)\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "float g = 1.25;\n"
+            "float h = 2.5;\n"
+            "float pick(){ return g ? h : h; }\n"
+            "int eq(){ return pick() == h; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick() {\n") != NULL &&
+        strstr(actual_text, "func eq() {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call pick()\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq tmp.4, tmp.7\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
+static int test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension(void) {
+    char *actual_text = NULL;
+    int ok = 0;
+
+    if (!lower_extension_source_to_lower_ir_text(
+            "float id(float x){ return x; }\n"
+            "float pick(float x){ return -id(x) ? x : x; }\n"
+            "int eq(float x){ return pick(x) == x; }\n"
+            "int main(){ return 0; }\n",
+            &actual_text)) {
+        free(actual_text);
+        return 0;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "func pick(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "func eq(x.0:float) {\n") != NULL &&
+        strstr(actual_text, "tmp.0 = call pick(tmp.8)\n") != NULL &&
+        strstr(actual_text, "tmp.1 = eq tmp.4, tmp.7\n") != NULL &&
+        strstr(actual_text, "ret tmp.1\n") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "(null)");
+    }
+
+    free(actual_text);
+    return ok;
+}
+
 static int test_lower_ir_accepts_float_equality_compare_under_extension(void) {
     char *actual_text = NULL;
     int ok = 0;
@@ -5227,6 +5349,18 @@ int main(void) {
         if (strstr("LOWER-IR-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_lower_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("LOWER-IR-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_lower_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_lower_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("LOWER-IR-FLOAT-GLOBAL-LITERAL-RUNTIME-INIT", filter) != NULL) {
             return test_lower_ir_lowers_float_literal_runtime_global_initializer_under_extension() ? 0 : 1;
         }
@@ -5316,6 +5450,10 @@ int main(void) {
     ok &= test_lower_ir_accepts_float_ternary_value_initializer_to_float_under_extension();
     ok &= test_lower_ir_accepts_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_lower_ir_accepts_unary_call_float_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_lower_ir_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
+    ok &= test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
+    ok &= test_lower_ir_accepts_float_helper_wrapped_ternary_call_compare_under_extension();
+    ok &= test_lower_ir_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension();
     ok &= test_lower_ir_accepts_nested_float_mul_div_under_extension();
     ok &= test_lower_ir_rejects_mixed_float_int_arithmetic_under_extension();
     ok &= test_lower_ir_rejects_float_literal_int_arithmetic_under_extension();

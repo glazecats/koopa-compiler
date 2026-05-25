@@ -168,6 +168,21 @@
     are now regression-locked through semantic / compiler / IR / lower-IR
     plus the downstream default `ValueSSA` / `machine_ir` /
     `machine_select` surfaces
+  - latest helper-membrane follow-up now landed:
+    one more narrow value-producing family is now also real without directly
+    reopening raw ternary-derived float operands: when a same-type float
+    ternary is first wrapped behind a helper return, the resulting direct call
+    root may now participate in later same-type float arithmetic/comparison
+    families such as `pick() + h`, `pick(x) + x`, `pick() == h`, and
+    `pick(x) == x`
+  - latest implementation note after that follow-up:
+    landing that slice also closed a real canonical-IR lowering bug in the
+    helper-backed float path. Nested helper-backed arithmetic such as
+    `wrap(pick() + h)` had been able to invalidate the active `IrFunction *`
+    during builtin signature insertion and then trip verifier failures like
+    `IR-VERIFY-003` / `IR-VERIFY-031`; the helper-backed IR lowering path now
+    refreshes the active function after builtin insertion so the new slice is
+    implementation-stable instead of only semantically accepted
   - current optimized-shape note after that follow-up:
     the downstream default path does not promise to preserve an explicit
     float call-argument transport shape forever. The global-fed witness may

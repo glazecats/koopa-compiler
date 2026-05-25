@@ -29,6 +29,29 @@ static int ir_lower_float_compare_order_key(IrLowerContext *ctx,
 static int ir_lower_float_compare_expression(IrLowerContext *ctx,
     const AstExpression *expr,
     IrValueRef *out_value);
+static int ir_lower_refresh_current_function(IrLowerContext *ctx,
+    const char *current_function_name,
+    int line,
+    int column);
+
+static int ir_lower_refresh_current_function(IrLowerContext *ctx,
+    const char *current_function_name,
+    int line,
+    int column) {
+    if (!ctx || !current_function_name || current_function_name[0] == '\0') {
+        return 1;
+    }
+    ctx->function = ir_program_find_function_mut(ctx->program, current_function_name);
+    if (!ctx->function) {
+        ir_set_error(ctx->error,
+            line,
+            column,
+            "IR-INT-084: current lowering function '%s' disappeared after builtin insertion",
+            current_function_name);
+        return 0;
+    }
+    return 1;
+}
 
 static int ir_lower_boolean_branch(IrLowerContext *ctx,
     const AstExpression *expr,
@@ -723,6 +746,7 @@ static int ir_lower_float_arithmetic_expression(IrLowerContext *ctx,
     IrValueRef rhs;
     IrValueRef call_args_storage[2];
     const char *helper_name = NULL;
+    const char *current_function_name = NULL;
     IrFunction *callee_function = NULL;
 
     if (!ctx || !expr || !out_value || !ir_expression_is_float_arithmetic(ctx, expr)) {
@@ -745,9 +769,11 @@ static int ir_lower_float_arithmetic_expression(IrLowerContext *ctx,
     default:
         return 0;
     }
-    if (!ir_lower_expression(ctx, expr->as.binary.left, &lhs) ||
+    current_function_name = ctx->function ? ctx->function->name : NULL;
+    if (!ir_ensure_builtin_function_signature(ctx->program, helper_name, &callee_function, ctx->error) ||
+        !ir_lower_refresh_current_function(ctx, current_function_name, expr->line, expr->column) ||
+        !ir_lower_expression(ctx, expr->as.binary.left, &lhs) ||
         !ir_lower_expression(ctx, expr->as.binary.right, &rhs) ||
-        !ir_ensure_builtin_function_signature(ctx->program, helper_name, &callee_function, ctx->error) ||
         !callee_function) {
         return 0;
     }
@@ -1302,13 +1328,19 @@ static int ir_lower_expression(IrLowerContext *ctx,
     case AST_EXPR_CONVERSION:
         if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_INT) {
             IrValueRef call_args_storage[1];
+            const char *current_function_name = ctx->function ? ctx->function->name : NULL;
 
-            if (!ir_lower_expression(ctx, expr->as.conversion.operand, &operand) ||
-                !ir_ensure_builtin_function_signature(
+            if (!ir_ensure_builtin_function_signature(
                     ctx->program,
                     "__builtin_f2i32",
                     &callee_function,
                     ctx->error) ||
+                !ir_lower_refresh_current_function(
+                    ctx,
+                    current_function_name,
+                    expr->line,
+                    expr->column) ||
+                !ir_lower_expression(ctx, expr->as.conversion.operand, &operand) ||
                 !callee_function) {
                 return 0;
             }
@@ -1319,13 +1351,19 @@ static int ir_lower_expression(IrLowerContext *ctx,
             return ir_emit_call(ctx, *out_value, "__builtin_f2i32", call_args_storage, 1u);
         } else if (expr->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT) {
             IrValueRef call_args_storage[1];
+            const char *current_function_name = ctx->function ? ctx->function->name : NULL;
 
-            if (!ir_lower_expression(ctx, expr->as.conversion.operand, &operand) ||
-                !ir_ensure_builtin_function_signature(
+            if (!ir_ensure_builtin_function_signature(
                     ctx->program,
                     "__builtin_i2f32",
                     &callee_function,
                     ctx->error) ||
+                !ir_lower_refresh_current_function(
+                    ctx,
+                    current_function_name,
+                    expr->line,
+                    expr->column) ||
+                !ir_lower_expression(ctx, expr->as.conversion.operand, &operand) ||
                 !callee_function) {
                 return 0;
             }

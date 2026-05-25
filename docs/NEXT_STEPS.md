@@ -622,6 +622,23 @@
     `machine_select` reject probes, while the already-open direct
     ternary-to-float-callarg witnesses remain green as neighboring accept
     checkpoints
+  - latest helper-membrane float follow-up:
+    the next intentionally narrow opening after that repair is now also
+    checkpointed: if a same-type float ternary is first sealed behind a
+    helper return, the resulting direct call root may now feed later
+    same-type float arithmetic/comparison families. Concretely,
+    `pick() + h`, `pick(x) + x`, `pick() == h`, and `pick(x) == x` are now
+    accepted and regression-locked through semantic / compiler / IR /
+    lower-IR plus focused default `ValueSSA` / `machine_ir` /
+    `machine_select` surfaces
+  - latest implementation closure on that line:
+    landing that helper-membrane slice also closed a real canonical-IR
+    lowering bug rather than only a semantic gap. Nested helper-backed float
+    arithmetic such as `wrap(pick() + h)` had been able to invalidate the
+    active `IrFunction *` during builtin signature insertion and then fail
+    with `IR-VERIFY-003` / `IR-VERIFY-031`; the helper-backed IR lowering
+    path now refreshes the active function after builtin insertion, and the
+    previously failing nested witnesses are now green
   - latest explicit-conversion lowering fix:
     helper-backed conversion builtins are now also predeclared before IR
     function-body lowering, so nested call/conversion shapes such as

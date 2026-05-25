@@ -1596,6 +1596,102 @@ static int test_compiler_accepts_unary_call_ternary_value_call_argument_to_float
     return 1;
 }
 
+static int test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "float get(){ return pick() + h; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call arithmetic should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "float f(float x){ return pick(x) + x; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output ||
+        strstr(output, "__builtin_fadd32") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call arithmetic should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_float_helper_wrapped_ternary_call_compare_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "float h = 2.5;\n"
+        "float pick(){ return g ? h : h; }\n"
+        "int eq(){ return pick() == h; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: float helper-wrapped ternary call compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "float pick(float x){ return -id(x) ? x : x; }\n"
+        "int eq(float x){ return pick(x) == x; }\n"
+        "int main(){ return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call helper-wrapped ternary call compare should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -6001,6 +6097,18 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-UNARY-CALL-TERNARY-CALLARG-FLOAT-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_unary_call_ternary_value_call_argument_to_float_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-ARITH-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_float_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-UNARY-HELPER-TERNARY-CALL-COMPARE-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-INIT-INT-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_ternary_value_initializer_to_int_under_extension() ? 0 : 1;
         }
@@ -6121,6 +6229,10 @@ int main(void) {
     ok &= test_compiler_rejects_unary_call_ternary_value_call_argument_to_int_under_extension();
     ok &= test_compiler_accepts_float_ternary_value_call_argument_to_float_under_extension();
     ok &= test_compiler_accepts_unary_call_ternary_value_call_argument_to_float_under_extension();
+    ok &= test_compiler_accepts_float_helper_wrapped_ternary_call_arithmetic_under_extension();
+    ok &= test_compiler_accepts_unary_call_helper_wrapped_ternary_call_arithmetic_under_extension();
+    ok &= test_compiler_accepts_float_helper_wrapped_ternary_call_compare_under_extension();
+    ok &= test_compiler_accepts_unary_call_helper_wrapped_ternary_call_compare_under_extension();
     ok &= test_compiler_accepts_explicit_int_from_float_conversion_on_direct_root_under_extension();
     ok &= test_compiler_accepts_explicit_float_from_int_conversion_under_extension();
     ok &= test_compiler_rejects_redundant_explicit_same_type_conversion_for_now();
