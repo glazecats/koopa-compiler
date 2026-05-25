@@ -667,6 +667,11 @@
     recursive shapes. Representative `!=`, `<=`, and `>=` witnesses such as
     `((x + y) + z) != z`, `((x + y) + z) <= z`,
     `(-a * (b / c)) != c`, and `(-a * (b / c)) >= c` are now locked too
+  - latest next-step design note:
+    if the current float line is treated as plateau-stable after the pending
+    downstream aggregation confidence check, the next most natural narrow
+    opening is now documented separately in
+    [docs/language/FLOAT_RECURSIVE_CONDITION_PLAN.md](/workspaces/compiler_lab/docs/language/FLOAT_RECURSIVE_CONDITION_PLAN.md)
   - latest implementation closure on that line:
     landing that helper-membrane slice also closed a real canonical-IR
     lowering bug rather than only a semantic gap. Nested helper-backed float
