@@ -1589,6 +1589,26 @@ static int test_semantic_accepts_recursive_explicit_float_condition_under_extens
         "int main(){ if(float(add3(1, 2, 3))) return 1; return 0; }\n");
 }
 
+static int test_semantic_accepts_explicit_float_while_condition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-convert-while-cond-ext-pass",
+        "int main(){ while(float(3)) return 1; return 0; }\n");
+}
+
+static int test_semantic_accepts_recursive_explicit_float_for_condition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-convert-recursive-for-cond-ext-pass",
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ for(;float(add3(1, 2, 3));) return 1; return 0; }\n");
+}
+
+static int test_semantic_accepts_explicit_float_logical_condition_composition_under_extension(void) {
+    return run_extension_semantic_expect_accepts(
+        "float-convert-logic-cond-ext-pass",
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ if(!float(0) || (float(3) && float(add3(1, 2, 3)))) return 1; return 0; }\n");
+}
+
 static int test_semantic_accepts_recursive_float_if_condition_under_extension(void) {
     return run_extension_semantic_expect_accepts(
         "float-recursive-if-cond-ext-pass",

@@ -837,6 +837,68 @@ static int test_compiler_accepts_recursive_explicit_float_condition_under_extens
     return 1;
 }
 
+static int test_compiler_accepts_explicit_float_while_condition_under_extension(void) {
+    static const char *source =
+        "int main(){ while(float(3)) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float while-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_recursive_explicit_float_for_condition_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ for(;float(add3(1, 2, 3));) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: recursive explicit float for-condition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_accepts_explicit_float_logical_condition_composition_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ if(!float(0) || (float(3) && float(add3(1, 2, 3)))) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (!compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        !output) {
+        fprintf(stderr,
+            "[compiler] FAIL: explicit float logical condition composition should compile under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_accepts_same_type_float_ternary_value_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -6791,6 +6853,15 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_recursive_explicit_float_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-CONVERT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CONVERT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_recursive_explicit_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CONVERT-LOGIC-COND-ACCEPT", filter) != NULL) {
+            return test_compiler_accepts_explicit_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-TERNARY-VALUE-ACCEPT", filter) != NULL) {
             return test_compiler_accepts_same_type_float_ternary_value_under_extension() ? 0 : 1;
         }
@@ -7127,6 +7198,9 @@ int main(void) {
     ok &= test_compiler_accepts_float_logical_condition_composition_under_extension();
     ok &= test_compiler_accepts_explicit_float_condition_under_extension();
     ok &= test_compiler_accepts_recursive_explicit_float_condition_under_extension();
+    ok &= test_compiler_accepts_explicit_float_while_condition_under_extension();
+    ok &= test_compiler_accepts_recursive_explicit_float_for_condition_under_extension();
+    ok &= test_compiler_accepts_explicit_float_logical_condition_composition_under_extension();
     ok &= test_compiler_rejects_float_array_local_declaration_under_extension();
     ok &= test_compiler_rejects_float_array_global_declaration_under_extension();
     ok &= test_compiler_rejects_float_array_parameter_under_extension();

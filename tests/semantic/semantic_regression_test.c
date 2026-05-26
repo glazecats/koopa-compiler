@@ -215,6 +215,15 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_recursive_explicit_float_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-CONVERT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CONVERT-RECURSIVE-FOR-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_recursive_explicit_float_for_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CONVERT-LOGIC-COND-ACCEPT", filter) != NULL) {
+            return test_semantic_accepts_explicit_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
             return test_semantic_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
         }
@@ -701,6 +710,9 @@ int main(void) {
     ok &= test_semantic_accepts_float_ternary_condition_under_extension();
     ok &= test_semantic_accepts_explicit_float_condition_under_extension();
     ok &= test_semantic_accepts_recursive_explicit_float_condition_under_extension();
+    ok &= test_semantic_accepts_explicit_float_while_condition_under_extension();
+    ok &= test_semantic_accepts_recursive_explicit_float_for_condition_under_extension();
+    ok &= test_semantic_accepts_explicit_float_logical_condition_composition_under_extension();
     ok &= test_semantic_accepts_recursive_float_if_condition_under_extension();
     ok &= test_semantic_accepts_recursive_float_while_condition_under_extension();
     ok &= test_semantic_accepts_recursive_float_for_condition_under_extension();

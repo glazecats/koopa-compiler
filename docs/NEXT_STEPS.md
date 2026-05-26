@@ -498,6 +498,12 @@
     `if(float(add3(1, 2, 3)))` are now locked through semantic / compiler /
     IR / lower-IR plus focused `ValueSSA`, `machine_ir`, and
     `machine_select`
+  - latest explicit-float-condition breadth lock:
+    that same condition-root slice now also has front-half regression breadth
+    beyond the first `if(...)` witnesses. Focused semantic / compiler / IR /
+    lower-IR regressions now also cover `while(float(3))`,
+    `for(;float(add3(1, 2, 3));)`, and logical condition composition such as
+    `!float(0) || (float(3) && float(add3(1, 2, 3)))`
   - latest explicit-conversion bridge lock:
     focused parser / semantic / compiler / IR / lower-IR regressions now also
     lock two first real bridge families rather than only direct-root/same-
