@@ -24651,11 +24651,11 @@ static int test_value_ssa_optimize_perf_hotspots_source_power_branch_cleanup_dum
 static int test_value_ssa_optimize_perf_hotspots_source_recursive_divmod2_reduced_dump(void) {
     static const char *const fragments[] = {
         "func multiply(a.0, b.1) {\n",
-        "    ssa.5 = shr ssa.1, 1\n",
-        "    ssa.9 = and ssa.1, 1\n",
+        "    ssa.4 = shr ssa.1, 1\n",
+        "    ssa.8 = and ssa.1, 1\n",
         "func power(a.0, b.1) {\n",
-        "    ssa.3 = shr ssa.1, 1\n",
-        "    ssa.6 = and ssa.1, 1\n",
+        "    ssa.2 = shr ssa.1, 1\n",
+        "    ssa.5 = and ssa.1, 1\n",
     };
     static const char *source =
         "const int mod = 998244353;\n"
