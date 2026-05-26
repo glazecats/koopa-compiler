@@ -310,6 +310,10 @@
   translation-only `ValueSSA` witness is now locked too, and the downstream
   default `machine_ir` / `machine_select` report surfaces remain green on the
   same corner case.
+- Explicit float conversion roots now also participate in float control
+  conditions under `-extension`: shapes such as `if(float(3))` and
+  `if(float(add3(1, 2, 3)))` are intentionally accepted and lower through the
+  existing `__builtin_i2f32` helper plus the same float truthiness bridge.
 - The current relational float-compare slice is now also checked on negative
   witnesses rather than only on positive literals/parameters. Keep relying on
   those negative/signed-zero witnesses when touching the comparison lowering,

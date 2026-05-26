@@ -239,6 +239,9 @@ itself rather than at the old “derived float values are closed” story.
   - those same `float(int_expr)` richer families now also have focused
     default-path regression locks on `ValueSSA`, `machine_ir`, and
     `machine_select`
+  - `float(int_expr)` now also participates in float control conditions under
+    the same explicit opt-in story, with focused witnesses such as
+    `if(float(3))` and `if(float(add3(1, 2, 3)))`
   - redundant same-type conversions still reject through `SEMA-EXT-038`
 - lowering/runtime support is now present for the intended first bidirectional
   scalar pair rather than partial/one-sided

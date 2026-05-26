@@ -1543,6 +1543,19 @@ static int semantic_expression_is_float_condition_root(const AstExpression *expr
             scopes)) {
         return 1;
     }
+    if (base->kind == AST_EXPR_CONVERSION &&
+        base->as.conversion.target_type_kind == AST_DECLARATION_VALUE_FLOAT &&
+        semantic_expression_resolve_scalar_type(
+            base,
+            program,
+            func_index,
+            include_current_external,
+            scopes,
+            &scalar_type,
+            NULL) &&
+        scalar_type.kind == SEMANTIC_TYPE_KIND_FLOAT) {
+        return 1;
+    }
     if (base->kind != AST_EXPR_BINARY ||
         (base->as.binary.op != TOKEN_PLUS &&
             base->as.binary.op != TOKEN_MINUS &&
@@ -2993,7 +3006,7 @@ static int semantic_validate_control_condition_type(const AstExpression *expr,
         semantic_set_error(error,
             expr->line,
             expr->column,
-            "SEMA-EXT-036: float control-flow conditions currently support only direct transport roots and recursive pure-float arithmetic");
+            "SEMA-EXT-036: float control-flow conditions currently support only direct transport roots, explicit float conversion roots, and recursive pure-float arithmetic");
         return 0;
     }
     return 1;

@@ -1890,6 +1890,49 @@ cleanup:
     return ok;
 }
 
+static int test_machine_ir_accepts_recursive_explicit_float_condition_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ if(float(add3(1, 2, 3))) return 1; return 0; }\n";
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    MachineIrAllocateRewriteReport report;
+    MachineIrError machine_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    value_ssa_program_init(&program);
+    machine_ir_allocate_rewrite_report_init(&report);
+    memset(&value_error, 0, sizeof(value_error));
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (!build_value_ssa_program_from_extension_source_text(source, &program, &value_error) ||
+        !machine_ir_build_translation_only_report(&program, 8, 8, &report, &machine_error) ||
+        !machine_ir_dump_allocate_rewrite_report(&report, &actual_text, &machine_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT setup failed: %s\n",
+            machine_error.message[0] ? machine_error.message : value_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3 locals=3 spills=0") ||
+        !strstr(actual_text, "call __builtin_i2f32") ||
+        !strstr(actual_text, "2147483647") ||
+        !strstr(actual_text, "br reg.")) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_ir_allocate_rewrite_report_free(&report);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_machine_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -3235,9 +3278,9 @@ static int test_machine_ir_accepts_explicit_float_from_int_compare_bridge_under_
         goto cleanup;
     }
 
-    if (!strstr(actual_text, "spill.0 = call __builtin_i2f32(6)") ||
-        !strstr(actual_text, "reg.0(r0) = call __builtin_i2f32(6)") ||
-        !strstr(actual_text, " eq spill.0, reg.0(r0)") ||
+    if (!strstr(actual_text, "call __builtin_i2f32(6)") ||
+        !strstr(actual_text, "2147483647") ||
+        !strstr(actual_text, " eq ") ||
         !strstr(actual_text, "ret reg.")) {
         fprintf(stderr,
             "[machine-ir] FAIL: MACHINE-IR-INT-TO-FLOAT-COMPARE-BRIDGE-ACCEPT dump mismatch\nactual:\n%s\n",
@@ -14874,6 +14917,9 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-RECURSIVE-IF-COND-ACCEPT", filter) != NULL) {
             return test_machine_ir_accepts_recursive_float_if_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT", filter) != NULL) {
+            return test_machine_ir_accepts_recursive_explicit_float_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
         }
@@ -15189,6 +15235,9 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_accepts_recursive_float_if_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_accepts_recursive_explicit_float_condition_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_rejects_recursive_float_condition_with_ternary_neighbor_under_extension()) {

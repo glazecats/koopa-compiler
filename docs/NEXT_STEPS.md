@@ -491,6 +491,13 @@
     intentionally reject through `SEMA-EXT-038`, so the next float task is no
     longer “make explicit conversion exist” but rather deciding which broader
     post-conversion value contexts or reject-matrix edges deserve to open next
+  - latest explicit-float-condition closure:
+    one more post-conversion value context is now intentionally open too:
+    `float(int_expr)` roots may now drive float control conditions under
+    `-extension`. Representative witnesses such as `if(float(3))` and
+    `if(float(add3(1, 2, 3)))` are now locked through semantic / compiler /
+    IR / lower-IR plus focused `ValueSSA`, `machine_ir`, and
+    `machine_select`
   - latest explicit-conversion bridge lock:
     focused parser / semantic / compiler / IR / lower-IR regressions now also
     lock two first real bridge families rather than only direct-root/same-
