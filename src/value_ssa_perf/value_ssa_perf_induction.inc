@@ -1171,6 +1171,26 @@ static int value_ssa_perf_shift_result_is_worth_carried_recurrence(const ValueSs
     return useful_address_uses >= 2u;
 }
 
+static int value_ssa_perf_value_has_non_phi_use(const ValueSsaDefUseAnalysis *analysis,
+    ValueSsaValueRef value) {
+    size_t use_index;
+
+    if (!analysis || value.kind != VALUE_SSA_VALUE_ID || value.value_id >= analysis->value_count ||
+        !analysis->use_counts || !analysis->use_sites || !analysis->use_offsets) {
+        return 0;
+    }
+
+    for (use_index = 0; use_index < analysis->use_counts[value.value_id]; ++use_index) {
+        const ValueSsaUseSite *site = &analysis->use_sites[analysis->use_offsets[value.value_id] + use_index];
+
+        if (site->role != VALUE_SSA_USE_ROLE_PHI_INPUT) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int __attribute__((unused)) value_ssa_perf_value_has_multiple_body_binary_uses(const ValueSsaDefUseAnalysis *analysis,
     const ValueSsaPerfSimpleLoop *loop,
     ValueSsaValueRef value) {
@@ -1237,6 +1257,9 @@ static int value_ssa_perf_body_has_later_related_induction_address(const ValueSs
                 &other_scale,
                 &other_offset,
                 0u)) {
+            continue;
+        }
+        if (!value_ssa_perf_value_has_non_phi_use(analysis, instruction->result)) {
             continue;
         }
         if (other_phi_id == phi_id && other_scale == scale) {
@@ -1546,6 +1569,7 @@ static int value_ssa_perf_strength_reduce_simple_induction_address_exprs(ValueSs
                         &scale,
                         &offset,
                         0u) ||
+                    !value_ssa_perf_value_has_non_phi_use(&def_use, instruction->result) ||
                     phi_id >= function->next_value_id ||
                     !has_induction[phi_id] ||
                     !value_ssa_perf_body_has_later_related_induction_address(

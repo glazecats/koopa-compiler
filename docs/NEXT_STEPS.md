@@ -393,6 +393,13 @@
     local-id, float-literal, direct-call, and unary-sign-call witnesses. The
     remaining noisy signal is now concentrated in some older IR/lower-IR
     aggregator runs rather than in the implementation path itself.
+  - latest regression-runner stability follow-up:
+    the "older aggregator noise" turned out not to be a generic runner issue
+    after all. A non-converging `ValueSSA` perf-hotspot induction-address
+    rewrite on the simple induction-shift witness could keep the full
+    `value_ssa_regression_test` spinning indefinitely. The pass now ignores
+    phi-only carried-step artifacts, the focused perf witnesses have been
+    restamped to the current kept shapes, and `make test` is green again.
   - latest global-root boundary repair:
     the conservative usage gate no longer treats “result type is float” as
     automatic permission for all arithmetic trees. Recursive pure-float trees

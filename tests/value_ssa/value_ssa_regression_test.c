@@ -24484,26 +24484,27 @@ static int test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_shifts
         "    jmp bb.1\n"
         "  bb.1:\n"
         "    ssa.0 = phi [bb.0: 0], [bb.2: ssa.6]\n"
-        "    ssa.1 = phi [bb.0: 0], [bb.2: ssa.7]\n"
-        "    ssa.2 = lt ssa.0, 4\n"
-        "    br ssa.2, bb.2, bb.3\n"
+        "    ssa.1 = phi [bb.0: 1], [bb.2: ssa.7]\n"
+        "    ssa.2 = phi [bb.0: 3], [bb.2: ssa.8]\n"
+        "    ssa.3 = lt ssa.0, 4\n"
+        "    br ssa.3, bb.2, bb.3\n"
         "  bb.2:\n"
-        "    ssa.3 = add ssa.1, 1\n"
-        "    store_local acc0.0, ssa.3\n"
-        "    ssa.4 = add ssa.1, 3\n"
-        "    store_local acc0.0, ssa.4\n"
-        "    ssa.5 = add ssa.1, 2\n"
+        "    ssa.4 = shl ssa.0, 2\n"
+        "    store_local acc0.0, ssa.1\n"
+        "    store_local acc0.0, ssa.2\n"
+        "    ssa.5 = add ssa.2, -1\n"
         "    store_local acc1.1, ssa.5\n"
         "    ssa.6 = add ssa.0, 1\n"
-        "    ssa.7 = add ssa.1, 4\n"
+        "    ssa.7 = add ssa.2, 2\n"
+        "    ssa.8 = add ssa.2, 4\n"
         "    jmp bb.1\n"
         "  bb.3:\n"
-        "    ssa.8 = load_local acc0.0\n"
-        "    ssa.9 = load_local acc1.1\n"
-        "    ssa.10 = load_local acc0.0\n"
-        "    ssa.11 = add ssa.8, ssa.9\n"
-        "    ssa.12 = add ssa.11, ssa.10\n"
-        "    ret ssa.12\n"
+        "    ssa.9 = load_local acc0.0\n"
+        "    ssa.10 = load_local acc1.1\n"
+        "    ssa.11 = load_local acc0.0\n"
+        "    ssa.12 = add ssa.9, ssa.10\n"
+        "    ssa.13 = add ssa.12, ssa.11\n"
+        "    ret ssa.13\n"
         "}\n");
 }
 
@@ -24515,16 +24516,16 @@ static int test_value_ssa_optimize_perf_hotspots_reduces_simple_induction_addres
         "    jmp bb.1\n"
         "  bb.1:\n"
         "    ssa.0 = phi [bb.0: 0], [bb.2: ssa.5]\n"
-        "    ssa.1 = phi [bb.0: 101], [bb.2: ssa.2]\n"
-        "    ssa.2 = phi [bb.0: 105], [bb.2: ssa.6]\n"
-        "    ssa.3 = lt ssa.0, 4\n"
-        "    br ssa.3, bb.2, bb.3\n"
+        "    ssa.1 = phi [bb.0: 101], [bb.2: ssa.6]\n"
+        "    ssa.2 = lt ssa.0, 4\n"
+        "    br ssa.2, bb.2, bb.3\n"
         "  bb.2:\n"
-        "    ssa.4 = shl ssa.0, 2\n"
+        "    ssa.3 = shl ssa.0, 2\n"
         "    store_local acc0.0, ssa.1\n"
-        "    store_local acc1.1, ssa.2\n"
+        "    ssa.4 = add ssa.1, 4\n"
+        "    store_local acc1.1, ssa.4\n"
         "    ssa.5 = add ssa.0, 1\n"
-        "    ssa.6 = add ssa.2, 4\n"
+        "    ssa.6 = add ssa.1, 4\n"
         "    jmp bb.1\n"
         "  bb.3:\n"
         "    ssa.7 = load_local acc0.0\n"
@@ -24587,11 +24588,11 @@ static int test_value_ssa_optimize_perf_hotspots_source_multiply_baseline_dump(v
         "func multiply(a.0, b.1) {\n",
         "    ssa.0 = load_local a.0\n",
         "    ssa.1 = load_local b.1\n",
-        "    ssa.5 = div ssa.1, 2\n",
-        "    ssa.6 = call multiply(ssa.0, ssa.5)\n",
-        "    ssa.9 = mod ssa.1, 2\n",
-        "    ssa.10 = eq ssa.9, 1\n",
-        "    ret ssa.8\n",
+        "    ssa.4 = shr ssa.1, 1\n",
+        "    ssa.5 = call multiply(ssa.0, ssa.4)\n",
+        "    ssa.8 = and ssa.1, 1\n",
+        "    br ssa.8, bb.5, bb.6\n",
+        "    ret ssa.7\n",
     };
     static const char *source =
         "const int mod = 998244353;\n"
