@@ -1494,6 +1494,145 @@ cleanup:
     return ok;
 }
 
+static int build_extension_explicit_float_while_condition_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "int main(){ while(float(3)) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-CONVERT-WHILE-COND setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int build_extension_explicit_float_logical_condition_program(ValueSsaProgram *program, ValueSsaError *error) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ if(!float(0) || (float(3) && float(add3(1, 2, 3)))) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    memset(&parse_error, 0, sizeof(parse_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    if (!lexer_tokenize(source, &tokens) ||
+        !parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_error) ||
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) ||
+        !ir_lower_program(&ast_program, &ir_options, &ir_program, &ir_error) ||
+        !lower_ir_lower_from_ir(&ir_program, NULL, &lower_program, &lower_error) ||
+        !value_ssa_build_translation_only_from_lower_ir(&lower_program, program, error)) {
+        if (error && error->message[0] == '\0') {
+            if (lower_error.message[0] != '\0') {
+                error->line = lower_error.line;
+                error->column = lower_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", lower_error.message);
+            } else if (ir_error.message[0] != '\0') {
+                error->line = ir_error.line;
+                error->column = ir_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", ir_error.message);
+            } else if (semantic_error.message[0] != '\0') {
+                error->line = semantic_error.line;
+                error->column = semantic_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", semantic_error.message);
+            } else if (parse_error.message[0] != '\0') {
+                error->line = parse_error.line;
+                error->column = parse_error.column;
+                snprintf(error->message, sizeof(error->message), "%s", parse_error.message);
+            } else {
+                snprintf(error->message, sizeof(error->message), "VALUE-SSA-FLOAT-CONVERT-LOGIC-COND setup failed");
+            }
+        }
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int build_lower_ir_scrambled_diamond_program(LowerIrProgram *program, LowerIrError *error) {
     LowerIrFunction *function = NULL;
     LowerIrInstruction instruction;
@@ -20637,6 +20776,72 @@ cleanup:
     return ok;
 }
 
+static int test_value_ssa_accepts_explicit_float_while_condition_under_extension(void) {
+    char *actual_text = NULL;
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok = 0;
+
+    value_ssa_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_extension_explicit_float_while_condition_program(&program, &error) ||
+        !value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CONVERT-WHILE-COND-ACCEPT setup failed: %s\n",
+            error.message);
+        goto cleanup;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, "2147483647") != NULL &&
+        strstr(actual_text, "jmp bb.1\n") != NULL &&
+        strstr(actual_text, "br ssa.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CONVERT-WHILE-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+cleanup:
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
+static int test_value_ssa_accepts_explicit_float_logical_condition_composition_under_extension(void) {
+    char *actual_text = NULL;
+    ValueSsaProgram program;
+    ValueSsaError error;
+    int ok = 0;
+
+    value_ssa_program_init(&program);
+    memset(&error, 0, sizeof(error));
+    if (!build_extension_explicit_float_logical_condition_program(&program, &error) ||
+        !value_ssa_dump_program(&program, &actual_text)) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CONVERT-LOGIC-COND-ACCEPT setup failed: %s\n",
+            error.message);
+        goto cleanup;
+    }
+
+    ok = actual_text &&
+        strstr(actual_text, "call __builtin_i2f32(") != NULL &&
+        strstr(actual_text, "call add3(1, 2, 3)") != NULL &&
+        strstr(actual_text, "2147483647") != NULL &&
+        strstr(actual_text, "br ssa.") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CONVERT-LOGIC-COND-ACCEPT mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+    }
+
+cleanup:
+    free(actual_text);
+    value_ssa_program_free(&program);
+    return ok;
+}
+
 static int test_value_ssa_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -28425,6 +28630,12 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT", filter) != NULL) {
             return test_value_ssa_accepts_recursive_explicit_float_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-FLOAT-CONVERT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_explicit_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-CONVERT-LOGIC-COND-ACCEPT", filter) != NULL) {
+            return test_value_ssa_accepts_explicit_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
         }
@@ -28541,6 +28752,8 @@ int main(void) {
     ok &= test_value_ssa_accepts_recursive_float_while_condition_under_extension();
     ok &= test_value_ssa_accepts_recursive_float_for_condition_under_extension();
     ok &= test_value_ssa_accepts_recursive_explicit_float_condition_under_extension();
+    ok &= test_value_ssa_accepts_explicit_float_while_condition_under_extension();
+    ok &= test_value_ssa_accepts_explicit_float_logical_condition_composition_under_extension();
     ok &= test_value_ssa_rejects_recursive_float_condition_with_ternary_neighbor_under_extension();
     ok &= test_value_ssa_translation_only_preserves_signed_zero_float_equality();
     ok &= test_value_ssa_translation_only_preserves_negative_float_relational_compare();

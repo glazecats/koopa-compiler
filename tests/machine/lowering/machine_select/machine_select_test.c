@@ -3625,6 +3625,92 @@ cleanup:
     return ok;
 }
 
+static int test_machine_select_accepts_explicit_float_while_condition_under_extension(void) {
+    static const char *source =
+        "int main(){ while(float(3)) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CONVERT-WHILE-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "__builtin_i2f32") ||
+        !strstr(actual_text, "cmpbri") ||
+        !strstr(actual_text, "reti 1") ||
+        !strstr(actual_text, "reti 0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CONVERT-WHILE-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
+static int test_machine_select_accepts_explicit_float_logical_condition_composition_under_extension(void) {
+    static const char *source =
+        "int add3(int a, int b, int c){ return (a + b) + c; }\n"
+        "int main(){ if(!float(0) || (float(3) && float(add3(1, 2, 3)))) return 1; return 0; }\n";
+    MachineIrAllocateRewriteReport machine_report;
+    MachineIrError machine_error;
+    MachineSelectLowerReport select_report;
+    MachineSelectError select_error;
+    char *actual_text = NULL;
+    int ok = 1;
+
+    memset(&machine_error, 0, sizeof(machine_error));
+    memset(&select_error, 0, sizeof(select_error));
+    machine_ir_allocate_rewrite_report_init(&machine_report);
+    machine_select_lower_report_init(&select_report);
+
+    if (!build_machine_ir_report_from_extension_source_text(source, &machine_report, &machine_error) ||
+        !machine_select_build_report_from_machine_ir_report(&machine_report, &select_report, &select_error) ||
+        !machine_select_dump_lower_report_artifact(&select_report, &actual_text, &select_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CONVERT-LOGIC-COND-ACCEPT setup failed: %s\n",
+            select_error.message[0] ? select_error.message : machine_error.message);
+        ok = 0;
+        goto cleanup;
+    }
+
+    if (!strstr(actual_text, "function add3 params=3 locals=3 spills=0") ||
+        !strstr(actual_text, "__builtin_i2f32") ||
+        !strstr(actual_text, "cmpbri") ||
+        !strstr(actual_text, "reti 1") ||
+        !strstr(actual_text, "reti 0")) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CONVERT-LOGIC-COND-ACCEPT dump mismatch\nactual:\n%s\n",
+            actual_text ? actual_text : "<null>");
+        ok = 0;
+    }
+
+cleanup:
+    free(actual_text);
+    machine_select_lower_report_free(&select_report);
+    machine_ir_allocate_rewrite_report_free(&machine_report);
+    return ok;
+}
+
 static int test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -15220,6 +15306,12 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-CONVERT-RECURSIVE-COND-ACCEPT", filter) != NULL) {
             return test_machine_select_accepts_recursive_explicit_float_condition_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-CONVERT-WHILE-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_while_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-CONVERT-LOGIC-COND-ACCEPT", filter) != NULL) {
+            return test_machine_select_accepts_explicit_float_logical_condition_composition_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-RECURSIVE-COND-TERNARY-NEIGHBOR-REJECT", filter) != NULL) {
             return test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension() ? 0 : 1;
         }
@@ -15592,6 +15684,12 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_accepts_recursive_explicit_float_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_while_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_accepts_explicit_float_logical_condition_composition_under_extension()) {
         return 1;
     }
     if (!test_machine_select_rejects_recursive_float_condition_with_ternary_neighbor_under_extension()) {

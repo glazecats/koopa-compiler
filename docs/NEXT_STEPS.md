@@ -504,6 +504,11 @@
     lower-IR regressions now also cover `while(float(3))`,
     `for(;float(add3(1, 2, 3));)`, and logical condition composition such as
     `!float(0) || (float(3) && float(add3(1, 2, 3)))`
+  - latest explicit-float-condition downstream breadth lock:
+    that same breadth is now also checked one stage deeper on focused
+    downstream surfaces. `ValueSSA`, `machine_ir`, and `machine_select` now
+    also have dedicated witnesses for `while(float(3))` and
+    `!float(0) || (float(3) && float(add3(1, 2, 3)))`
   - latest explicit-conversion bridge lock:
     focused parser / semantic / compiler / IR / lower-IR regressions now also
     lock two first real bridge families rather than only direct-root/same-

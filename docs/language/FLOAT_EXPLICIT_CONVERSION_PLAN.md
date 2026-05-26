@@ -246,6 +246,10 @@ itself rather than at the old “derived float values are closed” story.
     regression locks covering `while(float(3))`,
     `for(;float(add3(1, 2, 3));)`, and logical condition composition such as
     `!float(0) || (float(3) && float(add3(1, 2, 3)))`
+  - focused downstream regression breadth now also covers that same slice on
+    `ValueSSA`, `machine_ir`, and `machine_select` for representative
+    `while(float(3))` and explicit-float logical condition-composition
+    witnesses
   - redundant same-type conversions still reject through `SEMA-EXT-038`
 - lowering/runtime support is now present for the intended first bidirectional
   scalar pair rather than partial/one-sided
