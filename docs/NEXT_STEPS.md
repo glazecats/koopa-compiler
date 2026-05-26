@@ -364,6 +364,13 @@
     roots are now confirmed on direct semantic/compiler probes to land on the
     same `SEMA-TYPE-008` boundary, while the intentionally kept top-level
     global-root family still remains on `SEMA-EXT-035`
+  - latest condition-position reject-matrix follow-up:
+    that same split is now also checkpointed in control-flow conditions.
+    Focused semantic / compiler / IR / lower-IR / `ValueSSA` / `machine_ir` /
+    `machine_select` regressions now lock `if(g + 1)`,
+    `if(((x + y) + z) + 1)`, and `if((-a * (b / c)) + 1)` on
+    `SEMA-EXT-035`, while direct-call and unary-call-root mixed families such
+    as `if(id(1.0) + 1)` and `if(-id(1.0) + 1)` stay on `SEMA-TYPE-008`
   - latest focused-runner hygiene follow-up:
     the earlier confusing `call-root mixed arithmetic` signal has now been
     narrowed to runner/build hygiene rather than a live language bug. Direct

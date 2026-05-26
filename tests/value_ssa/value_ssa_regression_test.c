@@ -18000,6 +18000,294 @@ static int test_value_ssa_rejects_negative_float_call_int_arithmetic_under_exten
     return ok;
 }
 
+static int test_value_ssa_rejects_global_float_int_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-GLOBAL-COND-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_float_call_int_condition_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ if(id(1.0) + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-CALL-COND-PLUS-INT-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_negative_float_call_int_condition_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT expected SEMA-TYPE-008, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    static const char *source =
+        "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_value_ssa_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    static const char *source =
+        "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n";
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parser_error;
+    SemanticError semantic_error;
+    SemanticOptions semantic_options;
+    IrProgram ir_program;
+    IrError ir_error;
+    IrLowerOptions ir_options;
+    LowerIrProgram lower_program;
+    LowerIrError lower_error;
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    ir_program_init(&ir_program);
+    lower_ir_program_init(&lower_program);
+    value_ssa_program_init(&program);
+    memset(&parser_error, 0, sizeof(parser_error));
+    memset(&semantic_error, 0, sizeof(semantic_error));
+    memset(&semantic_options, 0, sizeof(semantic_options));
+    memset(&ir_error, 0, sizeof(ir_error));
+    memset(&ir_options, 0, sizeof(ir_options));
+    memset(&lower_error, 0, sizeof(lower_error));
+    memset(&value_error, 0, sizeof(value_error));
+
+    semantic_options.allow_extension_features = 1;
+    semantic_options.skip_all_paths_return_check = 1;
+    ir_options.allow_implicit_fallthrough_return = 1;
+
+    ok = lexer_tokenize(source, &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parser_error) &&
+        !semantic_analyze_program_with_options(&ast_program, &semantic_options, &semantic_error) &&
+        strstr(semantic_error.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[value-ssa-reg] FAIL: VALUE-SSA-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT expected SEMA-EXT-035, got parse='%s' sema='%s' ir='%s' lower='%s' value='%s'\n",
+            parser_error.message,
+            semantic_error.message,
+            ir_error.message,
+            lower_error.message,
+            value_error.message);
+    }
+
+    value_ssa_program_free(&program);
+    lower_ir_program_free(&lower_program);
+    ir_program_free(&ir_program);
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int test_value_ssa_rejects_nested_float_tree_plus_int_under_extension(void) {
     static const char *source =
         "float add(float x, float y){ return (x + y) + 1; }\n"
@@ -27896,6 +28184,21 @@ int main(void) {
         if (strstr("VALUE-SSA-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("VALUE-SSA-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("VALUE-SSA-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_value_ssa_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("VALUE-SSA-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
             return test_value_ssa_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
         }
@@ -28115,6 +28418,11 @@ int main(void) {
     ok &= test_value_ssa_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_value_ssa_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_value_ssa_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_value_ssa_rejects_global_float_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_float_call_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_nested_float_tree_plus_int_condition_under_extension();
+    ok &= test_value_ssa_rejects_nested_float_muldiv_plus_int_condition_under_extension();
     ok &= test_value_ssa_rejects_float_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_value_ssa_rejects_unary_call_ternary_value_plus_float_call_argument_under_extension();
     ok &= test_value_ssa_rejects_float_ternary_value_compare_against_float_under_extension();

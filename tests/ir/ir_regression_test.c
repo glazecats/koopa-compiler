@@ -4285,6 +4285,44 @@ static int test_ir_rejects_negative_float_call_int_arithmetic_under_extension(vo
         "SEMA-TYPE-008");
 }
 
+static int test_ir_rejects_global_float_int_condition_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT",
+        "float g = 1.25;\n"
+        "int main(){ if(g + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_float_call_int_condition_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-CALL-COND-PLUS-INT-REJECT",
+        "float id(float x){ return x; }\n"
+        "int main(){ if(id(1.0) + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_negative_float_call_int_condition_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT",
+        "float id(float x){ return x; }\n"
+        "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_ir_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT",
+        "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    return expect_extension_semantic_reject(
+        "IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT",
+        "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
 static int test_ir_rejects_float_compare_against_int_under_extension(void) {
     return expect_extension_semantic_reject(
         "IR-FLOAT-COMPARE-INT-TYPE-REJECT",
@@ -5062,6 +5100,21 @@ int main(void) {
         if (strstr("IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_ir_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("IR-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
             return test_ir_rejects_float_compare_against_int_under_extension() ? 0 : 1;
         }
@@ -5342,6 +5395,11 @@ int main(void) {
     ok &= test_ir_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_ir_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_ir_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_ir_rejects_global_float_int_condition_under_extension();
+    ok &= test_ir_rejects_float_call_int_condition_under_extension();
+    ok &= test_ir_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_ir_rejects_nested_float_tree_plus_int_condition_under_extension();
+    ok &= test_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension();
     ok &= test_ir_rejects_float_compare_against_int_under_extension();
     ok &= test_ir_rejects_nested_float_tree_plus_int_under_extension();
     ok &= test_ir_rejects_nested_float_muldiv_plus_int_under_extension();

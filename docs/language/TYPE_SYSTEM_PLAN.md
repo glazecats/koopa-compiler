@@ -339,6 +339,12 @@
     `-id(x) * 1` now match it too in direct semantic/compiler probes, while
     the deliberately kept top-level-global `g + 1` family still stays on
     `SEMA-EXT-035`
+  - latest condition-position reject-matrix follow-up:
+    that same split is now also locked in control-flow condition position.
+    Global-root and deeper nested families such as `if(g + 1)`,
+    `if(((x + y) + z) + 1)`, and `if((-a * (b / c)) + 1)` stay on
+    `SEMA-EXT-035`, while direct-call and unary-call-root mixed families such
+    as `if(id(1.0) + 1)` and `if(-id(1.0) + 1)` stay on `SEMA-TYPE-008`
   - latest reject-matrix follow-up:
     that broader mixed-root split is now also locked on more than just direct
     probes: focused compiler / default-`ValueSSA` / `machine_ir` /

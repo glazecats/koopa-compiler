@@ -1416,6 +1416,109 @@ static int test_compiler_rejects_negative_float_call_int_arithmetic_under_extens
     return 1;
 }
 
+static int test_compiler_rejects_global_float_int_condition_under_extension(void) {
+    static const char *source =
+        "float g = 1.25;\n"
+        "int main(){ if(g + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: global-root float condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_float_call_int_condition_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ if(id(1.0) + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: float call-root condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_negative_float_call_int_condition_under_extension(void) {
+    static const char *source =
+        "float id(float x){ return x; }\n"
+        "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: unary-call float condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    static const char *source =
+        "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float tree condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
+static int test_compiler_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    static const char *source =
+        "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n";
+    CompilerError error;
+    char *output = NULL;
+
+    memset(&error, 0, sizeof(error));
+    if (compiler_compile_source_text(source, COMPILER_MODE_EXTENSION, &output, &error) ||
+        strstr(error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[compiler] FAIL: nested float mul/div condition plus int should still be rejected under extension: %s\n",
+            error.message);
+        free(output);
+        return 0;
+    }
+
+    free(output);
+    return 1;
+}
+
 static int test_compiler_rejects_float_compare_against_int_under_extension(void) {
     static const char *source =
         "float g = 1.25;\n"
@@ -6755,6 +6858,21 @@ int main(void) {
         if (strstr("COMPILER-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_compiler_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("COMPILER-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("COMPILER-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_compiler_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("COMPILER-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
             return test_compiler_rejects_float_compare_against_int_under_extension() ? 0 : 1;
         }
@@ -6995,6 +7113,11 @@ int main(void) {
     ok &= test_compiler_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_compiler_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_compiler_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_compiler_rejects_global_float_int_condition_under_extension();
+    ok &= test_compiler_rejects_float_call_int_condition_under_extension();
+    ok &= test_compiler_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_compiler_rejects_nested_float_tree_plus_int_condition_under_extension();
+    ok &= test_compiler_rejects_nested_float_muldiv_plus_int_condition_under_extension();
     ok &= test_compiler_rejects_float_compare_against_int_under_extension();
     ok &= test_compiler_rejects_nested_float_tree_plus_int_under_extension();
     ok &= test_compiler_rejects_nested_float_muldiv_plus_int_under_extension();

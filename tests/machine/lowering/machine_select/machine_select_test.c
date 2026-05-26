@@ -5395,6 +5395,174 @@ static int test_machine_select_rejects_negative_float_call_int_arithmetic_under_
     return 1;
 }
 
+static int test_machine_select_rejects_global_float_int_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "int main(){ if(g + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-GLOBAL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_float_call_int_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(id(1.0) + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_negative_float_call_int_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
+static int test_machine_select_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    MachineIrProgram machine_program;
+    MachineIrError machine_error;
+    MachineSelectProgram select_program;
+
+    machine_ir_program_init(&machine_program);
+    machine_select_program_init(&select_program);
+    memset(&machine_error, 0, sizeof(machine_error));
+
+    if (build_machine_ir_program_from_extension_source_text(
+            "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n",
+            &machine_program,
+            &machine_error)) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT should have failed\n");
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+    if (strstr(machine_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-select] FAIL: MACHINE-SELECT-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT mismatch: %s\n",
+            machine_error.message);
+        machine_select_program_free(&select_program);
+        machine_ir_program_free(&machine_program);
+        return 0;
+    }
+
+    machine_select_program_free(&select_program);
+    machine_ir_program_free(&machine_program);
+    return 1;
+}
+
 static int test_machine_select_rejects_nested_float_tree_plus_int_under_extension(void) {
     MachineIrProgram machine_program;
     MachineIrError machine_error;
@@ -15134,6 +15302,21 @@ int main(void) {
         if (strstr("MACHINE-SELECT-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-SELECT-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-SELECT-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_select_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-SELECT-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_select_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
         }
@@ -15500,6 +15683,21 @@ int main(void) {
         return 1;
     }
     if (!test_machine_select_rejects_negative_float_call_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_global_float_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_float_call_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_negative_float_call_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_nested_float_tree_plus_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_select_rejects_nested_float_muldiv_plus_int_condition_under_extension()) {
         return 1;
     }
     if (!test_machine_select_rejects_float_ternary_value_plus_float_call_argument_under_extension()) {

@@ -4790,6 +4790,179 @@ static int test_lower_ir_rejects_negative_float_call_int_arithmetic_under_extens
     return ok;
 }
 
+static int test_lower_ir_rejects_global_float_int_condition_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "float g = 1.25;\n"
+            "int main(){ if(g + 1) return 1; return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_lower_ir_rejects_float_call_int_condition_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(id(1.0) + 1) return 1; return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-CALL-COND-PLUS-INT-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_lower_ir_rejects_negative_float_call_int_condition_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-TYPE-008") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_lower_ir_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
+static int test_lower_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    TokenArray tokens;
+    AstProgram ast_program;
+    ParserError parse_err;
+    SemanticError sema_err;
+    SemanticOptions sema_options;
+    int ok = 0;
+
+    lexer_init_tokens(&tokens);
+    ast_program_init(&ast_program);
+    memset(&parse_err, 0, sizeof(parse_err));
+    memset(&sema_err, 0, sizeof(sema_err));
+    memset(&sema_options, 0, sizeof(sema_options));
+    sema_options.allow_extension_features = 1;
+
+    ok = lexer_tokenize(
+            "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n",
+            &tokens) &&
+        parser_parse_translation_unit_ast(&tokens, &ast_program, &parse_err) &&
+        !semantic_analyze_program_with_options(&ast_program, &sema_options, &sema_err) &&
+        strstr(sema_err.message, "SEMA-EXT-035") != NULL;
+
+    if (!ok) {
+        fprintf(stderr,
+            "[lower-ir-reg] FAIL: LOWER-IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT mismatch: parse='%s' sema='%s'\n",
+            parse_err.message,
+            sema_err.message);
+    }
+
+    ast_program_free(&ast_program);
+    lexer_free_tokens(&tokens);
+    return ok;
+}
+
 static int test_lower_ir_rejects_float_compare_against_int_under_extension(void) {
     TokenArray tokens;
     AstProgram ast_program;
@@ -5850,6 +6023,21 @@ int main(void) {
         if (strstr("LOWER-IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_lower_ir_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("LOWER-IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("LOWER-IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_lower_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("LOWER-IR-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
             return test_lower_ir_rejects_float_compare_against_int_under_extension() ? 0 : 1;
         }
@@ -6041,6 +6229,11 @@ int main(void) {
     ok &= test_lower_ir_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_lower_ir_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_lower_ir_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_lower_ir_rejects_global_float_int_condition_under_extension();
+    ok &= test_lower_ir_rejects_float_call_int_condition_under_extension();
+    ok &= test_lower_ir_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_lower_ir_rejects_nested_float_tree_plus_int_condition_under_extension();
+    ok &= test_lower_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension();
     ok &= test_lower_ir_rejects_float_compare_against_int_under_extension();
     ok &= test_lower_ir_rejects_float_ternary_value_under_extension();
     ok &= test_lower_ir_lowers_assignment_and_return_via_store_and_load();

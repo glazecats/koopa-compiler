@@ -341,6 +341,21 @@ int main(void) {
         if (strstr("SEMANTIC-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_semantic_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("SEMANTIC-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("SEMANTIC-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_semantic_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("SEMANTIC-FLOAT-COMPARE-INT-TYPE-REJECT", filter) != NULL) {
             return test_semantic_rejects_float_compare_against_int_under_extension() ? 0 : 1;
         }
@@ -720,6 +735,11 @@ int main(void) {
     ok &= test_semantic_rejects_float_literal_int_arithmetic_under_extension();
     ok &= test_semantic_rejects_float_call_int_arithmetic_under_extension();
     ok &= test_semantic_rejects_negative_float_call_int_arithmetic_under_extension();
+    ok &= test_semantic_rejects_global_float_int_condition_under_extension();
+    ok &= test_semantic_rejects_float_call_int_condition_under_extension();
+    ok &= test_semantic_rejects_negative_float_call_int_condition_under_extension();
+    ok &= test_semantic_rejects_nested_float_tree_plus_int_condition_under_extension();
+    ok &= test_semantic_rejects_nested_float_muldiv_plus_int_condition_under_extension();
     ok &= test_semantic_rejects_float_compare_against_int_under_extension();
     ok &= test_semantic_rejects_nested_float_tree_plus_int_under_extension();
     ok &= test_semantic_rejects_nested_float_muldiv_plus_int_under_extension();

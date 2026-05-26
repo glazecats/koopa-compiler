@@ -3677,6 +3677,149 @@ static int test_machine_ir_rejects_negative_float_call_int_arithmetic_under_exte
     return 1;
 }
 
+static int test_machine_ir_rejects_global_float_int_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float g = 1.25;\n"
+            "int main(){ if(g + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_float_call_int_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(id(1.0) + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_negative_float_call_int_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "float id(float x){ return x; }\n"
+            "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-TYPE-008") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
+static int test_machine_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    ValueSsaProgram program;
+    ValueSsaError value_error;
+
+    value_ssa_program_init(&program);
+    memset(&value_error, 0, sizeof(value_error));
+
+    if (build_value_ssa_program_from_extension_source_text(
+            "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n",
+            &program,
+            &value_error)) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT should have failed\n");
+        value_ssa_program_free(&program);
+        return 0;
+    }
+    if (strstr(value_error.message, "SEMA-EXT-035") == NULL) {
+        fprintf(stderr,
+            "[machine-ir] FAIL: MACHINE-IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT mismatch: %s\n",
+            value_error.message);
+        value_ssa_program_free(&program);
+        return 0;
+    }
+
+    value_ssa_program_free(&program);
+    return 1;
+}
+
 static int test_machine_ir_rejects_nested_float_tree_plus_int_under_extension(void) {
     ValueSsaProgram program;
     ValueSsaError value_error;
@@ -14860,6 +15003,21 @@ int main(void) {
         if (strstr("MACHINE-IR-FLOAT-NEG-CALL-ARITH-INT-TYPE-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_negative_float_call_int_arithmetic_under_extension() ? 0 : 1;
         }
+        if (strstr("MACHINE-IR-FLOAT-GLOBAL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_global_float_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NEG-CALL-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_negative_float_call_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-TREE-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_float_tree_plus_int_condition_under_extension() ? 0 : 1;
+        }
+        if (strstr("MACHINE-IR-FLOAT-NESTED-MULDIV-COND-PLUS-INT-REJECT", filter) != NULL) {
+            return test_machine_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension() ? 0 : 1;
+        }
         if (strstr("MACHINE-IR-FLOAT-NESTED-TREE-PLUS-INT-REJECT", filter) != NULL) {
             return test_machine_ir_rejects_nested_float_tree_plus_int_under_extension() ? 0 : 1;
         }
@@ -15172,6 +15330,21 @@ int main(void) {
         return 1;
     }
     if (!test_machine_ir_rejects_negative_float_call_int_arithmetic_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_global_float_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_float_call_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_negative_float_call_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_nested_float_tree_plus_int_condition_under_extension()) {
+        return 1;
+    }
+    if (!test_machine_ir_rejects_nested_float_muldiv_plus_int_condition_under_extension()) {
         return 1;
     }
     if (!test_machine_ir_rejects_float_ternary_value_plus_float_call_argument_under_extension()) {

@@ -1892,6 +1892,44 @@ static int test_semantic_rejects_negative_float_call_int_arithmetic_under_extens
         "SEMA-TYPE-008");
 }
 
+static int test_semantic_rejects_global_float_int_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-global-cond-plus-int-ext-reject",
+        "float g = 1.25;\n"
+        "int main(){ if(g + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_semantic_rejects_float_call_int_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-call-cond-plus-int-ext-reject",
+        "float id(float x){ return x; }\n"
+        "int main(){ if(id(1.0) + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_semantic_rejects_negative_float_call_int_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-neg-call-cond-plus-int-ext-reject",
+        "float id(float x){ return x; }\n"
+        "int main(){ if(-id(1.0) + 1) return 1; return 0; }\n",
+        "SEMA-TYPE-008");
+}
+
+static int test_semantic_rejects_nested_float_tree_plus_int_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-nested-tree-cond-plus-int-ext-reject",
+        "int main(float x, float y, float z){ if(((x + y) + z) + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
+static int test_semantic_rejects_nested_float_muldiv_plus_int_condition_under_extension(void) {
+    return run_extension_semantic_expect_rejects(
+        "float-nested-muldiv-cond-plus-int-ext-reject",
+        "int main(float a, float b, float c){ if((-a * (b / c)) + 1) return 1; return 0; }\n",
+        "SEMA-EXT-035");
+}
+
 static int test_semantic_rejects_float_compare_against_int_under_extension(void) {
     return run_extension_semantic_expect_rejects(
         "float-compare-int-mismatch-ext-reject",
