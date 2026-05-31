@@ -996,6 +996,18 @@ static int ir_finish_dynamic_function_value_specialization_view_resolution(
     return 1;
 }
 
+static int ir_finish_dynamic_function_value_specialization_materialized_view(
+    IrLowerCallableObjectView *out_view,
+    const char *const **out_owned_dynamic_target_names,
+    int *out_requires_materialized_capture_forwarding,
+    int materialize_ok) {
+    return materialize_ok &&
+        ir_finish_dynamic_function_value_specialization_view_resolution(
+            out_view,
+            out_owned_dynamic_target_names,
+            out_requires_materialized_capture_forwarding);
+}
+
 static int ir_prepare_dynamic_function_value_specialization_dispatch(
     const IrLowerCallableObjectView *dynamic_callable_view,
     const char *const *owned_dynamic_target_names,
@@ -5175,34 +5187,34 @@ static int ir_try_resolve_dynamic_function_value_specialization_callable_object_
     }
 
     if (function_arg_base && function_arg_base->kind == AST_EXPR_TERNARY) {
-        if (!ir_materialize_ternary_function_value_argument_callable_object_view(
-                ctx,
-                callee_external,
-                function_arg_index,
-                function_arg_base,
+        if (!ir_finish_dynamic_function_value_specialization_materialized_view(
                 out_view,
                 out_owned_dynamic_target_names,
-                out_then_tag_value) ||
-            !ir_finish_dynamic_function_value_specialization_view_resolution(
-                out_view,
-                out_owned_dynamic_target_names,
-                out_requires_materialized_capture_forwarding)) {
+                out_requires_materialized_capture_forwarding,
+                ir_materialize_ternary_function_value_argument_callable_object_view(
+                    ctx,
+                    callee_external,
+                    function_arg_index,
+                    function_arg_base,
+                    out_view,
+                    out_owned_dynamic_target_names,
+                    out_then_tag_value))) {
             return 0;
         }
         return 1;
     }
 
     if (function_arg_base && function_arg_base->kind == AST_EXPR_CALL) {
-        if (!ir_try_materialize_two_target_returned_callable_object_view_with_family_prefixes(
-                ctx,
-                function_arg_base,
-                "__retfn_argslot",
-                "__retclosure_argslot",
-                out_view) ||
-            !ir_finish_dynamic_function_value_specialization_view_resolution(
+        if (!ir_finish_dynamic_function_value_specialization_materialized_view(
                 out_view,
                 out_owned_dynamic_target_names,
-                out_requires_materialized_capture_forwarding)) {
+                out_requires_materialized_capture_forwarding,
+                ir_try_materialize_two_target_returned_callable_object_view_with_family_prefixes(
+                    ctx,
+                    function_arg_base,
+                    "__retfn_argslot",
+                    "__retclosure_argslot",
+                    out_view))) {
             return 0;
         }
         return 1;

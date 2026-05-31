@@ -93,6 +93,8 @@ static const char *machine_decode_op_tag_name(unsigned char tag_value) {
             return "call";
         case MACHINE_SELECT_OP_CALL_IMM:
             return "call-imm";
+        case MACHINE_SELECT_OP_ADDR_FUNCTION:
+            return "addr-function";
         case MACHINE_SELECT_OP_CALL_SPILL:
             return "call-spill";
         case MACHINE_SELECT_OP_CALL_IMM_SPILL:
@@ -402,7 +404,7 @@ int machine_decode_build_from_machine_step_file(const MachineStepFile *step_file
     }
 
     raw_byte = fetch_summary.byte_value;
-    if (raw_byte >= 0x10u && raw_byte < (unsigned char)(0x10u + MACHINE_SELECT_OP_STORE_INDIRECT + 1u)) {
+    if (raw_byte >= 0x10u && raw_byte < (unsigned char)(0x10u + MACHINE_SELECT_OP_MAX + 1u)) {
         tag_class = MACHINE_DECODE_TAG_OP;
         tag_value = (unsigned char)(raw_byte - 0x10u);
         is_known = machine_decode_op_tag_name(tag_value) != NULL;
